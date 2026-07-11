@@ -12,7 +12,10 @@ DDL = """CREATE TABLE IF NOT EXISTS data_quality_issue (
  issue_id TEXT PRIMARY KEY, domain TEXT NOT NULL, issue_type TEXT NOT NULL, semester_id TEXT,
  entity_type TEXT, entity_id TEXT, affected_rows INTEGER NOT NULL DEFAULT 0, severity TEXT NOT NULL,
  status TEXT NOT NULL DEFAULT 'open', detail TEXT, recommendation TEXT, detected_at TEXT NOT NULL,
- source TEXT NOT NULL DEFAULT 'derived');"""
+ source TEXT NOT NULL DEFAULT 'derived');
+CREATE TABLE IF NOT EXISTS data_quality_issue_audit (
+ audit_id INTEGER PRIMARY KEY AUTOINCREMENT, issue_id TEXT NOT NULL, from_status TEXT,
+ to_status TEXT NOT NULL, operator TEXT NOT NULL, comment TEXT, operated_at TEXT NOT NULL);"""
 
 if __name__ == "__main__":
     conn = sqlite3.connect(DB_PATH)

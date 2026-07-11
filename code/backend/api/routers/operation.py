@@ -3,13 +3,15 @@
 +合成调停课(fact_schedule_change)。学院下钻用真实 college_id（C01-C16）。
 """
 import sqlite3
+from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel
 
 from .. import db as dbm
-from ..deps import get_db, get_current_user, student_data_scope, college_data_scope
-from ..envelope import ok
+from ..deps import get_db, get_db_rw, get_current_user, student_data_scope, college_data_scope
+from ..envelope import ok, ApiError
 from ..util import normalize_title, clean_dept
 from ..settings import LATEST_REAL_SEMESTER, CURRENT_SEMESTER
 
@@ -19,6 +21,12 @@ _PALETTE = ["#2563EB", "#16A34A", "#EA580C", "#F59E0B", "#9333EA", "#60A5FA",
             "#DC2626", "#0891B2", "#65A30D"]
 # 单学期教学班 > 阈值 → 判为源库生成缺陷，统计时排除
 _TEACHER_CAP = 200
+_QUALITY_MANAGERS = {"dean", "dept_operation"}
+
+
+class QualityStatusIn(BaseModel):
+    status: str
+    comment: str
 
 
 def _pct(x, nd=1):
@@ -32,7 +40,7 @@ def _anomalous_filter(conn, sem_ids: list, alias: str = "l") -> tuple[str, list]
         return ("", [])
     ph = ",".join("?" * len(sem_ids))
     rows = dbm.query(conn, f"""SELECT entity_id teacher_id FROM data_quality_issue
-        WHERE domain='operation' AND issue_type='teacher_lesson_overflow' AND status='open'
+        WHERE domain='operation' AND issue_type='teacher_lesson_overflow' AND status IN ('open','reviewing')
         AND semester_id IN ({ph})""", tuple(sem_ids))
     bad = [r["teacher_id"] for r in rows]
     if not bad:
@@ -46,7 +54,7 @@ def _anomaly_summary(conn, sem_ids: list) -> dict:
         return {"excludedTeachers": 0, "excludedLessons": 0, "threshold": _TEACHER_CAP}
     ph = ",".join("?" * len(sem_ids))
     rows = dbm.query(conn, f"""SELECT entity_id teacher_id,affected_rows lessons FROM data_quality_issue
-        WHERE domain='operation' AND issue_type='teacher_lesson_overflow' AND status='open'
+        WHERE domain='operation' AND issue_type='teacher_lesson_overflow' AND status IN ('open','reviewing')
         AND semester_id IN ({ph})""", sem_ids)
     return {"excludedTeachers": len(rows), "excludedLessons": sum(r["lessons"] for r in rows),
             "threshold": _TEACHER_CAP, "reason": "单教师单学期教学班数超过质量阈值"}
@@ -76,8 +84,41 @@ def operation_data_quality(semester: Optional[str] = None, status: Optional[str]
     return ok({"list": rows, "summary": {"total": len(rows),
         "open": sum(1 for r in rows if r["status"] == "open"),
         "affectedRows": sum(int(r["affected_rows"] or 0) for r in rows)},
-        "policy": {"statisticalAction": "open问题在教学运行统计中排除",
-                   "recovery": "源数据修复并复核后可关闭问题并重新计算"}})
+        "policy": {"statisticalAction": "open/reviewing问题在教学运行统计中排除",
+                   "recovery": "源数据修复并复核后可关闭问题并重新计算"},
+        "permissions": {"manage": user.get("role_id") in _QUALITY_MANAGERS}})
+
+
+@router.get("/data-quality/{issue_id}/audit")
+def operation_quality_audit(issue_id: str, user: dict = Depends(get_current_user),
+                            conn: sqlite3.Connection = Depends(get_db)):
+    issue = dbm.query_one(conn, "SELECT 1 FROM data_quality_issue WHERE issue_id=?", (issue_id,))
+    if not issue:
+        raise ApiError("数据质量问题不存在", code=404, status_code=404)
+    return ok(dbm.query(conn, """SELECT from_status,to_status,operator,comment,operated_at
+        FROM data_quality_issue_audit WHERE issue_id=? ORDER BY audit_id""", (issue_id,)))
+
+
+@router.put("/data-quality/{issue_id}/status")
+def update_operation_quality_status(issue_id: str, body: QualityStatusIn,
+                                    user: dict = Depends(get_current_user),
+                                    conn: sqlite3.Connection = Depends(get_db_rw)):
+    if user.get("role_id") not in _QUALITY_MANAGERS:
+        raise ApiError("仅教务处运行科或教务处处长可处置数据质量问题", code=403, status_code=403)
+    issue = dbm.query_one(conn, "SELECT status FROM data_quality_issue WHERE issue_id=?", (issue_id,))
+    if not issue:
+        raise ApiError("数据质量问题不存在", code=404, status_code=404)
+    allowed = {"open": {"reviewing"}, "reviewing": {"open", "closed"}, "closed": {"open"}}
+    if body.status not in allowed.get(issue["status"], set()):
+        raise ApiError(f"不允许从 {issue['status']} 变更为 {body.status}", code=400, status_code=400)
+    if not body.comment.strip():
+        raise ApiError("请填写处置说明", code=400, status_code=400)
+    now = datetime.now().isoformat(timespec="seconds")
+    dbm.execute(conn, "UPDATE data_quality_issue SET status=? WHERE issue_id=?", (body.status, issue_id))
+    dbm.execute(conn, """INSERT INTO data_quality_issue_audit
+        (issue_id,from_status,to_status,operator,comment,operated_at) VALUES (?,?,?,?,?,?)""",
+        (issue_id, issue["status"], body.status, user["username"], body.comment.strip(), now))
+    return ok({"issueId": issue_id, "status": body.status}, msg="问题状态已更新")
 
 
 # ------------------------------------------------------------------ 开课与排课

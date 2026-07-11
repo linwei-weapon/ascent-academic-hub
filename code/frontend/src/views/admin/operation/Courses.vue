@@ -39,10 +39,28 @@
           <el-table-column prop="affected_rows" label="影响记录" width="90" align="right" />
           <el-table-column prop="detail" label="问题说明" min-width="210" />
           <el-table-column prop="recommendation" label="处置建议" min-width="250" />
-          <el-table-column prop="status" label="状态" width="70" />
+          <el-table-column label="状态" width="90"><template #default="{row}"><el-tag size="small" :type="qualityStatusType(row.status)">{{ qualityStatusLabel(row.status) }}</el-tag></template></el-table-column>
+          <el-table-column label="处置" width="220"><template #default="{row}">
+            <el-button link @click="showQualityAudit(row)">处置轨迹</el-button>
+            <template v-if="qualityManage">
+            <el-button v-if="row.status==='open'" link type="primary" @click="changeQuality(row,'reviewing')">开始复核</el-button>
+            <template v-if="row.status==='reviewing'"><el-button link type="success" @click="changeQuality(row,'closed')">确认关闭</el-button><el-button link @click="changeQuality(row,'open')">退回</el-button></template>
+            <el-button v-if="row.status==='closed'" link type="warning" @click="changeQuality(row,'open')">重新打开</el-button>
+            </template>
+          </template></el-table-column>
         </el-table>
       </el-collapse-item>
     </el-collapse>
+    <el-dialog v-model="auditVisible" title="数据质量问题处置轨迹" width="680px">
+      <el-empty v-if="!qualityAudit.length" description="暂无处置记录" />
+      <el-timeline v-else>
+        <el-timeline-item v-for="(item,index) in qualityAudit" :key="index" :timestamp="item.operated_at" placement="top">
+          <div><b>{{ qualityStatusLabel(item.from_status) }} → {{ qualityStatusLabel(item.to_status) }}</b></div>
+          <div class="sa-faint">操作人：{{ item.operator }}</div>
+          <div>{{ item.comment }}</div>
+        </el-timeline-item>
+      </el-timeline>
+    </el-dialog>
 
     <div v-if="collegeFilter" class="filter-banner">
       <span>当前学院视图：<b>{{ collegeFilter.name }}</b>（仅显示该学院数据）</span>
@@ -123,6 +141,7 @@ import KpiCard from '@/components/KpiCard.vue'
 import EChart from '@/components/EChart.vue'
 import { COLLEGE_MAP } from '@/constants/colleges'
 import { getFilterMeta, type SemesterOpt } from '@/utils/meta'
+import { ElMessageBox } from 'element-plus'
 const router = useRouter()
 const route = useRoute()
 
@@ -159,6 +178,21 @@ const data = reactive<{deptCourses:any[];typeDist:any[];sizeDist:any[];trend:any
   deptCourses: [], typeDist: [], sizeDist: [], trend: [], totalCourses: 0, courseList: [], dataQuality: {},
 })
 const qualityIssues = ref<any[]>([])
+const qualityManage = ref(false)
+const auditVisible = ref(false)
+const qualityAudit = ref<any[]>([])
+const qualityStatusLabel = (status:string) => ({open:'待处理',reviewing:'复核中',closed:'已关闭'} as Record<string,string>)[status] || status
+const qualityStatusType = (status:string) => ({open:'danger',reviewing:'warning',closed:'success'} as Record<string,any>)[status] || 'info'
+async function showQualityAudit(row:any) {
+  qualityAudit.value = await http.get(`/admin/operation/data-quality/${encodeURIComponent(row.issue_id)}/audit`) || []
+  auditVisible.value = true
+}
+async function changeQuality(row:any,status:string) {
+  const action:any={reviewing:'开始复核',closed:'确认关闭',open:'重新打开/退回'}
+  const r=await ElMessageBox.prompt('请填写处置说明',action[status]||'更新状态',{inputPlaceholder:'说明核查结果或处置依据'})
+  await http.put(`/admin/operation/data-quality/${encodeURIComponent(row.issue_id)}/status`,{status,comment:r.value})
+  await load()
+}
 const totalCourses = computed(() => data.totalCourses)
 
 async function load() {
@@ -177,9 +211,9 @@ async function load() {
   if (d) { kpis.value = d.kpis || []; Object.assign(data, d) }
   const qParams = new URLSearchParams()
   if (fSemester.value) qParams.set('semester', fSemester.value)
-  qParams.set('status','open')
   const q = await http.get<any>('/admin/operation/data-quality?' + qParams.toString())
   qualityIssues.value = q?.list || []
+  qualityManage.value = !!q?.permissions?.manage
 }
 onMounted(async () => {
   const meta = await getFilterMeta()

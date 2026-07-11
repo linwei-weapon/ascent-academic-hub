@@ -410,6 +410,17 @@ CREATE TABLE data_quality_issue (
     source TEXT NOT NULL DEFAULT 'derived'
 );
 
+DROP TABLE IF EXISTS data_quality_issue_audit;
+CREATE TABLE data_quality_issue_audit (
+    audit_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    issue_id TEXT NOT NULL,
+    from_status TEXT,
+    to_status TEXT NOT NULL,
+    operator TEXT NOT NULL,
+    comment TEXT,
+    operated_at TEXT NOT NULL
+);
+
 -- ---------------------------------------------------------------------
 -- 系统 / RBAC / 规则元数据 sys_
 -- ---------------------------------------------------------------------
