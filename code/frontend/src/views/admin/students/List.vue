@@ -1,0 +1,235 @@
+<template>
+  <div>
+    <div class="sa-head-row">
+      <div>
+        <el-breadcrumb separator="›" style="margin-bottom:4px">
+          <el-breadcrumb-item :to="{path:'/admin/students/analysis'}">学生学业</el-breadcrumb-item>
+          <el-breadcrumb-item>学生学业画像</el-breadcrumb-item>
+        </el-breadcrumb>
+        <h2 class="sa-page-title">{{ pageTitle }}</h2>
+        <p class="sa-page-sub">数据来源：学籍表 + 成绩表 · 快照+趋势+模式，从群体统计下钻到个体追踪</p>
+      </div>
+    </div>
+
+    <!-- 筛选栏 -->
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+      <el-select v-model="fCollege" size="small" style="width:150px" clearable filterable placeholder="全部学院" @change="onCollege">
+        <el-option v-for="c in colleges" :key="c.value" :label="c.label" :value="c.value" />
+      </el-select>
+      <el-select v-model="fMajor" size="small" style="width:140px" clearable filterable placeholder="全部专业" @change="onMajor">
+        <el-option v-for="m in majorOptions" :key="m.value" :label="m.label" :value="m.value" />
+      </el-select>
+      <el-select v-model="fGrade" size="small" style="width:100px" clearable placeholder="全部年级">
+        <el-option v-for="g in grades" :key="g" :label="g + '级'" :value="g" />
+      </el-select>
+      <el-select v-model="fClass" size="small" style="width:140px" clearable filterable placeholder="全部班级">
+        <el-option v-for="c in classOptions" :key="c.value" :label="c.label" :value="c.value" />
+      </el-select>
+      <el-select v-model="fSemester" size="small" style="width:160px" clearable placeholder="全部学期">
+        <el-option v-for="s in semesters" :key="s.value" :label="s.label" :value="s.value" />
+      </el-select>
+      <el-select v-model="fRetake" size="small" style="width:100px" clearable placeholder="重修/非">
+        <el-option label="重修" value="重修" /><el-option label="非重修" value="非重修" />
+      </el-select>
+      <el-select v-model="fRequired" size="small" style="width:100px" clearable placeholder="课程性质">
+        <el-option label="必修" value="必修" /><el-option label="选修" value="选修" />
+      </el-select>
+      <el-input v-model="keyword" size="small" style="width:180px" placeholder="搜索学号/姓名" clearable @keyup.enter="search" />
+      <el-button size="small" type="primary" @click="search">查询</el-button>
+      <el-button size="small" @click="reset">重置</el-button>
+    </div>
+
+    <!-- 当前课程过滤标签 -->
+    <div v-if="courseName" style="margin-bottom:8px">
+      <el-tag closable type="warning" @close="removeCourse">当前课程：{{ courseName }}</el-tag>
+    </div>
+
+    <!-- 摘要行 -->
+    <div class="sa-summary" style="margin-bottom:12px;font-size:13px;color:var(--sa-faint)">
+      共 <b class="tnum">{{ total }}</b> 名学生<span v-if="avgGpa !== null">，平均 GPA <b class="tnum" :style="{color: avgGpa >= 3.0 ? '#16A34A' : '#DC2626'}">{{ avgGpa }}</b></span>
+    </div>
+
+    <!-- 学生表格 -->
+    <div class="sa-card">
+      <el-table :data="students" stripe size="small" v-loading="loading" @row-click="goStudent" row-class-name="college-row-clickable">
+        <el-table-column prop="sid" label="学号" width="130" />
+        <el-table-column prop="name" label="姓名" width="80" />
+        <el-table-column prop="college" label="学院" width="140" />
+        <el-table-column label="专业" width="120">
+          <template #default="{row}"><span>{{ row.majorName || row.major }}</span></template>
+        </el-table-column>
+        <el-table-column label="班级" width="100">
+          <template #default="{row}"><span>{{ row.className || row.class }}</span></template>
+        </el-table-column>
+        <el-table-column prop="grade" label="年级" width="72" />
+        <el-table-column label="GPA" width="72" align="right">
+          <template #default="{row}">
+            <span class="tnum" :style="{color: gpaColor(row.gpa), fontWeight:700}">{{ row.gpa != null ? row.gpa.toFixed(2) : '—' }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="挂科门数" width="80" align="right">
+          <template #default="{row}">
+            <span class="tnum" :style="{color: row.failCount > 0 ? '#DC2626' : '#6B7280', fontWeight: row.failCount > 0 ? 700 : 400}">{{ row.failCount }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="预警" width="100">
+          <template #default="{row}">
+            <el-tag v-if="row.alertLevel && row.alertLevel !== '—'" size="small" :type="alertTagType(row.alertLevel)">{{ row.alertLevel }}</el-tag>
+            <span v-else class="sa-faint">—</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="" width="56">
+          <template #default><span style="color:var(--sa-faint)">详情 ›</span></template>
+        </el-table-column>
+      </el-table>
+
+      <div v-if="!loading && students.length === 0" class="sa-faint" style="text-align:center;padding:40px">未找到匹配学生</div>
+
+      <div style="display:flex;justify-content:flex-end;margin-top:12px" v-if="total > 0">
+        <el-pagination v-model:current-page="page" :page-size="pageSize" :total="total" layout="total, prev, pager, next, jumper" small @current-change="loadPage" />
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref, computed, onMounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { http } from '@/utils/http'
+import { getFilterMeta, type SemesterOpt, type MajorOpt, type ClassOpt } from '@/utils/meta'
+
+const route = useRoute()
+const router = useRouter()
+
+// ── 筛选状态 ──
+const fCollege = ref('')
+const fMajor = ref('')
+const fGrade = ref('')
+const fClass = ref('')
+const fSemester = ref('')
+const fRetake = ref('')
+const fRequired = ref('')
+const keyword = ref('')
+const page = ref(1)
+const pageSize = 20
+
+// ── URL 参数预填 ──
+const courseName = ref(route.query.courseName as string || '')
+const courseId = ref(route.query.course as string || '')
+
+// ── 数据 ──
+const loading = ref(false)
+const students = ref<any[]>([])
+const total = ref(0)
+const avgGpa = ref<number | null>(null)
+
+// ── 筛选器选项 ──
+const semesters = ref<SemesterOpt[]>([])
+const grades = ref<string[]>([])
+const colleges = ref<{value:string;label:string}[]>([])
+const majors = ref<MajorOpt[]>([])
+const classes = ref<ClassOpt[]>([])
+
+const majorOptions = computed(() => fCollege.value
+  ? majors.value.filter(m => m.college === fCollege.value)
+  : majors.value)
+const classOptions = computed(() => fMajor.value
+  ? classes.value.filter(c => c.major === fMajor.value)
+  : classes.value)
+
+// ── 页面标题 ──
+const pageTitle = computed(() => {
+  const parts: string[] = []
+  if (courseName.value) parts.push(courseName.value)
+  if (route.query.collegeName) parts.push(route.query.collegeName as string)
+  else if (route.query.majorName) parts.push(route.query.majorName as string)
+  parts.push('学生学业画像')
+  return parts.join(' · ')
+})
+
+// ── URL 参数初始化 ──
+onMounted(async () => {
+  const meta = await getFilterMeta()
+  semesters.value = meta.semesters.slice().reverse()
+  grades.value = meta.grades || []
+  colleges.value = meta.colleges || []
+  majors.value = meta.majors || []
+  classes.value = meta.classes || []
+
+  if (route.query.college) fCollege.value = route.query.college as string
+  if (route.query.major) fMajor.value = route.query.major as string
+  if (route.query.grade) fGrade.value = route.query.grade as string
+  if (route.query.class) fClass.value = route.query.class as string
+  if (route.query.semester) fSemester.value = route.query.semester as string
+  if (route.query.course) courseId.value = route.query.course as string
+  if (route.query.courseName) courseName.value = route.query.courseName as string
+  loadPage(1)
+})
+
+// ── 筛选联动 ──
+function onCollege() { fMajor.value = ''; fClass.value = '' }
+function onMajor() { fClass.value = '' }
+
+// ── 数据加载 ──
+async function loadPage(p: number) {
+  loading.value = true
+  try {
+    const params: Record<string, any> = { page: p, page_size: pageSize }
+    if (fCollege.value) params.college = fCollege.value
+    if (fMajor.value) params.major = fMajor.value
+    if (fGrade.value) params.grade = fGrade.value
+    if (fClass.value) params.class_id = fClass.value
+    if (fSemester.value) params.semester = fSemester.value
+    if (fRetake.value) params.retake = fRetake.value
+    if (fRequired.value) params.required = fRequired.value
+    if (keyword.value) params.keyword = keyword.value
+    if (courseId.value) params.course = courseId.value
+    // 排序
+    params.sort = 'gpa'
+    params.order = 'desc'
+
+    const qs = Object.entries(params).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&')
+    const data = await http.get<any>(`/admin/students/list?${qs}`)
+
+    students.value = data.students || []
+    total.value = data.total || 0
+    page.value = data.page || p
+
+    // 计算平均 GPA
+    const gpas = students.value.map((s: any) => s.gpa).filter((g: any) => g != null)
+    avgGpa.value = gpas.length > 0 ? +(gpas.reduce((a: number, b: number) => a + b, 0) / gpas.length).toFixed(2) : null
+  } catch { /* http 工具已 toast */ }
+  finally { loading.value = false }
+}
+
+// ── 操作 ──
+function search() { page.value = 1; loadPage(1) }
+function reset() {
+  fCollege.value = ''; fMajor.value = ''; fGrade.value = ''
+  fClass.value = ''; fSemester.value = ''; fRetake.value = ''
+  fRequired.value = ''; keyword.value = ''
+  courseId.value = ''; courseName.value = ''
+  page.value = 1; loadPage(1)
+}
+function removeCourse() { courseId.value = ''; courseName.value = ''; search() }
+function goStudent(row: any) {
+  const qs = new URLSearchParams({ from: 'list' })
+  if (fCollege.value) qs.set('college', fCollege.value)
+  if (fMajor.value) qs.set('major', fMajor.value)
+  router.push(`/admin/student/${row.sid}?${qs.toString()}`)
+}
+
+// ── 辅助 ──
+function gpaColor(g: number | null): string {
+  if (g == null) return '#6B7280'
+  if (g >= 3.5) return '#16A34A'
+  if (g >= 3.0) return '#2563EB'
+  if (g >= 2.0) return '#EA580C'
+  return '#DC2626'
+}
+function alertTagType(level: string): string {
+  if (level.includes('严重')) return 'danger'
+  if (level.includes('警告')) return 'warning'
+  return 'info'
+}
+</script>

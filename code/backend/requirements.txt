@@ -1,0 +1,19 @@
+# 平台管理端 BI · 后端 + ETL 依赖
+# ---- ETL（阶段2 用）----
+pandas==2.2.3
+openpyxl==3.1.5          # 成绩 236MB 流式只读
+xlrd==2.0.2              # 教学任务 .xls
+python-docx==1.1.2       # 培养方案 docx 解析
+
+# ---- 后端 API（阶段3 用）----
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+SQLAlchemy==2.0.36
+pydantic==2.10.4
+python-jose[cryptography]==3.3.0   # JWT
+passlib[bcrypt]==1.7.4              # 密码哈希
+python-multipart==0.0.20           # 表单/登录
+
+# ---- 测试（阶段3/5 用）----
+pytest==8.3.4
+httpx==0.28.1

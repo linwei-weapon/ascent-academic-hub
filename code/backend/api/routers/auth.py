@@ -1,0 +1,82 @@
+"""鉴权路由：登录/当前用户/登出。仅菜单权限（sys_role_menu）。"""
+import sqlite3
+
+from fastapi import APIRouter, Depends
+from pydantic import BaseModel
+
+from .. import db as dbm
+from ..deps import get_db, get_current_user
+from ..envelope import ok, ApiError
+from ..security import verify_password, create_token
+
+router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+
+class LoginIn(BaseModel):
+    username: str
+    password: str
+
+
+def _menus_for_role(conn: sqlite3.Connection, role_id: str) -> list[dict]:
+    """该角色可见菜单（按 sort_order）。"""
+    return dbm.query(conn, """
+        SELECT m.menu_id, m.title, m.path, m.icon, m.sort_order
+        FROM sys_role_menu rm JOIN sys_menu m ON rm.menu_id = m.menu_id
+        WHERE rm.role_id = ?
+        ORDER BY m.sort_order
+    """, (role_id,))
+
+
+def _user_payload(conn: sqlite3.Connection, user: dict) -> dict:
+    role = dbm.query_one(conn, "SELECT role_id, name, data_scope_type FROM sys_role WHERE role_id=?",
+                         (user["role_id"],))
+    payload = {
+        "username": user["username"],
+        "name": user["name"],
+        "role": user["role_id"],
+        "roleName": role["name"] if role else user["role_id"],
+        "menus": _menus_for_role(conn, user["role_id"]),
+    }
+    # 附加数据范围（college/major/class），供前端切换视角
+    scopes = dbm.query(conn, "SELECT scope_id FROM sys_role_scope WHERE role_id=?", (user["role_id"],))
+    scope_ids = [s["scope_id"] for s in scopes]
+    if scope_ids:
+        # 学院级：取第一个 scope_id 作为学院
+        college = dbm.query_one(conn, "SELECT college_id, name FROM dim_college WHERE college_id=?",
+                                (scope_ids[0],))
+        if college:
+            payload["scope"] = {"collegeId": college["college_id"], "collegeName": college["name"]}
+        # 专业级：scope_id 是 major_id
+        major = dbm.query_one(conn, "SELECT major_id, name FROM dim_major WHERE major_id=?",
+                              (scope_ids[0],))
+        if major:
+            if "scope" in payload:
+                payload["scope"]["majorId"] = major["major_id"]
+            else:
+                payload["scope"] = {"majorId": major["major_id"]}
+        # 班级级：全量 class_ids（辅导员）
+        if not college and not major and scope_ids:
+            payload["scope"] = {"classIds": scope_ids}
+    return payload
+
+
+@router.post("/login")
+def login(body: LoginIn, conn: sqlite3.Connection = Depends(get_db)):
+    user = dbm.query_one(
+        conn, "SELECT username, name, role_id, status, password_hash "
+        "FROM sys_user WHERE username=?", (body.username,))
+    if not user or user["status"] != "active" or not verify_password(body.password, user["password_hash"]):
+        raise ApiError("用户名或密码错误", code=401, status_code=401)
+    token = create_token(user["username"], user["role_id"])
+    return ok({"token": token, "user": _user_payload(conn, user)})
+
+
+@router.get("/me")
+def me(user: dict = Depends(get_current_user), conn: sqlite3.Connection = Depends(get_db)):
+    return ok(_user_payload(conn, user))
+
+
+@router.post("/logout")
+def logout(user: dict = Depends(get_current_user)):
+    # 无状态 JWT：前端丢弃 token 即可；此处仅作语义占位
+    return ok(msg="已登出")

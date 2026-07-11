@@ -1,0 +1,196 @@
+// ============================================================
+// Style A「靛蓝清爽」全局视觉层
+// 现代浅色 SaaS：浅底白卡 + 单一靛蓝强调 + 细线描边 + 留白。
+// 仅做视觉，不触碰任何取数/业务逻辑。
+// ============================================================
+
+:root {
+  --sa-primary: #4f46e5;
+  --sa-teal: #0d9488;
+  --sa-amber: #d97706;
+  --sa-danger: #e11d48;
+  --sa-text: #1e293b; // slate-800 标题/正文
+  --sa-muted: #64748b; // slate-500 次要
+  --sa-faint: #94a3b8; // slate-400 极弱
+  --sa-border: #eaedf2; // 卡片描边
+  --sa-border-2: #e2e8f0; // 略深分隔
+  --sa-bg: #f8fafc; // 页面底
+  --sa-row-hover: #f1f5f9;
+  --sa-track: #eef2ff; // 进度条/柱底
+  --sa-font-head: 'Plus Jakarta Sans', 'Noto Sans SC', system-ui, sans-serif;
+}
+
+body {
+  font-family: 'Noto Sans SC', system-ui, sans-serif;
+  color: var(--sa-text);
+  background: var(--sa-bg);
+}
+
+// 表格对齐数字
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+// 标题字族工具
+.sa-head {
+  font-family: var(--sa-font-head);
+}
+
+// 页面级标题（替代各页散落的 <h2>）
+.sa-page-title {
+  font-family: var(--sa-font-head);
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--sa-text);
+  letter-spacing: -0.01em;
+  margin: 0 0 4px;
+}
+.sa-page-sub {
+  font-size: 13px;
+  color: var(--sa-muted);
+  margin: 0 0 18px;
+  line-height: 1.6;
+}
+
+// 标准白卡
+.sa-card {
+  background: #fff;
+  border: 1px solid var(--sa-border);
+  border-radius: 14px;
+  padding: 16px 18px;
+}
+
+// 同一行（el-row）内的卡片等高：让卡片填满被拉伸的列高度，避免高低不齐
+.el-row > .el-col > .sa-card {
+  height: 100%;
+  box-sizing: border-box;
+}
+.sa-card-title {
+  font-family: var(--sa-font-head);
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--sa-text);
+  margin-bottom: 14px;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.sa-card-title .extra {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--sa-muted);
+}
+
+.sa-muted {
+  color: var(--sa-muted);
+}
+.sa-faint {
+  color: var(--sa-faint);
+}
+
+// KPI 横排栅格（自适应）
+.sa-kpi-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+// ---------- ElementPlus 组件 Style A 适配 ----------
+
+// 卡片：细描边 + 14 圆角 + 取消默认阴影
+.el-card {
+  border: 1px solid var(--sa-border) !important;
+  border-radius: 14px !important;
+  box-shadow: none !important;
+}
+.el-card__header {
+  border-bottom: 1px solid var(--sa-border) !important;
+  font-family: var(--sa-font-head);
+  font-weight: 700;
+  color: var(--sa-text);
+}
+
+// 表格：浅冷表头 + 细描边 + 行悬浮
+.el-table {
+  --el-table-border-color: var(--sa-border);
+  --el-table-header-bg-color: #f8fafc;
+  --el-table-header-text-color: #475569;
+  --el-table-row-hover-bg-color: var(--sa-row-hover);
+  --el-table-text-color: var(--sa-text);
+  font-variant-numeric: tabular-nums;
+}
+.el-table th.el-table__cell {
+  font-weight: 600;
+  font-size: 12.5px;
+}
+
+// 标签页下划线主色已由 --el-color-primary 接管，这里仅统一字重
+.el-tabs__item {
+  font-weight: 500;
+}
+
+// 描述列表（settings/sync 等）描边对齐 Style A
+.el-descriptions {
+  --el-descriptions-item-bordered-label-background: #f8fafc;
+}
+
+// ---------- 进场动效：卡片/KPI 首次渲染上浮淡入 ----------
+// 路由切换时 Layout 用 :key 重挂载视图，故每次进入页面都会重新触发。
+@keyframes sa-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.sa-card,
+.sa-kpi {
+  animation: sa-rise 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+// KPI 横排轻微错峰，形成依次跳入的节奏
+.sa-kpi-row .sa-kpi:nth-child(1) {
+  animation-delay: 0.02s;
+}
+.sa-kpi-row .sa-kpi:nth-child(2) {
+  animation-delay: 0.07s;
+}
+.sa-kpi-row .sa-kpi:nth-child(3) {
+  animation-delay: 0.12s;
+}
+.sa-kpi-row .sa-kpi:nth-child(4) {
+  animation-delay: 0.17s;
+}
+.sa-kpi-row .sa-kpi:nth-child(5) {
+  animation-delay: 0.22s;
+}
+.sa-kpi-row .sa-kpi:nth-child(6) {
+  animation-delay: 0.27s;
+}
+
+// 尊重系统「减少动态效果」无障碍设置
+@media (prefers-reduced-motion: reduce) {
+  .sa-card,
+  .sa-kpi {
+    animation: none;
+  }
+}
+
+// 细滚动条
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: #d8dee8;
+  border-radius: 99px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}

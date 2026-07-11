@@ -1,0 +1,13 @@
+# 分析库产物（ETL 生成，勿入库）
+db/*.sqlite
+db/*.sqlite-wal
+db/*.sqlite-shm
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# ETL 报告产物
+etl/_reports/

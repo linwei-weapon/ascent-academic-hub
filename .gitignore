@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+
+# Build output
+dist/
+*.egg-info/
+
+# Data files (proprietary)
+datasource/
+*.sqlite
+*.db
+analytics.sqlite
+
+# IDE & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Claude
+.claude/
+
+# Screenshots
+演示截图/
+
+# Business docs (internal)
+D:\AI教育\AI学业助手\04-业务流程/

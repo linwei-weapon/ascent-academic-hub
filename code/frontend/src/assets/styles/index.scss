@@ -1,0 +1,11 @@
+/* 重置默认样式 */
+@use './core/reset.scss';
+
+/* 应用全局样式 */
+@use './core/app.scss';
+
+/* Element Plus 样式优化 */
+@use './core/el-ui.scss';
+
+/* Style A「靛蓝清爽」全局视觉层（最后加载，覆盖前面默认值） */
+@use './core/style-a.scss';
