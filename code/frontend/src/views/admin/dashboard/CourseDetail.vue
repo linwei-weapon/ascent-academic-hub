@@ -9,7 +9,11 @@
       <span v-if="data.credits">{{ data.credits }} 学分 · {{ data.type }} · {{ data.college }}</span>
       <span v-else>成绩分布、历年趋势与各教学班通过情况。</span>
       <span v-if="semLabel" style="margin-left:10px;padding:1px 8px;border-radius:10px;background:#EEF2FF;color:#4F46E5;font-size:12px">数据周期：{{ semLabel }}</span>
+      <span v-if="data.scope?.restricted" style="margin-left:8px;padding:1px 8px;border-radius:10px;background:#FFF7ED;color:#C2410C;font-size:12px">仅当前角色授权学生范围</span>
     </p>
+
+    <el-alert v-if="data.evidence?.limitation" type="info" :closable="false" show-icon style="margin-bottom:12px"
+      title="统计范围说明" :description="data.evidence.limitation" />
 
     <div class="sa-kpi-row">
       <KpiCard v-for="k in data.kpi" :key="k.label" :label="k.label" :value="k.value" :tone="kpiTone(k.label)" :hint="k.formula" :sub="k.detail" />
@@ -58,7 +62,7 @@ import KpiCard from '@/components/KpiCard.vue';
 import EChart from '@/components/EChart.vue';
 const route = useRoute(); const router = useRouter();
 const semLabel = (route.query.semester as string) || '';
-const data = reactive({ name:'', credits:0, type:'', college:'', kpi:[] as any[], scoreDistribution:[] as any[], classDetail:[] as any[], history:[] as any[] });
+const data = reactive<any>({ name:'', credits:0, type:'', college:'', kpi:[], scoreDistribution:[], classDetail:[], history:[], scope:{restricted:false}, evidence:{} });
 
 function barColor(label: string) {
   if (label === '不及格') return '#E11D48';

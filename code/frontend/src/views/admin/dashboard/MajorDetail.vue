@@ -1,11 +1,14 @@
 <template>
   <div>
     <el-breadcrumb separator="›">
-      <el-breadcrumb-item :to="{path:'/admin/dashboard'}">数据大屏</el-breadcrumb-item>
+      <el-breadcrumb-item :to="{path:'/admin/dashboard',query:semLabel?{semester:semLabel}:{}}">数据大屏</el-breadcrumb-item>
       <el-breadcrumb-item>{{ data.name || '专业详情' }}</el-breadcrumb-item>
     </el-breadcrumb>
     <h2 class="sa-page-title" style="margin-top:14px">{{ data.name || '加载中…' }} · 专业详情</h2>
-    <p class="sa-page-sub">{{ data.college }} · 年级学业明细、本专业集中挂科课程与毕业去向目标分布。</p>
+    <p class="sa-page-sub">{{ data.college }} · {{ semLabel || '默认学期' }} · {{ data.scope?.restricted ? '当前角色授权范围' : '本专业全量' }}</p>
+
+    <el-alert v-if="data.evidence?.limitation" type="warning" :closable="false" show-icon style="margin-bottom:12px"
+      title="证据与口径说明" :description="data.evidence.limitation" />
 
     <div class="sa-kpi-row">
       <KpiCard v-for="k in data.kpi" :key="k.label" :label="k.label" :value="k.value" :tone="kpiTone(k.label)" :hint="k.formula" />
@@ -24,12 +27,12 @@
               <span class="chip">挂科率 <b class="tnum" style="color:#E11D48">{{ g.failRate }}</b></span>
               <span class="chip">预警 <b class="tnum" style="color:#E11D48">{{ g.alertCount }}</b>人</span>
               <span class="grade-credit">
-                <span class="sa-faint" style="font-size:11px">学分完成</span>
+                <span class="sa-faint" style="font-size:11px">课程学分通过</span>
                 <el-progress :percentage="g.creditDone" :stroke-width="7" :color="g.creditDone>75?'#0D9488':'#D97706'" style="width:120px" />
               </span>
             </div>
-            <el-table v-if="g.courses && g.courses.length" :data="g.courses" size="small">
-              <el-table-column prop="name" label="挂科课程" width="160" />
+            <el-table v-if="g.courses && g.courses.length" :data="g.courses" size="small" @row-click="goCourse" row-class-name="course-row-clickable">
+              <el-table-column prop="name" label="挂科课程" width="160"><template #default="{row}"><span class="course-link">{{ row.name }}</span></template></el-table-column>
               <el-table-column label="挂科率计算" min-width="220"><template #default="{row}"><span style="font-size:12px"><b style="color:#E11D48" class="tnum">{{ row.failCount }}</b> 不及格 ÷ <b class="tnum">{{ row.totalCount }}</b> 总修读 = <b style="color:#E11D48" class="tnum">{{ row.failRate }}%</b></span></template></el-table-column>
             </el-table>
             <div v-else class="sa-faint" style="font-size:12px;padding:2px 0 4px">该年级无集中挂科课程</div>
@@ -38,7 +41,7 @@
       </el-col>
       <el-col :span="8">
         <div class="sa-card">
-          <div class="sa-card-title">毕业去向目标分布</div>
+          <div class="sa-card-title">毕业去向分布（合成）</div>
           <template v-if="goalRows.length">
             <div class="goal-donut-wrap">
               <EChart :option="goalOption" :height="200" />
@@ -60,7 +63,7 @@
         </div>
       </el-col>
     </el-row>
-    <div style="margin-top:16px"><el-button type="primary" @click="goStudents">查看本专业全部学生 →</el-button></div>
+    <div style="margin-top:16px"><el-button type="primary" @click="goStudents">查看{{ data.scope?.restricted ? '授权范围' : '本专业全部' }}学生 →</el-button></div>
   </div>
 </template>
 
@@ -71,12 +74,14 @@ import { useRoute, useRouter } from 'vue-router';
 import KpiCard from '@/components/KpiCard.vue';
 import EChart from '@/components/EChart.vue';
 const route = useRoute(); const router = useRouter();
-const data = reactive({ name:'', college:'', kpi:[] as any[], gradeDetail:[] as any[], goalDistribution:{} as Record<string,number> });
+const semLabel = (route.query.semester as string) || '';
+const data = reactive<any>({ name:'', college:'', collegeId:'', kpi:[], gradeDetail:[], goalDistribution:{}, scope:{restricted:false}, evidence:{} });
 
 const GOAL_COLORS = ['#4F46E5', '#0D9488', '#D97706', '#6366F1', '#94A3B8', '#E11D48', '#0EA5E9', '#A855F7'];
 
 onMounted(async () => {
-  const d = await http.get('/admin/major/' + (route.params.id || 'M051'));
+  const qs = semLabel ? '?semester=' + encodeURIComponent(semLabel) : '';
+  const d = await http.get('/admin/major/' + (route.params.id || 'M051') + qs);
   if (d) Object.assign(data, d);
 });
 
@@ -108,9 +113,9 @@ function kpiTone(label: string): 'primary'|'teal'|'danger'|'amber' {
 }
 function goStudents() {
   const majorId = route.params.id as string;
-  const collegeId = (data as any).collegeId || data.college;
-  router.push('/admin/students/list?college=' + encodeURIComponent(collegeId) + '&major=' + majorId + '&majorName=' + encodeURIComponent(data.name));
+  router.push({ path:'/admin/students/list', query:{college:data.collegeId,major:majorId,majorName:data.name,...(semLabel?{semester:semLabel}:{})} });
 }
+function goCourse(row: any) { router.push({ path:'/admin/course/'+row.id, query:semLabel?{semester:semLabel}:{} }); }
 </script>
 
 <style scoped>
@@ -134,4 +139,6 @@ function goStudents() {
 .goal-legend-label { color: var(--sa-text); flex: 1; }
 .goal-legend-val { color: var(--sa-text); font-weight: 600; }
 .goal-legend-pct { color: var(--sa-muted); width: 38px; text-align: right; }
+:deep(.course-row-clickable) { cursor: pointer; }
+.course-link { color: var(--sa-primary); font-weight: 500; }
 </style>

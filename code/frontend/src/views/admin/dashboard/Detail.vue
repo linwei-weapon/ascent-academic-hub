@@ -1,15 +1,18 @@
 <template>
   <div>
-    <el-breadcrumb separator="›"><el-breadcrumb-item :to="{path:'/admin/dashboard'}">数据大屏</el-breadcrumb-item><el-breadcrumb-item>{{ data.name || '学院详情' }}</el-breadcrumb-item></el-breadcrumb>
+    <el-breadcrumb separator="›"><el-breadcrumb-item :to="{path:'/admin/dashboard',query:{semester:fSemester}}">数据大屏</el-breadcrumb-item><el-breadcrumb-item>{{ data.name || '学院详情' }}</el-breadcrumb-item></el-breadcrumb>
     <div style="display:flex;justify-content:space-between;align-items:center">
       <div>
         <h2 class="sa-page-title" style="margin-top:14px;margin-bottom:0">{{ data.name || '加载中…' }} · 学院详情</h2>
-        <p class="sa-page-sub">统计学期：<b>{{ curSemester }}</b> · 二级学院学业全景</p>
+        <p class="sa-page-sub">统计学期：<b>{{ fSemester }}</b> · {{ data.scope?.restricted ? '当前角色授权范围' : '二级学院学业全景' }}</p>
       </div>
       <el-select v-model="fSemester" size="small" style="width:170px" placeholder="选择学期" @change="loadData">
         <el-option v-for="s in semesters" :key="s.value" :label="s.label" :value="s.value" />
       </el-select>
     </div>
+
+    <el-alert v-if="data.evidence?.limitation" type="warning" :closable="false" show-icon style="margin:12px 0"
+      title="证据与口径说明" :description="data.evidence.limitation" />
 
     <div class="sa-kpi-row">
       <KpiCard v-for="k in data.kpi" :key="k.label" :label="k.label" :value="k.value" :tone="kpiTone(k.label)" :hint="k.formula" />
@@ -34,7 +37,7 @@
         <el-table-column label="" width="36"><template #default><span style="color:var(--sa-faint)">›</span></template></el-table-column>
       </el-table>
       <div style="margin-top:8px;text-align:right">
-        <el-button size="small" @click="router.push('/admin/students/list?college=' + collegeId + '&collegeName=' + encodeURIComponent(data.name))">查看本学院全部学生 →</el-button>
+        <el-button size="small" @click="goStudents">查看{{ data.scope?.restricted ? '授权范围' : '本学院全部' }}学生 →</el-button>
       </div>
     </div>
 
@@ -42,7 +45,7 @@
     <el-row :gutter="16" style="margin-bottom:16px">
       <el-col :span="12">
         <div class="sa-card">
-          <div class="sa-card-title">各年级学分完成率 <KpiLabel label="" formula="已通过课程学分÷修读课程总学分×100%，按年级统计均值。反映该年级学生整体学业进度与培养方案完成情况" /></div>
+          <div class="sa-card-title">各年级课程学分通过占比 <KpiLabel label="" formula="当前学期已通过课程学分人次÷修读课程学分人次×100%，不等同于培养方案完成度" /></div>
           <EChart v-if="data.gradeCompare.length" :option="gradeOption" :height="Math.max(150, data.gradeCompare.length*46)" />
           <div v-else class="sa-faint" style="font-size:12px">暂无年级数据</div>
         </div>
@@ -78,11 +81,10 @@ import EChart from '@/components/EChart.vue';
 import { getFilterMeta, type SemesterOpt } from '@/utils/meta';
 const route = useRoute(); const router = useRouter();
 const collegeId = route.params.id as string;
-const data = reactive({ name:'', kpi:[] as any[], majors:[] as any[], gradeCompare:[] as any[] });
+const data = reactive<any>({ name:'', kpi:[], majors:[], gradeCompare:[], scope:{restricted:false}, evidence:{} });
 const failCourses = reactive([] as any[]);
 const semesters = ref<SemesterOpt[]>([]);
 const fSemester = ref('');
-const curSemester = ref('');
 
 async function loadData() {
   const id = route.params.id as string || 'C05';
@@ -97,8 +99,7 @@ async function loadData() {
 onMounted(async () => {
   const meta = await getFilterMeta();
   semesters.value = meta.semesters.slice().reverse();
-  curSemester.value = meta.current || semesters.value[0]?.value || '';
-  fSemester.value = curSemester.value;
+  fSemester.value = (route.query.semester as string) || meta.current || semesters.value[0]?.value || '';
   loadData();
 });
 
@@ -125,8 +126,9 @@ function kpiTone(label: string): 'primary'|'teal'|'danger'|'amber' {
   if (label.includes('挂科')) return 'amber';
   return 'primary';
 }
-function goMajor(row: any) { router.push('/admin/major/'+(row.id||'M051')); }
-function goCourse(row: any) { router.push('/admin/course/'+(row.id||'100101C003')); }
+function goMajor(row: any) { router.push({ path:'/admin/major/'+row.id, query:{semester:fSemester.value} }); }
+function goCourse(row: any) { router.push({ path:'/admin/course/'+row.id, query:{semester:fSemester.value} }); }
+function goStudents() { router.push({ path:'/admin/students/list', query:{college:collegeId,collegeName:data.name,semester:fSemester.value} }); }
 </script>
 <style scoped>
 :deep(.row-clickable) { cursor: pointer; }
