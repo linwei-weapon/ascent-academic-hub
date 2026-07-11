@@ -34,6 +34,9 @@
       <div class="filter-banner">
         <span>当前课程：<b>{{ selectedCourse.name }}</b>（{{ selectedCourse.code }}）· {{ selectedCourse.dept || '' }}</span>
       </div>
+      <el-alert v-if="evidence.limitation" type="warning" :closable="false" show-icon style="margin-bottom:12px"
+        title="证据边界：团队成员与授课记录为真实数据，年龄、学历和教龄为模拟画像"
+        :description="evidence.limitation" />
 
       <!-- KPI 行 -->
       <div class="sa-kpi-row">
@@ -45,18 +48,15 @@
         <el-col :span="14">
           <div class="sa-card">
             <div class="sa-card-title">授课团队成员</div>
-            <el-table v-if="team.length" :data="team" size="small">
-              <el-table-column prop="name" label="教师" width="90" />
+            <el-table v-if="team.length" :data="team" size="small" @row-click="goTeacher" row-class-name="row-clickable">
+              <el-table-column prop="name" label="教师" width="90"><template #default="{row}"><span class="link">{{ row.name }}</span></template></el-table-column>
               <el-table-column prop="title" label="职称" width="100" />
-              <el-table-column prop="education" label="学历" width="80" />
-              <el-table-column prop="age" label="年龄" width="64" align="right" />
-              <el-table-column prop="teachingYears" label="教龄" width="64" align="right" />
-              <el-table-column prop="role" label="角色" width="100">
-                <template #default="{row}">
-                  <el-tag size="small" :type="row.role === '主讲' ? 'primary' : 'info'">{{ row.role }}</el-tag>
-                </template>
-              </el-table-column>
+              <el-table-column prop="education" label="学历（模拟）" width="105" />
+              <el-table-column prop="age" label="年龄（模拟）" width="95" align="right" />
+              <el-table-column prop="teachingYears" label="教龄（模拟）" width="95" align="right" />
+              <el-table-column prop="teachingCount" label="近两学期教学班" width="115" align="right" />
               <el-table-column prop="coursesThisSemester" label="本学期授课门数" width="110" align="right" />
+              <el-table-column label="历史教室倾向（行为推断）" min-width="165"><template #default="{row}">{{ row.observedClassroom }}<span v-if="row.observedClassroomPct" class="sa-faint"> · {{ row.observedClassroomPct }}%</span></template></el-table-column>
             </el-table>
             <div v-else class="sa-faint" style="font-size:12px;padding:20px;text-align:center">暂无团队成员数据</div>
           </div>
@@ -72,16 +72,28 @@
         </el-col>
       </el-row>
 
-      <!-- 缺口风险 -->
+      <!-- 梯队模拟场景 -->
       <div class="sa-card">
-        <div class="sa-card-title">师资缺口风险预警</div>
-        <el-alert v-if="gapRisks.length === 0" title="当前团队结构合理，暂无明显师资缺口风险" type="success" :closable="false" show-icon />
+        <div class="sa-card-title">师资梯队模拟场景</div>
+        <el-alert v-if="gapRisks.length === 0" title="当前模拟画像未识别明显梯队风险，仍需真实人员档案核验" type="info" :closable="false" show-icon />
         <div v-else>
           <div v-for="(r, i) in gapRisks" :key="i" style="margin-bottom:8px">
             <el-alert :title="r.title" :description="r.desc" :type="r.level === '高' ? 'error' : r.level === '中' ? 'warning' : 'info'"
               :closable="false" show-icon />
           </div>
         </div>
+      </div>
+
+      <div class="sa-card" style="margin-top:16px">
+        <div class="sa-card-title">团队建设核验建议 <span class="extra">仅依据真实授课覆盖与数据质量台账</span></div>
+        <el-alert type="info" :closable="false" show-icon :title="decisionBoundary" style="margin-bottom:10px" />
+        <el-table :data="supportSuggestions" size="small" stripe>
+          <el-table-column prop="level" label="关注级别" width="90" />
+          <el-table-column prop="topic" label="主题" width="150" />
+          <el-table-column prop="basis" label="事实依据" min-width="220" />
+          <el-table-column prop="suggestion" label="核验建议" min-width="300" />
+          <el-table-column prop="readiness" label="状态" width="100" />
+        </el-table>
       </div>
     </template>
 
@@ -95,6 +107,9 @@ import KpiLabel from '@/components/KpiLabel.vue'
 import KpiCard from '@/components/KpiCard.vue'
 import EChart from '@/components/EChart.vue'
 import { http } from '@/utils/http'
+import { useRouter } from 'vue-router'
+
+const router = useRouter()
 
 const courseQuery = ref('')
 const searching = ref(false)
@@ -102,6 +117,9 @@ const searchResults = ref<any[]>([])
 const selectedCourse = ref<any>(null)
 const team = ref<any[]>([])
 const gapRisks = ref<any[]>([])
+const evidence = ref<any>({})
+const supportSuggestions = ref<any[]>([])
+const decisionBoundary = ref('')
 
 const kpis = ref<any[]>([])
 
@@ -148,18 +166,23 @@ async function loadTeam(courseId: string) {
     const data = await http.get<any>(`/admin/faculty/team/${courseId}`)
     team.value = data.team || []
     gapRisks.value = data.gapRisks || []
+    evidence.value = data.evidence || {}
+    supportSuggestions.value = data.supportSuggestions || []
+    decisionBoundary.value = data.decisionBoundary || ''
     kpis.value = data.kpis || [
       { label: '团队人数', value: team.value.length, formula: '参与授课的教师总数', tone: 'primary' as const },
       { label: '教授占比', value: computeProfRatio(), formula: '教授人数 ÷ 团队总人数', tone: 'teal' as const },
-      { label: '平均教龄', value: computeAvgAge(), formula: '团队成员教龄平均值', tone: 'primary' as const },
-      { label: '缺口风险', value: gapRisks.value.length ? `${gapRisks.value.length}项` : '无', formula: '当前识别的师资缺口风险项数', tone: gapRisks.value.length ? 'danger' as const : 'teal' as const },
+      { label: '模拟平均教龄', value: computeAvgAge(), formula: '模拟画像中的团队成员教龄平均值', tone: 'primary' as const },
+      { label: '模拟风险场景', value: gapRisks.value.length ? `${gapRisks.value.length}项` : '未识别', formula: '基于模拟年龄画像识别，需真实档案核验', tone: gapRisks.value.length ? 'danger' as const : 'primary' as const },
     ]
   } catch { /* http 工具已 toast */ }
 }
 
+function goTeacher(row:any) { router.push('/admin/faculty/' + row.teacherId) }
+
 function computeProfRatio() {
   if (!team.value.length) return '—'
-  const profs = team.value.filter(t => t.title && (t.title.includes('教授')))
+  const profs = team.value.filter(t => t.title === '教授')
   return Math.round(profs.length / team.value.length * 100) + '%'
 }
 
@@ -173,4 +196,7 @@ function computeAvgAge() {
 <style scoped>
 .sa-head-row { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 14px; }
 .filter-banner { background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 10px; padding: 8px 14px; margin-bottom: 12px; font-size: 12px; color: var(--sa-primary); }
+.link { color: var(--sa-primary); cursor: pointer; font-weight: 500; }
+.link:hover { text-decoration: underline; }
+:deep(.row-clickable) { cursor: pointer; }
 </style>

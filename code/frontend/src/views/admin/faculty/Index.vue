@@ -15,6 +15,10 @@
       </div>
     </div>
 
+    <el-alert v-if="evidence.limitation" type="warning" :closable="false" show-icon style="margin-bottom:12px"
+      title="师资画像证据说明：职称与教学记录来自真实源，学历、年龄、学缘和教龄为模拟字段"
+      :description="evidence.limitation" />
+
     <div v-if="collegeFilter" class="filter-banner">
       <span>当前学院视图：<b>{{ collegeFilter.name }}</b></span>
       <el-button size="small" type="primary" text @click="clearCollegeFilter">← 返回全校视图</el-button>
@@ -119,6 +123,7 @@ const titles = ref<string[]>([])
 const semesters = ref<SemesterOpt[]>([])
 
 const facultyKpis = ref<any[]>([])
+const evidence = ref<any>({})
 const data = reactive<{structure:any[];teachingRates:any[];teacherTrends:any[];notTeaching:any[]}>({
   structure: [], teachingRates: [], teacherTrends: [], notTeaching: [],
 })
@@ -131,7 +136,7 @@ async function load() {
   if (fSemester.value) params.set('semester', fSemester.value)
   const qs = params.toString() ? `?${params.toString()}` : ''
   const d = await http.get('/admin/faculty/structure' + qs)
-  if (d) { facultyKpis.value = d.facultyKpis || []; Object.assign(data, d) }
+  if (d) { facultyKpis.value = d.facultyKpis || []; evidence.value = d.evidence || {}; Object.assign(data, d) }
 }
 onMounted(async () => {
   const meta = await getFilterMeta()

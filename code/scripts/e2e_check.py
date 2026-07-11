@@ -310,9 +310,56 @@ def main():
     tid = c.execute("SELECT teacher_id FROM fact_lesson WHERE semester_id=? AND teacher_id IS NOT NULL "
                     "GROUP BY teacher_id ORDER BY COUNT(*) DESC LIMIT 1", (CUR,)).fetchone()[0]
     fd = http(base, f"/api/admin/faculty/{tid}")["data"]
-    check(f"faculty {tid} 本学期课程数",
+    check(f"faculty {tid} 本学期去重课程数",
+          f"{scalar(c, 'SELECT COUNT(DISTINCT course_id) FROM fact_lesson WHERE teacher_id=? AND semester_id=?', tid, CUR)}门",
+          kpi_val(fd, "本学期授课门数"))
+    check(f"faculty {tid} 教学班记录总数",
           scalar(c, "SELECT COUNT(*) FROM fact_lesson WHERE teacher_id=? AND semester_id=?", tid, CUR),
-          len(fd["currentCourses"]))
+          fd["currentCourseTotal"])
+    check("faculty 教学班明细限制", True, len(fd["currentCourses"]) <= 100)
+    check("faculty 异常教师质量问题可见", True, fd["dataQuality"] is not None)
+    check("faculty 历史排课偏好样本数",
+          scalar(c, "SELECT COUNT(*) FROM fact_lesson WHERE teacher_id=?", tid),
+          fd["schedulePattern"]["sampleCount"])
+    check("faculty 不使用模拟时段推断偏好", True,
+          "不分析时段偏好" in fd["schedulePattern"]["limitation"] and
+          fd["schedulePattern"]["evidenceLevel"] == "real_derived")
+    check("faculty 画像模拟字段已披露", True,
+          "学历学位、年龄、学缘、毕业院校、教龄" in "、".join(fc["evidence"]["simulated"]))
+    team_course = c.execute("""SELECT l.course_id,c.name FROM fact_lesson l JOIN dim_course c
+        ON l.course_id=c.course_id WHERE c.name IS NOT NULL GROUP BY l.course_id
+        HAVING COUNT(DISTINCT l.teacher_id)>0 ORDER BY COUNT(*) DESC LIMIT 1""").fetchone()
+    team_search = http(base, "/api/admin/faculty/team/search?q=" +
+                       urllib.parse.quote(team_course["name"]))["data"]
+    check("faculty 团队课程搜索", True,
+          any(x["id"] == team_course["course_id"] for x in team_search))
+    ft = http(base, f"/api/admin/faculty/team/{team_course['course_id']}")["data"]
+    check("faculty 团队成员数量", len(ft["team"]), ft["totalMembers"])
+    check("faculty 团队风险证据等级", "scenario_simulation", ft["evidence"]["level"])
+    check("faculty 历史教室倾向标明行为推断", True,
+          "历史行为统计" in ft["evidence"]["limitation"])
+    check("faculty 团队建议非个人评价", True,
+          "不构成个人评价" in ft["decisionBoundary"] and
+          len(ft["supportSuggestions"]) > 0)
+    check("faculty 团队建议均需核验", True,
+          all(x["readiness"].startswith("待") for x in ft["supportSuggestions"]))
+    college_token = http(base, "/api/auth/login", "POST",
+        {"username": "college_dean", "password": DEMO_PASSWORD})["data"]["token"]
+    scoped_college = scalar(c, """SELECT name FROM dim_college WHERE college_id=(
+        SELECT scope_id FROM sys_role_scope WHERE role_id='college_dean' LIMIT 1)""")
+    scoped_course = c.execute("""SELECT c.course_id,c.name FROM dim_course c JOIN fact_lesson l
+        ON c.course_id=l.course_id WHERE c.dept=? AND c.name IS NOT NULL
+        GROUP BY c.course_id ORDER BY COUNT(*) DESC LIMIT 1""", (scoped_college,)).fetchone()
+    other_course = c.execute("""SELECT c.course_id FROM dim_course c JOIN fact_lesson l
+        ON c.course_id=l.course_id WHERE c.dept<>? AND c.dept IN (SELECT name FROM dim_college)
+        GROUP BY c.course_id ORDER BY COUNT(*) DESC LIMIT 1""", (scoped_college,)).fetchone()
+    scoped_search = http(base, "/api/admin/faculty/team/search?q=" +
+        urllib.parse.quote(scoped_course["name"]), token=college_token)["data"]
+    check("faculty 学院角色可搜索本院课程", True,
+          any(x["id"] == scoped_course["course_id"] for x in scoped_search))
+    check("faculty 学院角色禁止跨院团队", 403,
+          http(base, f"/api/admin/faculty/team/{other_course['course_id']}",
+               token=college_token)["code"])
     check("faculty 不存在教师.code", 404, http(base, "/api/admin/faculty/NOEXIST")["code"])
 
     # 13. 学生学业分析

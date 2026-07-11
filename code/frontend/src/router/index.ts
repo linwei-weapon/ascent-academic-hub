@@ -38,6 +38,7 @@ export const router = createRouter({
 
         // ====== 师资结构分析 ======
         { path: 'faculty', component: () => import('@/views/admin/faculty/Index.vue') },
+        { path: 'faculty/team', component: () => import('@/views/admin/faculty/Team.vue') },
         { path: 'faculty/:id', component: () => import('@/views/admin/faculty/Detail.vue') },
 
         // ====== 学生学业分析 ======

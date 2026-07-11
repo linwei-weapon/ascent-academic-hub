@@ -35,6 +35,50 @@ def _teaching_set(conn, sem) -> set:
     return s
 
 
+def _historical_schedule_pattern(conn: sqlite3.Connection, teacher_id: str) -> dict:
+    """从真实教学任务归纳历史排课行为倾向；不使用模拟星期/节次数据。"""
+    rows = dbm.query(conn, """SELECT l.semester_id,l.campus,l.classroom,l.enrolled,
+        c.course_nature FROM fact_lesson l LEFT JOIN dim_course c ON l.course_id=c.course_id
+        WHERE l.teacher_id=? ORDER BY l.semester_id""", (teacher_id,))
+    total = len(rows)
+
+    def dist(key: str, limit: int = 3) -> list:
+        counts = {}
+        for row in rows:
+            value = str(row.get(key) or "").strip()
+            if value:
+                counts[value] = counts.get(value, 0) + 1
+        return [{"label": label, "count": count,
+                 "pct": round(count / total * 100, 1) if total else 0}
+                for label, count in sorted(counts.items(), key=lambda x: (-x[1], x[0]))[:limit]]
+
+    enrolled = [int(r["enrolled"]) for r in rows if r.get("enrolled") is not None]
+    avg_size = round(sum(enrolled) / len(enrolled), 1) if enrolled else None
+    if avg_size is None:
+        size_label = "暂无"
+    elif avg_size < 30:
+        size_label = "小班（<30）"
+    elif avg_size < 60:
+        size_label = "中班（30-59）"
+    elif avg_size < 120:
+        size_label = "大班（60-119）"
+    else:
+        size_label = "超大班（≥120）"
+    classrooms = dist("classroom")
+    top_share = classrooms[0]["pct"] if classrooms else 0
+    confidence = "低" if total < 5 else ("高" if top_share >= 60 else "中" if top_share >= 40 else "低")
+    has_issue = bool(dbm.scalar(conn, """SELECT 1 FROM data_quality_issue
+        WHERE domain='operation' AND entity_type='teacher' AND entity_id=?
+        AND status IN ('open','reviewing') LIMIT 1""", (teacher_id,)))
+    return {"evidenceLevel": "real_derived", "sampleCount": total,
+            "semesterCount": len({r["semester_id"] for r in rows}),
+            "campuses": dist("campus"), "classrooms": classrooms,
+            "courseNatures": dist("course_nature"), "avgClassSize": avg_size,
+            "classSizeTendency": size_label, "confidence": confidence,
+            "readiness": "待数据核验" if has_issue else "可供排课参考",
+            "limitation": "该结果是历史排课行为统计，不等同于教师主动表达的意愿；源数据无真实星期和节次字段，因此不分析时段偏好。"}
+
+
 @router.get("/structure")
 def structure(college: Optional[str] = None, semester: Optional[str] = None,
               title: Optional[str] = None,
@@ -171,7 +215,12 @@ def structure(college: Optional[str] = None, semester: Optional[str] = None,
 
     return ok({"facultyKpis": facultyKpis, "structure": structure_cards,
                "teachingRates": teachingRates, "teacherTrends": teacherTrends,
-               "notTeaching": notTeaching})
+               "notTeaching": notTeaching,
+               "evidence": {
+                   "real": ["教师工号、姓名、所属部门、原始职称", "教学任务、授课课程、学生成绩"],
+                   "simulated": ["学历学位、年龄、学缘、毕业院校、教龄"],
+                   "limitation": "专任教师总数仅覆盖教学任务中出现的教师，不代表学校教职工全量名册。"
+               }})
 
 
 @router.get("/{teacher_id}")
@@ -209,17 +258,25 @@ def detail(teacher_id: str, semester: Optional[str] = None,
     avg_all = round(sum(scoreTrend) / len(scoreTrend), 1) if scoreTrend else 0
 
     # 本学期授课课程
-    currentCourses = []
-    cur_hours = 0.0
-    for r in dbm.query(conn, """
+    lesson_rows = dbm.query(conn, """
         SELECT l.course_id, co.name cname, l.class_names, l.enrolled, l.total_hours
         FROM fact_lesson l LEFT JOIN dim_course co ON l.course_id=co.course_id
-        WHERE l.teacher_id=? AND l.semester_id=?""", (teacher_id, cur)):
+        WHERE l.teacher_id=? AND l.semester_id=? ORDER BY l.course_id,l.lesson_id""", (teacher_id, cur))
+    currentCourses = []
+    cur_hours = 0.0
+    for r in lesson_rows[:100]:
         cur_hours += r["total_hours"] or 0
         currentCourses.append({
             "id": r["course_id"], "courseName": r["cname"] or r["course_id"],
             "className": r["class_names"] or "—", "students": r["enrolled"] or 0,
             "hours": round(r["total_hours"] or 0)})
+    # 总学时必须基于全量行计算，不能被前端展示上限截断。
+    cur_hours = sum((r["total_hours"] or 0) for r in lesson_rows)
+    current_course_count = len({r["course_id"] for r in lesson_rows if r["course_id"]})
+    current_issue = dbm.query_one(conn, """SELECT issue_id,status,detail,recommendation,affected_rows
+        FROM data_quality_issue WHERE domain='operation' AND entity_type='teacher'
+        AND entity_id=? AND semester_id=? AND status IN ('open','reviewing') LIMIT 1""",
+        (teacher_id, cur))
 
     # 近年授课历史（逐教学班均分/通过率）
     teachingHistory = []
@@ -239,8 +296,10 @@ def detail(teacher_id: str, semester: Optional[str] = None,
     teachingHistory = teachingHistory[:12]
 
     kpis = [
-        {"label": "本学期授课门数", "value": f"{len(currentCourses)}门",
-         "formula": "当前学期承担教学班课程数"},
+        {"label": "本学期授课门数", "value": f"{current_course_count}门",
+         "formula": "当前学期教学任务中的去重课程数"},
+        {"label": "教学班记录", "value": f"{len(lesson_rows)}条",
+         "formula": "当前学期教学任务记录数；异常问题未关闭时须先核验"},
         {"label": "本学期总学时", "value": str(round(cur_hours)),
          "formula": "当前学期教学班学时合计"},
         {"label": "近期平均成绩", "value": str(avg_all) if scoreTrend else "—",
@@ -259,37 +318,78 @@ def detail(teacher_id: str, semester: Optional[str] = None,
         "education": prof.get("education", "—"), "degree": prof.get("degree", "—"),
         "school": prof.get("school", "—"), "kpis": kpis,
         "semesters": semesters, "scoreTrend": scoreTrend,
-        "currentCourses": currentCourses, "teachingHistory": teachingHistory})
+        "currentCourses": currentCourses, "teachingHistory": teachingHistory,
+        "currentCourseTotal": len(lesson_rows), "currentCourseDisplayLimit": 100,
+        "dataQuality": dict(current_issue) if current_issue else None,
+        "schedulePattern": _historical_schedule_pattern(conn, teacher_id),
+        "evidence": {
+            "real": ["教师基本标识、原始职称、教学任务、课程成绩"],
+            "simulated": ["学历学位、年龄、学缘、毕业院校、教龄"],
+            "limitation": "模拟画像仅用于界面和场景分析，不得作为教师评价、晋升或排课决策依据。"
+        }})
 
 # -- V1.1：课程教学团队分析 --
+@router.get("/team/search")
+def search_team_courses(q: str, user: dict = Depends(get_current_user),
+                        conn: sqlite3.Connection = Depends(get_db)):
+    keyword = q.strip()
+    if not keyword:
+        return ok([])
+    rows = dbm.query(conn, """SELECT DISTINCT c.course_id id,c.course_id code,c.name,c.dept
+        FROM dim_course c JOIN fact_lesson l ON c.course_id=l.course_id
+        WHERE c.course_id LIKE ? OR c.name LIKE ?
+        ORDER BY c.name,c.course_id LIMIT 20""", (f"%{keyword}%", f"%{keyword}%"))
+    col_scope, col_params = college_data_scope(user, conn)
+    if col_scope:
+        allowed_names = {r["name"] for r in dbm.query(
+            conn, f"SELECT name FROM dim_college WHERE {col_scope}", col_params)}
+        rows = [r for r in rows if clean_dept(r.get("dept")) in allowed_names]
+    return ok(rows)
+
+
 @router.get("/team/{course_id}")
 def team_analysis(course_id: str, conn: sqlite3.Connection = Depends(get_db),
                   user: dict = Depends(get_current_user)):
-    """课程教学团队画像 + 断层风险评估 + 排课偏好。"""
+    """课程教学团队画像 + 基于模拟年龄画像的断层风险场景。"""
     co = dbm.query_one(conn, "SELECT course_id, name, credits, dept FROM dim_course WHERE course_id=?", (course_id,))
     if not co: raise ApiError("课程不存在", code=404, status_code=404)
+    col_scope, col_params = college_data_scope(user, conn)
+    if col_scope:
+        allowed = dbm.scalar(conn, f"SELECT 1 FROM dim_college WHERE name=? AND {col_scope}",
+                             [clean_dept(co.get("dept"))] + col_params)
+        if not allowed:
+            raise ApiError("无权限查看该课程教学团队", code=403, status_code=403)
     # 团队教师列表
     members = []
     for r in dbm.query(conn, """
-        SELECT DISTINCT l.teacher_id, t.name, p.norm_title, p.education,
-               p.age, p.teach_years, p.origin
+        SELECT l.teacher_id, t.name, p.norm_title, p.education,
+               p.age, p.teach_years, p.origin, COUNT(*) teaching_count
         FROM fact_lesson l
         JOIN dim_teacher t ON l.teacher_id=t.teacher_id
         LEFT JOIN fact_teacher_profile p ON l.teacher_id=p.teacher_id
         WHERE l.course_id=? AND l.semester_id IN (
             SELECT semester_id FROM dim_semester ORDER BY semester_id DESC LIMIT 2)
+        GROUP BY l.teacher_id,t.name,p.norm_title,p.education,p.age,p.teach_years,p.origin
     """, (course_id,)):
-        # 排课偏好
+        # 仅表示历史上最常使用的教室，不等同于教师主动填报的排课偏好。
         prefs = dbm.query(conn, """
             SELECT l.classroom, COUNT(*) cnt FROM fact_lesson l
             WHERE l.teacher_id=? AND l.course_id=?
             GROUP BY l.classroom ORDER BY cnt DESC LIMIT 1
         """, (r["teacher_id"], course_id))
+        course_lesson_count = dbm.scalar(conn, "SELECT COUNT(*) FROM fact_lesson WHERE teacher_id=? AND course_id=?",
+                                         (r["teacher_id"], course_id)) or 0
+        current_courses = dbm.scalar(conn, """SELECT COUNT(DISTINCT course_id) FROM fact_lesson
+            WHERE teacher_id=? AND semester_id=?""", (r["teacher_id"], CUR)) or 0
         members.append({"teacherId": r["teacher_id"], "name": r["name"] or r["teacher_id"],
             "title": r["norm_title"] or "—", "education": r["education"] or "—",
-            "age": r["age"], "teachYears": r["teach_years"],
+            "age": r["age"], "teachingYears": r["teach_years"],
             "origin": r["origin"] or "—",
-            "prefClassroom": prefs[0]["classroom"] if prefs else "—"})
+            "teachingCount": r["teaching_count"],
+            "coursesThisSemester": current_courses,
+            "observedClassroom": prefs[0]["classroom"] if prefs else "—",
+            "observedClassroomPct": round(prefs[0]["cnt"] / course_lesson_count * 100, 1)
+                if prefs and course_lesson_count else 0})
     total = len(members) or 1
     under_45 = sum(1 for m in members if (m["age"] or 99) < 45)
     over_55 = sum(1 for m in members if (m["age"] or 0) > 55)
@@ -298,9 +398,51 @@ def team_analysis(course_id: str, conn: sqlite3.Connection = Depends(get_db),
         gap_level = "severe" if (over_55 / total > 0.5 and not has_under_40) else "warning"
     else:
         gap_level = "none"
-    return ok({"courseName": co["name"] or course_id, "credits": co["credits"],
-        "college": co["dept"] or "—", "members": members, "totalMembers": total,
+    level_label = {"severe": "高", "warning": "中", "none": "无"}[gap_level]
+    risks = [] if gap_level == "none" else [{
+        "level": level_label,
+        "title": "团队年龄梯队模拟场景存在断层风险",
+        "desc": f"模拟画像中45岁以下占比{round(under_45/total*100)}%、55岁以上占比{round(over_55/total*100)}%。请接入真实年龄与人员名册后再核验。"
+    }]
+    # 团队建设建议只使用真实授课覆盖与数据质量台账，不使用模拟画像评价个人。
+    support_suggestions = []
+    if len(members) == 1:
+        support_suggestions.append({"level": "重点关注", "topic": "课程授课单点覆盖",
+            "basis": "近两学期该课程仅识别到1名授课教师",
+            "suggestion": "建议教研室核验课程接续安排，并评估是否需要设置协同备课或替补教师。",
+            "readiness": "待人工核验"})
+    elif len(members) == 2:
+        support_suggestions.append({"level": "一般关注", "topic": "课程团队覆盖较窄",
+            "basis": "近两学期该课程识别到2名授课教师",
+            "suggestion": "建议结合开课规模核验团队冗余度和课程交接安排。",
+            "readiness": "待人工核验"})
+    issue_members = {r["entity_id"] for r in dbm.query(conn, """SELECT entity_id
+        FROM data_quality_issue WHERE domain='operation' AND entity_type='teacher'
+        AND status IN ('open','reviewing')""")}
+    affected = [m["name"] for m in members if m["teacherId"] in issue_members]
+    if affected:
+        support_suggestions.append({"level": "数据核验", "topic": "教师课时数据质量",
+            "basis": f"团队中{len(affected)}名教师存在未关闭的教学运行数据质量问题",
+            "suggestion": "请先完成教师工号映射和教学班拆分核验，再使用工作量数据开展团队建设分析。",
+            "readiness": "待数据修复"})
+    if not support_suggestions:
+        support_suggestions.append({"level": "信息提示", "topic": "团队覆盖",
+            "basis": f"近两学期识别到{len(members)}名授课教师，未命中现有课时数据质量问题",
+            "suggestion": "当前仅提供授课覆盖事实；培养计划仍需结合真实人才档案、教研任务和教师意愿人工制定。",
+            "readiness": "待人工核验"})
+    return ok({"course": {"id": course_id, "code": course_id,
+            "name": co["name"] or course_id, "dept": co["dept"] or "—"},
+        "courseName": co["name"] or course_id, "credits": co["credits"],
+        "college": co["dept"] or "—", "team": members, "members": members,
+        "totalMembers": len(members),
         "titleDist": [{"label": t, "count": sum(1 for m in members if m["title"]==t)}
             for t in ["教授","副教授","讲师","助教","其他"]],
         "gapRisk": {"level": gap_level, "under45Pct": round(under_45/total*100),
-            "over55Pct": round(over_55/total*100), "hasUnder40": has_under_40}})
+            "over55Pct": round(over_55/total*100), "hasUnder40": has_under_40},
+        "gapRisks": risks,
+        "supportSuggestions": support_suggestions,
+        "decisionBoundary": "建议仅用于团队建设核验，不构成个人评价、岗位安排或晋升依据。",
+        "evidence": {"level": "scenario_simulation",
+            "real": ["近两学期课程授课教师、原始职称、教学班和历史教室"],
+            "simulated": ["学历、年龄、教龄、学缘"],
+            "limitation": "断层风险基于模拟年龄画像；教室倾向来自历史行为统计，不等同于教师主动表达的意愿。"}})
