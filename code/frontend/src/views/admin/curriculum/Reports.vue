@@ -16,7 +16,15 @@
 
     <div style="flex:1;min-width:0">
       <h2 class="sa-page-title">{{ currentLabel }}</h2>
-      <p class="sa-page-sub">数据来源：教务系统同步 · {{ scopeLabel }} · 共 {{ filteredData.length }} 条</p>
+      <p class="sa-page-sub">数据证据：{{ evidence.label || '正在核验' }} · {{ scopeLabel }} · 共 {{ filteredData.length }} 条</p>
+
+      <el-alert
+        v-if="evidence.level && evidence.level !== 'real'"
+        :title="evidence.level === 'simulated' ? '本报表使用规则模拟数据' : '本报表同时使用真实与模拟数据'"
+        :description="evidenceDescription"
+        type="warning" :closable="false" show-icon style="margin-bottom:12px"
+      />
+      <el-alert v-if="evidence.limitation" :title="evidence.limitation" type="info" :closable="false" show-icon style="margin-bottom:12px" />
 
       <div v-if="insights.length" class="insight-box">
         <div v-for="(ins,i) in insights" :key="i" class="insight-row">
@@ -26,28 +34,34 @@
       </div>
 
       <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center">
-        <el-select v-model="fSemester" placeholder="全部学期" size="small" clearable style="width:160px" @change="onSemester">
+        <el-select v-if="supports('semester')" v-model="fSemester" placeholder="全部学期" size="small" clearable style="width:160px" @change="onSemester">
           <el-option v-for="s in semesters" :key="s.value" :label="s.label" :value="s.value" />
         </el-select>
-        <el-select v-model="fYear" placeholder="全部学年" size="small" clearable style="width:140px" @change="onYear">
+        <el-select v-if="supports('year')" v-model="fYear" placeholder="全部学年" size="small" clearable style="width:140px" @change="onYear">
           <el-option v-for="y in years" :key="y" :label="y + '学年'" :value="y" />
         </el-select>
-        <el-select v-model="fCollege" placeholder="全部学院" size="small" clearable style="width:160px" @change="loadData">
+        <el-select v-if="supports('college')" v-model="fCollege" placeholder="全部学院" size="small" clearable style="width:160px" @change="loadData">
           <el-option v-for="c in colleges" :key="c.value" :label="c.label" :value="c.value" />
         </el-select>
-        <el-select v-model="fGrade" placeholder="全部年级" size="small" clearable style="width:120px" @change="loadData">
+        <el-select v-if="supports('grade')" v-model="fGrade" placeholder="全部年级" size="small" clearable style="width:120px" @change="loadData">
           <el-option v-for="g in grades" :key="g" :label="g + '级'" :value="g" />
         </el-select>
         <el-select v-if="activeTab==='attrition'" v-model="fKind" placeholder="全部异动" size="small" clearable style="width:120px" @change="loadData">
           <el-option v-for="k in attritionKinds" :key="k" :label="k" :value="k" />
         </el-select>
         <div style="flex:1" />
-        <el-button size="small" @click="exportTable('csv')">导出 CSV</el-button>
-        <el-button size="small" @click="exportTable('pdf')">导出 PDF</el-button>
+        <div style="display:flex;gap:8px;white-space:nowrap">
+          <el-button size="small" @click="exportTable('csv')">导出 CSV</el-button>
+          <el-button size="small" @click="exportTable('pdf')">打印/另存为 PDF</el-button>
+        </div>
       </div>
 
-      <div class="sa-card" style="padding:0;overflow:hidden">
-        <el-table :data="filteredData" size="small" style="width:100%" max-height="420">
+      <div class="sa-card" style="padding:0;overflow:hidden" v-loading="loading">
+        <el-result v-if="loadError" icon="error" title="报表加载失败" :sub-title="loadError">
+          <template #extra><el-button size="small" @click="loadData">重新加载</el-button></template>
+        </el-result>
+        <el-empty v-else-if="!loading && !filteredData.length" :description="evidence.limitation || '当前筛选范围内暂无数据'" />
+        <el-table v-else :data="filteredData" size="small" style="width:100%" max-height="420">
           <el-table-column v-for="col in currentCols" :key="col.prop" :prop="col.prop" :label="col.label" :width="col.width" :min-width="col.minWidth" :sortable="col.sortable">
             <template v-if="col.html" #default="{row}"><span v-html="col.html(row)" /></template>
           </el-table-column>
@@ -86,6 +100,10 @@ const years = ref<string[]>([])
 const colleges = ref<{ value: string; label: string }[]>([])
 const grades = ref<string[]>([])
 const attritionKinds = ref<string[]>([])
+const loading = ref(false)
+const loadError = ref('')
+const evidence = ref<any>({})
+let requestSeq = 0
 
 const groups = [
   { name: '教学质量', items: [
@@ -106,6 +124,22 @@ const groups = [
 ]
 const labels: Record<string, string> = { score: '成绩分布统计', passrank: '课程通过率排名', discipline: '考风考纪统计', alert: '学业预警明细', credit: '学分修读进度', attrition: '学籍异动统计', graduate: '毕业学位情况', exam: '校外考试统计', attend: '学生出勤率统计' }
 const currentLabel = computed(() => labels[activeTab.value] || '')
+
+const supportedFilters: Record<string, string[]> = {
+  score: ['semester', 'year', 'college', 'grade'], passrank: ['semester', 'year', 'college', 'grade'],
+  discipline: ['semester', 'year', 'college', 'grade'], alert: ['semester', 'year', 'college', 'grade'],
+  credit: ['college', 'grade'], attrition: ['semester', 'year', 'college', 'grade', 'kind'],
+  graduate: ['semester', 'year', 'college', 'grade'], exam: ['college', 'grade'],
+  attend: ['semester', 'year', 'college'],
+}
+const supports = (name: string) => supportedFilters[activeTab.value]?.includes(name) ?? false
+const evidenceDescription = computed(() => {
+  const tables = (evidence.value.details || []).map((d: any) => {
+    const sources = (d.sources || []).map((s: any) => `${s.label} ${s.count} 条`).join('、')
+    return `${d.table}：${sources || '无记录'}`
+  })
+  return tables.join('；')
+})
 
 // 维度筛选改为后端 WHERE（学期/学院/年级/学籍异动），前端不再客户端过滤
 const filteredData = computed(() => tableData.value)
@@ -140,13 +174,13 @@ const insights = computed(() => {
     const byCol: Record<string, number> = {}
     d.forEach((x: any) => { byCol[x.college] = (byCol[x.college] || 0) + 1 })
     const topCol = Object.entries(byCol).sort((a, b) => b[1] - a[1])[0]
-    out.push({ level: severe ? 'red' : 'yellow', text: `严重预警 ${severe} 条、警告 ${warn} 条${topCol ? `，预警最集中：${topCol[0]}(${topCol[1]}人)` : ''}` })
+    out.push({ level: severe ? 'red' : 'yellow', text: `严重预警 ${severe} 条、警告 ${warn} 条${topCol ? `，预警记录最集中：${topCol[0]}(${topCol[1]}条)` : ''}` })
   } else if (activeTab.value === 'credit') {
     const sorted = [...d].sort((a: any, b: any) => (b.gap || 0) - (a.gap || 0))
     const top = sorted[0]
     if (top) out.push({ level: top.gap > 15 ? 'red' : 'yellow', text: `学分缺口最大：${top.major}${top.grade || ''} ${top.gap}学分` })
     const avgReq = r1(d.reduce((s: number, x: any) => s + (x.majorReq || 0), 0) / d.length)
-    out.push({ level: avgReq < 70 ? 'yellow' : 'green', text: `专业必修平均完成率 ${avgReq}%` })
+    out.push({ level: 'green', text: `专业必修要求平均 ${avgReq} 学分` })
   } else if (activeTab.value === 'attrition') {
     const sorted = [...d].sort((a: any, b: any) => (b.rate || 0) - (a.rate || 0))
     const top = sorted[0]
@@ -271,14 +305,28 @@ const passOption = computed(() => {
 })
 
 async function loadData() {
+  const seq = ++requestSeq
   const qs = new URLSearchParams({ type: activeTab.value })
-  if (fSemester.value) qs.set('semester', fSemester.value)
-  else if (fYear.value) qs.set('year', fYear.value)
-  if (fCollege.value) qs.set('college', fCollege.value)
-  if (fGrade.value) qs.set('grade', fGrade.value)
+  if (supports('semester') && fSemester.value) qs.set('semester', fSemester.value)
+  else if (supports('year') && fYear.value) qs.set('year', fYear.value)
+  if (supports('college') && fCollege.value) qs.set('college', fCollege.value)
+  if (supports('grade') && fGrade.value) qs.set('grade', fGrade.value)
   if (activeTab.value === 'attrition' && fKind.value) qs.set('kind', fKind.value)
-  const d = await http.get('/admin/reports?' + qs.toString())
-  tableData.value = d || []
+  loading.value = true
+  loadError.value = ''
+  try {
+    const d: any = await http.get('/admin/reports?' + qs.toString())
+    if (seq !== requestSeq) return
+    tableData.value = d?.rows || []
+    evidence.value = d?.evidence || {}
+  } catch (err: any) {
+    if (seq !== requestSeq) return
+    tableData.value = []
+    evidence.value = {}
+    loadError.value = err?.message || '请求失败'
+  } finally {
+    if (seq === requestSeq) loading.value = false
+  }
 }
 // 学期与学年互斥（学期更细，选学期则清学年，反之亦然）
 function onSemester() { if (fSemester.value) fYear.value = ''; loadData() }
@@ -286,11 +334,15 @@ function onYear() { if (fYear.value) fSemester.value = ''; loadData() }
 function selectReport(key: string) {
   activeTab.value = key
   fKind.value = ''
+  if (!supports('semester')) fSemester.value = ''
+  else if (!fSemester.value && !fYear.value) fSemester.value = semesters.value.find(s => s.value)?.value || ''
+  if (!supports('year')) fYear.value = ''
+  if (!supports('grade')) fGrade.value = ''
   loadData()
 }
 function exportTable(fmt: string) {
-  if (fmt === 'pdf') { printReport(); return }
   if (!filteredData.value.length) { window.alert('当前无数据可导出'); return }
+  if (fmt === 'pdf') { printReport(); return }
   // 从列定义取 {prop,label}，剥离 html 渲染函数导出原始值；派生列补 value 取数
   const derived: Record<string, (r: any) => any> = {
     totalStudents: (r: any) => (r.score90 || 0) + (r.score80 || 0) + (r.score70 || 0) + (r.score60 || 0) + (r.scoreFail || 0),
@@ -309,7 +361,7 @@ onMounted(async () => {
   grades.value = meta.grades
   attritionKinds.value = meta.attritionKinds
   fSemester.value = meta.current  // 默认当前学期，避免聚合全部 9 学期产生歧义
-  loadData()
+  await loadData()
 })
 </script>
 

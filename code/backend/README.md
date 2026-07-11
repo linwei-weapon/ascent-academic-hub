@@ -33,13 +33,18 @@ PYTHONIOENCODING=utf-8 python -X utf8 -m uvicorn backend.api.main:app --reload -
 | GET | /api/admin/student/{sid} | 学生明细 | fact_grade + fact_alert |
 | GET | /api/admin/curriculum/plan/{major} | 培养方案 | fact_plan_meta/course |
 | GET | /api/admin/reports?type= | 报表中心 | 见下 |
+| GET | /api/admin/reports/custom?metrics=&dimension=&semester= | 自定义报表 | 真实学生/成绩/预警受控聚合 |
 
 **培养方案**：真实方案仅 2 个专业（M017 安全工程 / M031 海洋油气工程，2022级）。
 前端选择器传占位 id（pe2007 等），后端别名映射 `me_safety→M017`、`pe_ocean→M031`，
 未命中回退首个真实方案。
 
-**报表 type**：`score/passrank/alert` 由真实数据计算；
-`discipline/credit/attrition/graduate/exam/attend` 缺脱敏源数据，回退演示样例（保持页面完整）。
+**报表 type**：`score/passrank/alert/attrition/exam` 由真实同步数据计算；
+`discipline/graduate/attend` 为规则模拟事实，`credit` 混合真实培养要求与模拟毕业事实。
+接口响应会返回 evidence 明细，前端明确展示证据等级；所有学生级报表接入角色数据范围。
+
+**自定义报表**：当前开放 K001 在籍学生数、K002 预警学生数、K003 GPA 均值、
+K004 挂科率，支持学院/专业/年级维度与学期筛选。缺少可靠来源的指标不生成替代值。
 
 ## 前后端联调（切换 mock → 真实后端）
 

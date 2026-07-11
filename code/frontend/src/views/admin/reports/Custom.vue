@@ -6,12 +6,14 @@
     </el-breadcrumb>
 
     <h2 class="sa-page-title">自定义报表</h2>
-    <p class="sa-page-sub">选择指标与维度，生成聚合报表 · 支持导出 Excel / PDF / CSV</p>
+    <p class="sa-page-sub">基于真实学生、成绩与预警数据进行受控聚合</p>
+
+    <el-alert title="仅开放已有可靠数据口径的指标；不可用指标不会用模拟值代替" type="info" :closable="false" show-icon style="margin-top:14px" />
 
     <div class="sa-card" style="margin-top:14px">
       <div class="sa-card-title">报表配置</div>
       <el-row :gutter="20" style="margin-top:6px">
-        <el-col :span="8">
+        <el-col :span="12">
           <div class="cfg-label">选择指标 <span class="sa-faint">（可多选）</span></div>
           <el-checkbox-group v-model="form.selectedMetrics" size="small">
             <div v-for="g in metricGroups" :key="g.group" class="metric-group">
@@ -20,7 +22,7 @@
             </div>
           </el-checkbox-group>
         </el-col>
-        <el-col :span="8">
+        <el-col :span="12">
           <div class="cfg-label">选择维度</div>
           <el-radio-group v-model="form.dimension" size="small">
             <el-radio v-for="d in dimOptions" :key="d.id" :value="d.id" class="dim-radio">{{ d.name }}</el-radio>
@@ -30,36 +32,32 @@
             <el-option v-for="s in semesters" :key="s.value" :label="s.label" :value="s.value" />
           </el-select>
         </el-col>
-        <el-col :span="8">
-          <div class="cfg-label">导出格式</div>
-          <el-radio-group v-model="form.exportFormat" size="small">
-            <el-radio value="excel">Excel (.xlsx)</el-radio>
-            <el-radio value="pdf">PDF</el-radio>
-            <el-radio value="csv">CSV</el-radio>
-          </el-radio-group>
-          <div class="cfg-label" style="margin-top:18px">图表类型</div>
-          <el-radio-group v-model="form.chartType" size="small">
-            <el-radio value="auto">自动推荐</el-radio>
-            <el-radio value="bar">柱状图</el-radio>
-            <el-radio value="line">折线图</el-radio>
-            <el-radio value="table">表格</el-radio>
-          </el-radio-group>
-        </el-col>
       </el-row>
+      <div class="cfg-label" style="margin-top:10px">暂不可用指标</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <el-tag v-for="m in unavailableMetrics" :key="m" type="info" effect="plain" size="small">{{ m }}</el-tag>
+      </div>
       <div style="margin-top:18px;display:flex;justify-content:flex-end;gap:8px;align-items:center">
         <span v-if="selectedSummary" class="sa-faint" style="font-size:12px;margin-right:auto">已选：{{ selectedSummary }}</span>
-        <el-button size="small" @click="exportReport">导出报表</el-button>
+        <el-button size="small" type="primary" :loading="loading" :disabled="!form.selectedMetrics.length" @click="generateReport">生成报表</el-button>
       </div>
     </div>
 
     <div class="sa-card" style="margin-top:14px">
       <div class="sa-card-title">报表预览</div>
-      <el-empty :image-size="100">
+      <div v-if="rows.length" style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:10px">
+        <el-button size="small" @click="exportReport('csv')">导出 CSV</el-button>
+        <el-button size="small" @click="exportReport('pdf')">打印/另存为 PDF</el-button>
+      </div>
+      <el-table v-if="rows.length" :data="rows" size="small" border>
+        <el-table-column v-for="col in columns" :key="col.prop" :prop="col.prop" :label="col.label" min-width="120" />
+      </el-table>
+      <el-empty v-else :image-size="100">
         <template #description>
-          <div style="font-size:13px;color:#64748B">报表聚合服务尚未接入</div>
+          <div style="font-size:13px;color:#64748B">选择指标后生成报表</div>
           <div style="font-size:11px;color:#94A3B8;margin-top:6px;line-height:1.7">
-            自定义指标 × 维度的实时聚合需后端聚合引擎支持，当前未接入该服务，<br />
-            无法生成预览数据。已固化的常用报表请在<span class="link" @click="$router.push('/admin/reports')">报表中心</span>查看。
+            当前支持在籍学生数、预警学生数、GPA 均值与挂科率，<br />
+            更多固定口径请在<span class="link" @click="$router.push('/admin/reports')">报表中心</span>查看。
           </div>
         </template>
       </el-empty>
@@ -69,13 +67,16 @@
 
 <script setup lang="ts">
 import { reactive, ref, computed, onMounted } from 'vue'
+import { http } from '@/utils/http'
 import { getFilterMeta, type SemesterOpt } from '@/utils/meta'
+import { exportCsv, printReport, type ExportCol } from '@/utils/export'
 
-// 自定义报表的实时聚合依赖后端聚合引擎，当前无对应数据源；配置面板保留，预览/导出不构造假数据，按空态/动作占位处理。
 const form = reactive({
   selectedMetrics: [] as string[], dimension: 'college', semester: '',
-  exportFormat: 'excel', chartType: 'auto',
 })
+const loading = ref(false)
+const rows = ref<any[]>([])
+const columns = ref<{ prop: string; label: string }[]>([])
 
 const semesters = ref<SemesterOpt[]>([])
 onMounted(async () => {
@@ -87,24 +88,13 @@ onMounted(async () => {
 const metricGroups = [
   { group: '学生指标', items: [
     { id: 'K001', name: '在籍学生数' }, { id: 'K002', name: '预警学生数' }, { id: 'K003', name: 'GPA均值' },
-    { id: 'K004', name: '挂科率' }, { id: 'K005', name: '毕业率' }, { id: 'K006', name: '学位授予率' },
-  ] },
-  { group: '教学指标', items: [
-    { id: 'K007', name: '开课门数' }, { id: 'K008', name: '教学班数' }, { id: 'K009', name: '平均班额' },
-    { id: 'K010', name: '教室利用率' }, { id: 'K011', name: '调停课率' },
-  ] },
-  { group: '师资指标', items: [
-    { id: 'K012', name: '专任教师数' }, { id: 'K013', name: '教授上课率' }, { id: 'K014', name: '生师比' },
-    { id: 'K015', name: '博士比' },
-  ] },
-  { group: '实践指标', items: [
-    { id: 'K016', name: '实验开出率' }, { id: 'K017', name: '毕业论文优秀率' }, { id: 'K018', name: '创新学分完成率' },
+    { id: 'K004', name: '挂科率' },
   ] },
 ]
+const unavailableMetrics = ['毕业率', '学位授予率', '开课门数', '教学班数', '平均班额', '教室利用率', '调停课率', '专任教师数', '教授上课率', '生师比', '博士比', '实验开出率', '毕业论文优秀率', '创新学分完成率']
 const metricOptions = metricGroups.flatMap(g => g.items)
 const dimOptions = [
   { id: 'college', name: '按学院' }, { id: 'major', name: '按专业' }, { id: 'grade', name: '按年级' },
-  { id: 'semester', name: '按学期' }, { id: 'courseType', name: '按课程类别' },
 ]
 
 const selectedSummary = computed(() => {
@@ -114,10 +104,28 @@ const selectedSummary = computed(() => {
   return `${metrics.join('、')} · ${dim}`
 })
 
-function exportReport() {
-  if (!form.selectedMetrics.length) { window.alert('请先选择至少一个指标'); return }
-  window.alert(`导出自定义报表（${selectedSummary.value}）\n将在接入聚合与导出服务后实现`)
+async function generateReport() {
+  if (!form.selectedMetrics.length) return
+  loading.value = true
+  try {
+    const qs = new URLSearchParams({
+      metrics: form.selectedMetrics.join(','), dimension: form.dimension,
+    })
+    if (form.semester) qs.set('semester', form.semester)
+    const data: any = await http.get('/admin/reports/custom?' + qs.toString())
+    rows.value = data?.rows || []
+    columns.value = data?.columns || []
+  } finally {
+    loading.value = false
+  }
 }
+
+function exportReport(format: string) {
+  if (!rows.value.length) return
+  if (format === 'pdf') { printReport(); return }
+  exportCsv('自定义报表', columns.value as ExportCol[], rows.value)
+}
+
 </script>
 
 <style scoped>

@@ -306,31 +306,74 @@ def main():
     pg_search = http(base, f"/api/admin/curriculum/progress/me_safety?keyword={first_student}")["data"]
     check("curriculum student search", first_student, pg_search["progress"][0]["studentId"])
 
-    score = http(base, "/api/admin/reports?type=score")["data"]
+    score_payload = http(base, "/api/admin/reports?type=score")["data"]
+    score = score_payload["rows"]
     check("score 条数<=40", True, 0 < len(score) <= 40)
+    check("score 真实证据", "real", score_payload["evidence"]["level"])
     exp_pr = scalar(c, """SELECT COUNT(*) FROM (SELECT course_id FROM fact_grade
         WHERE source='real' GROUP BY course_id HAVING COUNT(*)>=50)""")
-    pr = http(base, "/api/admin/reports?type=passrank")["data"]
+    pr = http(base, "/api/admin/reports?type=passrank")["data"]["rows"]
     check("passrank 条数", exp_pr, len(pr))
-    attr = http(base, "/api/admin/reports?type=attrition")["data"]
-    check("attrition 演示样例非空", True, len(attr) > 0)
-    # 六类合成业务报表：均现算自合成真表（条数与 DB 聚合一致）
-    exp_disc = scalar(c, "SELECT COUNT(DISTINCT college_id) FROM fact_discipline")
-    disc = http(base, "/api/admin/reports?type=discipline")["data"]
+    attr_payload = http(base, "/api/admin/reports?type=attrition")["data"]
+    attr = attr_payload["rows"]
+    check("attrition 真实数据非空", True, len(attr) > 0)
+    check("attrition 真实证据", "real", attr_payload["evidence"]["level"])
+    # 业务报表均按事实表动态聚合，且显式返回真实/模拟证据边界。
+    exp_disc = scalar(c, """SELECT COUNT(DISTINCT s.college_id) FROM fact_discipline d
+        JOIN dim_student s ON d.student_id=s.student_id""")
+    disc_payload = http(base, "/api/admin/reports?type=discipline")["data"]
+    disc = disc_payload["rows"]
     check("discipline 学院数", exp_disc, len(disc))
-    exp_grad = scalar(c, """SELECT COUNT(*) FROM (SELECT major_id FROM fact_graduation
-        GROUP BY major_id HAVING COUNT(*)>=20)""")
-    grad = http(base, "/api/admin/reports?type=graduate")["data"]
+    check("discipline 模拟证据", "simulated", disc_payload["evidence"]["level"])
+    exp_grad = scalar(c, """SELECT COUNT(*) FROM (SELECT g.major_id FROM fact_graduation g
+        JOIN dim_student s ON g.student_id=s.student_id GROUP BY g.major_id HAVING COUNT(*)>=20)""")
+    grad = http(base, "/api/admin/reports?type=graduate")["data"]["rows"]
     check("graduate 专业数(>=20)", exp_grad, len(grad))
-    exp_exam = scalar(c, """SELECT COUNT(*) FROM (SELECT college_id FROM fact_exam_cert
-        GROUP BY college_id HAVING COUNT(*)>=20)""")
-    exam = http(base, "/api/admin/reports?type=exam")["data"]
+    exp_exam = scalar(c, """SELECT COUNT(*) FROM (SELECT s.college_id FROM fact_exam_cert e
+        JOIN dim_student s ON e.student_id=s.student_id GROUP BY s.college_id HAVING COUNT(*)>=20)""")
+    exam_payload = http(base, "/api/admin/reports?type=exam")["data"]
+    exam = exam_payload["rows"]
     check("exam 学院数(>=20)", exp_exam, len(exam))
+    check("exam 真实证据", "real", exam_payload["evidence"]["level"])
     exp_att = scalar(c, "SELECT COUNT(*) FROM fact_attend")
-    att = http(base, "/api/admin/reports?type=attend")["data"]
+    att = http(base, "/api/admin/reports?type=attend")["data"]["rows"]
     check("attend 课程数", exp_att, len(att))
-    credit = http(base, "/api/admin/reports?type=credit")["data"]
+    credit_payload = http(base, "/api/admin/reports?type=credit")["data"]
+    credit = credit_payload["rows"]
     check("credit 非空", True, len(credit) > 0)
+    check("credit 混合证据", "mixed", credit_payload["evidence"]["level"])
+    scoped_alert = http(base, "/api/admin/reports?type=alert",
+                        token=counselor_scope_token)["data"]
+    check("reports 辅导员预警范围", True, all(
+        scalar(c, f"SELECT COUNT(*) FROM dim_student WHERE student_id=? AND class_id IN ({class_ph})",
+               x["sid"], *counselor_classes) == 1 for x in scoped_alert["rows"]))
+    scoped_attend = http(base, "/api/admin/reports?type=attend",
+                         token=counselor_scope_token)["data"]
+    check("reports 窄范围出勤不越权", [], scoped_attend["rows"])
+    check("reports 窄范围出勤限制可见", True,
+          bool(scoped_attend["evidence"]["limitation"]))
+    check("reports 拒绝越权学院", 403,
+          http(base, f"/api/admin/reports?type=score&college={other_college}",
+               token=dashboard_college_token)["code"])
+    check("reports 拒绝无效学期", 400,
+          http(base, "/api/admin/reports?type=score&semester=invalid")["code"])
+    check("reports 拒绝不适用筛选", 400,
+          http(base, f"/api/admin/reports?type=credit&semester={CUR}")["code"])
+    custom = http(base, "/api/admin/reports/custom?" + urllib.parse.urlencode({
+        "metrics": "K001,K002,K003,K004", "dimension": "college",
+        "semester": CUR,
+    }))["data"]
+    check("custom report 学院维度", scalar(c, "SELECT COUNT(*) FROM dim_college"),
+          len(custom["rows"]))
+    check("custom report 学生合计", scalar(c, "SELECT COUNT(*) FROM dim_student"),
+          sum(x["students"] for x in custom["rows"]))
+    check("custom report 真实证据", "real", custom["evidence"]["level"])
+    custom_scoped = http(base, "/api/admin/reports/custom?metrics=K001&dimension=college",
+                         token=dashboard_college_token)["data"]
+    check("custom report 学院角色范围", [scoped_cid_dash],
+          [x["dimensionId"] for x in custom_scoped["rows"]])
+    check("custom report 拒绝未知指标", 400,
+          http(base, "/api/admin/reports/custom?metrics=K999&dimension=college")["code"])
     # 边界：未知报表类型 -> 400；不存在专业培养方案 -> 404
     check("未知报表类型.code", 400, http(base, "/api/admin/reports?type=zzz")["code"])
     check("不存在培养方案.code", 404,

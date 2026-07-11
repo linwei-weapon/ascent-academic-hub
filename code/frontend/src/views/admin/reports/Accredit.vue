@@ -6,7 +6,7 @@
     </el-breadcrumb>
 
     <h2 class="sa-page-title">认证评估报表</h2>
-    <p class="sa-page-sub">支撑本科教育教学审核评估 + 工程教育专业认证 + 高基报表 · 数据自动从教务系统汇总</p>
+    <p class="sa-page-sub">本科教育教学审核评估 + 工程教育专业认证 + 高基报表 · 待接入专项评估指标体系</p>
 
     <div class="sa-card" style="margin-top:14px">
       <el-empty :image-size="110">
