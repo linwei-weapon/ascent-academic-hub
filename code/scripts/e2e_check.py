@@ -367,10 +367,77 @@ def main():
     sa = http(base, "/api/admin/students/analysis")["data"]
     check("students 在籍学生", f"{scalar(c, 'SELECT COUNT(*) FROM dim_student'):,}",
           kpi_val(sa, "在籍学生"))
-    check("students 群体聚类合计==有绩点学生",
+    check("students GPA分层合计==有绩点学生",
           scalar(c, "SELECT COUNT(DISTINCT student_id) FROM fact_grade WHERE gpa IS NOT NULL"),
           sum(x["count"] for x in sa["clusters"]))
     check("students 挂科集中课程 0<n<=10", True, 0 < len(sa["failCourses"]) <= 10)
+    check("students 模拟指标边界可见", True,
+          "毕业结果" in "、".join(sa["evidence"]["simulated"]))
+    college_token2 = http(base, "/api/auth/login", "POST",
+        {"username": "college_dean", "password": DEMO_PASSWORD})["data"]["token"]
+    scoped_sa = http(base, "/api/admin/students/analysis", token=college_token2)["data"]
+    scoped_cid = scalar(c, "SELECT scope_id FROM sys_role_scope WHERE role_id='college_dean' LIMIT 1")
+    check("students 学院角色分析范围",
+          f"{scalar(c, 'SELECT COUNT(*) FROM dim_student WHERE college_id=?', scoped_cid):,}",
+          kpi_val(scoped_sa, "在籍学生"))
+    scoped_students = scalar(c, "SELECT COUNT(*) FROM dim_student WHERE college_id=?", scoped_cid)
+    check("students 学院角色迁移范围",
+          scoped_students,
+          scoped_sa["migration"]["compared"] + scoped_sa["migration"]["insufficient"])
+    check("students 学院角色年级人数不越界",
+          scoped_students, sum(x["students"] for x in scoped_sa["gradeGpa"]))
+    migration = sa["migration"]
+    check("students 迁移分类合计",
+          migration["compared"],
+          migration["improved"] + migration["stable"] + migration["declined"])
+    check("students 迁移覆盖完整学生范围",
+          scalar(c, "SELECT COUNT(*) FROM dim_student"),
+          migration["compared"] + migration["insufficient"])
+    fail_patterns = {x["key"]: x for x in sa["failPatterns"]}
+    expected_repeat = scalar(c, """SELECT COUNT(DISTINCT student_id) FROM (
+        SELECT student_id,course_id FROM fact_grade
+        WHERE source='real' AND is_pass=0
+        GROUP BY student_id,course_id HAVING COUNT(*)>=2)""")
+    expected_retake_failed = scalar(c, """SELECT COUNT(DISTINCT student_id)
+        FROM fact_grade WHERE source='real' AND is_pass=0 AND is_retake=1""")
+    check("students 同课重复挂科模式口径", expected_repeat,
+          fail_patterns["repeat_course"]["count"])
+    check("students 重修仍未通过模式口径", expected_retake_failed,
+          fail_patterns["retake_failed"]["count"])
+    for pattern_key, pattern_row in fail_patterns.items():
+        pattern_list = http(base, "/api/admin/students/list?pattern=" +
+            urllib.parse.quote(pattern_key) + "&page=1&page_size=20")["data"]
+        check(f"students 挂科模式下钻 {pattern_key}", pattern_row["count"],
+              pattern_list["total"])
+    scoped_patterns = {x["key"]: x["count"] for x in scoped_sa["failPatterns"]}
+    scoped_repeat = http(base, "/api/admin/students/list?pattern=repeat_course&page=1&page_size=20",
+                         token=college_token2)["data"]
+    check("students 学院角色挂科模式下钻范围", scoped_patterns["repeat_course"],
+          scoped_repeat["total"])
+    if migration["fromSemester"] and migration["toSemester"]:
+        for migration_key in ("improved", "stable", "declined", "insufficient"):
+            query = urllib.parse.urlencode({
+                "migration": migration_key,
+                "from_semester": migration["fromSemester"],
+                "to_semester": migration["toSemester"],
+                "page": 1, "page_size": 20,
+            })
+            migration_list = http(base, "/api/admin/students/list?" + query)["data"]
+            check(f"students 画像迁移下钻 {migration_key}", migration[migration_key],
+                  migration_list["total"])
+    invalid_pattern = http(base, "/api/admin/students/list?pattern=unknown")
+    check("students 拒绝无效挂科模式", 400, invalid_pattern["code"])
+    sl = http(base, "/api/admin/students/list?page=1&page_size=20")["data"]
+    expected_list_gpa = scalar(c, """SELECT ROUND(AVG(g),2) FROM (
+        SELECT student_id,AVG(gpa) g FROM fact_grade WHERE gpa IS NOT NULL GROUP BY student_id)""")
+    check("students 清单均值使用完整筛选群体", expected_list_gpa, sl["summary"]["avgGpa"])
+    required_list = http(base, "/api/admin/students/list?required=" +
+        urllib.parse.quote("必修") + "&page=1&page_size=20")["data"]
+    expected_required_gpa = scalar(c, """SELECT ROUND(AVG(g),2) FROM (
+        SELECT student_id,AVG(gpa) g FROM fact_grade WHERE gpa IS NOT NULL AND is_required=1
+        GROUP BY student_id)""")
+    check("students 清单必修筛选进入GPA口径", expected_required_gpa,
+          required_list["summary"]["avgGpa"])
 
     # 14. 系统设置（预警规则 + 角色权限）
     print("\n[14] 系统设置")

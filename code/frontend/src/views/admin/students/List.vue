@@ -25,8 +25,11 @@
       <el-select v-model="fClass" size="small" style="width:140px" clearable filterable placeholder="全部班级">
         <el-option v-for="c in classOptions" :key="c.value" :label="c.label" :value="c.value" />
       </el-select>
-      <el-select v-model="fSemester" size="small" style="width:160px" clearable placeholder="全部学期">
+      <el-select v-model="fSemester" size="small" style="width:160px" clearable placeholder="全部学期" @change="onSemester">
         <el-option v-for="s in semesters" :key="s.value" :label="s.label" :value="s.value" />
+      </el-select>
+      <el-select v-model="fYear" size="small" style="width:120px" clearable placeholder="全部学年" @change="onYear">
+        <el-option v-for="y in years" :key="y" :label="y + '学年'" :value="y" />
       </el-select>
       <el-select v-model="fRetake" size="small" style="width:100px" clearable placeholder="重修/非">
         <el-option label="重修" value="重修" /><el-option label="非重修" value="非重修" />
@@ -39,9 +42,13 @@
       <el-button size="small" @click="reset">重置</el-button>
     </div>
 
-    <!-- 当前课程过滤标签 -->
-    <div v-if="courseName" style="margin-bottom:8px">
-      <el-tag closable type="warning" @close="removeCourse">当前课程：{{ courseName }}</el-tag>
+    <!-- 群体画像下钻与课程过滤标签 -->
+    <div v-if="courseName || patternKey || migrationKey" class="drill-tags">
+      <el-tag v-if="courseName" closable type="warning" @close="removeCourse">当前课程：{{ courseName }}</el-tag>
+      <el-tag v-if="patternKey" closable type="danger" @close="removePattern">挂科模式：{{ patternLabel }}</el-tag>
+      <el-tag v-if="migrationKey" closable type="primary" @close="removeMigration">
+        画像迁移：{{ migrationLabel }}（{{ fromSemester }} → {{ toSemester }}）
+      </el-tag>
     </div>
 
     <!-- 摘要行 -->
@@ -107,6 +114,7 @@ const fMajor = ref('')
 const fGrade = ref('')
 const fClass = ref('')
 const fSemester = ref('')
+const fYear = ref('')
 const fRetake = ref('')
 const fRequired = ref('')
 const keyword = ref('')
@@ -116,6 +124,12 @@ const pageSize = 20
 // ── URL 参数预填 ──
 const courseName = ref(route.query.courseName as string || '')
 const courseId = ref(route.query.course as string || '')
+const patternKey = ref(route.query.pattern as string || '')
+const patternLabel = ref(route.query.patternLabel as string || '')
+const migrationKey = ref(route.query.migration as string || '')
+const migrationLabel = ref(route.query.migrationLabel as string || '')
+const fromSemester = ref(route.query.from_semester as string || '')
+const toSemester = ref(route.query.to_semester as string || '')
 
 // ── 数据 ──
 const loading = ref(false)
@@ -125,6 +139,7 @@ const avgGpa = ref<number | null>(null)
 
 // ── 筛选器选项 ──
 const semesters = ref<SemesterOpt[]>([])
+const years = ref<string[]>([])
 const grades = ref<string[]>([])
 const colleges = ref<{value:string;label:string}[]>([])
 const majors = ref<MajorOpt[]>([])
@@ -141,6 +156,8 @@ const classOptions = computed(() => fMajor.value
 const pageTitle = computed(() => {
   const parts: string[] = []
   if (courseName.value) parts.push(courseName.value)
+  if (patternKey.value) parts.push(patternLabel.value || '挂科模式')
+  if (migrationKey.value) parts.push((migrationLabel.value || '画像迁移') + '学生')
   if (route.query.collegeName) parts.push(route.query.collegeName as string)
   else if (route.query.majorName) parts.push(route.query.majorName as string)
   parts.push('学生学业画像')
@@ -151,6 +168,7 @@ const pageTitle = computed(() => {
 onMounted(async () => {
   const meta = await getFilterMeta()
   semesters.value = meta.semesters.slice().reverse()
+  years.value = (meta.years || []).slice().reverse()
   grades.value = meta.grades || []
   colleges.value = meta.colleges || []
   majors.value = meta.majors || []
@@ -161,6 +179,9 @@ onMounted(async () => {
   if (route.query.grade) fGrade.value = route.query.grade as string
   if (route.query.class) fClass.value = route.query.class as string
   if (route.query.semester) fSemester.value = route.query.semester as string
+  if (route.query.year) fYear.value = route.query.year as string
+  if (route.query.retake) fRetake.value = route.query.retake as string
+  if (route.query.required) fRequired.value = route.query.required as string
   if (route.query.course) courseId.value = route.query.course as string
   if (route.query.courseName) courseName.value = route.query.courseName as string
   loadPage(1)
@@ -169,6 +190,8 @@ onMounted(async () => {
 // ── 筛选联动 ──
 function onCollege() { fMajor.value = ''; fClass.value = '' }
 function onMajor() { fClass.value = '' }
+function onSemester() { if (fSemester.value) fYear.value = '' }
+function onYear() { if (fYear.value) fSemester.value = '' }
 
 // ── 数据加载 ──
 async function loadPage(p: number) {
@@ -180,10 +203,17 @@ async function loadPage(p: number) {
     if (fGrade.value) params.grade = fGrade.value
     if (fClass.value) params.class_id = fClass.value
     if (fSemester.value) params.semester = fSemester.value
+    else if (fYear.value) params.year = fYear.value
     if (fRetake.value) params.retake = fRetake.value
     if (fRequired.value) params.required = fRequired.value
     if (keyword.value) params.keyword = keyword.value
     if (courseId.value) params.course = courseId.value
+    if (patternKey.value) params.pattern = patternKey.value
+    if (migrationKey.value) {
+      params.migration = migrationKey.value
+      params.from_semester = fromSemester.value
+      params.to_semester = toSemester.value
+    }
     // 排序
     params.sort = 'gpa'
     params.order = 'desc'
@@ -195,9 +225,8 @@ async function loadPage(p: number) {
     total.value = data.total || 0
     page.value = data.page || p
 
-    // 计算平均 GPA
-    const gpas = students.value.map((s: any) => s.gpa).filter((g: any) => g != null)
-    avgGpa.value = gpas.length > 0 ? +(gpas.reduce((a: number, b: number) => a + b, 0) / gpas.length).toFixed(2) : null
+    // 使用后端对完整筛选群体计算的均值，不能只计算当前分页。
+    avgGpa.value = data.summary?.avgGpa ?? null
   } catch { /* http 工具已 toast */ }
   finally { loading.value = false }
 }
@@ -206,12 +235,29 @@ async function loadPage(p: number) {
 function search() { page.value = 1; loadPage(1) }
 function reset() {
   fCollege.value = ''; fMajor.value = ''; fGrade.value = ''
-  fClass.value = ''; fSemester.value = ''; fRetake.value = ''
+  fClass.value = ''; fSemester.value = ''; fYear.value = ''; fRetake.value = ''
   fRequired.value = ''; keyword.value = ''
   courseId.value = ''; courseName.value = ''
+  patternKey.value = ''; patternLabel.value = ''
+  migrationKey.value = ''; migrationLabel.value = ''; fromSemester.value = ''; toSemester.value = ''
+  router.replace({ path: route.path, query: {} })
   page.value = 1; loadPage(1)
 }
-function removeCourse() { courseId.value = ''; courseName.value = ''; search() }
+function clearRouteKeys(keys: string[]) {
+  const query: Record<string, any> = { ...route.query }
+  keys.forEach(key => delete query[key])
+  router.replace({ path: route.path, query })
+}
+function removeCourse() {
+  courseId.value = ''; courseName.value = ''; clearRouteKeys(['course', 'courseName']); search()
+}
+function removePattern() {
+  patternKey.value = ''; patternLabel.value = ''; clearRouteKeys(['pattern', 'patternLabel']); search()
+}
+function removeMigration() {
+  migrationKey.value = ''; migrationLabel.value = ''; fromSemester.value = ''; toSemester.value = ''
+  clearRouteKeys(['migration', 'migrationLabel', 'from_semester', 'to_semester']); search()
+}
 function goStudent(row: any) {
   const qs = new URLSearchParams({ from: 'list' })
   if (fCollege.value) qs.set('college', fCollege.value)
@@ -233,3 +279,7 @@ function alertTagType(level: string): string {
   return 'info'
 }
 </script>
+
+<style scoped>
+.drill-tags { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+</style>

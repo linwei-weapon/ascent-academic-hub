@@ -33,6 +33,10 @@
       </div>
     </div>
 
+    <el-alert v-if="evidence.limitation" type="warning" :closable="false" show-icon style="margin-bottom:12px"
+      title="证据说明：毕业率、学位授予率和部分专业学分要求包含模拟数据"
+      :description="evidence.limitation" />
+
     <div class="sa-kpi-row">
       <KpiCard v-for="k in studentKpis" :key="k.label" :label="k.label" :value="k.value" :hint="k.formula" :tone="kpiTone(k.label)" />
     </div>
@@ -40,7 +44,7 @@
     <el-row :gutter="16" style="margin-bottom:16px">
       <el-col :span="8">
         <div class="sa-card" style="height:100%">
-          <div class="sa-card-title">学生群体聚类 <KpiLabel label="" formula="基于GPA分5档：优秀≥3.5·良好3.0-3.5·一般2.5-3.0·困难2.0-2.5·高危<2.0" /></div>
+          <div class="sa-card-title">学生 GPA 分层画像 <KpiLabel label="" formula="固定GPA分层（非机器学习聚类）：优秀≥3.5·良好3.0-3.5·一般2.5-3.0·困难2.0-2.5·高危<2.0" /></div>
           <EChart v-if="data.clusters.length" :option="clusterOption" :height="190" />
           <div v-else class="sa-faint" style="font-size:12px">暂无数据</div>
           <div v-if="data.clusters.length" class="legend-list">
@@ -69,6 +73,38 @@
           <div class="sa-card-title">学分完成分布 <KpiLabel label="" formula="按已修学分÷要求学分比例分组" /></div>
           <EChart v-if="data.creditDist.length" :option="creditOption" :height="190" />
           <div v-else class="sa-faint" style="font-size:12px">暂无数据</div>
+        </div>
+      </el-col>
+    </el-row>
+
+    <el-row :gutter="16" style="margin-bottom:16px">
+      <el-col :span="14">
+        <div class="sa-card" style="height:100%">
+          <div class="sa-card-title">
+            相邻学期画像迁移
+            <KpiLabel label="" :formula="`比较${data.migration.fromSemester || '—'}与${data.migration.toSemester || '—'}的学生学期平均GPA；变化达到±${data.migration.threshold}视为改善或恶化`" />
+          </div>
+          <div v-if="data.migration.fromSemester && data.migration.toSemester" class="migration-meta">
+            <span>{{ data.migration.fromSemester }}</span><b>→</b><span>{{ data.migration.toSemester }}</span>
+            <em>有效对比 {{ data.migration.compared }} 人 · 平均变化 {{ data.migration.avgDelta == null ? '—' : (data.migration.avgDelta > 0 ? '+' : '') + data.migration.avgDelta }}</em>
+          </div>
+          <div class="migration-kpis">
+            <div class="drill-card" @click="goMigration('improved', '改善')"><KpiCard label="改善" :value="`${data.migration.improved}人`" tone="teal" /></div>
+            <div class="drill-card" @click="goMigration('stable', '稳定')"><KpiCard label="稳定" :value="`${data.migration.stable}人`" tone="primary" /></div>
+            <div class="drill-card" @click="goMigration('declined', '恶化')"><KpiCard label="恶化" :value="`${data.migration.declined}人`" tone="danger" /></div>
+            <div class="drill-card" @click="goMigration('insufficient', '数据不足')"><KpiCard label="数据不足" :value="`${data.migration.insufficient}人`" tone="amber" /></div>
+          </div>
+          <div v-if="!data.migration.fromSemester || !data.migration.toSemester" class="sa-faint" style="font-size:12px">当前范围不足两个可比较学期</div>
+        </div>
+      </el-col>
+      <el-col :span="10">
+        <div class="sa-card" style="height:100%">
+          <div class="sa-card-title">历史挂科模式 <KpiLabel label="" formula="基于筛选范围内真实不及格记录识别；各模式可相互重叠" /></div>
+          <el-table :data="data.failPatterns" size="small" @row-click="goPattern" row-class-name="row-clickable">
+            <el-table-column prop="label" label="模式" width="120" />
+            <el-table-column prop="count" label="学生数" width="76" align="right"><template #default="{row}"><b class="tnum">{{ row.count }}</b></template></el-table-column>
+            <el-table-column prop="definition" label="识别口径" min-width="180" show-overflow-tooltip />
+          </el-table>
         </div>
       </el-col>
     </el-row>
@@ -131,8 +167,10 @@ function onSemester() { if (fSemester.value) fYear.value = ''; load() }
 function onYear() { if (fYear.value) fSemester.value = ''; load() }
 
 const studentKpis = ref<any[]>([])
-const data = reactive<{clusters:any[];gradeGpa:any[];creditDist:any[];failCourses:any[]}>({
-  clusters: [], gradeGpa: [], creditDist: [], failCourses: [],
+const evidence = ref<any>({})
+const data = reactive<any>({
+  clusters: [], gradeGpa: [], creditDist: [], failCourses: [], failPatterns: [],
+  migration: { fromSemester: null, toSemester: null, improved: 0, stable: 0, declined: 0, insufficient: 0, compared: 0, avgDelta: null, threshold: 0.3 },
 })
 async function load() {
   const params = new URLSearchParams()
@@ -146,10 +184,33 @@ async function load() {
   if (fRequired.value) params.set('required', fRequired.value)
   const qs = params.toString() ? `?${params.toString()}` : ''
   const d = await http.get('/admin/students/analysis' + qs)
-  if (d) { studentKpis.value = d.studentKpis || []; Object.assign(data, d) }
+  if (d) { studentKpis.value = d.studentKpis || []; evidence.value = d.evidence || {}; Object.assign(data, d) }
 }
 
 function goCourse(row: any) { router.push({ path: '/admin/course/' + row.id, query: fSemester.value ? { semester: fSemester.value } : {} }) }
+
+function drillQuery() {
+  const query: Record<string, string> = {}
+  if (fSemester.value) query.semester = fSemester.value
+  else if (fYear.value) query.year = fYear.value
+  if (fGrade.value) query.grade = fGrade.value
+  if (fCollege.value) query.college = fCollege.value
+  if (fMajor.value) query.major = fMajor.value
+  if (fClass.value) query.class = fClass.value
+  if (fRetake.value) query.retake = fRetake.value
+  if (fRequired.value) query.required = fRequired.value
+  return query
+}
+function goPattern(row: any) {
+  router.push({ path: '/admin/students/list', query: { ...drillQuery(), pattern: row.key, patternLabel: row.label } })
+}
+function goMigration(key: string, label: string) {
+  if (!data.migration.fromSemester || !data.migration.toSemester) return
+  router.push({ path: '/admin/students/list', query: {
+    ...drillQuery(), migration: key, migrationLabel: label,
+    from_semester: data.migration.fromSemester, to_semester: data.migration.toSemester,
+  } })
+}
 
 function kpiTone(label: string): 'primary'|'teal'|'danger'|'amber' {
   if (label.includes('高危') || label.includes('预警')) return 'danger'
@@ -217,6 +278,12 @@ onMounted(async () => {
 .lg-label { color: #475569; }
 .lg-val { margin-left: auto; color: #64748B; }
 .grade-foot { margin-top: 6px; display: flex; flex-direction: column; gap: 2px; font-size: 10px; color: #94A3B8; }
+.migration-meta { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; color: #475569; font-size: 13px; }
+.migration-meta b { color: var(--sa-primary); }
+.migration-meta em { margin-left: auto; color: #64748B; font-style: normal; font-size: 12px; }
+.migration-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.drill-card { cursor: pointer; border-radius: 14px; transition: transform .15s ease, box-shadow .15s ease; }
+.drill-card:hover { transform: translateY(-2px); box-shadow: 0 8px 18px rgba(15,23,42,.08); }
 .link { color: var(--sa-primary); cursor: pointer; font-weight: 500; }
 .link:hover { text-decoration: underline; }
 :deep(.row-clickable) { cursor: pointer; }
