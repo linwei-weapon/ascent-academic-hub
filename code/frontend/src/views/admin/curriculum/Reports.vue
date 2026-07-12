@@ -48,7 +48,7 @@ const topics = [
   { key:'risk', index:'01', title:'学业风险与低年级受挫', status:'部分可用', tone:'risk',
     value:'把关注时点从严重预警前移到首次受挫和持续困难，识别需要更早支持的学生群体。',
     questions:['哪些学生在大一首次挂科后没有恢复？','困难集中在哪些课程、年级和专业？','哪些学生已有改善，应避免持续贴标签？'],
-    actions:[{label:'查看学生学业分析',path:'/admin/students/analysis',primary:true},{label:'查看困难学生',path:'/admin/alert'}],
+    actions:[{label:'进入专题',path:'/admin/reports/early-setback',primary:true},{label:'查看困难学生',path:'/admin/alert'}],
     boundary:'不自动建立帮扶任务；学生个人原因必须由授权人员核实。' },
   { key:'plan', index:'02', title:'培养方案完成与毕业准备度', status:'部分可用', tone:'plan',
     value:'从“修了多少学分”转向“是否完成正确的课程结构”，提前发现必修、模块和先修链缺口。',

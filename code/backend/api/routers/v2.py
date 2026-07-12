@@ -98,6 +98,94 @@ def difficult_students(flag: Optional[str] = None, severity: Optional[str] = Non
     return ok({"items": rows, "total": total, "limit": limit, "offset": offset})
 
 
+@router.get("/topics/early-setback")
+def early_setback_topic(organization_id: Optional[str] = None, major_code: Optional[str] = None,
+                        entry_grade: Optional[int] = None,
+                        limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0),
+                        conn: sqlite3.Connection = Depends(get_v2_db), user: dict = Depends(require_v2_reader)):
+    """大一首次挂科及后续恢复专题；只使用已发布、未作废且通过口径明确的成绩。"""
+    cond, params = ["s.entry_grade BETWEEN 2000 AND 2100"], []
+    scope, scope_params = _student_scope(user, conn, "s")
+    if scope:
+        cond.append(scope); params.extend(scope_params)
+    if organization_id:
+        cond.append("s.organization_id=?"); params.append(organization_id)
+    if major_code:
+        cond.append("s.major_code=?"); params.append(major_code)
+    if entry_grade:
+        cond.append("s.entry_grade=?"); params.append(entry_grade)
+    where = " AND ".join(cond)
+    cte = f"""
+    WITH eligible AS (
+      SELECT s.* FROM dim_student s WHERE {where}
+    ), term_result AS (
+      SELECT g.student_id,g.semester_id,
+        CAST(substr(g.semester_id,1,4) AS INTEGER)-e.entry_grade+1 study_year,
+        substr(g.semester_id,-1) term_no,
+        COUNT(*) attempts,SUM(CASE WHEN g.is_pass=0 THEN 1 ELSE 0 END) failures,
+        AVG(g.gpa) avg_gpa
+      FROM grade_attempt g JOIN eligible e ON e.student_id=g.student_id
+      WHERE g.is_published=1 AND g.is_void=0 AND g.is_pass IS NOT NULL
+      GROUP BY g.student_id,g.semester_id
+    ), student_result AS (
+      SELECT e.student_id,e.display_name,e.entry_grade,e.organization_id,e.major_code,e.major_name,e.class_code,
+        SUM(CASE WHEN t.study_year=1 AND t.term_no IN ('1','2') THEN t.failures ELSE 0 END) first_year_failures,
+        SUM(CASE WHEN t.study_year=1 AND t.term_no IN ('1','2') THEN t.attempts ELSE 0 END) first_year_attempts,
+        SUM(CASE WHEN t.study_year>1 AND t.term_no IN ('1','2') THEN t.failures ELSE 0 END) later_failures,
+        SUM(CASE WHEN t.study_year>1 AND t.term_no IN ('1','2') THEN t.attempts ELSE 0 END) later_attempts,
+        MIN(CASE WHEN t.study_year=1 AND t.term_no IN ('1','2') AND t.failures>0 THEN t.semester_id END) first_setback_semester,
+        MAX(CASE WHEN t.study_year>1 AND t.term_no IN ('1','2') THEN t.semester_id END) latest_later_semester,
+        AVG(CASE WHEN t.study_year=1 AND t.term_no IN ('1','2') THEN t.avg_gpa END) first_year_gpa,
+        AVG(CASE WHEN t.study_year>1 AND t.term_no IN ('1','2') THEN t.avg_gpa END) later_gpa
+      FROM eligible e LEFT JOIN term_result t ON t.student_id=e.student_id GROUP BY e.student_id
+    ), classified AS (
+      SELECT *,CASE
+        WHEN first_year_failures=0 THEN 'no_setback'
+        WHEN later_attempts=0 THEN 'pending_observation'
+        WHEN later_failures=0 THEN 'recovered'
+        WHEN later_failures<=first_year_failures THEN 'recovering'
+        ELSE 'persistent' END recovery_status
+      FROM student_result WHERE first_year_attempts>0
+    )
+    """
+    summary = dbm.query_one(conn, cte + """SELECT COUNT(*) eligible_students,
+      SUM(CASE WHEN first_year_failures>0 THEN 1 ELSE 0 END) setback_students,
+      SUM(CASE WHEN recovery_status='recovered' THEN 1 ELSE 0 END) recovered_students,
+      SUM(CASE WHEN recovery_status='recovering' THEN 1 ELSE 0 END) recovering_students,
+      SUM(CASE WHEN recovery_status='persistent' THEN 1 ELSE 0 END) persistent_students,
+      SUM(CASE WHEN recovery_status='pending_observation' THEN 1 ELSE 0 END) pending_students
+      FROM classified""", tuple(params)) or {}
+    total = dbm.scalar(conn, cte + "SELECT COUNT(*) FROM classified WHERE first_year_failures>0", tuple(params)) or 0
+    students = dbm.query(conn, cte + """SELECT * FROM classified WHERE first_year_failures>0
+      ORDER BY CASE recovery_status WHEN 'persistent' THEN 1 WHEN 'recovering' THEN 2 WHEN 'pending_observation' THEN 3 ELSE 4 END,
+      later_failures DESC,first_year_failures DESC,student_id LIMIT ? OFFSET ?""", tuple(params + [limit, offset]))
+    by_grade = dbm.query(conn, cte + """SELECT entry_grade,COUNT(*) eligible_students,
+      SUM(CASE WHEN first_year_failures>0 THEN 1 ELSE 0 END) setback_students
+      FROM classified GROUP BY entry_grade ORDER BY entry_grade""", tuple(params))
+    by_major = dbm.query(conn, cte + """SELECT organization_id,major_code,major_name,COUNT(*) eligible_students,
+      SUM(CASE WHEN first_year_failures>0 THEN 1 ELSE 0 END) setback_students,
+      SUM(CASE WHEN recovery_status='persistent' THEN 1 ELSE 0 END) persistent_students
+      FROM classified GROUP BY organization_id,major_code,major_name HAVING setback_students>0
+      ORDER BY setback_students DESC LIMIT 12""", tuple(params))
+    courses = dbm.query(conn, f"""WITH eligible AS (SELECT s.* FROM dim_student s WHERE {where})
+      SELECT g.course_id,COALESCE(MAX(g.course_name),MAX(c.name),g.course_id) course_name,
+      COUNT(*) failed_attempts,COUNT(DISTINCT g.student_id) affected_students
+      FROM grade_attempt g JOIN eligible e ON e.student_id=g.student_id LEFT JOIN dim_course c ON c.course_id=g.course_id
+      WHERE g.is_published=1 AND g.is_void=0 AND g.is_pass=0
+        AND CAST(substr(g.semester_id,1,4) AS INTEGER)=e.entry_grade AND substr(g.semester_id,-1) IN ('1','2')
+      GROUP BY g.course_id ORDER BY affected_students DESC,failed_attempts DESC LIMIT 10""", tuple(params))
+    eligible = summary.get("eligible_students") or 0; setback = summary.get("setback_students") or 0
+    summary["setback_rate"] = round(setback * 100.0 / eligible, 2) if eligible else 0
+    return ok({"summary": summary, "by_grade": by_grade, "by_major": by_major, "courses": courses,
+               "students": students, "total": total, "limit": limit, "offset": offset,
+               "definition": {"first_year": "入学学年第一、第二学期（不含第3学期）",
+                 "setback": "大一常规学期至少1条已发布、未作废且明确未通过的成绩记录",
+                 "recovered": "后续常规学期已有成绩且无未通过记录",
+                 "recovering": "后续仍有未通过，但门次未超过大一",
+                 "persistent": "后续未通过门次超过大一", "pending_observation": "尚无后续常规学期成绩",
+                 "boundary": "群体筛查不推断个人原因，不自动建立帮扶任务；无有效入学年或无大一常规学期成绩者不进入分母。"}})
+
+
 @router.get("/students/{student_id}/growth")
 def student_growth(student_id: str, timeline_limit: int = Query(100, ge=1, le=500),
                    conn: sqlite3.Connection = Depends(get_v2_db), user: dict = Depends(require_v2_reader)):

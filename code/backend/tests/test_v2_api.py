@@ -11,6 +11,7 @@ class V2ApiTest(unittest.TestCase):
                     "/api/v2/students/{student_id}/growth",
                     "/api/v2/students/{student_id}/plan-courses",
                     "/api/v2/students/{student_id}/advice",
+                    "/api/v2/topics/early-setback",
                     "/api/v2/courses/offerings", "/api/v2/courses/schedule-distribution",
                     "/api/v2/courses/{course_id}/team",
                     "/api/v2/teachers/{staff_id}/schedule-preference", "/api/v2/rooms/summary"}

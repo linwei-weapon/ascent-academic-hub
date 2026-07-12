@@ -230,6 +230,10 @@ const router = useRouter()
 
 // 返回溯源：根据 from 参数判断来源页面
 const backLink = computed(() => {
+  const returnTo = route.query.returnTo as string
+  if (returnTo) {
+    return { label: (route.query.returnLabel as string) || '返回来源页面', action: () => router.push(returnTo) }
+  }
   const from = route.query.from as string
   if (from === 'alert') {
     return { label: '返回预警列表', action: () => router.push('/admin/alert') }
