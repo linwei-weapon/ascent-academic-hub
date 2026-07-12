@@ -29,6 +29,321 @@ def require_v2_all_reader(user: dict = Depends(get_current_user)) -> dict:
     return user
 
 
+@router.get("/curriculum/options")
+def curriculum_options(conn: sqlite3.Connection = Depends(get_v2_db),
+                       user: dict = Depends(require_v2_reader)):
+    """真实方案选择项：学院、年级、专业、方案四级联动所需的轻量元数据。"""
+    rows = dbm.query(conn, """
+        SELECT p.plan_id planId,p.plan_name planName,p.grade,p.major_code majorCode,
+               p.major_name majorName,
+               COALESCE(o.organization_id,s.organization_id) collegeId,
+               COALESCE(o.name,s.organization_id,'未映射学院') collegeName,
+               COUNT(DISTINCT s.student_id) studentCount,
+               COUNT(DISTINCT pc.plan_course_id) courseCount,
+               COUNT(DISTINCT gr.requirement_id) requirementCount
+        FROM curriculum_plan p
+        LEFT JOIN dim_student s ON s.plan_id=p.plan_id
+        LEFT JOIN dim_organization o ON o.organization_id=s.organization_id
+        LEFT JOIN curriculum_plan_course pc ON pc.plan_id=p.plan_id
+        LEFT JOIN curriculum_graduation_requirement gr ON gr.plan_id=p.plan_id
+        GROUP BY p.plan_id
+        ORDER BY collegeName,p.grade DESC,p.major_name,p.plan_name
+    """)
+    for row in rows:
+        row["coverageStatus"] = "document_and_courses" if row["requirementCount"] and row["courseCount"] else (
+            "courses_only" if row["courseCount"] else "metadata_only")
+        row["coverageLabel"] = {"document_and_courses": "原文与课程表齐全",
+          "courses_only": "仅课程表，缺方案原文", "metadata_only": "仅方案元数据"}[row["coverageStatus"]]
+    return ok({"plans": rows, "total": len(rows)})
+
+
+@router.get("/curriculum/management-overview")
+def curriculum_management_overview(conn: sqlite3.Connection = Depends(get_v2_db),
+                                   user: dict = Depends(require_v2_reader)):
+    scope, scope_params = _student_scope(user, conn, "s")
+    student_where = f"WHERE {scope}" if scope else ""
+    plans = dbm.query(conn, """SELECT p.plan_id,p.plan_name,p.major_name,
+      COUNT(DISTINCT pc.plan_course_id) course_count,
+      COUNT(DISTINCT gr.requirement_id) requirement_count,
+      COUNT(DISTINCT mr.module_requirement_id) module_rule_count
+      FROM curriculum_plan p LEFT JOIN curriculum_plan_course pc ON pc.plan_id=p.plan_id
+      LEFT JOIN curriculum_graduation_requirement gr ON gr.plan_id=p.plan_id
+      LEFT JOIN curriculum_plan_module_requirement mr ON mr.plan_id=p.plan_id GROUP BY p.plan_id""")
+    students = dbm.query(conn, f"""SELECT s.student_id,s.organization_id,s.major_code,s.major_name,s.plan_id,
+      COALESCE(o.name,s.organization_id,'未映射学院') college_name
+      FROM dim_student s LEFT JOIN dim_organization o ON o.organization_id=s.organization_id {student_where}""", tuple(scope_params))
+    student_ids = {x["student_id"] for x in students}
+    status_rows = dbm.query(conn, """SELECT x.student_id,
+      SUM(CASE WHEN x.requirement_type='必修' AND x.completion_status='failed' THEN 1 ELSE 0 END) failed_required,
+      SUM(CASE WHEN x.requirement_type='必修' AND x.completion_status IN ('not_completed','unknown') AND x.is_overdue=1 THEN 1 ELSE 0 END) verification_required
+      FROM student_plan_course_status x WHERE x.rule_version='growth-v1' GROUP BY x.student_id""")
+    status = {x["student_id"]: x for x in status_rows if x["student_id"] in student_ids}
+    no_offering = dbm.scalar(conn, """SELECT COUNT(DISTINCT pc.course_id) FROM curriculum_plan_course pc
+      LEFT JOIN teaching_lesson l ON l.course_id=pc.course_id WHERE l.lesson_id IS NULL""") or 0
+    single_teacher = dbm.scalar(conn, """SELECT COUNT(1) FROM (SELECT pc.course_id
+      FROM curriculum_plan_course pc LEFT JOIN teaching_lesson l ON l.course_id=pc.course_id
+      LEFT JOIN lesson_teacher lt ON lt.lesson_id=l.lesson_id GROUP BY pc.course_id
+      HAVING COUNT(DISTINCT lt.staff_id)=1)""") or 0
+    colleges = defaultdict(lambda: {"students": 0, "withoutPlan": 0, "actionRequired": 0, "verification": 0})
+    majors = defaultdict(lambda: {"students": 0, "withoutPlan": 0, "actionRequired": 0, "verification": 0})
+    for student in students:
+        row = colleges[student["college_name"]]
+        row["students"] += 1
+        row["withoutPlan"] += int(not student["plan_id"])
+        evidence = status.get(student["student_id"], {})
+        row["actionRequired"] += int((evidence.get("failed_required") or 0) > 0)
+        row["verification"] += int((evidence.get("verification_required") or 0) > 0)
+        major_key = (student["college_name"], student["major_code"] or "—")
+        major_row = majors[major_key]
+        major_row["students"] += 1
+        major_row["withoutPlan"] += int(not student["plan_id"])
+        major_row["actionRequired"] += int((evidence.get("failed_required") or 0) > 0)
+        major_row["verification"] += int((evidence.get("verification_required") or 0) > 0)
+    college_rows = [{"collegeName": name, **value} for name, value in colleges.items()]
+    college_rows.sort(key=lambda x: (-x["actionRequired"], -x["verification"], -x["withoutPlan"]))
+    major_names = {x["major_code"]: x["major_name"] for x in students if x.get("major_code")}
+    major_rows = [{"collegeName": key[0], "majorCode": key[1],
+                   "majorName": major_names.get(key[1], key[1]), **value}
+                  for key, value in majors.items()]
+    major_rows.sort(key=lambda x: (-x["actionRequired"], -x["verification"], -x["withoutPlan"]))
+    course_rows = dbm.query(conn, """SELECT x.course_id courseId,COALESCE(MAX(c.name),x.course_id) courseName,
+      COUNT(DISTINCT CASE WHEN x.requirement_type='必修' AND x.completion_status='failed' THEN x.student_id END) actionRequiredStudents,
+      COUNT(DISTINCT CASE WHEN x.requirement_type='必修' AND x.completion_status IN ('not_completed','unknown') AND x.is_overdue=1 THEN x.student_id END) verificationStudents,
+      COUNT(DISTINCT s.major_code) affectedMajors
+      FROM student_plan_course_status x JOIN dim_student s ON s.student_id=x.student_id
+      LEFT JOIN dim_course c ON c.course_id=x.course_id WHERE x.rule_version='growth-v1'
+      GROUP BY x.course_id HAVING actionRequiredStudents>0 OR verificationStudents>0
+      ORDER BY actionRequiredStudents DESC,verificationStudents DESC LIMIT 20""")
+    summary = {
+      "activePlans": len(plans),
+      "completeStructurePlans": sum(bool(x["course_count"] and x["requirement_count"] and x["module_rule_count"]) for x in plans),
+      "coursesOnlyPlans": sum(bool(x["course_count"] and not x["requirement_count"]) for x in plans),
+      "coveredStudents": len(students),
+      "studentsWithoutPlan": sum(not x["plan_id"] for x in students),
+      "actionRequiredStudents": sum((status.get(x["student_id"], {}).get("failed_required") or 0) > 0 for x in students),
+      "verificationStudents": sum((status.get(x["student_id"], {}).get("verification_required") or 0) > 0 for x in students),
+      "coursesWithoutOfferingEvidence": no_offering,
+      "singleTeacherCourses": single_teacher,
+    }
+    return ok({"summary": summary, "colleges": college_rows[:30], "majors": major_rows[:50],
+      "bottleneckCourses": course_rows,
+      "definition": {
+        "completeStructurePlans": "同时具备结构化课程、毕业要求原文和模块要求学分的方案数。",
+        "actionRequiredStudents": "至少一门方案必修课存在明确未通过成绩的去重学生数。",
+        "verificationStudents": "建议修读学期已到但当前缺少通过、认定或明确未通过证据的去重学生数。",
+        "coursesWithoutOfferingEvidence": "方案引用课程中，在当前已接入真实教学任务范围内未发现开课记录的去重课程数；不等同未来不开课。",
+        "singleTeacherCourses": "当前已接入教学任务中仅关联一名教师的方案课程数，用于资源连续性核查。",
+        "boundary": "总览用于发现需进一步核验的管理事项，不输出毕业审核、方案合规或教学质量结论。"
+      }})
+
+
+@router.get("/curriculum/management-students")
+def curriculum_management_students(college_name: Optional[str] = None, major_code: Optional[str] = None,
+                                   course_id: Optional[str] = None, status: Optional[str] = None,
+                                   limit: int = Query(200, ge=1, le=500),
+                                   conn: sqlite3.Connection = Depends(get_v2_db),
+                                   user: dict = Depends(require_v2_reader)):
+    scope, scope_params = _student_scope(user, conn, "s")
+    cond, params = ["x.rule_version='growth-v1'"], []
+    if scope: cond.append(scope); params.extend(scope_params)
+    if college_name: cond.append("COALESCE(o.name,s.organization_id,'未映射学院')=?"); params.append(college_name)
+    if major_code: cond.append("s.major_code=?"); params.append(major_code)
+    if course_id: cond.append("x.course_id=?"); params.append(course_id)
+    where = " AND ".join(cond)
+    rows = dbm.query(conn, f"""SELECT s.student_id studentId,s.display_name name,s.entry_grade grade,
+      COALESCE(o.name,s.organization_id,'未映射学院') collegeName,s.major_code majorCode,s.major_name majorName,
+      COUNT(*) evidenceCourses,
+      SUM(CASE WHEN x.requirement_type='必修' AND x.completion_status='failed' THEN 1 ELSE 0 END) failedRequired,
+      SUM(CASE WHEN x.requirement_type='必修' AND x.completion_status IN ('not_completed','unknown') AND x.is_overdue=1 THEN 1 ELSE 0 END) verificationRequired
+      FROM student_plan_course_status x JOIN dim_student s ON s.student_id=x.student_id
+      LEFT JOIN dim_organization o ON o.organization_id=s.organization_id WHERE {where}
+      GROUP BY s.student_id ORDER BY failedRequired DESC,verificationRequired DESC,s.student_id LIMIT ?""", tuple(params + [limit]))
+    items = []
+    for row in rows:
+        row["evidenceStatus"] = "明确需处理" if row["failedRequired"] else ("到期待核验" if row["verificationRequired"] else "未发现到期问题")
+        if not status or row["evidenceStatus"] == status:
+            items.append(row)
+    return ok({"items": items, "total": len(items),
+      "definition": "名单与管理总览使用同一套方案课程状态；到期待核验不等同漏选，需结合选课记录确认。"})
+
+
+@router.get("/curriculum/management-major/{major_code}")
+def curriculum_management_major(major_code: str, conn: sqlite3.Connection = Depends(get_v2_db),
+                                user: dict = Depends(require_v2_reader)):
+    scope, scope_params = _student_scope(user, conn, "s")
+    where = "s.major_code=?" + (f" AND {scope}" if scope else "")
+    params = [major_code] + scope_params
+    students = dbm.query(conn, f"""SELECT s.student_id,s.major_name,s.plan_id,
+      SUM(CASE WHEN x.requirement_type='必修' AND x.completion_status='failed' THEN 1 ELSE 0 END) failed_required,
+      SUM(CASE WHEN x.requirement_type='必修' AND x.completion_status IN ('not_completed','unknown') AND x.is_overdue=1 THEN 1 ELSE 0 END) verification_required
+      FROM dim_student s LEFT JOIN student_plan_course_status x ON x.student_id=s.student_id AND x.rule_version='growth-v1'
+      WHERE {where} GROUP BY s.student_id""", tuple(params))
+    if not students: raise ApiError("专业不存在或无权访问", code=404, status_code=404)
+    plan_ids = sorted({x["plan_id"] for x in students if x["plan_id"]})
+    plans = []
+    if plan_ids:
+        ph = ",".join("?" for _ in plan_ids)
+        plans = dbm.query(conn, f"""SELECT p.plan_id planId,p.plan_name planName,p.grade,p.total_credits graduationMinimumCredits,
+          COUNT(DISTINCT pc.plan_course_id) courseCount,COUNT(DISTINCT mr.module_requirement_id) moduleRuleCount
+          FROM curriculum_plan p LEFT JOIN curriculum_plan_course pc ON pc.plan_id=p.plan_id
+          LEFT JOIN curriculum_plan_module_requirement mr ON mr.plan_id=p.plan_id
+          WHERE p.plan_id IN ({ph}) GROUP BY p.plan_id""", tuple(plan_ids))
+    courses = dbm.query(conn, """SELECT x.course_id courseId,COALESCE(MAX(c.name),x.course_id) courseName,
+      COUNT(DISTINCT CASE WHEN x.requirement_type='必修' AND x.completion_status='failed' THEN x.student_id END) actionRequiredStudents,
+      COUNT(DISTINCT CASE WHEN x.requirement_type='必修' AND x.completion_status IN ('not_completed','unknown') AND x.is_overdue=1 THEN x.student_id END) verificationStudents,
+      COUNT(DISTINCT l.lesson_id) lessonCount,COUNT(DISTINCT lt.staff_id) teacherCount
+      FROM student_plan_course_status x JOIN dim_student s ON s.student_id=x.student_id
+      LEFT JOIN dim_course c ON c.course_id=x.course_id LEFT JOIN teaching_lesson l ON l.course_id=x.course_id
+      LEFT JOIN lesson_teacher lt ON lt.lesson_id=l.lesson_id
+      WHERE s.major_code=? AND x.rule_version='growth-v1' GROUP BY x.course_id
+      HAVING actionRequiredStudents>0 OR verificationStudents>0
+      ORDER BY actionRequiredStudents DESC,verificationStudents DESC LIMIT 20""", (major_code,))
+    summary = {"students": len(students), "plans": len(plans),
+      "studentsWithoutPlan": sum(not x["plan_id"] for x in students),
+      "actionRequiredStudents": sum((x["failed_required"] or 0)>0 for x in students),
+      "verificationStudents": sum((x["verification_required"] or 0)>0 for x in students),
+      "bottleneckCourses": len(courses), "coursesWithoutOffering": sum(not x["lessonCount"] for x in courses),
+      "singleTeacherCourses": sum(x["teacherCount"]==1 for x in courses)}
+    return ok({"majorCode": major_code, "majorName": students[0]["major_name"], "summary": summary,
+      "plans": plans, "courses": courses,
+      "boundary": "开课和教师覆盖仅基于当前已接入真实教学任务；课程瓶颈表示需要管理核查，不等同专业培养质量结论。"})
+
+
+@router.get("/curriculum/course-supply/{course_id}")
+def curriculum_course_supply(course_id: str, conn: sqlite3.Connection = Depends(get_v2_db),
+                             user: dict = Depends(require_v2_reader)):
+    course = dbm.query_one(conn, "SELECT course_id courseId,name courseName,category,nature,organization_id organizationId FROM dim_course WHERE course_id=?", (course_id,))
+    if not course: course = {"courseId": course_id, "courseName": course_id}
+    offerings = dbm.query(conn, """SELECT l.semester_id semesterId,COUNT(DISTINCT l.lesson_id) lessonCount,
+      COUNT(DISTINCT lt.staff_id) teacherCount,SUM(COALESCE(l.capacity,0)) capacity,
+      SUM(COALESCE(l.enrolled,0)) enrolled,ROUND(AVG(l.enrolled),1) avgClassSize,
+      GROUP_CONCAT(DISTINCT l.student_grade) studentGrades,GROUP_CONCAT(DISTINCT l.schedule_text) schedules
+      FROM teaching_lesson l LEFT JOIN lesson_teacher lt ON lt.lesson_id=l.lesson_id
+      WHERE l.course_id=? GROUP BY l.semester_id ORDER BY l.semester_id DESC""", (course_id,))
+    substitutions = dbm.query(conn, """SELECT original_course_id originalCourseId,MAX(original_course_name) originalCourseName,
+      substitute_course_id substituteCourseId,MAX(substitute_course_name) substituteCourseName,
+      COUNT(DISTINCT student_id) studentCount,MAX(approval_status) approvalStatus
+      FROM student_course_substitution WHERE original_course_id=? OR substitute_course_id=?
+      GROUP BY original_course_id,substitute_course_id ORDER BY studentCount DESC""", (course_id, course_id))
+    affected = dbm.query_one(conn, """SELECT COUNT(DISTINCT CASE WHEN x.requirement_type='必修' AND x.completion_status='failed' THEN x.student_id END) actionRequiredStudents,
+      COUNT(DISTINCT CASE WHEN x.requirement_type='必修' AND x.completion_status IN ('not_completed','unknown') AND x.is_overdue=1 THEN x.student_id END) verificationStudents,
+      COUNT(DISTINCT s.major_code) affectedMajors FROM student_plan_course_status x
+      JOIN dim_student s ON s.student_id=x.student_id WHERE x.course_id=? AND x.rule_version='growth-v1'""", (course_id,)) or {}
+    return ok({"course": course, "affected": affected, "offerings": offerings, "substitutions": substitutions,
+      "availability": {"hasOfferingEvidence": bool(offerings), "hasSubstitutionEvidence": bool(substitutions),
+        "hasRetakeResourceEvidence": False, "hasFuturePlanEvidence": False},
+      "boundary": "当前数据未提供教学班类型中的重修班标识和未来开课计划；教学任务只证明已接入学期曾经开设，不能据此承诺下一次开课。"})
+
+
+@router.get("/curriculum/plans/{plan_id}")
+def curriculum_plan_detail(plan_id: str,
+                           conn: sqlite3.Connection = Depends(get_v2_db),
+                           user: dict = Depends(require_v2_reader)):
+    plan = dbm.query_one(conn, """
+        SELECT p.*,COUNT(DISTINCT pc.plan_course_id) courseCount,
+               ROUND(SUM(DISTINCT CASE WHEN pc.plan_course_id IS NOT NULL THEN pc.credits ELSE 0 END),1) structuredCredits
+        FROM curriculum_plan p
+        LEFT JOIN curriculum_plan_course pc ON pc.plan_id=p.plan_id
+        WHERE p.plan_id=? GROUP BY p.plan_id
+    """, (plan_id,))
+    if not plan:
+        raise ApiError("培养方案不存在", code=404, status_code=404)
+    goals = dbm.query(conn, """SELECT goal_no goalNo,goal_text text,source_file sourceFile
+        FROM curriculum_plan_goal WHERE plan_id=? ORDER BY goal_no""", (plan_id,))
+    requirements = dbm.query(conn, """SELECT requirement_id requirementId,requirement_no requirementNo,
+        requirement_title title,requirement_text text,source_file sourceFile
+        FROM curriculum_graduation_requirement WHERE plan_id=? ORDER BY requirement_no""", (plan_id,))
+    module_requirements = dbm.query(conn, """SELECT parent_module parentModule,module_name moduleName,
+        requirement_type requirementType,minimum_credits minimumCredits,raw_hierarchy rawHierarchy,
+        source_file sourceFile,source_table sourceTable
+        FROM curriculum_plan_module_requirement WHERE plan_id=?
+        ORDER BY source_table,module_requirement_id""", (plan_id,))
+    courses = dbm.query(conn, """SELECT pc.course_id courseId,COALESCE(c.name,pc.course_id) courseName,
+        COALESCE(NULLIF(pc.module,''),'未标注模块') module,
+        COALESCE(NULLIF(pc.requirement_type,''),'未标注性质') requirementType,
+        pc.credits,pc.suggested_term suggestedTerm,c.organization_id organizationId
+        FROM curriculum_plan_course pc LEFT JOIN dim_course c ON c.course_id=pc.course_id
+        WHERE pc.plan_id=? ORDER BY pc.module,CAST(pc.suggested_term AS INTEGER),pc.course_id""", (plan_id,))
+    module_map = defaultdict(lambda: {"courseCount": 0, "recordedCredits": 0.0, "courses": []})
+    for course in courses:
+        bucket = module_map[course["module"]]
+        bucket["courseCount"] += 1
+        bucket["recordedCredits"] += course["credits"] or 0
+        bucket["courses"].append(course)
+    modules = [{"name": name, "courseCount": value["courseCount"],
+                "recordedCredits": round(value["recordedCredits"], 1), "courses": value["courses"]}
+               for name, value in module_map.items()]
+    recorded_credits = round(sum((x["credits"] or 0) for x in courses), 1)
+    indicator_count = dbm.scalar(conn, """SELECT COUNT(*) FROM curriculum_requirement_indicator i
+        JOIN curriculum_graduation_requirement r ON r.requirement_id=i.requirement_id WHERE r.plan_id=?""", (plan_id,)) or 0
+    mapping_count = dbm.scalar(conn, "SELECT COUNT(*) FROM curriculum_course_requirement_mapping WHERE plan_id=?", (plan_id,)) or 0
+    return ok({
+        "plan": plan, "goals": goals, "requirements": requirements,
+        "courses": courses, "modules": modules, "moduleRequirements": module_requirements,
+        "creditEvidence": {"recordedCourseCredits": recorded_credits,
+          "graduationMinimumCredits": plan.get("total_credits"),
+          "requiredMinimumCredits": plan.get("required_min_credits"),
+          "electiveMinimumCredits": plan.get("elective_min_credits"),
+          "practiceMinimumCredits": plan.get("practice_min_credits"),
+          "degreeRequirement": plan.get("degree_requirement"),
+          "sourceFile": plan.get("credit_rule_source_file"),
+          "canCompareToGraduationMinimum": plan.get("total_credits") is not None,
+          "note": "课程记录学分合计包含方案表中的全部课程行，可能包含选修备选课程；未取得选修最低学分和课程组规则前，不将其作为毕业最低总学分。"},
+        "coverage": {"status": "document_and_courses" if requirements and plan["courseCount"] else "courses_only",
+          "label": "原文与课程表齐全" if requirements and plan["courseCount"] else "仅课程表，缺方案原文"},
+        "evidence": {
+            "hasGraduationRequirements": bool(requirements),
+            "indicatorCount": indicator_count, "courseMappingCount": mapping_count,
+            "canCalculateAttainment": bool(indicator_count and mapping_count),
+            "boundaryNote": "已接入培养目标和毕业要求原文；原始材料未提供独立指标点及课程支撑矩阵，当前不能计算毕业要求达成度。"
+        }
+    })
+
+
+@router.get("/curriculum/progress/{plan_id}")
+def curriculum_progress(plan_id: str, limit: int = Query(200, ge=1, le=1000),
+                        conn: sqlite3.Connection = Depends(get_v2_db),
+                        user: dict = Depends(require_v2_reader)):
+    """按同一状态明细汇总方案进度；不把待核验记录直接称为漏选。"""
+    scope, scope_params = _student_scope(user, conn, "s")
+    where = "x.plan_id=? AND x.rule_version='growth-v1'"
+    params = [plan_id]
+    if scope:
+        where += f" AND {scope}"; params.extend(scope_params)
+    rows = dbm.query(conn, f"""SELECT s.student_id studentId,s.display_name name,s.entry_grade grade,
+      COUNT(*) planCourses,
+      SUM(CASE WHEN x.completion_status IN ('passed','recognized') THEN 1 ELSE 0 END) completedCourses,
+      ROUND(SUM(CASE WHEN x.completion_status IN ('passed','recognized') THEN COALESCE(pc.credits,x.earned_credits,0) ELSE 0 END),1) completedCredits,
+      SUM(CASE WHEN x.requirement_type='必修' AND x.completion_status='failed' THEN 1 ELSE 0 END) failedRequired,
+      SUM(CASE WHEN x.requirement_type='必修' AND x.completion_status IN ('not_completed','unknown') AND x.is_overdue=1 THEN 1 ELSE 0 END) verificationRequired,
+      SUM(CASE WHEN x.is_actionable=1 THEN 1 ELSE 0 END) actionableCourses
+      FROM student_plan_course_status x JOIN dim_student s ON s.student_id=x.student_id
+      LEFT JOIN curriculum_plan_course pc ON pc.plan_course_id=x.plan_course_id
+      WHERE {where} GROUP BY s.student_id ORDER BY actionableCourses DESC,verificationRequired DESC,s.student_id LIMIT ?""",
+      tuple(params + [limit]))
+    for row in rows:
+        row["completionRate"] = round(row["completedCourses"] * 100 / row["planCourses"], 1) if row["planCourses"] else 0
+        row["status"] = "明确需处理" if row["failedRequired"] else ("待核验" if row["verificationRequired"] else "未发现到期问题")
+    total = len(rows)
+    summary = {
+      "coveredStudents": total,
+      "avgCourseCompletionRate": round(sum(x["completionRate"] for x in rows) / total, 1) if total else 0,
+      "actionRequiredStudents": sum(x["failedRequired"] > 0 for x in rows),
+      "verificationStudents": sum(x["verificationRequired"] > 0 for x in rows),
+      "evidenceClearStudents": sum(not x["failedRequired"] and not x["verificationRequired"] for x in rows),
+    }
+    plan = dbm.query_one(conn, "SELECT plan_id planId,plan_name planName,grade,major_name majorName FROM curriculum_plan WHERE plan_id=?", (plan_id,))
+    if not plan:
+        raise ApiError("培养方案不存在", code=404, status_code=404)
+    return ok({"plan": plan, "summary": summary, "students": rows,
+      "definition": {
+        "completionRate": "已有通过或课程替代认定证据的方案课程门数÷方案课程总门数。这里按课程门数计算，不与学分缺口混用。",
+        "actionRequired": "至少一门方案必修课存在明确未通过成绩的学生人数。",
+        "verificationRequired": "建议修读学期已到，但当前尚无通过、认定或明确未通过记录；需要结合选课数据核验，不能直接称为漏选。",
+        "boundary": "当前不展示总学分缺口：方案中的选修最低学分、课程组规则和毕业最低总学分尚未完成结构化核验。"
+      }})
+
+
 def _student_scope(user: dict, conn: sqlite3.Connection, alias: str = "s") -> tuple[str, list]:
     role = user.get("role_id")
     if role in V2_ALL_SCOPE_ROLES:

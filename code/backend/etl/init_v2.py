@@ -10,6 +10,9 @@ REQUIRED_TABLES = {
     "data_batch", "code_mapping", "dim_organization", "dim_semester",
     "dim_course", "dim_student", "dim_staff", "dim_building", "dim_room",
     "dim_period", "curriculum_plan", "curriculum_plan_course",
+    "curriculum_plan_module_requirement",
+    "curriculum_plan_goal", "curriculum_graduation_requirement",
+    "curriculum_requirement_indicator", "curriculum_course_requirement_mapping",
     "student_plan_assignment", "teaching_lesson", "lesson_teacher",
     "course_meeting", "grade_attempt", "student_course_result",
     "student_course_substitution", "student_status_event",
@@ -22,7 +25,9 @@ REQUIRED_TABLES = {
 }
 
 MIGRATION_COLUMNS = {
-    "curriculum_plan": {"major_name": "TEXT"},
+    "curriculum_plan": {"major_name": "TEXT", "required_min_credits": "REAL",
+        "elective_min_credits": "REAL", "practice_min_credits": "REAL",
+        "degree_requirement": "TEXT", "credit_rule_source_file": "TEXT"},
     "graduation_outcome": {
         "education_level": "TEXT", "organization_id": "TEXT", "major_code": "TEXT",
     },

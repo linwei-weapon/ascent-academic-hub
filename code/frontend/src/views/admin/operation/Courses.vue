@@ -84,24 +84,23 @@
     </div>
 
     <div class="sa-kpi-row">
-      <KpiCard v-for="k in kpis" :key="k.label" :label="k.label" :value="k.value" :hint="k.formula" :tone="k.label.includes('合班')?'amber':'primary'" />
+      <KpiCard v-for="k in realKpis" :key="k.label" :label="k.label" :value="k.value" :hint="k.formula" :tone="k.tone" />
     </div>
 
     <el-row :gutter="16" style="margin-bottom:16px">
       <el-col :span="14">
         <div class="sa-card">
-          <div class="sa-card-title">按学院开课门数 <span class="extra">全校共 {{ totalCourses }} 门 · 点击学院下钻</span></div>
+          <div class="sa-card-title">学院教学供给规模 <span class="extra">用于观察教学任务承载与资源配置，不评价学院教学质量</span></div>
           <el-table :data="data.deptCourses" size="small" @row-click="goCollege" row-class-name="row-clickable">
             <el-table-column prop="name" label="学院" width="150"><template #default="{row}"><span class="link">{{ row.name }}</span></template></el-table-column>
             <el-table-column label="开课门数" width="130"><template #default="{row}">
               <div class="tnum" style="font-weight:700;font-size:14px;color:#1E293B">{{ row.courseCount }} <span style="font-size:12px;font-weight:400">门</span></div>
               <div class="sa-faint" style="font-size:11px">{{ row.lessonCount }} 个教学班</div>
             </template></el-table-column>
-            <el-table-column label="占全校比例" min-width="240"><template #default="{row}">
+            <el-table-column label="教学班占全校比例" min-width="240"><template #default="{row}">
               <div style="display:flex;align-items:center;gap:10px">
                 <el-progress :percentage="row.pct" :stroke-width="10" :color="pctColor(row.pct)" style="flex:1" />
                 <span class="tnum" style="font-weight:700;font-size:13px;min-width:34px;text-align:right">{{ row.pct }}%</span>
-                <span class="lvl-tag" :style="{background:lvlBg(row.pct),color:lvlFg(row.pct)}">{{ row.level }}</span>
               </div>
             </template></el-table-column>
           </el-table>
@@ -128,11 +127,9 @@
       </el-col>
     </el-row>
 
-    <div class="sa-card">
-      <div class="sa-card-title">近年开课趋势 <KpiLabel label="" formula="按学期统计开课门数、教学班数、平均班额变化" /></div>
-      <EChart v-if="data.trend.length" :option="trendOption" :height="240" />
-      <div v-else class="sa-faint" style="font-size:12px">暂无趋势数据</div>
-    </div>
+    <el-alert type="warning" :closable="false" show-icon
+      title="历史趋势暂不展示"
+      description="当前 V2 真实教学任务主要覆盖一个学期，旧原型趋势可能包含模拟学期。待接入连续真实教学任务后，再展示跨学期开课门数、教学班数和平均班额变化。" />
     <div class="sa-card" style="margin-top:16px">
       <div class="sa-card-title">课程明细 <span class="extra">当前筛选最多展示100门，可按课程代码或名称定位</span></div>
       <el-table :data="data.courseList" size="small" stripe>
@@ -199,6 +196,26 @@ const qualityManage = ref(false)
 const auditVisible = ref(false)
 const qualityAudit = ref<any[]>([])
 const v2Offering = reactive<any>({ items: [], total: 0, semester: '' })
+const decisionOfferings = computed(() => (v2Offering.items || []).map((row:any) => {
+  const avgClassSize = row.lesson_count ? Math.round(row.enrolled / row.lesson_count) : 0
+  const attention:string[] = []
+  if (avgClassSize >= 120) attention.push('平均班额≥120，核查是否拆班')
+  else if (avgClassSize >= 80) attention.push('平均班额偏大')
+  if (row.teacher_count === 1 && row.lesson_count >= 3) attention.push('多班次由单一教师覆盖')
+  if (row.lesson_count === 1 && row.enrolled >= 80) attention.push('单班集中供给')
+  return { ...row, avgClassSize, attention }
+}).sort((a:any,b:any) => b.attention.length-a.attention.length || b.enrolled-a.enrolled))
+const realKpis = computed(() => {
+  const items = v2Offering.items || []
+  const lessons = items.reduce((sum:number,x:any) => sum + (x.lesson_count || 0), 0)
+  const enrolled = items.reduce((sum:number,x:any) => sum + (x.enrolled || 0), 0)
+  return [
+    {label:'已关联课程',value:`${v2Offering.total || 0}门`,formula:'真实教学任务中成功关联课程主数据的去重课程数',tone:'primary' as const},
+    {label:'教学班',value:`${lessons}个`,formula:'当前已接入真实学期的教学任务班次合计',tone:'primary' as const},
+    {label:'平均班额',value:lessons?`${Math.round(enrolled/lessons)}人`:'—',formula:'真实教学任务选课人次÷教学班数',tone:'teal' as const},
+    {label:'需核查课程',value:`${decisionOfferings.value.filter((x:any)=>x.attention.length).length}门`,formula:'触发大班、单班集中或单一教师多班覆盖提示的课程数',tone:'amber' as const},
+  ]
+})
 const qualityStatusLabel = (status:string) => ({open:'待处理',reviewing:'复核中',closed:'已关闭'} as Record<string,string>)[status] || status
 const qualityStatusType = (status:string) => ({open:'danger',reviewing:'warning',closed:'success'} as Record<string,any>)[status] || 'info'
 async function showQualityAudit(row:any) {
@@ -251,8 +268,6 @@ onMounted(async () => {
 })
 
 function pctColor(p: number) { return p >= 12 ? '#4F46E5' : p >= 6 ? '#6366F1' : '#0D9488' }
-function lvlBg(p: number) { return p >= 12 ? '#eef2ff' : p >= 6 ? '#f1f5f9' : '#ecfdf5' }
-function lvlFg(p: number) { return p >= 12 ? '#4F46E5' : p >= 6 ? '#64748B' : '#0D9488' }
 
 const TYPE_COLORS = ['#4F46E5', '#0D9488', '#D97706', '#6366F1', '#0EA5E9', '#94A3B8', '#A855F7', '#E11D48']
 const typeOption = computed(() => ({
@@ -313,4 +328,5 @@ const trendOption = computed(() => {
 .link:hover { text-decoration: underline; }
 :deep(.row-clickable) { cursor: pointer; }
 :deep(.row-clickable:hover) { background: #eef2ff !important; }
+.management-note { margin:10px 0 0; padding-top:10px; border-top:1px solid var(--sa-border); color:#64748B; font-size:12px; line-height:1.7; }
 </style>

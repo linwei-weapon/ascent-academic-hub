@@ -128,6 +128,11 @@ CREATE TABLE IF NOT EXISTS curriculum_plan (
     major_code TEXT,
     major_name TEXT,
     total_credits REAL,
+    required_min_credits REAL,
+    elective_min_credits REAL,
+    practice_min_credits REAL,
+    degree_requirement TEXT,
+    credit_rule_source_file TEXT,
     version TEXT,
     status TEXT,
     source TEXT NOT NULL DEFAULT 'real'
@@ -144,6 +149,70 @@ CREATE TABLE IF NOT EXISTS curriculum_plan_course (
     offered_season TEXT,
     source TEXT NOT NULL DEFAULT 'real',
     UNIQUE(plan_id, course_id, module, suggested_term)
+);
+
+CREATE TABLE IF NOT EXISTS curriculum_plan_module_requirement (
+    module_requirement_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    plan_id TEXT NOT NULL,
+    parent_module TEXT,
+    module_name TEXT NOT NULL,
+    requirement_type TEXT,
+    minimum_credits REAL NOT NULL,
+    raw_hierarchy TEXT,
+    source_file TEXT,
+    source_table INTEGER,
+    source TEXT NOT NULL DEFAULT 'real',
+    UNIQUE(plan_id, module_name, minimum_credits, source_table)
+);
+
+-- 培养方案正文中的培养目标。保留原文与来源定位，避免把统计指标误作培养目标。
+CREATE TABLE IF NOT EXISTS curriculum_plan_goal (
+    goal_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    plan_id TEXT NOT NULL,
+    goal_no INTEGER NOT NULL,
+    goal_text TEXT NOT NULL,
+    source_file TEXT,
+    source_section TEXT,
+    source TEXT NOT NULL DEFAULT 'real',
+    UNIQUE(plan_id, goal_no)
+);
+
+-- 各专业方案自己的毕业要求；不同专业条数不固定，不能套用通用 12 条模板。
+CREATE TABLE IF NOT EXISTS curriculum_graduation_requirement (
+    requirement_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    plan_id TEXT NOT NULL,
+    requirement_no INTEGER NOT NULL,
+    requirement_title TEXT,
+    requirement_text TEXT NOT NULL,
+    source_file TEXT,
+    source_section TEXT,
+    source TEXT NOT NULL DEFAULT 'real',
+    UNIQUE(plan_id, requirement_no)
+);
+
+-- 仅接收来源中明确给出的指标点。当前原始方案未提供时保持为空，不自动推演。
+CREATE TABLE IF NOT EXISTS curriculum_requirement_indicator (
+    indicator_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    requirement_id INTEGER NOT NULL,
+    indicator_code TEXT NOT NULL,
+    indicator_text TEXT NOT NULL,
+    source_file TEXT,
+    source TEXT NOT NULL DEFAULT 'real',
+    UNIQUE(requirement_id, indicator_code)
+);
+
+-- 课程对毕业要求/指标点的支撑关系。只有取得正式矩阵后才可计算达成度。
+CREATE TABLE IF NOT EXISTS curriculum_course_requirement_mapping (
+    mapping_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    plan_id TEXT NOT NULL,
+    course_id TEXT NOT NULL,
+    requirement_id INTEGER NOT NULL,
+    indicator_id INTEGER,
+    support_level TEXT,
+    weight REAL,
+    source_file TEXT,
+    source TEXT NOT NULL DEFAULT 'real',
+    UNIQUE(plan_id, course_id, requirement_id, indicator_id)
 );
 
 CREATE TABLE IF NOT EXISTS student_plan_assignment (

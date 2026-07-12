@@ -24,6 +24,26 @@
     </template>
 
     <template v-if="data.requirements.length">
+      <el-alert type="warning" :closable="false" show-icon :title="data.boundaryNote" style="margin-bottom:14px" />
+      <div class="sa-kpi-row" style="margin-bottom:16px">
+        <KpiCard label="毕业要求" :value="data.requirements.length" sub="方案原文" tone="teal" hint="当前专业培养方案中明确列出的毕业要求条数" />
+        <KpiCard label="独立指标点" :value="data.indicatorCount" sub="尚未提供" tone="amber" hint="原始材料中独立编号的毕业要求指标点" />
+        <KpiCard label="课程支撑关系" :value="data.courseMappingCount" sub="尚未提供" tone="amber" hint="课程对毕业要求或指标点的正式支撑矩阵记录数" />
+      </div>
+      <div class="sa-card">
+        <div class="sa-card-title">毕业要求原文 <span class="extra">不同专业条数可以不同，不套用通用12条模板</span></div>
+        <div v-for="row in data.requirements" :key="row.requirementId" class="real-requirement">
+          <el-tag size="small">{{ row.requirementNo }}</el-tag>
+          <div><b>{{ row.title }}</b><p>{{ row.text }}</p><small>来源：{{ row.sourceFile }}</small></div>
+        </div>
+      </div>
+      <div class="sa-card" style="margin-top:14px">
+        <div class="sa-card-title">达成度计算条件</div>
+        <p class="evidence-note">只有取得“指标点—支撑课程—评价环节—目标值—实际评价结果”的完整证据链后，系统才展示达成度和雷达图。当前不再用课程平均分或通过率代替毕业要求达成度。</p>
+      </div>
+    </template>
+
+    <template v-if="false">
       <!-- 总达成度 -->
       <div class="sa-kpi-row" style="margin-bottom:16px">
         <KpiCard
@@ -108,7 +128,7 @@
 
 <script setup lang="ts">
 import { http } from '@/utils/http'
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import KpiCard from '@/components/KpiCard.vue'
 import EChart from '@/components/EChart.vue'
 
@@ -137,14 +157,15 @@ function weightClass(w: number): string {
 }
 
 const data = reactive<{ requirements: any[]; overallAchievement: number; overallStatus: string;
+  indicatorCount:number; courseMappingCount:number; boundaryNote:string;
   requirementNames: string[]; supportMatrix: Record<string, number[]>; planModules: string[] }>({
-  requirements: [], overallAchievement: 0, overallStatus: '', requirementNames: [], supportMatrix: {}, planModules: [],
+  requirements: [], overallAchievement: 0, overallStatus: '', indicatorCount:0, courseMappingCount:0, boundaryNote:'', requirementNames: [], supportMatrix: {}, planModules: [],
 })
 
 async function load() {
   try {
-    const d = await http.get('/admin/curriculum/graduate-requirements/' + major.value)
-    if (d) Object.assign(data, d)
+    const d = await http.get('/v2/curriculum/plans/' + major.value)
+    if (d) Object.assign(data, d.evidence, { requirements:d.requirements || [] })
     else data.requirements = []
   } catch {
     data.requirements = []
@@ -185,6 +206,7 @@ const radarOption = computed(() => {
 })
 
 onMounted(load)
+watch(() => props.majorId, value => { if (value) { major.value = value; load() } })
 </script>
 
 <style scoped>
@@ -198,4 +220,10 @@ onMounted(load)
 .w-mid { background: #A5B4FC; color: #1E293B; }
 .w-low { background: #EEF2FF; color: #475569; }
 .w-none { background: #fff; color: #CBD5E1; }
+.real-requirement { display:flex; gap:10px; padding:12px 0; border-bottom:1px solid var(--sa-border); }
+.real-requirement:last-child { border-bottom:0; }
+.real-requirement b { color:#334155; font-size:13px; }
+.real-requirement p { color:#475569; font-size:12px; line-height:1.7; margin:6px 0; }
+.real-requirement small { color:#94A3B8; }
+.evidence-note { margin:0; color:#475569; font-size:13px; line-height:1.8; }
 </style>
