@@ -5,7 +5,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
 
-from .. import db as dbm
+from .. import db as dbm, settings
 from ..deps import get_current_user, get_v2_db
 from ..envelope import ApiError, ok
 
@@ -550,11 +550,13 @@ def graduation_readiness_topic(organization_id: Optional[str] = None, major_code
     """
     read_cond, read_params = "", []
     if readiness:
-        if readiness not in {"action_required", "verification_required", "evidence_complete"}:
+        if readiness not in {"action_required", "verification_required", "evidence_complete", "high_grade_action"}:
             raise ApiError("不支持的准备度状态", code=400, status_code=400)
         read_cond = " WHERE readiness_status=?"; read_params = [readiness]
     all_rows = dbm.query(conn, cte + "SELECT * FROM classified", tuple(params))
-    filtered = [x for x in all_rows if not readiness or x["readiness_status"] == readiness]
+    filtered = [x for x in all_rows if not readiness or
+      (readiness == "high_grade_action" and (x["entry_grade"] or 9999) <= settings.GRADUATING_GRADE and x["readiness_status"] == "action_required") or
+      (readiness != "high_grade_action" and x["readiness_status"] == readiness)]
     rank = {"action_required": 0, "verification_required": 1, "evidence_complete": 2}
     filtered.sort(key=lambda x: (rank[x["readiness_status"]], -x["explicit_required_failures"],
                                  -x["due_required_gaps"], x["completion_rate"] or 0, x["student_id"]))
@@ -579,10 +581,24 @@ def graduation_readiness_topic(organization_id: Optional[str] = None, major_code
       COUNT(DISTINCT CASE WHEN x.completion_status='failed' THEN x.student_id END) failed_students,
       COUNT(DISTINCT CASE WHEN x.completion_status IN ('not_completed','unknown')
         AND CAST(COALESCE(NULLIF(x.suggested_term,''),'99') AS INTEGER)<=8 THEN x.student_id END) verification_students,
-      COUNT(DISTINCT s.major_code) major_count
+      COUNT(DISTINCT s.major_code) major_count,COUNT(DISTINCT l.lesson_id) lesson_count,
+      COUNT(DISTINCT lt.staff_id) teacher_count,
+      COUNT(DISTINCT CASE WHEN scs.original_course_id=x.course_id THEN scs.substitution_id END) substitution_count
       FROM student_plan_course_status x JOIN dim_student s ON s.student_id=x.student_id LEFT JOIN dim_course c ON c.course_id=x.course_id
+      LEFT JOIN teaching_lesson l ON l.course_id=x.course_id LEFT JOIN lesson_teacher lt ON lt.lesson_id=l.lesson_id
+      LEFT JOIN student_course_substitution scs ON scs.original_course_id=x.course_id
       WHERE {where} AND x.requirement_type='必修' GROUP BY x.course_id
       HAVING failed_students>0 OR verification_students>0 ORDER BY failed_students DESC,verification_students DESC LIMIT 12""", tuple(params))
+    for course in courses:
+        reasons = []
+        if course["failed_students"] >= 10: reasons.append("影响学生较多")
+        if not course["lesson_count"]: reasons.append("当前无开课证据")
+        if course["teacher_count"] == 1: reasons.append("单一教师覆盖")
+        if not course["substitution_count"]: reasons.append("未发现替代关系")
+        course["supply_priority"] = "高" if (course["failed_students"] >= 10 and (not course["lesson_count"] or course["teacher_count"] <= 1)) else ("中" if reasons else "常规")
+        course["supply_reasons"] = reasons
+    high_grade_students = [x for x in all_rows if (x["entry_grade"] or 9999) <= settings.GRADUATING_GRADE and x["readiness_status"] == "action_required"]
+    summary["high_grade_attention_students"] = len(high_grade_students)
     return ok({"summary": summary, "majors": majors, "courses": courses,
                "students": students, "total": total, "limit": limit, "offset": offset,
                "definition": {"action_required": "至少有1门培养方案必修课存在明确未通过成绩的去重学生人数。",
@@ -590,6 +606,8 @@ def graduation_readiness_topic(organization_id: Optional[str] = None, major_code
                  "evidence_complete": "当前接入记录中未发现明确未通过或到期缺记录的必修课，不等同学校毕业审核通过。",
                  "completion_rate": "每名学生已有通过或认定记录的必修课占其方案必修课的比例，再按专业或全校求平均；单位为%。",
                  "number_unit": "专业表为去重学生人数；课程表为涉及该课程的去重学生人数，不是成绩条数或课程门次。",
+                 "high_grade_attention": f"入学年级不晚于{settings.GRADUATING_GRADE}级，且至少有一门必修课存在明确未通过成绩的去重学生数；待核验候选不计入。",
+                 "supply_priority": "课程保障优先级综合影响学生数、当前开课证据、教师覆盖和替代关系，仅用于安排核查顺序。",
                  "boundary": "本专题不输出能否毕业或获得学位的结论；正式结果以学校毕业审核和学位审核为准。"}})
 
 

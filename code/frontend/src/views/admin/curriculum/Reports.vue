@@ -33,7 +33,7 @@
       <div class="sa-card-title">建设顺序与当前边界</div>
       <el-steps :active="1" align-center finish-status="success">
         <el-step title="学生建议与低年级受挫" description="确定性建议原型已开始接入" />
-        <el-step title="培养方案与毕业准备度" description="复用V2课程状态，继续深化" />
+        <el-step title="毕业准备核查与课程保障" description="定位学生缺口与课程资源保障" />
         <el-step title="课程质量与教学运行" description="需要更多真实课程日历" />
         <el-step title="资源师资与排课优化" description="需年龄段、多学期课表和新学年任务" />
       </el-steps>
@@ -50,9 +50,9 @@ const topics = [
     questions:['哪些学生在大一首次挂科后没有恢复？','困难集中在哪些课程、年级和专业？','哪些学生已有改善，应避免持续贴标签？'],
     actions:[{label:'进入专题',path:'/admin/reports/early-setback',primary:true},{label:'查看困难学生',path:'/admin/alert'}],
     boundary:'不自动建立帮扶任务；学生个人原因必须由授权人员核实。' },
-  { key:'plan', index:'02', title:'培养方案完成与毕业准备度', status:'部分可用', tone:'plan',
-    value:'从“修了多少学分”转向“是否完成正确的课程结构”，提前发现必修、模块和先修链缺口。',
-    questions:['哪些学生存在明确未通过的必修课程？','哪些课程只是尚无完成证据，需要选课或认定核验？','哪些课程缺口需要新增重修资源？'],
+  { key:'plan', index:'02', title:'毕业准备核查与课程保障', status:'部分可用', tone:'plan',
+    value:'把学生毕业前课程缺口与学校课程供给能力放在同一专题核查，支持学院干预和教务处统筹开课、重修及替代资源。',
+    questions:['哪些高年级学生存在明确未通过或到期缺证据的必修课程？','哪些课程同时影响多个专业和大量学生？','哪些瓶颈课程缺少开课、教师、重修班或替代关系证据？'],
     actions:[{label:'进入专题',path:'/admin/reports/graduation-readiness',primary:true},{label:'查看培养质量',path:'/admin/curriculum'}],
     boundary:'当前不输出能否毕业结论；缺完整选课过程时不称“漏选”。' },
   { key:'course', index:'03', title:'课程质量与教学运行', status:'部分可用', tone:'course',
