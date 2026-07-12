@@ -149,25 +149,32 @@ def early_setback_topic(organization_id: Optional[str] = None, major_code: Optio
       FROM student_result WHERE first_year_attempts>0
     )
     """
-    summary = dbm.query_one(conn, cte + """SELECT COUNT(*) eligible_students,
-      SUM(CASE WHEN first_year_failures>0 THEN 1 ELSE 0 END) setback_students,
-      SUM(CASE WHEN recovery_status='recovered' THEN 1 ELSE 0 END) recovered_students,
-      SUM(CASE WHEN recovery_status='recovering' THEN 1 ELSE 0 END) recovering_students,
-      SUM(CASE WHEN recovery_status='persistent' THEN 1 ELSE 0 END) persistent_students,
-      SUM(CASE WHEN recovery_status='pending_observation' THEN 1 ELSE 0 END) pending_students
-      FROM classified""", tuple(params)) or {}
-    total = dbm.scalar(conn, cte + "SELECT COUNT(*) FROM classified WHERE first_year_failures>0", tuple(params)) or 0
-    students = dbm.query(conn, cte + """SELECT * FROM classified WHERE first_year_failures>0
-      ORDER BY CASE recovery_status WHEN 'persistent' THEN 1 WHEN 'recovering' THEN 2 WHEN 'pending_observation' THEN 3 ELSE 4 END,
-      later_failures DESC,first_year_failures DESC,student_id LIMIT ? OFFSET ?""", tuple(params + [limit, offset]))
-    by_grade = dbm.query(conn, cte + """SELECT entry_grade,COUNT(*) eligible_students,
-      SUM(CASE WHEN first_year_failures>0 THEN 1 ELSE 0 END) setback_students
-      FROM classified GROUP BY entry_grade ORDER BY entry_grade""", tuple(params))
-    by_major = dbm.query(conn, cte + """SELECT organization_id,major_code,major_name,COUNT(*) eligible_students,
-      SUM(CASE WHEN first_year_failures>0 THEN 1 ELSE 0 END) setback_students,
-      SUM(CASE WHEN recovery_status='persistent' THEN 1 ELSE 0 END) persistent_students
-      FROM classified GROUP BY organization_id,major_code,major_name HAVING setback_students>0
-      ORDER BY setback_students DESC LIMIT 12""", tuple(params))
+    all_rows = dbm.query(conn, cte + "SELECT * FROM classified", tuple(params))
+    setback_rows = [x for x in all_rows if x["first_year_failures"] > 0]
+    rank = {"persistent": 0, "recovering": 1, "pending_observation": 2, "recovered": 3}
+    setback_rows.sort(key=lambda x: (rank[x["recovery_status"]], -x["later_failures"],
+                                     -x["first_year_failures"], x["student_id"]))
+    total = len(setback_rows); students = setback_rows[offset:offset + limit]
+    summary = {"eligible_students": len(all_rows), "setback_students": len(setback_rows),
+      "recovered_students": sum(x["recovery_status"] == "recovered" for x in setback_rows),
+      "recovering_students": sum(x["recovery_status"] == "recovering" for x in setback_rows),
+      "persistent_students": sum(x["recovery_status"] == "persistent" for x in setback_rows),
+      "pending_students": sum(x["recovery_status"] == "pending_observation" for x in setback_rows)}
+    grade_groups = defaultdict(list); major_groups = defaultdict(list)
+    for row in all_rows:
+        grade_groups[row["entry_grade"]].append(row)
+        major_groups[(row["organization_id"], row["major_code"], row["major_name"])].append(row)
+    by_grade = [{"entry_grade": grade, "eligible_students": len(rows),
+      "setback_students": sum(x["first_year_failures"] > 0 for x in rows),
+      "persistent_students": sum(x["recovery_status"] == "persistent" for x in rows),
+      "improved_students": sum(x["recovery_status"] == "recovered" for x in rows)}
+      for grade, rows in sorted(grade_groups.items())]
+    by_major = [{"organization_id": org, "major_code": code, "major_name": name,
+      "eligible_students": len(rows), "setback_students": sum(x["first_year_failures"] > 0 for x in rows),
+      "persistent_students": sum(x["recovery_status"] == "persistent" for x in rows),
+      "improved_students": sum(x["recovery_status"] == "recovered" for x in rows)}
+      for (org, code, name), rows in major_groups.items() if any(x["first_year_failures"] > 0 for x in rows)]
+    by_major.sort(key=lambda x: (-x["persistent_students"], -x["setback_students"])); by_major = by_major[:12]
     courses = dbm.query(conn, f"""WITH eligible AS (SELECT s.* FROM dim_student s WHERE {where})
       SELECT g.course_id,COALESCE(MAX(g.course_name),MAX(c.name),g.course_id) course_name,
       COUNT(*) failed_attempts,COUNT(DISTINCT g.student_id) affected_students
@@ -179,11 +186,13 @@ def early_setback_topic(organization_id: Optional[str] = None, major_code: Optio
     summary["setback_rate"] = round(setback * 100.0 / eligible, 2) if eligible else 0
     return ok({"summary": summary, "by_grade": by_grade, "by_major": by_major, "courses": courses,
                "students": students, "total": total, "limit": limit, "offset": offset,
-               "definition": {"first_year": "入学学年第一、第二学期（不含第3学期）",
-                 "setback": "大一常规学期至少1条已发布、未作废且明确未通过的成绩记录",
-                 "recovered": "后续常规学期已有成绩且无未通过记录",
-                 "recovering": "后续仍有未通过，但门次未超过大一",
-                 "persistent": "后续未通过门次超过大一", "pending_observation": "尚无后续常规学期成绩",
+               "definition": {"first_year": "观察范围：有有效入学年，且大一第一或第二学期至少有1条有效成绩的去重学生。",
+                 "setback": "大一第一或第二学期至少出现1条明确未通过成绩的去重学生；比例分母为纳入观察的学生。",
+                 "recovered": "后续常规学期已有成绩且未再出现未通过记录；仅表示近期结果改善，不表示原课程已经通过。",
+                 "recovering": "后续仍有未通过记录，但累计门次未超过大一阶段，表示仍需观察。",
+                 "persistent": "后续未通过门次超过大一阶段，表示未通过记录仍持续出现，不推断个人原因。", "pending_observation": "大一有未通过记录，但尚无后续常规学期成绩可用于判断。",
+                 "management_value": "人数反映需要配置多少关注资源，比例用于发现群体集中度；课程集中提示基础课支持，专业持续人数提示学院优先核查。",
+                 "number_unit": "学生指标均为去重人数；课程表“未通过记录数”允许同一学生多次出现。",
                  "boundary": "群体筛查不推断个人原因，不自动建立帮扶任务；无有效入学年或无大一常规学期成绩者不进入分母。"}})
 
 
