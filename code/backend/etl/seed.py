@@ -160,7 +160,7 @@ def build_rules_df() -> pd.DataFrame:
 
 
 def load_discovered_rules() -> pd.DataFrame:
-    """从 sys_discovered_rule 表加载已审核通过的自发现规则，转为 DataFrame。
+    """加载已采纳的自发现规则，保留当前生产配置中的启用状态。
     与 build_rules_df 输出结构一致，用于合并进规则集。"""
     import sqlite3
     from . import config
@@ -168,8 +168,11 @@ def load_discovered_rules() -> pd.DataFrame:
     try:
         conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
         conn.row_factory = sqlite3.Row
-        rows = conn.execute(
-            "SELECT * FROM sys_discovered_rule WHERE status='approved'").fetchall()
+        rows = conn.execute("""SELECT d.*,
+            COALESCE((SELECT enabled FROM sys_alert_rule ar
+                      WHERE ar.rule_id='DR' || d.id),
+                     CASE WHEN d.status='approved' THEN 1 ELSE 0 END) current_enabled
+            FROM sys_discovered_rule d WHERE d.status IN ('approved','adopted')""").fetchall()
         conn.close()
     except Exception:
         return pd.DataFrame()
@@ -182,7 +185,7 @@ def load_discovered_rules() -> pd.DataFrame:
             conds = []
         params = {}
         for c in conds:
-            params[c["key"]] = c.get("value")
+            params[c["key"]] = c.get("engineValue", c.get("value"))
         params["text"] = r["name"]
         records.append({
             "rule_id": f"DR{r['id']}",
@@ -190,7 +193,7 @@ def load_discovered_rules() -> pd.DataFrame:
             "level": r["level"] or "警告",
             "trigger_type": "discovered",
             "params": json.dumps(params, ensure_ascii=False),
-            "enabled": 1,
+            "enabled": int(r["current_enabled"] or 0),
         })
     return pd.DataFrame(records)
 
@@ -262,10 +265,9 @@ def build_sys_config_df() -> pd.DataFrame:
         {"config_key": "discovery.data_sources",
          "config_value": json.dumps({
              "core": ["fact_grade", "dim_student", "fact_alert",
-                      "fact_graduation", "fact_major_req"],
+                      "fact_attrition", "fact_major_req"],
              "plan_majors": ["M017", "M031"],
-             "optional": ["fact_attrition", "fact_exam_cert",
-                          "fact_schedule_change"],
+             "optional": ["fact_exam_cert", "fact_schedule_change"],
              "available_not_connected": ["attend", "library", "card",
                                          "network", "counselor", "enrollment"],
          }, ensure_ascii=False)},

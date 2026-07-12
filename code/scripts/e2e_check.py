@@ -636,7 +636,7 @@ def main():
                        "PUT", {"status": "new", "reason": "自动化非法流转测试"})
         check("已解决事件不可直接回退", 400, invalid["code"])
 
-    print("\n[17] R2 两级候选规则")
+    print("\n[17] R2 两级候选规则与规则自发现")
     latest_batch = scalar(c, "SELECT MAX(batch_id) FROM alert_rule_candidate")
     candidate_total = scalar(c,
         "SELECT COUNT(*) FROM alert_rule_candidate WHERE batch_id=?", latest_batch)
@@ -645,6 +645,25 @@ def main():
         SELECT student_id,COUNT(DISTINCT rule_id) n FROM alert_rule_candidate
         WHERE batch_id=? GROUP BY student_id HAVING n>1)""", latest_batch)
     check("R2警告与严重互斥", 0, candidate_overlap)
+    discovered = http(base, "/api/admin/settings/rules/discovered")["data"]
+    check("规则自发现真实派生证据", "real-derived", discovered["evidence"]["level"])
+    check("规则自发现候选非空", True, len(discovered["pending"]) > 0)
+    supported_features = {"gpa_trend", "gpa_drop_count", "total_fail", "core_fail",
+                          "credit_ratio", "freshman_fail", "repeat_fail", "consecutive_drop"}
+    check("规则自发现仅输出引擎可执行特征", True, all(
+        c["key"] in supported_features
+        for rule in discovered["pending"] for c in rule["conditions"]))
+    check("规则自发现 GPA 下降方向", True, all(
+        c["value"] < 0 and c["op"] == "≤"
+        for rule in discovered["pending"] for c in rule["conditions"]
+        if c["key"] == "gpa_trend"))
+    check("规则自发现学分百分比展示与引擎值分离", True, all(
+        c["value"] > 1 and 0 <= c["engineValue"] <= 1
+        for rule in discovered["pending"] for c in rule["conditions"]
+        if c["key"] == "credit_ratio"))
+    discovery_config = http(base, "/api/admin/settings/discovery/config")["data"]
+    check("规则发现配置不回传模型密钥", False,
+          "cloud_api_key" in discovery_config["llm"])
 
     print(f"\n== 结果：通过 {_PASS} · 失败 {_FAIL} ==")
     return 1 if _FAIL else 0

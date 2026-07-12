@@ -34,6 +34,8 @@ PYTHONIOENCODING=utf-8 python -X utf8 -m uvicorn backend.api.main:app --reload -
 | GET | /api/admin/curriculum/plan/{major} | 培养方案 | fact_plan_meta/course |
 | GET | /api/admin/reports?type= | 报表中心 | 见下 |
 | GET | /api/admin/reports/custom?metrics=&dimension=&semester= | 自定义报表 | 真实学生/成绩/预警受控聚合 |
+| POST | /api/admin/settings/rules/discover | 运行规则自发现 | 真实数据历史关联候选，不直接生效 |
+| GET/PUT | /api/admin/settings/rules/discovered | 查询/采纳规则建议 | 采纳仅创建规则治理草稿 |
 
 **培养方案**：真实方案仅 2 个专业（M017 安全工程 / M031 海洋油气工程，2022级）。
 前端选择器传占位 id（pe2007 等），后端别名映射 `me_safety→M017`、`pe_ocean→M031`，
@@ -45,6 +47,10 @@ PYTHONIOENCODING=utf-8 python -X utf8 -m uvicorn backend.api.main:app --reload -
 
 **自定义报表**：当前开放 K001 在籍学生数、K002 预警学生数、K003 GPA 均值、
 K004 挂科率，支持学院/专业/年级维度与学期筛选。缺少可靠来源的指标不生成替代值。
+
+**规则自发现**：`association-v2` 仅使用真实成绩、真实学籍异动和当前严重预警做历史关联分析。
+所有候选特征必须由通用规则引擎可执行；未知特征按失败关闭处理。采纳建议只创建禁用规则占位和
+规则变更草稿，之后必须完成影响试算、独立复核、发布配置和受控激活。
 
 ## 前后端联调（切换 mock → 真实后端）
 

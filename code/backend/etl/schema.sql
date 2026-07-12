@@ -486,7 +486,7 @@ CREATE TABLE sys_discovered_rule (
     risk_ratio    REAL,              -- 风险倍数
     sample_size   INTEGER,           -- 样本量
     detail_json   TEXT,              -- JSON 详细分析数据
-    status        TEXT DEFAULT 'pending',  -- pending/approved/rejected
+    status        TEXT DEFAULT 'pending',  -- pending/adopted/rejected/superseded（approved 为历史兼容）
     source        TEXT DEFAULT 'ml', -- ml / llm（规则来源引擎）
     created_at    TEXT DEFAULT (datetime('now','localtime')),
     approved_at   TEXT

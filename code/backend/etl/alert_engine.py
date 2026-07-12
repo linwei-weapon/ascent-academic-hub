@@ -20,7 +20,7 @@ _BASE_DATE = np.datetime64("2026-03-01")
 def _compute_features(grade: pd.DataFrame, dim_student: pd.DataFrame,
                       plan_course: pd.DataFrame | None) -> pd.DataFrame:
     """计算每个学生的特征值，返回 DataFrame，index=student_id。"""
-    g = grade.copy()
+    g = grade[grade["source"] == "real"].copy() if "source" in grade.columns else grade.copy()
 
     # 总挂科
     total_fail = g[g["is_pass"] == 0].groupby("student_id").size()
@@ -28,9 +28,14 @@ def _compute_features(grade: pd.DataFrame, dim_student: pd.DataFrame,
     # 核心课挂科（需培养方案标记 is_core）
     core_fail = pd.Series(dtype=int)
     if plan_course is not None and len(plan_course):
-        core_courses = plan_course[plan_course["is_core"] == 1]["course_id"].unique()
-        core_g = g[g["course_id"].isin(core_courses)]
-        core_fail = core_g[core_g["is_pass"] == 0].groupby("student_id").size()
+        stu_keys = dim_student[["student_id", "major_id", "grade"]].copy()
+        stu_keys["grade"] = stu_keys["grade"].astype(str)
+        core_plan = plan_course[plan_course["is_core"] == 1][
+            ["major_id", "grade", "course_id"]].drop_duplicates().copy()
+        core_plan["grade"] = core_plan["grade"].astype(str)
+        core_g = g[g["is_pass"] == 0].merge(stu_keys, on="student_id", how="inner")
+        core_g = core_g.merge(core_plan, on=["major_id", "grade", "course_id"], how="inner")
+        core_fail = core_g.groupby("student_id").size()
 
     # GPA 逐学期轨迹
     gpa_g = g.dropna(subset=["gpa"])
@@ -49,6 +54,22 @@ def _compute_features(grade: pd.DataFrame, dim_student: pd.DataFrame,
         return sum(1 for i in range(1, len(seq)) if seq[i] < seq[i-1] - 0.2)
     gpa_drop = gpa_term.groupby("student_id")["gpa"].apply(list).apply(_drop_count)
 
+    def _consecutive_drop(seq):
+        best = current = 0
+        for i in range(1, len(seq)):
+            current = current + 1 if seq[i] < seq[i - 1] else 0
+            best = max(best, current)
+        return best
+    consecutive_drop = gpa_term.groupby("student_id")["gpa"].apply(list).apply(_consecutive_drop)
+
+    fail_rows = g[g["is_pass"] == 0][["student_id", "semester_id", "course_id"]]
+    fail_term = (g.assign(_failed=(g["is_pass"] == 0).astype(int))
+                 .groupby(["student_id", "semester_id"])["_failed"].sum().reset_index(name="n")
+                 .sort_values(["student_id", "semester_id"]))
+    freshman_fail = fail_term.groupby("student_id")["n"].apply(lambda x: int(x.iloc[:2].sum()))
+    repeat_fail = (fail_rows.groupby(["student_id", "course_id"]).size()
+                   .groupby("student_id").max())
+
     # 学分完成率
     earned = g[g["is_pass"] == 1].groupby("student_id")["credits"].sum()
     stu_major = dim_student.set_index("student_id")[["major_id", "grade"]]
@@ -58,7 +79,10 @@ def _compute_features(grade: pd.DataFrame, dim_student: pd.DataFrame,
     features["core_fail"] = core_fail.reindex(features.index).fillna(0).astype(int)
     features["gpa_trend"] = gpa_trend.reindex(features.index).fillna(0).round(2)
     features["gpa_drop_count"] = gpa_drop.reindex(features.index).fillna(0).astype(int)
-    features["credit_ratio"] = 0.0  # 默认值，后续按专业填充
+    features["freshman_fail"] = freshman_fail.reindex(features.index).fillna(0).astype(int)
+    features["repeat_fail"] = repeat_fail.reindex(features.index).fillna(0).astype(int)
+    features["consecutive_drop"] = consecutive_drop.reindex(features.index).fillna(0).astype(int)
+    features["credit_ratio"] = 1.0  # 无真实培养方案时不判定学分完成率风险
     features["earned_credits"] = earned.reindex(features.index).fillna(0.0)
 
     return features
@@ -96,11 +120,16 @@ def _evaluate_generic_rules(rules: dict, features: pd.DataFrame,
         # 对每个学生判断是否命中
         matched = pd.Series(True, index=features.index)
         detail_parts = []
+        supported_conditions = 0
+        invalid_condition = False
 
         # 处理单特征条件
         for key, threshold in conds.items():
-            if key == "text" or key not in features.columns:
+            if key == "text":
                 continue
+            if key not in features.columns:
+                invalid_condition = True
+                break
             if threshold is None:
                 continue
             try:
@@ -117,19 +146,27 @@ def _evaluate_generic_rules(rules: dict, features: pd.DataFrame,
                 unit = "" if key == "gpa_trend" else "%"
                 display_val = abs(th) if key == "gpa_trend" else th * 100
                 detail_parts.append(f"{label_map.get(key, key)}{op}{display_val}{unit}")
-            elif key in ("total_fail", "core_fail", "gpa_drop_count"):
+            elif key in ("total_fail", "core_fail", "gpa_drop_count", "freshman_fail",
+                         "repeat_fail", "consecutive_drop"):
                 op = "≥"
                 th_int = math.ceil(th)
                 cond_match = col >= th_int
                 label_map = {"total_fail": "挂科门次", "core_fail": "核心课挂科",
-                             "gpa_drop_count": "GPA下滑次数"}
-                unit_map = {"total_fail": "门", "core_fail": "门", "gpa_drop_count": "次"}
+                             "gpa_drop_count": "GPA下滑次数", "freshman_fail": "前两学期挂科",
+                             "repeat_fail": "同课反复挂科", "consecutive_drop": "GPA连续下降次数"}
+                unit_map = {"total_fail": "门", "core_fail": "门", "gpa_drop_count": "次",
+                            "freshman_fail": "门次", "repeat_fail": "次", "consecutive_drop": "次"}
                 detail_parts.append(f"{label_map.get(key, key)}{op}{th_int}{unit_map.get(key, '')}")
             else:
-                continue
+                invalid_condition = True
+                break
 
-            if len(features.loc[matched]) > 0:
-                matched = matched & cond_match
+            supported_conditions += 1
+            matched = matched & cond_match
+
+        # 任一未知特征都使整条规则失效，禁止退化为“全员命中”。
+        if invalid_condition or supported_conditions == 0:
+            continue
 
         # 复合条件（全部满足才算命中）
         hit_sids = features.index[matched]

@@ -22,6 +22,7 @@ export const router = createRouter({
 
         // ====== 预警查看 ======
         { path: 'alert', component: () => import('@/views/admin/alert/index.vue') },
+        { path: 'alert/discovery', component: () => import('@/views/admin/alert/Discovery.vue') },
 
         // ====== 教学运行分析 ======
         { path: 'operation/courses', component: () => import('@/views/admin/operation/Index.vue') },
@@ -66,6 +67,7 @@ export const router = createRouter({
 
 /** 子路径 → 所属一级菜单 path（与 Layout 高亮一致），用于菜单级准入判断 */
 function menuKeyOf(p: string): string {
+  if (p.startsWith('/admin/alert/')) return '/admin/alert'
   if (p.startsWith('/admin/college/')) return '/admin/dashboard'
   if (p.startsWith('/admin/major/')) return '/admin/dashboard'
   if (p.startsWith('/admin/course/')) return '/admin/dashboard'

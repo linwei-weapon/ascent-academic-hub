@@ -36,7 +36,7 @@
             </el-table-column>
             <el-table-column prop="enabled" label="启用" width="64">
               <template #default="{row}">
-                <el-switch v-model="row.enabled" size="small" :disabled="!hasPerm('edit')" @change="onRuleToggle(row)" />
+                <el-switch v-model="row.enabled" size="small" :disabled="!row.editable||!hasPerm('edit')" @change="onRuleToggle(row)" />
               </template>
             </el-table-column>
             <el-table-column label="操作" width="80">
@@ -92,8 +92,16 @@
           </div>
         </div>
 
-        <!-- 规则自发现 -->
-        <div class="sa-card" style="margin-top:14px">
+        <div class="sa-card" style="margin-top:14px;display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <div class="sa-card-title">规则自发现已迁移至预警中心</div>
+            <div class="sa-faint" style="font-size:12px">规则建议在预警中心形成，采纳后回到本页完成试算、复核、发布与激活。</div>
+          </div>
+          <el-button type="primary" plain size="small" @click="$router.push('/admin/alert/discovery')">进入规则自发现</el-button>
+        </div>
+
+        <!-- 旧内嵌区块保留为兼容模板，不再渲染或发起请求。 -->
+        <div v-if="false" class="sa-card" style="margin-top:14px">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
             <div class="sa-card-title" style="margin:0">
               规则自发现
@@ -102,8 +110,10 @@
             <el-button size="small" type="primary" :loading="discovering" @click="runDiscovery">运行规则自发现</el-button>
           </div>
           <div class="sa-faint" style="font-size:11px;margin-bottom:8px">
-            基于历史学生学业轨迹，自动识别高风险特征组合。审核通过的规则将加入上方预警规则表。
+            基于真实成绩、真实学籍异动和当前严重预警做历史关联分析。结果不是因果结论，采纳后仅创建变更草稿。
           </div>
+          <el-alert v-if="discoveryEvidence.limitation" type="warning" :closable="false"
+            :title="discoveryEvidence.limitation" show-icon style="margin-bottom:10px" />
 
           <!-- 待审核 -->
           <div v-if="discovered.pending.length" style="margin-bottom:12px">
@@ -140,9 +150,19 @@
                 </div>
               </div>
               <div class="disc-actions">
-                <el-button size="small" type="success" @click="reviewRule(dr.id, 'approve')">通过，启用此规则</el-button>
+                <el-button size="small" type="success" @click="reviewRule(dr.id, 'approve')">采纳并创建变更草稿</el-button>
                 <el-button size="small" type="danger" plain @click="reviewRule(dr.id, 'reject')">拒绝</el-button>
               </div>
+            </div>
+          </div>
+
+          <div v-if="discovered.approved.length" style="margin-bottom:12px">
+            <div class="sa-card-title" style="font-size:13px">已采纳建议（{{ discovered.approved.length }}）</div>
+            <div v-for="dr in discovered.approved" :key="dr.id" class="disc-card">
+              <span class="disc-name">{{ dr.name }}</span>
+              <span class="sa-faint" style="font-size:11px">
+                已转入规则治理<span v-if="dr.detail?.governance_change_id"> · 变更单 #{{ dr.detail.governance_change_id }}</span>
+              </span>
             </div>
           </div>
 
@@ -416,6 +436,7 @@ const discLastSemester = ref('')
 const discTotalStudents = ref(0)
 const discovering = ref(false)
 const showRejected = ref(false)
+const discoveryEvidence = ref<any>({})
 
 async function loadDiscovered() {
   try {
@@ -425,6 +446,7 @@ async function loadDiscovered() {
     discovered.rejected = d.rejected || []
     discLastSemester.value = d.lastSemester || ''
     discTotalStudents.value = d.totalStudents || 0
+    discoveryEvidence.value = d.evidence || {}
   } catch { /* 接口不可用时静默 */ }
 }
 
@@ -444,8 +466,9 @@ async function runDiscovery() {
 async function reviewRule(id: number, action: string) {
   try {
     const d = await http.put<any>(`/admin/settings/rules/discovered/${id}`, { action })
-    ElMessage.success(d.msg || (action === 'approve' ? '规则已启用' : '规则已拒绝'))
+    ElMessage.success(d.msg || (action === 'approve' ? '已创建规则变更草稿' : '规则建议已拒绝'))
     await loadDiscovered()
+    await loadChanges()
     // 同时刷新上方规则表
     const r = await http.get<{ rules: Rule[] }>('/admin/settings')
     rules.splice(0, rules.length, ...(r.rules || []))
@@ -462,7 +485,6 @@ onMounted(async () => {
   const d = await http.get<{ rules: Rule[] }>('/admin/settings')
   rules.splice(0, rules.length, ...(d.rules || []))
   loadChanges()
-  loadDiscovered()
 })
 </script>
 

@@ -196,6 +196,18 @@ def _build_conditions(rule_id: str, params: dict) -> list[dict]:
     return out
 
 
+def _discovered_conditions(conn: sqlite3.Connection, rule_id: str) -> list[dict]:
+    """从自发现建议保留原始运算符，避免只凭参数符号猜测展示口径。"""
+    if not rule_id.startswith("DR") or not rule_id[2:].isdigit():
+        return []
+    raw = dbm.scalar(conn, "SELECT conditions FROM sys_discovered_rule WHERE id=?",
+                     (int(rule_id[2:]),))
+    try:
+        return json.loads(raw or "[]")
+    except Exception:
+        return []
+
+
 def _gen_text(rule_id: str, params: dict) -> str:
     """由阈值现拼展示文案，与引擎实际判定一致。"""
     parts = []
@@ -220,10 +232,13 @@ def settings(conn: sqlite3.Connection = Depends(get_db),
             params = json.loads(r["params"]) if r["params"] else {}
         except Exception:
             params = {}
+        conditions = (_discovered_conditions(conn, r["rule_id"])
+                      if r["trigger_type"] == "discovered"
+                      else _build_conditions(r["rule_id"], params))
         rules.append({
             "id": r["rule_id"], "name": r["name"], "level": r["level"],
             "triggerType": r["trigger_type"],
-            "conditions": _build_conditions(r["rule_id"], params),
+            "conditions": conditions,
             "params": _gen_text(r["rule_id"], params),
             "editable": r["rule_id"] in RULE_PARAM_CATALOG,
             "enabled": bool(r["enabled"])})
@@ -808,13 +823,20 @@ class DiscoveredRuleAction(BaseModel):
 
 
 @router.post("/settings/rules/discover")
-def trigger_discovery(_: dict = Depends(require_admin)):
+def trigger_discovery(user: dict = Depends(get_current_user),
+                      conn: sqlite3.Connection = Depends(get_db)):
     """触发规则自发现分析，返回发现的规则数量。"""
+    if user.get("role_id") != "dean":
+        raise ApiError("当前角色无权运行规则自发现", code=403, status_code=403)
     from backend.etl.rule_discovery import run_and_save
     from ..settings import CURRENT_SEMESTER
     try:
         n = run_and_save(CURRENT_SEMESTER)
-        return ok({"count": n, "semester": CURRENT_SEMESTER},
+        return ok({"count": n, "semester": CURRENT_SEMESTER,
+                   "algorithmVersion": "association-v2",
+                   "evidence": {"level": "real-derived",
+                                "sources": ["真实成绩", "真实学籍异动", "当前严重预警"],
+                                "limitation": "历史关联不等于因果关系，采纳后仍须完成试算、复核、发布与激活。"}},
                   msg=f"分析完成，发现 {n} 条候选规则")
     except Exception as e:
         raise ApiError(f"分析失败：{e}", code=500, status_code=500)
@@ -824,7 +846,7 @@ def trigger_discovery(_: dict = Depends(require_admin)):
 def list_discovered(conn: sqlite3.Connection = Depends(get_db),
                   user: dict = Depends(get_current_user)):
     """获取规则自发现结果，按状态分组。"""
-    pending, approved, rejected = [], [], []
+    pending, approved, rejected, superseded = [], [], [], []
     last_semester = dbm.scalar(conn,
         "SELECT MAX(semester_id) FROM sys_discovered_rule") or ""
     for r in dbm.query(conn, """
@@ -848,24 +870,31 @@ def list_discovered(conn: sqlite3.Connection = Depends(get_db),
         }
         if r["status"] == "pending":
             pending.append(item)
-        elif r["status"] == "approved":
+        elif r["status"] in ("approved", "adopted"):
             approved.append(item)
-        else:
+        elif r["status"] == "rejected":
             rejected.append(item)
+        elif r["status"] == "superseded":
+            superseded.append(item)
 
-    # 补充：从 sys_alert_rule 中查出已启用的自发现规则（额外展示）
     return ok({
         "pending": pending, "approved": approved, "rejected": rejected,
+        "superseded": superseded,
         "lastSemester": last_semester,
         "totalStudents": dbm.scalar(conn, "SELECT COUNT(*) FROM dim_student") or 0,
+        "evidence": {"level": "real-derived",
+                     "sources": ["fact_grade(source=real)", "fact_attrition(source=real)", "fact_alert"],
+                     "limitation": "候选规则来自历史关联分析，不代表因果关系或自动生效。"},
     })
 
 
 @router.put("/settings/rules/discovered/{rule_id}")
 def review_discovered(rule_id: int, body: DiscoveredRuleAction,
-                       _: dict = Depends(require_admin),
+                       user: dict = Depends(get_current_user),
                        conn: sqlite3.Connection = Depends(get_db_rw)):
-    """审核自发现规则：approve → 写入 sys_alert_rule 并启用；reject → 标记已拒绝。"""
+    """采纳只创建禁用规则占位与治理草稿；不会直接改变生产预警。"""
+    _ensure_governance(conn)
+    _require_rule_permission(conn, user, "edit")
     if body.action not in ("approve", "reject"):
         raise ApiError("action 必须为 approve 或 reject", code=400, status_code=400)
 
@@ -877,33 +906,51 @@ def review_discovered(rule_id: int, body: DiscoveredRuleAction,
         raise ApiError("仅可审核待处理状态的规则", code=400, status_code=400)
 
     if body.action == "approve":
-        # 写入 sys_alert_rule
         try:
             conds = json.loads(row["conditions"])
         except Exception:
             conds = []
         params = {}
         for c in conds:
-            params[c["key"]] = c.get("value")
+            params[c["key"]] = c.get("engineValue", c.get("value"))
         params["text"] = row["name"]
         rule_id_str = f"DR{rule_id}"
+        if dbm.query_one(conn, "SELECT 1 FROM sys_alert_rule WHERE rule_id=?", (rule_id_str,)):
+            raise ApiError("该建议已存在生产规则占位，不能重复采纳", code=409, status_code=409)
+        params_json = json.dumps(params, ensure_ascii=False)
         dbm.execute(conn, """
-            INSERT OR REPLACE INTO sys_alert_rule
+            INSERT INTO sys_alert_rule
                 (rule_id, name, level, trigger_type, params, enabled)
-            VALUES (?, ?, ?, 'discovered', ?, 1)
+            VALUES (?, ?, ?, 'discovered', ?, 0)
         """, (rule_id_str, row["name"], row["level"] or "警告",
-              json.dumps(params, ensure_ascii=False)))
+              params_json))
+        now = datetime.now().astimezone().isoformat(timespec="seconds")
+        impact = {"currentStudents": 0, "candidateStatus": "pending",
+                  "note": "自发现建议已采纳，必须先完成影响试算",
+                  "discoveredRuleId": rule_id}
+        cur = dbm.execute(conn, """INSERT INTO alert_rule_change
+            (rule_id,base_params,proposed_params,base_enabled,proposed_enabled,status,
+             reason,impact_json,created_by,created_at)
+            VALUES (?,?,?,0,1,'draft',?,?,?,?)""",
+            (rule_id_str, params_json, params_json,
+             f"采纳自发现规则建议 #{rule_id}：{row['name']}",
+             json.dumps(impact, ensure_ascii=False), user["username"], now))
+        change_id = cur.lastrowid
+        detail = json.loads(row["detail_json"] or "{}")
+        detail["governance_change_id"] = change_id
+        detail["adopted_by"] = user["username"]
+        detail["adopted_at"] = now
         dbm.execute(conn, """
-            UPDATE sys_discovered_rule SET status='approved',
-            approved_at=datetime('now','localtime') WHERE id=?
-        """, (rule_id,))
-        msg = f"规则已启用：{row['name']}"
+            UPDATE sys_discovered_rule SET status='adopted', approved_at=?, detail_json=?
+            WHERE id=?""", (now, json.dumps(detail, ensure_ascii=False), rule_id))
+        msg = f"已创建规则变更草稿 #{change_id}，生产规则尚未启用"
     else:
         dbm.execute(conn,
             "UPDATE sys_discovered_rule SET status='rejected' WHERE id=?", (rule_id,))
-        msg = "规则已拒绝"
+        change_id = None
+        msg = "规则建议已拒绝"
 
-    return ok({"id": rule_id, "action": body.action}, msg=msg)
+    return ok({"id": rule_id, "action": body.action, "changeId": change_id}, msg=msg)
 
 
 # ── 规则自发现配置 ──
@@ -918,17 +965,23 @@ class DiscoveryConfigIn(BaseModel):
 def get_discovery_config(conn: sqlite3.Connection = Depends(get_db),
                          user: dict = Depends(get_current_user)):
     """获取规则自发现的数据范围/LLM/采样配置。"""
-    rows = dbm.query(conn, "SELECT config_key, config_value FROM sys_config "
-                     "WHERE config_key LIKE 'discovery.%'")
+    exists = dbm.scalar(conn, "SELECT 1 FROM sqlite_master WHERE type='table' AND name='sys_config'")
+    rows = (dbm.query(conn, "SELECT config_key, config_value FROM sys_config "
+                      "WHERE config_key LIKE 'discovery.%'") if exists else [])
     config = {}
     for r in rows:
         try:
             config[r["config_key"]] = json.loads(r["config_value"])
         except Exception:
             config[r["config_key"]] = r["config_value"]
+    llm = dict(config.get("discovery.llm", {"mode": "off", "anonymization": "standard"}) or {})
+    # 配置接口不回传密钥；当前实现也不允许把新密钥明文写入分析库。
+    has_cloud_key = bool(llm.pop("cloud_api_key", None))
+    llm["has_cloud_api_key"] = has_cloud_key
     return ok({
-        "data_sources": config.get("discovery.data_sources", {}),
-        "llm": config.get("discovery.llm", {}),
+        "data_sources": config.get("discovery.data_sources", {
+            "core": ["fact_grade", "dim_student", "fact_alert", "fact_attrition", "fact_major_req"]}),
+        "llm": llm,
         "sampling": config.get("discovery.sampling", {}),
     })
 
@@ -939,6 +992,12 @@ def update_discovery_config(body: DiscoveryConfigIn,
                             conn: sqlite3.Connection = Depends(get_db_rw)):
     """更新规则自发现配置。仅 admin 可操作。"""
     import json as _json
+    if body.llm and body.llm.get("cloud_api_key"):
+        raise ApiError("禁止将模型密钥明文写入分析库，请接入服务端密钥管理后再启用",
+                       code=400, status_code=400)
+    dbm.execute(conn, """CREATE TABLE IF NOT EXISTS sys_config (
+        config_key TEXT PRIMARY KEY, config_value TEXT NOT NULL,
+        updated_at TEXT DEFAULT (datetime('now','localtime')), updated_by TEXT)""")
     updates = {
         "discovery.data_sources": body.data_sources,
         "discovery.llm": body.llm,
