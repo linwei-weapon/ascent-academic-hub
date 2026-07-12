@@ -137,6 +137,79 @@ def student_plan_courses(student_id: str, status: Optional[str] = None,
                "wording": "not_completed表示截至当前成绩和认定记录尚无完成证据，不等同于漏选"})
 
 
+@router.get("/students/{student_id}/advice")
+def student_advice(student_id: str, conn: sqlite3.Connection = Depends(get_v2_db),
+                   user: dict = Depends(require_v2_reader)):
+    """确定性建议证据包；不调用大模型，不产生毕业结论或心理推断。"""
+    _assert_student_access(student_id, user, conn)
+    student = dbm.query_one(conn, "SELECT student_id,display_name,entry_grade,major_code,class_code,student_status FROM dim_student WHERE student_id=?", (student_id,)) or {}
+    indicator = dbm.query_one(conn, "SELECT * FROM student_growth_indicator WHERE student_id=? AND indicator_version='growth-v1'", (student_id,)) or {}
+    audiences = ["student", "counselor", "class_adviser", "college", "academic_affairs"]
+    cards = []
+
+    actionable = dbm.query(conn, """SELECT x.course_id,COALESCE(c.name,x.course_id) course_name,x.effective_score
+        FROM student_plan_course_status x LEFT JOIN dim_course c ON c.course_id=x.course_id
+        WHERE x.student_id=? AND x.is_actionable=1 ORDER BY x.is_overdue DESC,x.suggested_term LIMIT 5""", (student_id,))
+    for row in actionable:
+        course = row["course_name"]
+        cards.append({"advice_id": f"ADV-PLAN-FAILED-REQUIRED:{row['course_id']}", "priority": "high", "topic": "培养方案",
+            "title": f"优先核对《{course}》后续修读安排",
+            "evidence": f"培养方案课程存在明确未通过记录，有效成绩为{row['effective_score'] if row['effective_score'] is not None else '未记录'}",
+            "evidence_ids": [f"plan-course:{row['course_id']}"], "confidence": "high",
+            "messages": {"student": "建议尽早核对下一次开课或重修安排，并确认该课程是否影响后续课程衔接。",
+                "counselor": "建议确认学生是否了解该必修课程状态，并持续关注后续修读安排。",
+                "class_adviser": "建议关注该课程对应的专业基础及后续课程衔接，必要时提供学习指导。",
+                "college": "建议核查该课程重修或跟班修读资源，并关注同类学生规模。",
+                "academic_affairs": "建议关注该课程跨学院开课与重修资源；正式安排以教务系统为准。"},
+            "verification": "当前数据未包含完整重修班容量与报名条件"})
+
+    semester_gpa = dbm.query(conn, """SELECT semester_id,AVG(gpa) gpa FROM grade_attempt
+        WHERE student_id=? AND is_void=0 AND gpa IS NOT NULL GROUP BY semester_id ORDER BY semester_id DESC LIMIT 2""", (student_id,))
+    if len(semester_gpa) == 2:
+        delta = (semester_gpa[0]["gpa"] or 0) - (semester_gpa[1]["gpa"] or 0)
+        if abs(delta) >= 0.3:
+            improved = delta > 0
+            cards.append({"advice_id": "ADV-GPA-RECOVERY" if improved else "ADV-GPA-DECLINE",
+                "priority": "positive" if improved else "medium", "topic": "积极进展" if improved else "成绩趋势",
+                "title": "近期 GPA 有明显改善" if improved else "近期 GPA 出现下降",
+                "evidence": f"{semester_gpa[1]['semester_id']}至{semester_gpa[0]['semester_id']}平均绩点变化{delta:+.2f}",
+                "evidence_ids": [f"semester:{semester_gpa[1]['semester_id']}", f"semester:{semester_gpa[0]['semester_id']}"], "confidence": "high",
+                "messages": {a: ("近期学习结果出现改善，建议保持有效的学习节奏，并继续关注尚未解决的课程。" if improved else
+                    {"student": "建议回顾近期低分课程和学习负荷，优先安排基础薄弱课程的学习时间。",
+                     "counselor": "建议关注下降是否持续，并结合课程负荷和学籍背景与学生核实。",
+                     "class_adviser": "建议分析下降是否集中在专业基础课程，提供课程衔接建议。",
+                     "college": "建议结合该专业同年级情况判断是否存在共性困难课程。",
+                     "academic_affairs": "建议仅在形成跨学院共性时进入校级课程资源分析。"}[a]) for a in audiences},
+                "verification": "GPA变化为结果事实，不用于推断具体原因"})
+
+    latest_semester = dbm.scalar(conn, "SELECT MAX(semester_id) FROM grade_attempt WHERE student_id=? AND is_void=0", (student_id,))
+    if latest_semester:
+        difficult = dbm.query(conn, """WITH history AS (
+            SELECT course_id,COUNT(*) attempts,SUM(CASE WHEN is_pass=0 THEN 1 ELSE 0 END) failures
+            FROM grade_attempt WHERE is_void=0 AND semester_id<? AND is_pass IS NOT NULL GROUP BY course_id
+            HAVING COUNT(*)>=30 AND SUM(CASE WHEN is_pass=0 THEN 1 ELSE 0 END)*1.0/COUNT(*)>=0.15)
+            SELECT DISTINCT a.course_id,COALESCE(a.course_name,c.name,a.course_id) course_name,h.attempts,h.failures
+            FROM grade_attempt a JOIN history h ON h.course_id=a.course_id LEFT JOIN dim_course c ON c.course_id=a.course_id
+            WHERE a.student_id=? AND a.semester_id=? AND a.is_void=0 LIMIT 5""", (latest_semester, student_id, latest_semester))
+        for row in difficult:
+            rate = round(row["failures"] * 100.0 / row["attempts"], 1); course = row["course_name"]
+            cards.append({"advice_id": f"ADV-HIGH-FAIL-COURSE:{row['course_id']}", "priority": "medium", "topic": "课程难度",
+                "title": f"关注《{course}》的历史学习难度", "confidence": "medium",
+                "evidence": f"最近修读记录为{latest_semester}；此前历史样本{row['attempts']}人次，未通过率{rate}%",
+                "evidence_ids": [f"recent-course:{latest_semester}:{row['course_id']}", f"course-history:{row['course_id']}"],
+                "messages": {"student": "该课程历史未通过率相对较高，建议尽早安排学习时间、复习先修知识并关注课程答疑资源。",
+                    "counselor": "建议关注学生是否同时修读多门历史高难度课程，避免学习负荷过度集中。",
+                    "class_adviser": "建议关注先修知识和专业课程衔接，为学生提供针对性的学习指导。",
+                    "college": "建议核查该课程答疑、助教、课程团队和重修资源是否充足。",
+                    "academic_affairs": "建议关注该课程是否形成跨专业、跨学院的共同学习压力。"},
+                "verification": "历史群体结果不预测个人结果；原型缺当前选课状态，仅按最近学期修读记录提示"})
+
+    order = {"high": 0, "medium": 1, "positive": 2}; cards.sort(key=lambda x: (order.get(x["priority"], 9), x["advice_id"]))
+    return ok({"student": student, "indicator": indicator, "cards": cards[:12], "audiences": audiences,
+        "generated_by": "deterministic-template-v1", "ai_enabled": False,
+        "wording": "建议基于确定性证据生成；尚无完成证据不等同漏选，历史课程难度不预测个人结果"})
+
+
 @router.get("/courses/offerings")
 def course_offerings(semester: str = "2023-2024-1", category: Optional[str] = None,
                      limit: int = Query(100, ge=1, le=500), offset: int = Query(0, ge=0),

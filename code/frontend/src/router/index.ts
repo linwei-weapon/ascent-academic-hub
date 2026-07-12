@@ -48,8 +48,6 @@ export const router = createRouter({
 
         // ====== 报表中心 ======
         { path: 'reports', component: () => import('@/views/admin/curriculum/Reports.vue') },
-        { path: 'reports/custom', component: () => import('@/views/admin/reports/Custom.vue') },
-        { path: 'reports/accredit', component: () => import('@/views/admin/reports/Accredit.vue') },
 
         // ====== 系统管理（账号 / 菜单 / 角色） ======
         { path: 'system/accounts', component: () => import('@/views/admin/system/Accounts.vue') },

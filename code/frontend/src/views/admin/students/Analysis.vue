@@ -187,7 +187,7 @@ async function load() {
   if (d) { studentKpis.value = d.studentKpis || []; evidence.value = d.evidence || {}; Object.assign(data, d) }
 }
 
-function goCourse(row: any) { router.push({ path: '/admin/course/' + row.id, query: fSemester.value ? { semester: fSemester.value } : {} }) }
+function goCourse(row: any) { router.push({ path: '/admin/course/' + row.id, query: { ...(fSemester.value ? { semester: fSemester.value } : {}), returnTo:'/admin/students/analysis', returnLabel:'学生学业分析' } }) }
 
 function drillQuery() {
   const query: Record<string, string> = {}

@@ -57,18 +57,19 @@
     </div>
 
     <!-- 学生表格 -->
-    <div class="sa-card">
-      <el-table :data="students" stripe size="small" v-loading="loading" @row-click="goStudent" row-class-name="college-row-clickable">
-        <el-table-column prop="sid" label="学号" width="130" />
-        <el-table-column prop="name" label="姓名" width="80" />
-        <el-table-column prop="college" label="学院" width="140" />
-        <el-table-column label="专业" width="120">
+    <div class="sa-card student-table-card">
+      <div class="sa-card-title list-title"><span>学生明细</span><span class="extra">点击姓名或右侧按钮查看学业档案</span></div>
+      <el-table :data="students" stripe v-loading="loading" class="student-table">
+        <el-table-column prop="sid" label="学号" width="130"><template #default="{row}"><span class="tnum sid">{{ row.sid }}</span></template></el-table-column>
+        <el-table-column prop="name" label="姓名" width="100"><template #default="{row}"><el-button link type="primary" class="name-link" @click.stop="goStudent(row)">{{ row.name }}</el-button></template></el-table-column>
+        <el-table-column prop="college" label="学院" min-width="160" show-overflow-tooltip />
+        <el-table-column label="专业" min-width="140" show-overflow-tooltip>
           <template #default="{row}"><span>{{ row.majorName || row.major }}</span></template>
         </el-table-column>
-        <el-table-column label="班级" width="100">
+        <el-table-column label="班级" min-width="120" show-overflow-tooltip>
           <template #default="{row}"><span>{{ row.className || row.class }}</span></template>
         </el-table-column>
-        <el-table-column prop="grade" label="年级" width="72" />
+        <el-table-column prop="grade" label="年级" width="82" align="center" />
         <el-table-column label="GPA" width="72" align="right">
           <template #default="{row}">
             <span class="tnum" :style="{color: gpaColor(row.gpa), fontWeight:700}">{{ row.gpa != null ? row.gpa.toFixed(2) : '—' }}</span>
@@ -85,8 +86,8 @@
             <span v-else class="sa-faint">—</span>
           </template>
         </el-table-column>
-        <el-table-column label="" width="56">
-          <template #default><span style="color:var(--sa-faint)">详情 ›</span></template>
+        <el-table-column label="操作" width="100" fixed="right" align="center">
+          <template #default="{row}"><el-button size="small" type="primary" plain @click.stop="goStudent(row)">查看档案</el-button></template>
         </el-table-column>
       </el-table>
 
@@ -293,4 +294,12 @@ function alertTagType(level: string): string {
 
 <style scoped>
 .drill-tags { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.student-table-card { padding: 0; overflow: hidden; }
+.list-title { padding: 14px 16px 10px; display:flex; justify-content:space-between; }
+.student-table { width: 100%; }
+.sid { color:#475569; font-size:12px; }
+.name-link { font-weight:600; padding:0; }
+:deep(.student-table th.el-table__cell) { background:#F8FAFC; color:#475569; font-weight:600; height:44px; }
+:deep(.student-table td.el-table__cell) { padding:10px 0; }
+:deep(.student-table .el-table__row:hover > td.el-table__cell) { background:#F5F7FF; }
 </style>

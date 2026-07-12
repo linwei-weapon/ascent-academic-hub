@@ -97,6 +97,29 @@
       </el-table>
     </div>
 
+    <!-- 确定性学业建议：AI启用前的可追溯原型 -->
+    <div class="sa-card advice-panel" v-if="v2Status==='ok' && advice.cards.length">
+      <div class="sa-card-title advice-title">
+        <span>学业建议与关注要点 <span class="extra">确定性证据模板 · 非自由生成</span></span>
+        <el-select v-model="adviceAudience" size="small" style="width:150px">
+          <el-option v-for="item in audienceOptions" :key="item.value" :label="item.label" :value="item.value" />
+        </el-select>
+      </div>
+      <el-alert type="info" :closable="false" show-icon :title="advice.wording" style="margin-bottom:12px" />
+      <div class="advice-list">
+        <div v-for="card in advice.cards" :key="card.advice_id" class="advice-card" :class="card.priority">
+          <div class="advice-card-head">
+            <div><el-tag size="small" :type="adviceTagType(card.priority)">{{ advicePriority(card.priority) }}</el-tag><b>{{ card.title }}</b></div>
+            <span class="topic">{{ card.topic }}</span>
+          </div>
+          <p class="advice-message">{{ card.messages?.[adviceAudience] || card.messages?.student }}</p>
+          <div class="advice-evidence"><b>依据：</b>{{ card.evidence }}</div>
+          <div v-if="card.verification" class="advice-limit"><b>需核验：</b>{{ card.verification }}</div>
+        </div>
+      </div>
+      <div class="sa-faint advice-footer">生成方式：{{ advice.generated_by }} · 当前未启用外部AI模型 · 正式课程、成绩和毕业审核以学校业务系统为准</div>
+    </div>
+
     <!-- V2 成长指标与困难证据 -->
     <div class="sa-card" v-if="v2Status==='ok' && v2Growth.indicator">
       <div class="sa-card-title">V2 成长指标 <span class="extra">growth-v1 · 可回溯证据</span></div>
@@ -233,6 +256,13 @@ const v2Status = ref<'loading'|'ok'|'unavailable'>('loading')
 const v2Growth = reactive<any>({ student: null, indicator: null, flags: [], timeline: [], graduation: [] })
 const actionableCourses = reactive<any>({ items: [], total: 0 })
 const candidateCourses = reactive<any>({ items: [], total: 0 })
+const advice = reactive<any>({ cards: [], audiences: [], generated_by: '', wording: '' })
+const adviceAudience = ref('student')
+const audienceOptions = [
+  {value:'student',label:'学生本人视角'}, {value:'counselor',label:'辅导员视角'},
+  {value:'class_adviser',label:'班主任视角'}, {value:'college',label:'学院视角'},
+  {value:'academic_affairs',label:'教务处视角'},
+]
 const planTab = ref('actionable')
 
 onMounted(async () => {
@@ -245,21 +275,36 @@ onMounted(async () => {
   }
   try {
     const id = String(route.params.id)
-    const [growth, actionable, candidates] = await Promise.all([
-      http.get<any>('/v2/students/' + id + '/growth?timeline_limit=80'),
-      http.get<any>('/v2/students/' + id + '/plan-courses?actionable=true&limit=200'),
-      http.get<any>('/v2/students/' + id + '/plan-courses?status=not_completed&limit=100'),
+    const [growth, actionable, candidates, adviceData] = await Promise.all([
+      http.getSilent<any>('/v2/students/' + id + '/growth?timeline_limit=80'),
+      http.getSilent<any>('/v2/students/' + id + '/plan-courses?actionable=true&limit=200'),
+      http.getSilent<any>('/v2/students/' + id + '/plan-courses?status=not_completed&limit=100'),
+      http.getSilent<any>('/v2/students/' + id + '/advice'),
     ])
     Object.assign(v2Growth, growth)
     Object.assign(actionableCourses, actionable)
     Object.assign(candidateCourses, candidates)
+    Object.assign(advice, adviceData)
     v2Status.value = 'ok'
+    if (status.value === 'error' && growth?.student) {
+      Object.assign(data, {
+        code: growth.student.student_id,
+        name: growth.student.display_name,
+        collegeName: growth.student.organization_id || '—',
+        majorName: growth.student.major_name || growth.student.major_code || '—',
+        className: growth.student.class_code || '—',
+        kpis: [], gpaHistory: [], alertHistory: [], scores: [], semesterSummary: [],
+      })
+      status.value = 'ok'
+    }
   } catch {
     v2Status.value = 'unavailable'
   }
 })
 
 function fmtNumber(value: any) { return value == null ? '—' : Number(value).toFixed(2).replace(/\.00$/, '') }
+function adviceTagType(priority:string) { return priority==='high'?'danger':priority==='positive'?'success':'warning' }
+function advicePriority(priority:string) { return priority==='high'?'优先关注':priority==='positive'?'积极进展':'建议关注' }
 function flagLabel(code: string) {
   return ({ multiple_current_failures: '当前多门未通过', repeated_course_failure: '同一课程重复失败', required_course_gap: '必修课程明确失败' } as Record<string,string>)[code] || code
 }
@@ -333,4 +378,17 @@ const gpaOption = computed(() => {
 .flag-list { display:flex; align-items:center; flex-wrap:wrap; gap:6px; margin-top:12px; }
 .wording-alert { margin-bottom:8px; }
 .timeline-detail { font-size:12px; margin-top:4px; line-height:1.6; }
+.advice-title { display:flex; justify-content:space-between; align-items:center; }
+.advice-list { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+.advice-card { border:1px solid #E2E8F0; border-left:4px solid #D97706; border-radius:9px; padding:13px 14px; background:#fff; }
+.advice-card.high { border-left-color:#DC2626; }
+.advice-card.positive { border-left-color:#0D9488; }
+.advice-card-head { display:flex; justify-content:space-between; gap:12px; align-items:center; }
+.advice-card-head b { margin-left:8px; font-size:13px; color:#1E293B; }
+.advice-card-head .topic { color:#94A3B8; font-size:11px; white-space:nowrap; }
+.advice-message { margin:10px 0; color:#334155; font-size:13px; line-height:1.7; }
+.advice-evidence,.advice-limit { font-size:11px; color:#64748B; line-height:1.6; }
+.advice-limit { color:#92400E; margin-top:3px; }
+.advice-footer { font-size:11px; margin-top:12px; text-align:right; }
+@media (max-width:1000px) { .advice-list { grid-template-columns:1fr; } }
 </style>

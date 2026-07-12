@@ -23,7 +23,7 @@ function toLogin(): void {
   if (!location.hash.startsWith('#/login')) location.hash = '#/login'
 }
 
-async function request<T = any>(path: string, opts: RequestInit = {}): Promise<T> {
+async function request<T = any>(path: string, opts: RequestInit = {}, silent = false): Promise<T> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(opts.headers as Record<string, string> | undefined),
@@ -37,7 +37,7 @@ async function request<T = any>(path: string, opts: RequestInit = {}): Promise<T
   try {
     body = await res.json()
   } catch {
-    ElMessage.error('服务器无响应')
+    if (!silent) ElMessage.error('服务器无响应')
     throw new Error('invalid response')
   }
 
@@ -47,7 +47,7 @@ async function request<T = any>(path: string, opts: RequestInit = {}): Promise<T
     throw new Error(body?.msg || 'unauthorized')
   }
   if (body.code !== 0) {
-    ElMessage.error(body.msg || '请求失败')
+    if (!silent) ElMessage.error(body.msg || '请求失败')
     throw new Error(body.msg || 'request failed')
   }
   return body.data
@@ -55,6 +55,7 @@ async function request<T = any>(path: string, opts: RequestInit = {}): Promise<T
 
 export const http = {
   get: <T = any>(p: string) => request<T>(p),
+  getSilent: <T = any>(p: string) => request<T>(p, {}, true),
   post: <T = any>(p: string, data?: unknown) =>
     request<T>(p, { method: 'POST', body: JSON.stringify(data ?? {}) }),
   put: <T = any>(p: string, data?: unknown) =>
