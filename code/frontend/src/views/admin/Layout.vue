@@ -60,6 +60,7 @@ const route = useRoute()
 interface MenuNode extends AuthMenu {
   children?: MenuNode[]
 }
+const menuTitle = (menu: AuthMenu) => menu.path === '/admin/reports' ? '管理决策专题' : menu.title
 const menuTree = computed<MenuNode[]>(() => {
   const all = visibleMenus.value as AuthMenu[]
   // 找出父级菜单（无 parent_id 且有子菜单的）
@@ -68,7 +69,8 @@ const menuTree = computed<MenuNode[]>(() => {
     .filter(m => !m.parent_id || !parentIds.has(m.path))
     .map(m => ({
       ...m,
-      children: all.filter(c => c.parent_id === m.path).sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)),
+      title: menuTitle(m),
+      children: all.filter(c => c.parent_id === m.path).map(c => ({ ...c, title: menuTitle(c) })).sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)),
     }))
     .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
 })

@@ -984,7 +984,7 @@ function mockPlugin(): Plugin {
     { menu_id: '/admin/curriculum', title: '培养质量分析', path: '/admin/curriculum', icon: 'Reading', sort_order: 4 },
     { menu_id: '/admin/faculty', title: '师资结构分析', path: '/admin/faculty', icon: 'User', sort_order: 5 },
     { menu_id: '/admin/students/analysis', title: '学生学业分析', path: '/admin/students/analysis', icon: 'DataLine', sort_order: 6 },
-    { menu_id: '/admin/reports', title: '报表中心', path: '/admin/reports', icon: 'Document', sort_order: 7 },
+    { menu_id: '/admin/reports', title: '管理决策专题', path: '/admin/reports', icon: 'Document', sort_order: 7 },
     { menu_id: '/admin/system/accounts', title: '账号管理', path: '/admin/system/accounts', icon: 'User', sort_order: 8 },
     { menu_id: '/admin/system/menus', title: '菜单管理', path: '/admin/system/menus', icon: 'Menu', sort_order: 9 },
     { menu_id: '/admin/system/roles', title: '角色管理', path: '/admin/system/roles', icon: 'UserFilled', sort_order: 10 },
