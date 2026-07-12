@@ -53,7 +53,7 @@ const topics = [
   { key:'plan', index:'02', title:'培养方案完成与毕业准备度', status:'部分可用', tone:'plan',
     value:'从“修了多少学分”转向“是否完成正确的课程结构”，提前发现必修、模块和先修链缺口。',
     questions:['哪些学生存在明确未通过的必修课程？','哪些课程只是尚无完成证据，需要选课或认定核验？','哪些课程缺口需要新增重修资源？'],
-    actions:[{label:'查看培养方案进度',path:'/admin/curriculum/progress',primary:true},{label:'查看培养质量',path:'/admin/curriculum'}],
+    actions:[{label:'进入专题',path:'/admin/reports/graduation-readiness',primary:true},{label:'查看培养质量',path:'/admin/curriculum'}],
     boundary:'当前不输出能否毕业结论；缺完整选课过程时不称“漏选”。' },
   { key:'course', index:'03', title:'课程质量与教学运行', status:'部分可用', tone:'course',
     value:'识别影响面大且持续异常的课程，结合通过率、班额、年级和排课时段组织课程层面核查。',

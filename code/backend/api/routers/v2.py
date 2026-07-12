@@ -186,6 +186,86 @@ def early_setback_topic(organization_id: Optional[str] = None, major_code: Optio
                  "boundary": "群体筛查不推断个人原因，不自动建立帮扶任务；无有效入学年或无大一常规学期成绩者不进入分母。"}})
 
 
+@router.get("/topics/graduation-readiness")
+def graduation_readiness_topic(organization_id: Optional[str] = None, major_code: Optional[str] = None,
+                               plan_id: Optional[str] = None, readiness: Optional[str] = None,
+                               limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0),
+                               conn: sqlite3.Connection = Depends(get_v2_db), user: dict = Depends(require_v2_reader)):
+    """培养方案完成证据与毕业准备度专题；准备度不是毕业审核结论。"""
+    cond, params = ["x.rule_version='growth-v1'"], []
+    scope, scope_params = _student_scope(user, conn, "s")
+    if scope:
+        cond.append(scope); params.extend(scope_params)
+    if organization_id:
+        cond.append("s.organization_id=?"); params.append(organization_id)
+    if major_code:
+        cond.append("s.major_code=?"); params.append(major_code)
+    if plan_id:
+        cond.append("x.plan_id=?"); params.append(plan_id)
+    where = " AND ".join(cond)
+    cte = f"""WITH student_readiness AS (
+      SELECT s.student_id,s.display_name,s.entry_grade,s.organization_id,s.major_code,s.major_name,s.class_code,
+        x.plan_id,p.plan_name,p.version,
+        COUNT(*) plan_courses,ROUND(SUM(COALESCE(pc.credits,0)),1) plan_credits,
+        SUM(CASE WHEN x.completion_status IN ('passed','recognized') THEN 1 ELSE 0 END) completed_courses,
+        ROUND(SUM(CASE WHEN x.completion_status IN ('passed','recognized') THEN COALESCE(pc.credits,x.earned_credits,0) ELSE 0 END),1) completed_credits,
+        SUM(CASE WHEN x.requirement_type='必修' THEN 1 ELSE 0 END) required_courses,
+        SUM(CASE WHEN x.requirement_type='必修' AND x.completion_status IN ('passed','recognized') THEN 1 ELSE 0 END) required_completed,
+        SUM(CASE WHEN x.requirement_type='必修' AND x.completion_status='failed' THEN 1 ELSE 0 END) explicit_required_failures,
+        SUM(CASE WHEN x.requirement_type='必修' AND x.completion_status IN ('not_completed','unknown') THEN 1 ELSE 0 END) candidate_required_gaps,
+        SUM(CASE WHEN x.completion_status='recognized' THEN 1 ELSE 0 END) recognized_courses
+      FROM student_plan_course_status x JOIN dim_student s ON s.student_id=x.student_id
+      LEFT JOIN curriculum_plan p ON p.plan_id=x.plan_id LEFT JOIN curriculum_plan_course pc ON pc.plan_course_id=x.plan_course_id
+      WHERE {where} GROUP BY s.student_id,x.plan_id
+    ), classified AS (SELECT *,ROUND(required_completed*100.0/NULLIF(required_courses,0),1) completion_rate,
+      CASE WHEN explicit_required_failures>0 THEN 'action_required'
+           WHEN candidate_required_gaps>0 THEN 'verification_required'
+           ELSE 'evidence_complete' END readiness_status FROM student_readiness)
+    """
+    read_cond, read_params = "", []
+    if readiness:
+        if readiness not in {"action_required", "verification_required", "evidence_complete"}:
+            raise ApiError("不支持的准备度状态", code=400, status_code=400)
+        read_cond = " WHERE readiness_status=?"; read_params = [readiness]
+    all_params = tuple(params + read_params)
+    summary = dbm.query_one(conn, cte + """SELECT COUNT(*) covered_students,COUNT(DISTINCT plan_id) plan_count,
+      SUM(CASE WHEN readiness_status='action_required' THEN 1 ELSE 0 END) action_required_students,
+      SUM(CASE WHEN readiness_status='verification_required' THEN 1 ELSE 0 END) verification_students,
+      SUM(CASE WHEN readiness_status='evidence_complete' THEN 1 ELSE 0 END) evidence_complete_students,
+      ROUND(AVG(completion_rate),1) avg_completion_rate,SUM(explicit_required_failures) explicit_required_failures,
+      SUM(candidate_required_gaps) candidate_required_gaps FROM classified""", tuple(params)) or {}
+    total = dbm.scalar(conn, cte + "SELECT COUNT(*) FROM classified" + read_cond, all_params) or 0
+    students = dbm.query(conn, cte + "SELECT * FROM classified" + read_cond + """ ORDER BY
+      CASE readiness_status WHEN 'action_required' THEN 1 WHEN 'verification_required' THEN 2 ELSE 3 END,
+      explicit_required_failures DESC,candidate_required_gaps DESC,completion_rate ASC,student_id LIMIT ? OFFSET ?""",
+      tuple(params + read_params + [limit, offset]))
+    majors = dbm.query(conn, cte + """SELECT major_code,major_name,COUNT(*) students,
+      ROUND(AVG(completion_rate),1) avg_completion_rate,SUM(explicit_required_failures) explicit_required_failures,
+      SUM(candidate_required_gaps) candidate_required_gaps,
+      SUM(CASE WHEN readiness_status='action_required' THEN 1 ELSE 0 END) action_required_students
+      FROM classified GROUP BY major_code,major_name ORDER BY action_required_students DESC,candidate_required_gaps DESC LIMIT 15""", tuple(params))
+    modules = dbm.query(conn, f"""SELECT COALESCE(x.module,'未分类') module,
+      SUM(CASE WHEN x.requirement_type='必修' AND x.completion_status='failed' THEN 1 ELSE 0 END) explicit_failures,
+      SUM(CASE WHEN x.requirement_type='必修' AND x.completion_status IN ('not_completed','unknown') THEN 1 ELSE 0 END) candidate_gaps,
+      COUNT(DISTINCT x.student_id) students
+      FROM student_plan_course_status x JOIN dim_student s ON s.student_id=x.student_id WHERE {where}
+      GROUP BY COALESCE(x.module,'未分类') ORDER BY explicit_failures DESC,candidate_gaps DESC LIMIT 12""", tuple(params))
+    courses = dbm.query(conn, f"""SELECT x.course_id,COALESCE(MAX(c.name),x.course_id) course_name,
+      SUM(CASE WHEN x.completion_status='failed' THEN 1 ELSE 0 END) explicit_failures,
+      SUM(CASE WHEN x.completion_status IN ('not_completed','unknown') THEN 1 ELSE 0 END) candidate_gaps,
+      COUNT(DISTINCT x.student_id) affected_students
+      FROM student_plan_course_status x JOIN dim_student s ON s.student_id=x.student_id LEFT JOIN dim_course c ON c.course_id=x.course_id
+      WHERE {where} AND x.requirement_type='必修' GROUP BY x.course_id
+      HAVING explicit_failures>0 OR candidate_gaps>0 ORDER BY explicit_failures DESC,candidate_gaps DESC LIMIT 12""", tuple(params))
+    return ok({"summary": summary, "majors": majors, "modules": modules, "courses": courses,
+               "students": students, "total": total, "limit": limit, "offset": offset,
+               "definition": {"action_required": "培养方案必修课存在明确未通过成绩，可进入修读资源核查。",
+                 "verification_required": "必修课尚无通过、认定或明确失败证据，须结合选课与认定数据核验，不称为漏选。",
+                 "evidence_complete": "当前接入记录中必修课均有通过或认定证据，不等同学校毕业审核通过。",
+                 "completion_rate": "已有通过或认定证据的必修课程数 / 培养方案必修课程数；选修候选池不进入分母。",
+                 "boundary": "本专题不输出能否毕业或获得学位的结论；正式结果以学校毕业审核和学位审核为准。"}})
+
+
 @router.get("/students/{student_id}/growth")
 def student_growth(student_id: str, timeline_limit: int = Query(100, ge=1, le=500),
                    conn: sqlite3.Connection = Depends(get_v2_db), user: dict = Depends(require_v2_reader)):

@@ -49,6 +49,7 @@ export const router = createRouter({
         // ====== 报表中心 ======
         { path: 'reports', component: () => import('@/views/admin/curriculum/Reports.vue') },
         { path: 'reports/early-setback', component: () => import('@/views/admin/reports/EarlySetback.vue') },
+        { path: 'reports/graduation-readiness', component: () => import('@/views/admin/reports/GraduationReadiness.vue') },
 
         // ====== 系统管理（账号 / 菜单 / 角色） ======
         { path: 'system/accounts', component: () => import('@/views/admin/system/Accounts.vue') },
