@@ -214,7 +214,7 @@ function kpiTone(label: string): 'primary'|'teal'|'danger'|'amber' {
 }
 function goCollege(row: any) { router.push({ path:'/admin/college/' + row.id, query:{ semester:fSemester.value } }); }
 function goCourse(row: any) { router.push({ path:'/admin/course/' + row.id, query:{ semester:fSemester.value } }); }
-function goStudents() { router.push({ path:'/admin/students/list', query:{ semester:fSemester.value } }); }
+function goStudents() { router.push({ path:'/admin/students/list', query:{ semester:fSemester.value,returnTo:'/admin/dashboard',returnLabel:'返回数据大屏' } }); }
 </script>
 
 <style scoped>

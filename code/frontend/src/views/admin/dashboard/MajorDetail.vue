@@ -2,6 +2,7 @@
   <div>
     <el-breadcrumb separator="›">
       <el-breadcrumb-item :to="{path:'/admin/dashboard',query:semLabel?{semester:semLabel}:{}}">数据大屏</el-breadcrumb-item>
+      <el-breadcrumb-item v-if="data.collegeId" :to="{path:'/admin/college/'+data.collegeId,query:semLabel?{semester:semLabel}:{}}">{{ data.college || '学院详情' }}</el-breadcrumb-item>
       <el-breadcrumb-item>{{ data.name || '专业详情' }}</el-breadcrumb-item>
     </el-breadcrumb>
     <h2 class="sa-page-title" style="margin-top:14px">{{ data.name || '加载中…' }} · 专业详情</h2>
@@ -24,7 +25,7 @@
               <span class="grade-name">{{ g.grade }}</span>
               <span class="chip">{{ g.students }}人</span>
               <span class="chip">GPA <b class="tnum">{{ g.gpaAvg }}</b></span>
-              <span class="chip">挂科率 <b class="tnum" style="color:#E11D48">{{ g.failRate }}</b></span>
+              <span class="chip">当前挂科学生率 <b class="tnum" style="color:#E11D48">{{ g.failRate }}</b></span>
               <span class="chip">预警 <b class="tnum" style="color:#E11D48">{{ g.alertCount }}</b>人</span>
               <span class="grade-credit">
                 <span class="sa-faint" style="font-size:11px">课程学分通过</span>
@@ -33,7 +34,9 @@
             </div>
             <el-table v-if="g.courses && g.courses.length" :data="g.courses" size="small" @row-click="goCourse" row-class-name="course-row-clickable">
               <el-table-column prop="name" label="挂科课程" width="160"><template #default="{row}"><span class="course-link">{{ row.name }}</span></template></el-table-column>
-              <el-table-column label="挂科率计算" min-width="220"><template #default="{row}"><span style="font-size:12px"><b style="color:#E11D48" class="tnum">{{ row.failCount }}</b> 不及格 ÷ <b class="tnum">{{ row.totalCount }}</b> 总修读 = <b style="color:#E11D48" class="tnum">{{ row.failRate }}%</b></span></template></el-table-column>
+              <el-table-column prop="failCount" label="不及格" width="80" align="right" />
+              <el-table-column prop="totalCount" label="修读人数" width="90" align="right" />
+              <el-table-column prop="failRate" label="挂科率" width="90" align="right"><template #default="{row}"><b style="color:#E11D48" class="tnum">{{ row.failRate }}%</b></template></el-table-column>
             </el-table>
             <div v-else class="sa-faint" style="font-size:12px;padding:2px 0 4px">该年级无集中挂科课程</div>
           </div>
@@ -113,9 +116,9 @@ function kpiTone(label: string): 'primary'|'teal'|'danger'|'amber' {
 }
 function goStudents() {
   const majorId = route.params.id as string;
-  router.push({ path:'/admin/students/list', query:{college:data.collegeId,major:majorId,majorName:data.name,...(semLabel?{semester:semLabel}:{})} });
+  router.push({ path:'/admin/students/list', query:{college:data.collegeId,collegeName:data.college,major:majorId,majorName:data.name,returnTo:`/admin/major/${majorId}`,returnLabel:'返回专业详情',...(semLabel?{semester:semLabel}:{})} });
 }
-function goCourse(row: any) { router.push({ path:'/admin/course/'+row.id, query:semLabel?{semester:semLabel}:{} }); }
+function goCourse(row: any) { router.push({ path:'/admin/course/'+row.id, query:{collegeId:data.collegeId,collegeName:data.college,majorId:String(route.params.id),majorName:data.name,...(semLabel?{semester:semLabel}:{})} }); }
 </script>
 
 <style scoped>

@@ -54,7 +54,8 @@
         <div class="sa-card">
           <div class="sa-card-title">挂科集中课程 TOP6 <span class="extra">点击课程查看详情</span></div>
           <el-table :data="failCourses" size="small" @row-click="goCourse" row-class-name="row-clickable">
-            <el-table-column prop="name" label="课程" min-width="100"><template #default="{row}"><span class="link">{{ row.name }}</span></template></el-table-column>
+            <el-table-column prop="name" label="课程" min-width="140"><template #default="{row}"><span class="link">{{ row.name }}</span></template></el-table-column>
+            <el-table-column :formatter="() => data.name" label="开课学院" width="110" />
             <el-table-column label="挂科率" min-width="130"><template #default="{row}">
               <div style="display:flex;align-items:center;gap:6px">
                 <el-progress :percentage="Math.min(parseFloat(row.failRate)*5,100)" :show-text="false" :stroke-width="8" :color="parseFloat(row.failRate)>15?'#E11D48':'#D97706'" style="flex:1" />
@@ -62,8 +63,10 @@
               </div>
             </template></el-table-column>
             <el-table-column prop="failCount" label="不及格" width="64" align="right" />
-            <el-table-column prop="totalCount" label="修读" width="64" align="right" />
-            <el-table-column prop="avgScore" label="均分" width="54" align="right"><template #default="{row}"><b class="tnum">{{ row.avgScore }}</b></template></el-table-column>
+            <el-table-column prop="totalCount" label="修读人数" width="80" align="right" />
+            <el-table-column prop="avgScore" label="平均分" width="70" align="right"><template #default="{row}"><b class="tnum">{{ row.avgScore }}</b></template></el-table-column>
+            <el-table-column label="首次通过率" width="90" align="right"><template #default="{row}">{{ row.firstPassRate ?? '—' }}{{ row.firstPassRate != null ? '%' : '' }}</template></el-table-column>
+            <el-table-column label="最终通过率" width="90" align="right"><template #default="{row}">{{ row.finalPassRate ?? '—' }}{{ row.finalPassRate != null ? '%' : '' }}</template></el-table-column>
           </el-table>
         </div>
       </el-col>
@@ -126,9 +129,10 @@ function kpiTone(label: string): 'primary'|'teal'|'danger'|'amber' {
   if (label.includes('挂科')) return 'amber';
   return 'primary';
 }
-function goMajor(row: any) { router.push({ path:'/admin/major/'+row.id, query:{semester:fSemester.value} }); }
-function goCourse(row: any) { router.push({ path:'/admin/course/'+row.id, query:{semester:fSemester.value} }); }
-function goStudents() { router.push({ path:'/admin/students/list', query:{college:collegeId,collegeName:data.name,semester:fSemester.value} }); }
+function drillQuery(extra:Record<string,string>={}) { return { semester:fSemester.value, collegeId, collegeName:data.name, ...extra } }
+function goMajor(row: any) { router.push({ path:'/admin/major/'+row.id, query:drillQuery({majorId:row.id,majorName:row.name}) }); }
+function goCourse(row: any) { router.push({ path:'/admin/course/'+row.id, query:drillQuery() }); }
+function goStudents() { router.push({ path:'/admin/students/list', query:{college:collegeId,collegeName:data.name,semester:fSemester.value,returnTo:`/admin/college/${collegeId}`,returnLabel:'返回学院详情'} }); }
 </script>
 <style scoped>
 :deep(.row-clickable) { cursor: pointer; }

@@ -3,7 +3,7 @@
     <div class="sa-head-row">
       <div>
         <el-breadcrumb separator="›" style="margin-bottom:4px">
-          <el-breadcrumb-item :to="{path:'/admin/students/analysis'}">学生学业</el-breadcrumb-item>
+          <el-breadcrumb-item :to="backTarget">{{ backLabel }}</el-breadcrumb-item>
           <el-breadcrumb-item>学生学业画像</el-breadcrumb-item>
         </el-breadcrumb>
         <h2 class="sa-page-title">{{ pageTitle }}</h2>
@@ -130,6 +130,11 @@ const migrationKey = ref(route.query.migration as string || '')
 const migrationLabel = ref(route.query.migrationLabel as string || '')
 const fromSemester = ref(route.query.from_semester as string || '')
 const toSemester = ref(route.query.to_semester as string || '')
+const backTarget = computed(() => {
+  const path = route.query.returnTo as string
+  return path ? path : '/admin/students/analysis'
+})
+const backLabel = computed(() => (route.query.returnLabel as string) || '学生学业')
 
 // ── 数据 ──
 const loading = ref(false)
@@ -260,8 +265,14 @@ function removeMigration() {
 }
 function goStudent(row: any) {
   const qs = new URLSearchParams({ from: 'list' })
+  Object.entries(route.query).forEach(([k,v]) => { if (v != null) qs.set(k, String(v)) })
   if (fCollege.value) qs.set('college', fCollege.value)
   if (fMajor.value) qs.set('major', fMajor.value)
+  if (fGrade.value) qs.set('grade', fGrade.value)
+  if (fClass.value) qs.set('class', fClass.value)
+  if (fSemester.value) qs.set('semester', fSemester.value)
+  if (courseId.value) qs.set('course', courseId.value)
+  if (courseName.value) qs.set('courseName', courseName.value)
   router.push(`/admin/student/${row.sid}?${qs.toString()}`)
 }
 

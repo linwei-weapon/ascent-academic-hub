@@ -1,7 +1,9 @@
 <template>
   <div>
     <el-breadcrumb separator="›">
-      <el-breadcrumb-item :to="{path:'/admin/dashboard'}">数据大屏</el-breadcrumb-item>
+      <el-breadcrumb-item :to="{path:'/admin/dashboard',query:semLabel?{semester:semLabel}:{}}">数据大屏</el-breadcrumb-item>
+      <el-breadcrumb-item v-if="route.query.collegeId" :to="{path:'/admin/college/'+route.query.collegeId,query:semLabel?{semester:semLabel}:{}}">{{ route.query.collegeName || '学院详情' }}</el-breadcrumb-item>
+      <el-breadcrumb-item v-if="route.query.majorId" :to="{path:'/admin/major/'+route.query.majorId,query:semLabel?{semester:semLabel}:{}}">{{ route.query.majorName || '专业详情' }}</el-breadcrumb-item>
       <el-breadcrumb-item>{{ data.name || '课程详情' }}</el-breadcrumb-item>
     </el-breadcrumb>
     <h2 class="sa-page-title" style="margin-top:14px">{{ data.name || '加载中…' }} · 课程详情</h2>
@@ -119,6 +121,9 @@ function kpiTone(label: string): 'primary'|'teal'|'danger'|'amber' {
   return 'primary';
 }
 function goStudents() {
-  router.push('/admin/students/list?course=' + route.params.id + '&courseName=' + encodeURIComponent(data.name) + '&semester=' + encodeURIComponent(semLabel));
+  const query:any = { course:String(route.params.id), courseName:data.name, semester:semLabel, returnTo:route.fullPath, returnLabel:'返回课程详情' };
+  if (route.query.collegeId) { query.collegeId=route.query.collegeId; query.collegeName=route.query.collegeName; }
+  if (route.query.majorId) { query.majorId=route.query.majorId; query.majorName=route.query.majorName; }
+  router.push({path:'/admin/students/list',query});
 }
 </script>

@@ -420,14 +420,18 @@ def major_detail(major_id: str, semester: Optional[str] = None,
     ]
 
     gradeDetail = []
-    for r in dbm.query(conn, f"""
-        SELECT s.grade, COUNT(DISTINCT s.student_id) students,
-               AVG(g.gpa) gpa, AVG(CASE WHEN g.is_pass=0 THEN 1.0 ELSE 0 END) fr,
-               AVG(CASE WHEN g.is_pass=1 THEN g.credits ELSE 0 END)/NULLIF(AVG(g.credits),0) cd
-        FROM fact_grade g JOIN dim_student s ON g.student_id=s.student_id
-        WHERE s.major_id=? AND g.semester_id=? AND s.grade IS NOT NULL{scope_and}
-        GROUP BY s.grade ORDER BY s.grade DESC""", tuple([major_id, cur] + scope_params)):
-        grade = r["grade"]
+    grade_rows = dbm.query(conn, f"""SELECT s.grade,COUNT(DISTINCT s.student_id) students
+        FROM dim_student s WHERE s.major_id=? AND s.grade IS NOT NULL{scope_and}
+        GROUP BY s.grade ORDER BY s.grade DESC""", tuple([major_id] + scope_params))
+    for base in grade_rows:
+        grade = base["grade"]
+        r = dbm.query_one(conn, f"""SELECT AVG(g.gpa) gpa,
+            COUNT(DISTINCT CASE WHEN g.is_pass=0 THEN g.student_id END) failed_students,
+            SUM(CASE WHEN g.is_pass=1 THEN COALESCE(g.credits,0) ELSE 0 END) passed_credits,
+            SUM(COALESCE(g.credits,0)) attempted_credits
+            FROM fact_grade g JOIN dim_student s ON g.student_id=s.student_id
+            WHERE g.source='real' AND s.major_id=? AND s.grade=? AND g.semester_id=?{scope_and}""",
+            tuple([major_id, grade, cur] + scope_params)) or {}
         acnt = dbm.scalar(conn, f"""
             SELECT COUNT(DISTINCT a.student_id) FROM fact_alert a
             JOIN dim_student s ON a.student_id=s.student_id
@@ -445,9 +449,13 @@ def major_detail(major_id: str, semester: Optional[str] = None,
                             "totalCount": cr["total"],
                             "failRate": str(round(cr["fc"] / cr["total"] * 100, 1))})
         gradeDetail.append({
-            "grade": f"{grade}级", "students": r["students"],
-            "gpaAvg": f"{round(r['gpa'] or 0, 2)}", "failRate": _pct(r["fr"]),
-            "alertCount": acnt, "creditDone": round((r["cd"] or 0) * 100), "courses": courses,
+            "grade": f"{grade}级", "students": base["students"],
+            "gpaAvg": f"{round(r.get('gpa') or 0, 2)}",
+            "failRate": _pct((r.get("failed_students") or 0) / max(base["students"], 1)),
+            "failedStudents": r.get("failed_students") or 0,
+            "alertCount": acnt,
+            "creditDone": round((r.get("passed_credits") or 0) * 100 / (r.get("attempted_credits") or 1)),
+            "courses": courses,
         })
 
     goalDistribution = {"升学读研": 0, "签约就业": 0, "灵活就业": 0, "待业": 0}

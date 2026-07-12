@@ -357,7 +357,8 @@ def student_list(semester: Optional[str] = None, grade: Optional[str] = None,
         if not sem_ids:
             return "", []
         ph = ",".join("?" * len(sem_ids))
-        return f" AND {alias}.semester_id IN ({ph})", list(sem_ids)
+        field = f"{alias}.semester_id" if alias else "semester_id"
+        return f" AND {field} IN ({ph})", list(sem_ids)
 
     # 群体画像下钻：挂科模式沿用当前学期/课程性质/重修口径；迁移使用指定相邻学期。
     # 最终仍与显式维度筛选和角色数据范围取交集。
@@ -435,7 +436,7 @@ def student_list(semester: Optional[str] = None, grade: Optional[str] = None,
 
     # 学生 GPA
     gw = ["gpa IS NOT NULL"]
-    gsem, gsemp = _sem_cond()
+    gsem, gsemp = _sem_cond("")
     if gsem:
         gw.append(gsem[5:])
     if retake in ("重修", "1"):

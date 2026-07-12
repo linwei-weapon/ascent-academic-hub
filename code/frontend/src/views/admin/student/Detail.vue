@@ -214,7 +214,7 @@ const backLink = computed(() => {
   if (from === 'list') {
     // 保留筛选上下文
     const qs = new URLSearchParams()
-    const keys = ['college', 'major', 'grade', 'class', 'semester', 'course', 'courseName']
+    const keys = ['college', 'collegeId', 'collegeName', 'major', 'majorId', 'majorName', 'grade', 'class', 'semester', 'course', 'courseName', 'returnTo', 'returnLabel']
     keys.forEach(k => { const v = route.query[k]; if (v) qs.set(k, v as string) })
     return { label: '返回学生清单', action: () => router.push('/admin/students/list?' + qs.toString()) }
   }
