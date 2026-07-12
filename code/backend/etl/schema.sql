@@ -434,6 +434,34 @@ CREATE TABLE sys_user (
     status         TEXT DEFAULT 'active'
 );
 
+CREATE TABLE IF NOT EXISTS sys_login_attempt (
+    attempt_id  INTEGER PRIMARY KEY AUTOINCREMENT,
+    username    TEXT NOT NULL,
+    client_key  TEXT NOT NULL,
+    success     INTEGER NOT NULL,
+    attempted_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_login_attempt_lookup ON sys_login_attempt(username,client_key,attempted_at);
+
+CREATE TABLE IF NOT EXISTS sys_security_audit (
+    audit_id    INTEGER PRIMARY KEY AUTOINCREMENT,
+    actor       TEXT,
+    action      TEXT NOT NULL,
+    target_type TEXT,
+    target_id   TEXT,
+    result      TEXT NOT NULL,
+    client_key  TEXT,
+    detail_json TEXT,
+    created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_security_audit_time ON sys_security_audit(created_at,action);
+
+CREATE TABLE IF NOT EXISTS sys_revoked_token (
+    jti        TEXT PRIMARY KEY,
+    expires_at INTEGER NOT NULL,
+    revoked_at TEXT NOT NULL
+);
+
 DROP TABLE IF EXISTS sys_role;
 CREATE TABLE sys_role (
     role_id         TEXT PRIMARY KEY,
@@ -500,8 +528,7 @@ CREATE TABLE sys_config (
     updated_by    TEXT                -- 更新人 username
 );
 
-DROP TABLE IF EXISTS sys_kpi_config;
-CREATE TABLE sys_kpi_config (
+CREATE TABLE IF NOT EXISTS sys_kpi_config (
     kpi_id           TEXT PRIMARY KEY,
     module           TEXT NOT NULL,       -- 所属模块
     label            TEXT NOT NULL,       -- 展示名称

@@ -55,6 +55,8 @@ export const router = createRouter({
         { path: 'system/accounts', component: () => import('@/views/admin/system/Accounts.vue') },
         { path: 'system/menus', component: () => import('@/views/admin/system/Menus.vue') },
         { path: 'system/roles', component: () => import('@/views/admin/system/Roles.vue') },
+        { path: 'system/audit', component: () => import('@/views/admin/system/Audit.vue') },
+        { path: 'system/kpis', component: () => import('@/views/admin/system/Kpis.vue') },
 
         // ====== 系统设置 ======
         { path: 'settings', component: () => import('@/views/admin/settings/index.vue') },
@@ -76,6 +78,8 @@ function menuKeyOf(p: string): string {
   if (p.startsWith('/admin/reports/')) return '/admin/reports'
   if (p.startsWith('/admin/faculty/')) return '/admin/faculty'
   if (p.startsWith('/admin/students/')) return p  // 学生学业子页保留自身路径
+  if (p === '/admin/system/audit') return '/admin/system/accounts'
+  if (p === '/admin/system/kpis') return '/admin/system/accounts'
   if (p.startsWith('/admin/system/')) return p    // 系统管理子页保留自身路径
   return p
 }

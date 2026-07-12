@@ -13,6 +13,7 @@ import argparse
 import json
 import sqlite3
 import sys
+import time
 import urllib.request
 import urllib.parse
 
@@ -664,6 +665,54 @@ def main():
     discovery_config = http(base, "/api/admin/settings/discovery/config")["data"]
     check("规则发现配置不回传模型密钥", False,
           "cloud_api_key" in discovery_config["llm"])
+
+    # 18. 系统管理与平台安全
+    print("\n[18] 系统管理与平台安全")
+    counselor_security_token = http(base, "/api/auth/login", "POST",
+        {"username": "counselor", "password": DEMO_PASSWORD})["data"]["token"]
+    for resource in ("users", "roles", "menus"):
+        check(f"非管理员禁止读取 RBAC {resource}", 403,
+              http(base, f"/api/admin/rbac/{resource}",
+                   token=counselor_security_token)["code"])
+
+    weak_username = f"security_test_{time.time_ns()}"
+    weak = http(base, "/api/admin/rbac/users", "POST", {
+        "username": weak_username, "name": "安全策略测试", "role_id": "counselor",
+        "password": "alllowercase1!", "status": "active",
+    })
+    check("账号创建拒绝弱密码", 400, weak["code"])
+
+    kpi_config = http(base, "/api/admin/settings/kpi-config?module=dashboard")["data"]
+    check("仪表盘注册 KPI 数量", 8, len(kpi_config))
+    check("KPI 标识唯一", len(kpi_config), len({x["kpi_id"] for x in kpi_config}))
+    governed_dashboard = http(base, "/api/admin/dashboard")["data"]
+    check("仪表盘已应用 KPI 治理", True, governed_dashboard["kpiConfigApplied"])
+    check("仪表盘 KPI 稳定标识完整", True,
+          all(bool(x.get("id")) for x in governed_dashboard["kpi"]))
+    arbitrary_kpi = http(base, "/api/admin/settings/kpi-config", "POST", {
+        "kpi_id": "unsafe_formula", "formula": "SELECT * FROM sys_user"
+    })
+    check("禁止页面创建任意 KPI 公式", 410, arbitrary_kpi["code"])
+
+    logout_token = http(base, "/api/auth/login", "POST",
+        {"username": "college_dean", "password": DEMO_PASSWORD})["data"]["token"]
+    check("安全登出接口", 0,
+          http(base, "/api/auth/logout", "POST", {}, token=logout_token)["code"])
+    check("登出后 Token 立即失效", 401,
+          http(base, "/api/auth/me", token=logout_token)["code"])
+
+    rate_username = f"rate_limit_{time.time_ns()}"
+    for _ in range(8):
+        http(base, "/api/auth/login", "POST",
+             {"username": rate_username, "password": "WrongPassword!1"})
+    check("连续失败触发登录限流", 429,
+          http(base, "/api/auth/login", "POST",
+               {"username": rate_username, "password": "WrongPassword!1"})["code"])
+
+    audit = http(base, "/api/admin/rbac/security-audit?page=1&page_size=50")["data"]
+    check("安全审计列表可访问", True, isinstance(audit["list"], list))
+    check("安全审计记录登录与登出", True,
+          {"auth.login", "auth.logout"}.issubset({x["action"] for x in audit["list"]}))
 
     print(f"\n== 结果：通过 {_PASS} · 失败 {_FAIL} ==")
     return 1 if _FAIL else 0

@@ -5,7 +5,11 @@
         <h2 class="sa-page-title">账号管理</h2>
         <p class="sa-page-sub">数据来源：sys_user / sys_role（菜单级权限）</p>
       </div>
-      <el-button type="primary" size="small" @click="openDialog()">+ 新建账号</el-button>
+      <div style="display:flex;gap:8px">
+        <el-button size="small" @click="$router.push('/admin/system/audit')">安全审计</el-button>
+        <el-button size="small" @click="$router.push('/admin/system/kpis')">指标配置</el-button>
+        <el-button type="primary" size="small" @click="openDialog()">+ 新建账号</el-button>
+      </div>
     </div>
 
     <div class="sa-card">
@@ -50,8 +54,8 @@
             <el-option v-for="r in roles" :key="r.role_id" :label="r.name" :value="r.role_id" />
           </el-select>
         </el-form-item>
-        <el-form-item v-if="!editing" label="初始密码">
-          <el-input v-model="form.password" placeholder="留空则默认 Demo@2026" />
+        <el-form-item v-if="!editing" label="初始密码" required>
+          <el-input v-model="form.password" type="password" show-password placeholder="至少12位，包含大小写、数字和特殊字符" />
         </el-form-item>
         <el-form-item label="状态">
           <el-switch v-model="form.active" />
@@ -115,6 +119,10 @@ async function save() {
     ElMessage.warning('用户名和角色为必填')
     return
   }
+  if (!editing.value && !isStrongPassword(form.password, form.username)) {
+    ElMessage.warning('初始密码须为12~128位，并包含大小写字母、数字和特殊字符，且不能包含用户名')
+    return
+  }
   saving.value = true
   try {
     if (editing.value) {
@@ -125,7 +133,7 @@ async function save() {
     } else {
       await http.post('/admin/rbac/users', {
         username: form.username, name: form.name, role_id: form.role_id,
-        password: form.password || null, status: form.active ? 'active' : 'disabled',
+        password: form.password, status: form.active ? 'active' : 'disabled',
       })
     }
     ElMessage.success('已保存')
@@ -144,10 +152,20 @@ async function toggleStatus(row: any, v: any) {
 }
 
 async function resetPwd(row: any) {
-  const r = await http.post<{ password: string | null }>(`/admin/rbac/users/${row.user_id}/reset-pwd`, {})
-  ElMessageBox.alert(`账号「${row.username}」密码已重置为：${r.password || 'Demo@2026'}`, '重置成功', {
-    confirmButtonText: '知道了',
-  })
+  const { value } = await ElMessageBox.prompt(
+    `请输入账号「${row.username}」的新密码`, '重置密码', {
+      inputType: 'password', inputPlaceholder: '至少12位，包含大小写、数字和特殊字符',
+      inputValidator: (v: string) => isStrongPassword(v, row.username) || '密码强度不足或包含用户名',
+      confirmButtonText: '确认重置',
+    })
+  await http.post(`/admin/rbac/users/${row.user_id}/reset-pwd`, { password: value })
+  ElMessage.success('密码已安全重置')
+}
+
+function isStrongPassword(value: string, username = '') {
+  return value.length >= 12 && value.length <= 128 && /[a-z]/.test(value) && /[A-Z]/.test(value)
+    && /\d/.test(value) && /[^A-Za-z0-9]/.test(value)
+    && (!username || !value.toLowerCase().includes(username.toLowerCase()))
 }
 
 async function remove(row: any) {

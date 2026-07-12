@@ -32,6 +32,36 @@ def _gpa_bucket(value: float) -> str:
     return "<2.0"
 
 
+def _apply_kpi_config(conn: sqlite3.Connection, kpis: list[dict]) -> tuple[list[dict], bool]:
+    """Apply display-only governance to registered dashboard KPIs.
+
+    Missing rows keep their built-in defaults so a partial or legacy database never
+    makes a valid KPI disappear unexpectedly.
+    """
+    exists = dbm.scalar(conn, """SELECT 1 FROM sqlite_master
+        WHERE type='table' AND name='sys_kpi_config'""")
+    if not exists:
+        return kpis, False
+    rows = dbm.query(conn, """SELECT kpi_id,enabled,sort_order,color_rule,
+        threshold_warn,threshold_danger FROM sys_kpi_config
+        WHERE module='dashboard'""")
+    config = {row["kpi_id"]: row for row in rows}
+    shaped = []
+    for default_order, item in enumerate(kpis, start=1):
+        row = config.get(item["id"])
+        if row and not bool(row["enabled"]):
+            continue
+        current = dict(item)
+        current["sortOrder"] = row["sort_order"] if row else default_order
+        if row:
+            current["colorRule"] = row["color_rule"]
+            current["thresholdWarn"] = row["threshold_warn"]
+            current["thresholdDanger"] = row["threshold_danger"]
+        shaped.append(current)
+    shaped.sort(key=lambda item: (item["sortOrder"], item["id"]))
+    return shaped, True
+
+
 # ------------------------------------------------------------------ dashboard
 @router.get("/dashboard")
 def dashboard(semester: Optional[str] = None,
@@ -80,15 +110,15 @@ def dashboard(semester: Optional[str] = None,
     teacher_label = "相关授课教师数" if restricted else "专任教师数"
 
     kpi = [
-        {"label": "在籍学生数", "value": f"{students:,}", "formula": "当前在校本科生总数（含大一至大四）", "trend": "", "up": True, "group": "在校生"},
-        {"label": "本学期开课门数", "value": f"{courses_cur:,}", "formula": "当前学期授权学生范围内修读课程去重；全校视角按教学任务去重", "trend": "", "up": True, "group": "在校生"},
-        {"label": teacher_label, "value": f"{teachers:,}", "formula": "授权学生范围内有授课关系的教师去重；全校视角为教师维表去重", "trend": "", "up": True, "group": "在校生"},
-        {"label": "当前预警", "value": f"{alert_stu}人", "formula": "处于预警状态的学生数", "trend": "", "up": False, "group": "在校生"},
-        {"label": "当前挂科率", "value": "—", "formula": "当前学期有未通过课程的去重学生数÷在籍学生数", "trend": "", "up": False, "group": "在校生"},
-        {"label": "历史挂科经历率", "value": "—", "formula": "在校期间曾出现过未通过记录的去重学生数÷在籍学生数（包含后续补考或重修通过）", "trend": "", "up": False, "group": "在校生"},
-        {"label": "应届毕业率", "value": f"{_pct(grad_rate)}（{grad.get('grad_count') or 0}/{grad.get('total') or 0}）",
+        {"id": "student_count", "label": "在籍学生数", "value": f"{students:,}", "formula": "当前在校本科生总数（含大一至大四）", "trend": "", "up": True, "group": "在校生"},
+        {"id": "course_count", "label": "本学期开课门数", "value": f"{courses_cur:,}", "formula": "当前学期授权学生范围内修读课程去重；全校视角按教学任务去重", "trend": "", "up": True, "group": "在校生"},
+        {"id": "teacher_count", "label": teacher_label, "value": f"{teachers:,}", "formula": "授权学生范围内有授课关系的教师去重；全校视角为教师维表去重", "trend": "", "up": True, "group": "在校生"},
+        {"id": "alert_count", "label": "当前预警", "value": f"{alert_stu}人", "formula": "处于预警状态的学生数", "trend": "", "up": False, "group": "在校生"},
+        {"id": "current_fail_rate", "label": "当前挂科率", "value": "—", "formula": "当前学期有未通过课程的去重学生数÷在籍学生数", "trend": "", "up": False, "group": "在校生"},
+        {"id": "history_fail_rate", "label": "历史挂科经历率", "value": "—", "formula": "在校期间曾出现过未通过记录的去重学生数÷在籍学生数（包含后续补考或重修通过）", "trend": "", "up": False, "group": "在校生"},
+        {"id": "grad_rate", "label": "应届毕业率", "value": f"{_pct(grad_rate)}（{grad.get('grad_count') or 0}/{grad.get('total') or 0}）",
          "formula": "合成毕业业务表：按期毕业生÷毕业届总数", "trend": "", "up": True, "group": "毕业生", "sub": "2022级毕业届（合成）"},
-        {"label": "学位授予率", "value": f"{_pct(degree_rate)}（{grad.get('degree_count') or 0}/{grad.get('total') or 0}）",
+        {"id": "degree_rate", "label": "学位授予率", "value": f"{_pct(degree_rate)}（{grad.get('degree_count') or 0}/{grad.get('total') or 0}）",
          "formula": "合成毕业业务表：授予学位人数÷毕业届总数", "trend": "", "up": True, "group": "毕业生", "sub": "2022级毕业届（合成）"},
     ]
 
@@ -182,9 +212,11 @@ def dashboard(semester: Optional[str] = None,
     total_hist = sum(hist_fail_by_col.values()) if hist_fail_by_col else 0
     kpi[4]["value"] = _pct(total_cur / students if students else 0)
     kpi[5]["value"] = _pct(total_hist / students if students else 0)
+    kpi, kpi_config_applied = _apply_kpi_config(conn, kpi)
 
     return ok({"kpi": kpi, "colleges": colleges, "gpaDist": gpaDist,
                "gpaDistByCollege": gpaDistByCollege, "failCourses": failCourses,
+               "kpiConfigApplied": kpi_config_applied,
                "scope": {"restricted": restricted,
                          "label": scope_label,
                          "studentCount": students},

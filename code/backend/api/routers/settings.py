@@ -1026,11 +1026,39 @@ class KpiConfigIn(BaseModel):
     threshold_danger: float | None = None
 
 
+KPI_CONFIG_DDL = """CREATE TABLE IF NOT EXISTS sys_kpi_config (
+    kpi_id TEXT PRIMARY KEY,module TEXT NOT NULL,label TEXT NOT NULL,
+    enabled INTEGER DEFAULT 1,sort_order INTEGER DEFAULT 0,calc_type TEXT,
+    formula TEXT,unit TEXT,color_rule TEXT,threshold_warn REAL,
+    threshold_danger REAL,scope_applicable TEXT DEFAULT 'all',
+    updated_at TEXT DEFAULT (datetime('now','localtime')))"""
+KPI_DEFAULTS = [
+    ("student_count", "在籍学生数", 1, "count", "count_all", "人"),
+    ("course_count", "本学期开课门数", 2, "count", "distinct_course", "门"),
+    ("teacher_count", "专任教师数", 3, "count", "count_all", "人"),
+    ("alert_count", "当前预警", 4, "count", "distinct_student", "人"),
+    ("current_fail_rate", "当前挂科率", 5, "rate", "fail_current", "%"),
+    ("history_fail_rate", "历史挂科经历率", 6, "rate", "fail_history", "%"),
+    ("grad_rate", "应届毕业率", 7, "rate", "grad_ontime", "%"),
+    ("degree_rate", "学位授予率", 8, "rate", "degree_all", "%"),
+]
+
+
+def _ensure_kpi_config(conn: sqlite3.Connection) -> None:
+    dbm.execute(conn, KPI_CONFIG_DDL)
+    for kpi_id, label, order, calc_type, formula, unit in KPI_DEFAULTS:
+        dbm.execute(conn, """INSERT OR IGNORE INTO sys_kpi_config
+            (kpi_id,module,label,enabled,sort_order,calc_type,formula,unit,scope_applicable)
+            VALUES (?,'dashboard',?,1,?,?,?,?, 'all')""",
+            (kpi_id, label, order, calc_type, formula, unit))
+
+
 @router.get("/settings/kpi-config")
 def get_kpi_config(module: str = None,
-                   conn: sqlite3.Connection = Depends(get_db),
+                   conn: sqlite3.Connection = Depends(get_db_rw),
                    user: dict = Depends(get_current_user)):
     """获取 KPI 配置列表，可按模块过滤。"""
+    _ensure_kpi_config(conn)
     if module:
         rows = dbm.query(conn, """
             SELECT * FROM sys_kpi_config WHERE module=? ORDER BY sort_order
@@ -1044,14 +1072,18 @@ def get_kpi_config(module: str = None,
 
 @router.put("/settings/kpi-config/{kpi_id}")
 def update_kpi_config(kpi_id: str, body: KpiConfigIn,
-                      _: dict = Depends(require_admin),
+                      user: dict = Depends(require_admin),
                       conn: sqlite3.Connection = Depends(get_db_rw)):
-    """更新单个 KPI 配置。仅接受合法 calc_type。"""
+    """只允许调整已有可执行 KPI 的显示、顺序与着色阈值。"""
+    _ensure_kpi_config(conn)
     row = dbm.query_one(conn, "SELECT * FROM sys_kpi_config WHERE kpi_id=?", (kpi_id,))
     if not row:
         raise ApiError("KPI 不存在", code=404, status_code=404)
     fields, params = [], []
-    for col in ("enabled", "sort_order", "calc_type", "color_rule",
+    if body.calc_type is not None and body.calc_type != row["calc_type"]:
+        raise ApiError("计算口径由后端公式注册表管理，不能在页面中任意修改",
+                       code=400, status_code=400)
+    for col in ("enabled", "sort_order", "color_rule",
                 "threshold_warn", "threshold_danger"):
         val = getattr(body, col, None)
         if val is not None:
@@ -1060,6 +1092,9 @@ def update_kpi_config(kpi_id: str, body: KpiConfigIn,
         params.append(kpi_id)
         dbm.execute(conn, f"""UPDATE sys_kpi_config SET {','.join(fields)},
             updated_at=datetime('now','localtime') WHERE kpi_id=?""", params)
+        from ..security_governance import write_audit
+        write_audit(conn, user["username"], "settings.kpi.update", "kpi", kpi_id,
+                    detail={"fields": [f.split("=")[0] for f in fields]})
     return ok(msg="KPI 配置已更新")
 
 
@@ -1067,17 +1102,5 @@ def update_kpi_config(kpi_id: str, body: KpiConfigIn,
 def create_kpi_config(body: dict,
                       _: dict = Depends(require_admin),
                       conn: sqlite3.Connection = Depends(get_db_rw)):
-    """新增自定义 KPI。"""
-    kpi_id = body.get("kpi_id")
-    if not kpi_id:
-        raise ApiError("kpi_id 不能为空", code=400, status_code=400)
-    if dbm.query_one(conn, "SELECT 1 FROM sys_kpi_config WHERE kpi_id=?", (kpi_id,)):
-        raise ApiError("KPI ID 已存在", code=400, status_code=400)
-    dbm.execute(conn, """INSERT INTO sys_kpi_config (kpi_id, module, label, enabled,
-        sort_order, calc_type, formula, unit, color_rule, scope_applicable)
-        VALUES (?,?,?,?,?,?,?,?,?,?)""",
-        (kpi_id, body.get("module",""), body.get("label",""), 1,
-         body.get("sort_order",0), body.get("calc_type",""), body.get("formula",""),
-         body.get("unit",""), body.get("color_rule",""),
-         body.get("scope_applicable","all")))
-    return ok(msg="KPI 已创建")
+    raise ApiError("暂不支持创建任意 KPI；请先在后端公式注册表实现并验证计算口径",
+                   code=410, status_code=410)

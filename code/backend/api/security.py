@@ -2,13 +2,14 @@
 import hashlib
 import hmac
 import os
+import uuid
 from datetime import datetime, timedelta, timezone
 
 from jose import jwt, JWTError
 
 from . import settings
 
-PBKDF2_ITERS = 100_000
+PBKDF2_ITERS = 310_000
 
 
 def hash_password(password: str) -> str:
@@ -36,6 +37,9 @@ def create_token(username: str, role_id: str) -> str:
     payload = {
         "sub": username,
         "role": role_id,
+        "jti": uuid.uuid4().hex,
+        "iss": settings.JWT_ISSUER,
+        "aud": settings.JWT_AUDIENCE,
         "iat": now,
         "exp": now + timedelta(hours=settings.JWT_EXPIRE_HOURS),
     }
@@ -44,6 +48,9 @@ def create_token(username: str, role_id: str) -> str:
 
 def decode_token(token: str) -> dict | None:
     try:
-        return jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
+        return jwt.decode(token, settings.JWT_SECRET,
+                          algorithms=[settings.JWT_ALGORITHM],
+                          issuer=settings.JWT_ISSUER,
+                          audience=settings.JWT_AUDIENCE)
     except JWTError:
         return None

@@ -43,6 +43,10 @@ def get_current_user(authorization: str = Header(default=""),
     payload = decode_token(token)
     if not payload:
         raise ApiError("登录已过期，请重新登录", code=401, status_code=401)
+    if payload.get("jti") and dbm.query_one(
+            conn, "SELECT 1 FROM sqlite_master WHERE type='table' AND name='sys_revoked_token'"):
+        if dbm.query_one(conn, "SELECT 1 FROM sys_revoked_token WHERE jti=?", (payload["jti"],)):
+            raise ApiError("登录已失效，请重新登录", code=401, status_code=401)
     user = dbm.query_one(
         conn, "SELECT username, name, role_id, status FROM sys_user WHERE username=?",
         (payload.get("sub"),))

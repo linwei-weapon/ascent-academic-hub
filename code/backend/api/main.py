@@ -6,19 +6,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from .envelope import ApiError, fail, ok
+from . import settings
 from .routers import (auth, dashboard, alert, curriculum, reports,
                       operation, faculty, settings as settings_router, students,
                       admin_rbac, meta, teacher)
 
 app = FastAPI(title="高校学业BI · 平台管理端 API", version="0.3.0")
 
-# 演示环境放开跨域（前端 vite dev / 任意来源）
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.CORS_ORIGINS,
     allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 

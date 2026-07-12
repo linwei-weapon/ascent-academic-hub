@@ -70,8 +70,10 @@ MENUS = [
     ("/admin/system/accounts",        "账号管理",       "User",        16, "/admin/system"),
     ("/admin/system/roles",           "角色管理",       "UserFilled",  17, "/admin/system"),
     ("/admin/system/menus",           "菜单管理",       "Menu",        18, "/admin/system"),
+    ("/admin/system/audit",           "安全审计",       "Document",    19, "/admin/system"),
+    ("/admin/system/kpis",            "指标配置",       "DataAnalysis",20, "/admin/system"),
     # ── 系统设置（仅 dean）──
-    ("/admin/settings",               "系统设置",       "Setting",     19, None),
+    ("/admin/settings",               "系统设置",       "Setting",     21, None),
 ]
 
 # ---- 角色→菜单可见性（优化后）----
@@ -132,6 +134,8 @@ ROLE_MENU = {
     "/admin/system/accounts": ["dean"],
     "/admin/system/roles":    ["dean"],
     "/admin/system/menus":    ["dean"],
+    "/admin/system/audit":    ["dean"],
+    "/admin/system/kpis":     ["dean"],
     # 系统设置（仅 dean）
     "/admin/settings": ["dean", "quality_office", "school_leader"],
     # V1.1新增：任课教师仅看预警
@@ -145,7 +149,7 @@ ADMIN_PASSWORD = "admin123"  # 管理员 admin 专用登录密码
 
 def hash_password(pw: str) -> str:
     salt = os.urandom(16)
-    iters = 100_000
+    iters = 310_000
     dk = hashlib.pbkdf2_hmac("sha256", pw.encode(), salt, iters)
     return f"pbkdf2_sha256${iters}${salt.hex()}${dk.hex()}"
 
