@@ -289,51 +289,66 @@ def course_quality_topic(course_id: Optional[str] = None, semester_from: Optiona
     if semester_from: cond.append("g.semester_id>=?"); params.append(semester_from)
     if semester_to: cond.append("g.semester_id<=?"); params.append(semester_to)
     where = " AND ".join(cond)
-    cte = f"""WITH term AS (
-      SELECT g.course_id,COALESCE(MAX(g.course_name),MAX(c.name),g.course_id) course_name,g.semester_id,
+    term_rows = dbm.query(conn, f"""SELECT g.course_id,COALESCE(MAX(g.course_name),MAX(c.name),g.course_id) course_name,g.semester_id,
         COUNT(*) attempts,COUNT(DISTINCT g.student_id) students,
         SUM(CASE WHEN g.is_pass=0 THEN 1 ELSE 0 END) failures,
         ROUND(SUM(CASE WHEN g.is_pass=0 THEN 1.0 ELSE 0 END)*100.0/COUNT(*),1) fail_rate,
         ROUND(AVG(g.score),1) avg_score,SUM(CASE WHEN g.attempt_type='retake' THEN 1 ELSE 0 END) retake_attempts
       FROM grade_attempt g LEFT JOIN dim_course c ON c.course_id=g.course_id WHERE {where}
-      GROUP BY g.course_id,g.semester_id HAVING COUNT(*)>=?
-    ), course AS (
-      SELECT course_id,MAX(course_name) course_name,COUNT(*) observed_terms,SUM(attempts) attempts,
-        SUM(students) student_term_count,SUM(failures) failures,ROUND(SUM(failures)*100.0/SUM(attempts),1) fail_rate,
-        ROUND(MIN(fail_rate),1) min_fail_rate,ROUND(MAX(fail_rate),1) max_fail_rate,
-        ROUND(MAX(fail_rate)-MIN(fail_rate),1) volatility,SUM(retake_attempts) retake_attempts,
-        SUM(CASE WHEN fail_rate>=15 THEN 1 ELSE 0 END) high_fail_terms
-      FROM term GROUP BY course_id
-    ), classified AS (SELECT *,CASE
-      WHEN observed_terms>=2 AND high_fail_terms=observed_terms THEN 'persistent_high'
-      WHEN observed_terms>=2 AND volatility>=15 THEN 'volatile'
-      WHEN failures>=50 THEN 'wide_impact'
-      WHEN retake_attempts>=30 THEN 'retake_pressure' ELSE 'observe' END risk_type FROM course)
-    """
-    base_params = tuple(params + [min_sample])
-    summary = dbm.query_one(conn, cte + """SELECT COUNT(*) observed_courses,SUM(attempts) attempts,SUM(failures) failures,
-      ROUND(SUM(failures)*100.0/SUM(attempts),1) overall_fail_rate,
-      SUM(CASE WHEN risk_type='persistent_high' THEN 1 ELSE 0 END) persistent_high_courses,
-      SUM(CASE WHEN risk_type='volatile' THEN 1 ELSE 0 END) volatile_courses,
-      SUM(CASE WHEN risk_type='wide_impact' THEN 1 ELSE 0 END) wide_impact_courses,
-      SUM(retake_attempts) retake_attempts FROM classified""", base_params) or {}
-    total = dbm.scalar(conn, cte + "SELECT COUNT(*) FROM classified WHERE risk_type<>'observe'", base_params) or 0
-    courses = dbm.query(conn, cte + """SELECT * FROM classified WHERE risk_type<>'observe' ORDER BY
-      CASE risk_type WHEN 'persistent_high' THEN 1 WHEN 'wide_impact' THEN 2 WHEN 'volatile' THEN 3 ELSE 4 END,
-      failures DESC,fail_rate DESC LIMIT ? OFFSET ?""", tuple(params + [min_sample, limit, offset]))
-    trends = dbm.query(conn, cte + """SELECT t.* FROM term t JOIN classified c ON c.course_id=t.course_id
-      WHERE c.risk_type<>'observe' ORDER BY t.course_id,t.semester_id""", base_params)
-    offerings = dbm.query(conn, """SELECT a.semester_id,a.course_id,COALESCE(c.name,a.course_id) course_name,
-      a.lesson_count,a.teacher_count,a.enrolled,a.total_hours FROM agg_course_offering a
-      LEFT JOIN dim_course c ON c.course_id=a.course_id ORDER BY a.enrolled DESC LIMIT 15""")
+      GROUP BY g.course_id,g.semester_id HAVING COUNT(*)>=?""", tuple(params + [min_sample]))
+    groups = defaultdict(list)
+    for row in term_rows: groups[row["course_id"]].append(row)
+    all_courses = []
+    for cid, rows in groups.items():
+        attempts = sum(x["attempts"] for x in rows); failures = sum(x["failures"] for x in rows)
+        rates = [x["fail_rate"] for x in rows]; retakes = sum(x["retake_attempts"] for x in rows)
+        reasons = []
+        if len(rows) >= 2 and all(x >= 15 for x in rates): reasons.append("persistent_high")
+        if len(rows) >= 2 and max(rates) - min(rates) >= 15: reasons.append("volatile")
+        if failures >= 50: reasons.append("wide_impact")
+        if retakes >= 30: reasons.append("retake_pressure")
+        all_courses.append({"course_id": cid, "course_name": rows[0]["course_name"], "observed_terms": len(rows),
+          "attempts": attempts, "student_term_count": sum(x["students"] for x in rows), "failures": failures,
+          "fail_rate": round(failures * 100.0 / attempts, 1), "min_fail_rate": min(rates), "max_fail_rate": max(rates),
+          "volatility": round(max(rates) - min(rates), 1), "retake_attempts": retakes, "attention_reasons": reasons})
+    attention = [x for x in all_courses if x["attention_reasons"]]
+    attention.sort(key=lambda x: (-len(x["attention_reasons"]), -x["failures"], -x["fail_rate"]))
+    total = len(attention); courses = attention[offset:offset + limit]
+    attempts = sum(x["attempts"] for x in all_courses); failures = sum(x["failures"] for x in all_courses)
+    summary = {"observed_courses": len(all_courses), "attempts": attempts, "failures": failures,
+      "overall_fail_rate": round(failures * 100.0 / attempts, 1) if attempts else 0,
+      "persistent_high_courses": sum("persistent_high" in x["attention_reasons"] for x in all_courses),
+      "volatile_courses": sum("volatile" in x["attention_reasons"] for x in all_courses),
+      "wide_impact_courses": sum("wide_impact" in x["attention_reasons"] for x in all_courses),
+      "retake_attempts": sum(x["retake_attempts"] for x in all_courses)}
     semesters = dbm.query(conn, f"SELECT DISTINCT g.semester_id FROM grade_attempt g WHERE {where} ORDER BY g.semester_id", tuple(params))
-    return ok({"summary": summary, "courses": courses, "trends": trends, "offerings": offerings,
+    return ok({"summary": summary, "courses": courses,
                "semesters": [x["semester_id"] for x in semesters], "total": total, "limit": limit, "offset": offset,
-               "definition": {"sample": f"单课程单学期至少{min_sample}条有效成绩才进入比较。",
+               "definition": {"sample": f"至少有一个学期达到{min_sample}条有效成绩记录的去重课程数。",
+                 "overall": "进入统计范围的未通过成绩记录数 / 有效成绩记录总数，不是有挂科经历的学生比例。",
                  "persistent_high": "至少2个可比学期且每学期未通过率均不低于15%。",
                  "volatile": "至少2个可比学期，最高与最低未通过率相差不低于15个百分点。",
                  "wide_impact": "观察期累计未通过达到50人次。", "retake_pressure": "观察期重修尝试达到30人次。",
                  "boundary": "课程结果用于发现需核查的课程与资源问题，不证明教学质量原因，不用于教师个人排名。"}})
+
+
+@router.get("/topics/course-quality/{course_id}/detail")
+def course_quality_detail(course_id: str, semester_from: Optional[str] = None, semester_to: Optional[str] = None,
+                          conn: sqlite3.Connection = Depends(get_v2_db), user: dict = Depends(require_v2_all_reader)):
+    cond, params = ["g.course_id=?", "g.is_published=1", "g.is_void=0", "g.is_pass IS NOT NULL"], [course_id]
+    if semester_from: cond.append("g.semester_id>=?"); params.append(semester_from)
+    if semester_to: cond.append("g.semester_id<=?"); params.append(semester_to)
+    trends = dbm.query(conn, f"""SELECT g.semester_id,COUNT(*) attempts,COUNT(DISTINCT g.student_id) students,
+      SUM(CASE WHEN g.is_pass=0 THEN 1 ELSE 0 END) failures,
+      ROUND(SUM(CASE WHEN g.is_pass=0 THEN 1.0 ELSE 0 END)*100.0/COUNT(*),1) fail_rate,
+      ROUND(AVG(g.score),1) avg_score,SUM(CASE WHEN g.attempt_type='retake' THEN 1 ELSE 0 END) retake_attempts
+      FROM grade_attempt g WHERE {' AND '.join(cond)} GROUP BY g.semester_id ORDER BY g.semester_id""", tuple(params))
+    offerings = dbm.query(conn, """SELECT a.semester_id,a.lesson_count,a.teacher_count,a.enrolled,a.total_hours,
+      ROUND(a.enrolled*1.0/NULLIF(a.lesson_count,0),1) avg_class_size FROM agg_course_offering a
+      WHERE a.course_id=? ORDER BY a.semester_id DESC""", (course_id,))
+    name = dbm.scalar(conn, "SELECT name FROM dim_course WHERE course_id=?", (course_id,)) or course_id
+    return ok({"course_id": course_id, "course_name": name, "trends": trends, "offerings": offerings,
+               "offering_boundary": "当前真实教学任务主要覆盖一个接入学期，只能展示已接入供给，不能据此判断未来是否开课或资源是否充足。"})
 
 
 @router.get("/students/{student_id}/growth")
