@@ -58,7 +58,7 @@ const topics = [
   { key:'course', index:'03', title:'课程质量与教学运行', status:'部分可用', tone:'course',
     value:'识别影响面大且持续异常的课程，结合通过率、班额、年级和排课时段组织课程层面核查。',
     questions:['哪些课程连续高挂科而非单学期波动？','首次与最终通过率差异是否反映重修压力？','体育、思政等重点课程时段是否均衡？'],
-    actions:[{label:'查看开课分析',path:'/admin/operation/courses',primary:true},{label:'查看排课分析',path:'/admin/operation/schedule-analysis'}],
+    actions:[{label:'进入专题',path:'/admin/reports/course-quality',primary:true},{label:'查看排课分析',path:'/admin/operation/schedule-analysis'}],
     boundary:'课程差异不直接归因于教师；长期趋势需要多学期真实数据。' },
   { key:'faculty', index:'04', title:'资源与师资风险', status:'部分可用', tone:'faculty',
     value:'识别核心课程单点承担、年龄和职称梯队、接续活跃度及特殊空间约束。',

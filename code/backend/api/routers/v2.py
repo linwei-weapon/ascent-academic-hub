@@ -266,6 +266,64 @@ def graduation_readiness_topic(organization_id: Optional[str] = None, major_code
                  "boundary": "本专题不输出能否毕业或获得学位的结论；正式结果以学校毕业审核和学位审核为准。"}})
 
 
+@router.get("/topics/course-quality")
+def course_quality_topic(course_id: Optional[str] = None, semester_from: Optional[str] = None,
+                         semester_to: Optional[str] = None, min_sample: int = Query(30, ge=10, le=500),
+                         limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0),
+                         conn: sqlite3.Connection = Depends(get_v2_db), user: dict = Depends(require_v2_all_reader)):
+    """跨学期课程结果与教学供给专题，不用于教师个人评价。"""
+    cond, params = ["g.is_published=1", "g.is_void=0", "g.is_pass IS NOT NULL"], []
+    if course_id: cond.append("g.course_id=?"); params.append(course_id)
+    if semester_from: cond.append("g.semester_id>=?"); params.append(semester_from)
+    if semester_to: cond.append("g.semester_id<=?"); params.append(semester_to)
+    where = " AND ".join(cond)
+    cte = f"""WITH term AS (
+      SELECT g.course_id,COALESCE(MAX(g.course_name),MAX(c.name),g.course_id) course_name,g.semester_id,
+        COUNT(*) attempts,COUNT(DISTINCT g.student_id) students,
+        SUM(CASE WHEN g.is_pass=0 THEN 1 ELSE 0 END) failures,
+        ROUND(SUM(CASE WHEN g.is_pass=0 THEN 1.0 ELSE 0 END)*100.0/COUNT(*),1) fail_rate,
+        ROUND(AVG(g.score),1) avg_score,SUM(CASE WHEN g.attempt_type='retake' THEN 1 ELSE 0 END) retake_attempts
+      FROM grade_attempt g LEFT JOIN dim_course c ON c.course_id=g.course_id WHERE {where}
+      GROUP BY g.course_id,g.semester_id HAVING COUNT(*)>=?
+    ), course AS (
+      SELECT course_id,MAX(course_name) course_name,COUNT(*) observed_terms,SUM(attempts) attempts,
+        SUM(students) student_term_count,SUM(failures) failures,ROUND(SUM(failures)*100.0/SUM(attempts),1) fail_rate,
+        ROUND(MIN(fail_rate),1) min_fail_rate,ROUND(MAX(fail_rate),1) max_fail_rate,
+        ROUND(MAX(fail_rate)-MIN(fail_rate),1) volatility,SUM(retake_attempts) retake_attempts,
+        SUM(CASE WHEN fail_rate>=15 THEN 1 ELSE 0 END) high_fail_terms
+      FROM term GROUP BY course_id
+    ), classified AS (SELECT *,CASE
+      WHEN observed_terms>=2 AND high_fail_terms=observed_terms THEN 'persistent_high'
+      WHEN observed_terms>=2 AND volatility>=15 THEN 'volatile'
+      WHEN failures>=50 THEN 'wide_impact'
+      WHEN retake_attempts>=30 THEN 'retake_pressure' ELSE 'observe' END risk_type FROM course)
+    """
+    base_params = tuple(params + [min_sample])
+    summary = dbm.query_one(conn, cte + """SELECT COUNT(*) observed_courses,SUM(attempts) attempts,SUM(failures) failures,
+      ROUND(SUM(failures)*100.0/SUM(attempts),1) overall_fail_rate,
+      SUM(CASE WHEN risk_type='persistent_high' THEN 1 ELSE 0 END) persistent_high_courses,
+      SUM(CASE WHEN risk_type='volatile' THEN 1 ELSE 0 END) volatile_courses,
+      SUM(CASE WHEN risk_type='wide_impact' THEN 1 ELSE 0 END) wide_impact_courses,
+      SUM(retake_attempts) retake_attempts FROM classified""", base_params) or {}
+    total = dbm.scalar(conn, cte + "SELECT COUNT(*) FROM classified WHERE risk_type<>'observe'", base_params) or 0
+    courses = dbm.query(conn, cte + """SELECT * FROM classified WHERE risk_type<>'observe' ORDER BY
+      CASE risk_type WHEN 'persistent_high' THEN 1 WHEN 'wide_impact' THEN 2 WHEN 'volatile' THEN 3 ELSE 4 END,
+      failures DESC,fail_rate DESC LIMIT ? OFFSET ?""", tuple(params + [min_sample, limit, offset]))
+    trends = dbm.query(conn, cte + """SELECT t.* FROM term t JOIN classified c ON c.course_id=t.course_id
+      WHERE c.risk_type<>'observe' ORDER BY t.course_id,t.semester_id""", base_params)
+    offerings = dbm.query(conn, """SELECT a.semester_id,a.course_id,COALESCE(c.name,a.course_id) course_name,
+      a.lesson_count,a.teacher_count,a.enrolled,a.total_hours FROM agg_course_offering a
+      LEFT JOIN dim_course c ON c.course_id=a.course_id ORDER BY a.enrolled DESC LIMIT 15""")
+    semesters = dbm.query(conn, f"SELECT DISTINCT g.semester_id FROM grade_attempt g WHERE {where} ORDER BY g.semester_id", tuple(params))
+    return ok({"summary": summary, "courses": courses, "trends": trends, "offerings": offerings,
+               "semesters": [x["semester_id"] for x in semesters], "total": total, "limit": limit, "offset": offset,
+               "definition": {"sample": f"单课程单学期至少{min_sample}条有效成绩才进入比较。",
+                 "persistent_high": "至少2个可比学期且每学期未通过率均不低于15%。",
+                 "volatile": "至少2个可比学期，最高与最低未通过率相差不低于15个百分点。",
+                 "wide_impact": "观察期累计未通过达到50人次。", "retake_pressure": "观察期重修尝试达到30人次。",
+                 "boundary": "课程结果用于发现需核查的课程与资源问题，不证明教学质量原因，不用于教师个人排名。"}})
+
+
 @router.get("/students/{student_id}/growth")
 def student_growth(student_id: str, timeline_limit: int = Query(100, ge=1, le=500),
                    conn: sqlite3.Connection = Depends(get_v2_db), user: dict = Depends(require_v2_reader)):
