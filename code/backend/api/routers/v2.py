@@ -239,6 +239,42 @@ def curriculum_course_supply(course_id: str, conn: sqlite3.Connection = Depends(
       "boundary": "当前数据未提供教学班类型中的重修班标识和未来开课计划；教学任务只证明已接入学期曾经开设，不能据此承诺下一次开课。"})
 
 
+@router.get("/topics/graduation-readiness/student/{student_id}")
+def graduation_readiness_student(student_id: str, conn: sqlite3.Connection = Depends(get_v2_db),
+                                 user: dict = Depends(require_v2_reader)):
+    scope, scope_params = _student_scope(user, conn, "s")
+    where = "s.student_id=?" + (f" AND {scope}" if scope else "")
+    student = dbm.query_one(conn, f"""SELECT s.student_id,s.display_name,s.entry_grade,s.major_name,s.class_code,
+      p.plan_name,p.version FROM dim_student s LEFT JOIN curriculum_plan p ON p.plan_id=s.plan_id WHERE {where}""",
+      tuple([student_id] + scope_params))
+    if not student:
+        raise ApiError("学生不存在或无权访问", code=404, status_code=404)
+    evidence = dbm.query(conn, """SELECT x.course_id,COALESCE(c.name,x.course_id) course_name,x.suggested_term,
+      x.completion_status,x.effective_score,x.earned_credits,pc.credits required_credits,
+      (SELECT MAX(ga.semester_id) FROM grade_attempt ga WHERE ga.student_id=x.student_id AND ga.course_id=x.course_id) last_semester,
+      (SELECT COUNT(DISTINCT l.lesson_id) FROM teaching_lesson l WHERE l.course_id=x.course_id) lesson_count,
+      (SELECT COUNT(DISTINCT scs.substitution_id) FROM student_course_substitution scs
+        WHERE scs.student_id=x.student_id AND scs.original_course_id=x.course_id) substitution_count
+      FROM student_plan_course_status x LEFT JOIN dim_course c ON c.course_id=x.course_id
+      LEFT JOIN curriculum_plan_course pc ON pc.plan_course_id=x.plan_course_id
+      WHERE x.student_id=? AND x.rule_version='growth-v1' AND x.requirement_type='必修'
+        AND (x.completion_status='failed' OR (x.completion_status IN ('not_completed','unknown') AND x.is_overdue=1))
+      ORDER BY CASE WHEN x.completion_status='failed' THEN 0 ELSE 1 END,x.suggested_term,x.course_id""", (student_id,))
+    failed, candidates = [], []
+    for row in evidence:
+        if row["completion_status"] == "failed":
+            row["reason"] = f"已发现明确未通过成绩{('（'+str(row['effective_score'])+'分）') if row['effective_score'] is not None else ''}，需核查补考、重修或替代安排。"
+            failed.append(row)
+        else:
+            row["reason"] = "已到培养方案建议修读学期但未发现结果记录；需先核对选课、免修认定和个人实际应修范围。"
+            candidates.append(row)
+    return ok({"student": student, "failed_courses": failed, "candidate_courses": candidates,
+      "summary": {"failed_courses": len(failed), "candidate_courses": len(candidates),
+        "courses_without_offering": sum(not x["lesson_count"] for x in evidence),
+        "courses_with_substitution": sum(bool(x["substitution_count"]) for x in evidence)},
+      "boundary": "本核查页只汇集与毕业准备相关的课程证据；候选课程必须核对选课、认定和方案适用范围后，才能形成管理结论。"})
+
+
 @router.get("/curriculum/plans/{plan_id}")
 def curriculum_plan_detail(plan_id: str,
                            conn: sqlite3.Connection = Depends(get_v2_db),
