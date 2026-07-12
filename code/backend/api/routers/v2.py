@@ -377,6 +377,32 @@ def faculty_resource_risk(semester: str = "2023-2024-1", limit: int = Query(100,
       "boundary":"当前仅有一个真实教学任务学期；年龄没有真实数据，因此不判断年龄断层，不评价教师个人能力。"}})
 
 
+@router.get("/topics/schedule-strategy")
+def schedule_strategy(semester: str = "2023-2024-1",
+                      conn: sqlite3.Connection = Depends(get_v2_db), user: dict = Depends(require_v2_all_reader)):
+    cells = dbm.query(conn, """SELECT m.weekday,CASE WHEN m.period_start<=4 THEN '上午' WHEN m.period_start<=8 THEN '下午' ELSE '晚上' END day_part,
+      COUNT(DISTINCT m.meeting_id) meeting_count,COUNT(DISTINCT l.lesson_id) lesson_count,
+      COUNT(DISTINCT l.course_id) course_count,COUNT(DISTINCT m.room_id) room_count
+      FROM course_meeting m JOIN teaching_lesson l ON l.lesson_id=m.lesson_id WHERE l.semester_id=?
+      GROUP BY m.weekday,CASE WHEN m.period_start<=4 THEN '上午' WHEN m.period_start<=8 THEN '下午' ELSE '晚上' END ORDER BY m.weekday,day_part""",(semester,))
+    focus = dbm.query(conn, """SELECT CASE WHEN COALESCE(c.category,'') LIKE '%体育%' OR COALESCE(l.course_name,'') LIKE '%体育%' THEN '体育课'
+      WHEN COALESCE(c.category,'') LIKE '%思政%' OR COALESCE(l.course_name,'') LIKE '%思想%' OR COALESCE(l.course_name,'') LIKE '%形势与政策%' THEN '思政课' ELSE '其他' END course_group,
+      m.weekday,CASE WHEN m.period_start<=4 THEN '上午' WHEN m.period_start<=8 THEN '下午' ELSE '晚上' END day_part,
+      COUNT(DISTINCT m.meeting_id) meeting_count FROM course_meeting m JOIN teaching_lesson l ON l.lesson_id=m.lesson_id
+      LEFT JOIN dim_course c ON c.course_id=l.course_id WHERE l.semester_id=? GROUP BY course_group,m.weekday,day_part HAVING course_group<>'其他'""",(semester,))
+    prefs = dbm.query(conn, """WITH ranked AS (SELECT staff_id,weekday,day_part,meeting_count,
+      ROW_NUMBER() OVER(PARTITION BY staff_id ORDER BY meeting_count DESC,weekday,day_part) rn,
+      SUM(meeting_count) OVER(PARTITION BY staff_id) total FROM agg_teacher_schedule_preference WHERE semester_id=?)
+      SELECT staff_id,weekday,day_part,meeting_count,total,ROUND(meeting_count*100.0/total,1) share FROM ranked WHERE rn=1 ORDER BY share DESC LIMIT 100""",(semester,))
+    total_meetings=sum(x["meeting_count"] for x in cells); peak=max(cells,key=lambda x:x["meeting_count"]) if cells else None
+    return ok({"semester":semester,"summary":{"lessons":dbm.scalar(conn,"SELECT COUNT(*) FROM teaching_lesson WHERE semester_id=?",(semester,)) or 0,
+      "courses":dbm.scalar(conn,"SELECT COUNT(DISTINCT course_id) FROM teaching_lesson WHERE semester_id=?",(semester,)) or 0,
+      "teachers":dbm.scalar(conn,"SELECT COUNT(DISTINCT lt.staff_id) FROM teaching_lesson l JOIN lesson_teacher lt ON lt.lesson_id=l.lesson_id WHERE l.semester_id=?",(semester,)) or 0,
+      "meetings":total_meetings,"preference_teachers":len(prefs),"peak":peak},"cells":cells,"focus":focus,"preferences":prefs,
+      "definition":{"meeting":"一次解析后的周次—星期—节次排课记录；不是课程门数。","preference":"按教师实际排课记录中出现最多的星期和时段描述行为集中度，不是教师主动填报意愿。",
+      "peak":"排课记录最多的星期与时段，只提示当前分布集中，不证明资源冲突。","boundary":"当前只有一个真实课表学期，不能称为稳定历史偏好，也不能生成新学年A/B优化方案；生产系统需接入多学期课表、新学年教学任务、硬约束和可用教室快照。"}})
+
+
 @router.get("/students/{student_id}/growth")
 def student_growth(student_id: str, timeline_limit: int = Query(100, ge=1, le=500),
                    conn: sqlite3.Connection = Depends(get_v2_db), user: dict = Depends(require_v2_reader)):

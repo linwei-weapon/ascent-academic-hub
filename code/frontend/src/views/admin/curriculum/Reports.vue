@@ -68,7 +68,7 @@ const topics = [
   { key:'schedule', index:'05', title:'排课策略与方案优化', status:'规划中', tone:'schedule',
     value:'沉淀历史排课规律，预测新学年压力，支持冲突诊断和候选方案 A/B 比较。',
     questions:['哪些历史分布是稳定倾向，哪些由资源约束造成？','新学年哪些教师、学生群体和教室成为瓶颈？','调整时段后解决什么冲突，又增加什么代价？'],
-    actions:[{label:'查看历史排课分布',path:'/admin/operation/schedule-analysis',primary:true},{label:'查看教室资源',path:'/admin/operation/classroom'}],
+    actions:[{label:'进入专题',path:'/admin/reports/schedule-strategy',primary:true},{label:'查看教室资源',path:'/admin/operation/classroom'}],
     boundary:'不自动生成或发布最终课表；当前一个真实学期只能展示实际分布。' },
 ]
 function go(path:string) { router.push(path) }
