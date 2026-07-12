@@ -504,5 +504,8 @@ CREATE INDEX IF NOT EXISTS idx_meeting_lesson ON course_meeting(lesson_id);
 CREATE INDEX IF NOT EXISTS idx_status_event_student ON student_status_event(student_id, effective_at);
 CREATE INDEX IF NOT EXISTS idx_scope_student ON staff_student_scope(student_id, relation_type);
 CREATE INDEX IF NOT EXISTS idx_plan_status_student ON student_plan_course_status(student_id, completion_status);
+CREATE INDEX IF NOT EXISTS idx_lesson_course_supply ON teaching_lesson(course_id, lesson_id);
+CREATE INDEX IF NOT EXISTS idx_lesson_teacher_lesson ON lesson_teacher(lesson_id, staff_id);
+CREATE INDEX IF NOT EXISTS idx_substitution_original ON student_course_substitution(original_course_id, substitution_id);
 CREATE INDEX IF NOT EXISTS idx_difficulty_student ON student_difficulty_flag(student_id, severity);
 CREATE INDEX IF NOT EXISTS idx_timeline_student ON student_timeline_event(student_id, event_date);

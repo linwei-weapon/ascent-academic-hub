@@ -4,6 +4,7 @@
     <h2 class="sa-page-title">毕业准备核查与课程保障</h2>
     <p class="sa-page-sub">面向教务处和学院定位毕业准备中的学生课程缺口，并核查阻塞课程的开课、师资、重修与替代资源。</p>
     <el-alert type="warning" :closable="false" show-icon title="本页是毕业审核准备工具，不是毕业审核结论" :description="definition.boundary" />
+    <el-alert class="scope-alert" type="info" :closable="false" show-icon title="管理口径分为明确问题与数据候选" description="“明确未通过”来自已发布的不及格成绩，可进入核查名单；“到期缺证据候选”仅表示当前没有结果记录，可能包含未选、免修认定未接入或方案课程并非个人实际应修，不能直接认定为缺修。" />
 
     <div class="filters">
       <el-select v-model="draftStatus" clearable placeholder="全部学生"><el-option label="高年级重点核查" value="high_grade_action"/><el-option label="有必修课未通过" value="action_required"/><el-option label="到期缺证据候选（待核验）" value="verification_required"/><el-option label="当前未发现明显缺口" value="evidence_complete"/></el-select>
@@ -16,7 +17,7 @@
     </el-skeleton>
 
     <div class="grid">
-      <section class="sa-card" v-loading="loading"><div class="sa-card-title">各专业必修课完成情况 <span class="extra">表中人数均为去重学生人数</span></div>
+      <section class="sa-card" v-loading="loading"><div class="sa-card-title">各专业毕业准备核查概览 <span class="extra">表中均为去重学生人数，不是成绩条数</span></div>
         <el-table :data="data.majors" size="small" max-height="420"><el-table-column prop="major_name" label="专业" min-width="170" show-overflow-tooltip/><el-table-column prop="students" label="覆盖学生数" width="95"/><el-table-column label="平均必修完成率" width="125"><template #default="{row}">{{row.avg_completion_rate}}%</template></el-table-column><el-table-column prop="failed_students" label="有必修课未通过学生数" width="155"/><el-table-column prop="verification_students" label="有到期课程待核验学生数" width="170"/></el-table>
       </section>
       <section class="sa-card" v-loading="loading"><div class="sa-card-title">需要优先核查的必修课程 <span class="extra">数字表示涉及该课程的去重学生数</span></div>
@@ -29,7 +30,7 @@
       <el-pagination v-if="data.total" v-model:current-page="page" :page-size="50" :total="data.total" layout="total, prev, pager, next" @current-change="load"/>
     </section>
 
-    <section class="sa-card definition"><div class="sa-card-title">这些数字是什么意思</div><p><b>平均必修完成率：</b>{{definition.completion_rate}}</p><p><b>有必修课未通过学生数：</b>{{definition.action_required}}</p><p><b>到期缺证据候选：</b>{{definition.verification_required}}</p><p><b>课程保障优先级：</b>{{definition.supply_priority}}</p><p><b>统计单位：</b>{{definition.number_unit}}</p></section>
+    <section class="sa-card definition"><div class="sa-card-title">指标口径与管理动作</div><p><b>方案覆盖可核查学生：</b>已关联到培养方案且生成学生—课程状态的去重学生。管理用途是判断本专题覆盖面，不代表学生总数。</p><p><b>高年级明确未通过：</b>{{definition.high_grade_attention}} 管理动作是优先确认补考、重修、替代课程和开课资源。</p><p><b>全部年级明确未通过：</b>{{definition.action_required}} 管理动作是按专业和课程识别共性瓶颈。</p><p><b>到期缺证据候选：</b>{{definition.verification_required}} 该指标只用于补充数据核验，不直接形成学生处理结论。</p><p><b>必修完成率：</b>{{definition.completion_rate}}</p><p><b>课程保障优先级：</b>{{definition.supply_priority}}</p><p><b>统计单位：</b>{{definition.number_unit}}</p></section>
 
     <el-dialog v-model="supplyVisible" :title="supply.course?.courseName ? supply.course.courseName+'：课程保障证据' : '课程保障证据'" width="760px">
       <el-descriptions :column="3" border><el-descriptions-item label="明确未通过">{{supply.affected?.actionRequiredStudents||0}} 人</el-descriptions-item><el-descriptions-item label="缺证据候选">{{supply.affected?.verificationStudents||0}} 人</el-descriptions-item><el-descriptions-item label="涉及专业">{{supply.affected?.affectedMajors||0}} 个</el-descriptions-item><el-descriptions-item label="历史开课">{{supply.offerings?.length||0}} 个学期</el-descriptions-item><el-descriptions-item label="替代关系">{{supply.substitutions?.length||0}} 条</el-descriptions-item><el-descriptions-item label="未来开课计划">{{supply.availability?.hasFuturePlanEvidence?'已有证据':'暂无证据'}}</el-descriptions-item></el-descriptions>
@@ -44,7 +45,7 @@ const router=useRouter(),loading=ref(false),initialLoading=ref(true),draftStatus
 const data=reactive<any>({summary:{},majors:[],courses:[],students:[],total:0}),definition=reactive<any>({})
 const supply=reactive<any>({})
 const statusName:any={action_required:'存在明确未通过课程',verification_required:'存在到期缺记录课程',evidence_complete:'当前未发现明显缺口'}
-const kpis=computed(()=>[{label:'培养方案覆盖学生',value:(data.summary.covered_students||0)+' 人',note:(data.summary.plan_count||0)+' 个培养方案',help:'已成功关联培养方案并进入本专题统计的去重学生人数。'},{label:'高年级重点核查',value:(data.summary.high_grade_attention_students||0)+' 人',note:'优先安排毕业准备核查',help:definition.high_grade_attention||''},{label:'有必修课未通过',value:(data.summary.action_required_students||0)+' 人',note:(data.summary.explicit_required_failures||0)+' 个学生-课程记录',help:definition.action_required||'至少有一门必修课明确未通过的学生人数。'},{label:'有到期课程待核验',value:(data.summary.verification_students||0)+' 人',note:(data.summary.due_required_gaps||0)+' 个学生-课程记录',help:definition.verification_required||'已经到建议修读学期但尚无完成记录的学生人数。'},{label:'当前未发现明显缺口',value:(data.summary.evidence_complete_students||0)+' 人',note:'不等同毕业审核通过',help:definition.evidence_complete||'当前数据中未发现明确未通过或到期缺记录。'}])
+const kpis=computed(()=>[{label:'方案覆盖可核查学生',value:(data.summary.covered_students||0)+' 人',note:(data.summary.plan_count||0)+' 个培养方案；仅表示数据覆盖',help:'已关联培养方案并生成课程状态的去重学生人数，不是全校在籍学生数。'},{label:'高年级明确未通过',value:(data.summary.high_grade_attention_students||0)+' 人',note:'优先核查重修与开课保障',help:definition.high_grade_attention||''},{label:'全部年级明确未通过',value:(data.summary.action_required_students||0)+' 人',note:(data.summary.explicit_required_failures||0)+' 条学生－必修课记录',help:definition.action_required||'至少有一门必修课存在明确未通过成绩的去重学生。'},{label:'到期缺证据候选',value:(data.summary.verification_students||0)+' 人',note:'仅作数据核验，不认定缺修',help:definition.verification_required||''},{label:'未发现明确问题',value:(data.summary.evidence_complete_students||0)+' 人',note:'不等同毕业审核通过',help:definition.evidence_complete||''}])
 function tagType(s:string){return s==='action_required'?'danger':s==='verification_required'?'warning':'success'}
 function applyFilter(){status.value=draftStatus.value;page.value=1;load()}function reset(){draftStatus.value='high_grade_action';status.value='high_grade_action';page.value=1;load()}
 async function load(){const id=++requestId.value;loading.value=true;try{const q=new URLSearchParams({limit:'50',offset:String((page.value-1)*50)});if(status.value)q.set('readiness',status.value);const r=await http.get<any>('/v2/topics/graduation-readiness?'+q);if(id!==requestId.value)return;Object.assign(data,r);Object.assign(definition,r.definition)}finally{if(id===requestId.value){loading.value=false;initialLoading.value=false}}}

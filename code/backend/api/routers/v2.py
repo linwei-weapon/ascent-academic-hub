@@ -1,5 +1,7 @@
 """V2真实数据验证接口。全部只读，响应继续使用{code,msg,data}。"""
 import sqlite3
+import os
+import time
 from collections import defaultdict
 from typing import Optional
 
@@ -13,6 +15,8 @@ router = APIRouter(prefix="/api/v2", tags=["v2"])
 
 V2_ALL_SCOPE_ROLES = {"school_leader", "dean", "dept_operation", "dept_research", "dept_practice", "quality_office"}
 V2_MAPPED_SCOPE_ROLES = {"college_dean", "college_secretary", "counselor", "dept_director"}
+_GRADUATION_TOPIC_CACHE: dict[tuple, tuple[float, float, dict]] = {}
+_GRADUATION_TOPIC_CACHE_TTL = 300
 
 
 def require_v2_reader(user: dict = Depends(get_current_user)) -> dict:
@@ -517,6 +521,14 @@ def graduation_readiness_topic(organization_id: Optional[str] = None, major_code
                                limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0),
                                conn: sqlite3.Connection = Depends(get_v2_db), user: dict = Depends(require_v2_reader)):
     """培养方案完成证据与毕业准备度专题；准备度不是毕业审核结论。"""
+    db_mtime = os.path.getmtime(settings.V2_DB_PATH)
+    cache_key = (user.get("username"), user.get("role_id"), organization_id, major_code, plan_id, readiness)
+    cached = _GRADUATION_TOPIC_CACHE.get(cache_key)
+    if cached and cached[0] == db_mtime and time.monotonic() - cached[1] < _GRADUATION_TOPIC_CACHE_TTL:
+        cached_payload = dict(cached[2])
+        all_cached_students = cached_payload.pop("_all_students")
+        cached_payload.update({"students": all_cached_students[offset:offset + limit], "limit": limit, "offset": offset})
+        return ok(cached_payload)
     cond, params = ["x.rule_version='growth-v1'"], []
     scope, scope_params = _student_scope(user, conn, "s")
     if scope:
@@ -581,15 +593,26 @@ def graduation_readiness_topic(organization_id: Optional[str] = None, major_code
       COUNT(DISTINCT CASE WHEN x.completion_status='failed' THEN x.student_id END) failed_students,
       COUNT(DISTINCT CASE WHEN x.completion_status IN ('not_completed','unknown')
         AND CAST(COALESCE(NULLIF(x.suggested_term,''),'99') AS INTEGER)<=8 THEN x.student_id END) verification_students,
-      COUNT(DISTINCT s.major_code) major_count,COUNT(DISTINCT l.lesson_id) lesson_count,
-      COUNT(DISTINCT lt.staff_id) teacher_count,
-      COUNT(DISTINCT CASE WHEN scs.original_course_id=x.course_id THEN scs.substitution_id END) substitution_count
+      COUNT(DISTINCT s.major_code) major_count
       FROM student_plan_course_status x JOIN dim_student s ON s.student_id=x.student_id LEFT JOIN dim_course c ON c.course_id=x.course_id
-      LEFT JOIN teaching_lesson l ON l.course_id=x.course_id LEFT JOIN lesson_teacher lt ON lt.lesson_id=l.lesson_id
-      LEFT JOIN student_course_substitution scs ON scs.original_course_id=x.course_id
       WHERE {where} AND x.requirement_type='必修' GROUP BY x.course_id
       HAVING failed_students>0 OR verification_students>0 ORDER BY failed_students DESC,verification_students DESC LIMIT 12""", tuple(params))
+    course_ids = [x["course_id"] for x in courses]
+    lesson_supply, substitution_supply = {}, {}
+    if course_ids:
+        marks = ",".join("?" for _ in course_ids)
+        lesson_supply = {x["course_id"]: x for x in dbm.query(conn, f"""SELECT l.course_id,
+          COUNT(DISTINCT l.lesson_id) lesson_count,COUNT(DISTINCT lt.staff_id) teacher_count
+          FROM teaching_lesson l LEFT JOIN lesson_teacher lt ON lt.lesson_id=l.lesson_id
+          WHERE l.course_id IN ({marks}) GROUP BY l.course_id""", tuple(course_ids))}
+        substitution_supply = {x["course_id"]: x["substitution_count"] for x in dbm.query(conn, f"""SELECT original_course_id course_id,
+          COUNT(DISTINCT substitution_id) substitution_count FROM student_course_substitution
+          WHERE original_course_id IN ({marks}) GROUP BY original_course_id""", tuple(course_ids))}
     for course in courses:
+        supply = lesson_supply.get(course["course_id"], {})
+        course["lesson_count"] = supply.get("lesson_count", 0)
+        course["teacher_count"] = supply.get("teacher_count", 0)
+        course["substitution_count"] = substitution_supply.get(course["course_id"], 0)
         reasons = []
         if course["failed_students"] >= 10: reasons.append("影响学生较多")
         if not course["lesson_count"]: reasons.append("当前无开课证据")
@@ -599,8 +622,9 @@ def graduation_readiness_topic(organization_id: Optional[str] = None, major_code
         course["supply_reasons"] = reasons
     high_grade_students = [x for x in all_rows if (x["entry_grade"] or 9999) <= settings.GRADUATING_GRADE and x["readiness_status"] == "action_required"]
     summary["high_grade_attention_students"] = len(high_grade_students)
-    return ok({"summary": summary, "majors": majors, "courses": courses,
+    payload = {"summary": summary, "majors": majors, "courses": courses,
                "students": students, "total": total, "limit": limit, "offset": offset,
+               "cache": {"ttl_seconds": _GRADUATION_TOPIC_CACHE_TTL, "generated_at": int(time.time())},
                "definition": {"action_required": "至少有1门培养方案必修课存在明确未通过成绩的去重学生人数。",
                  "verification_required": "已到建议修读学期但尚无通过、认定或明确未通过记录的去重学生人数；需结合选课与认定数据核验，不称为漏选。",
                  "evidence_complete": "当前接入记录中未发现明确未通过或到期缺记录的必修课，不等同学校毕业审核通过。",
@@ -608,7 +632,11 @@ def graduation_readiness_topic(organization_id: Optional[str] = None, major_code
                  "number_unit": "专业表为去重学生人数；课程表为涉及该课程的去重学生人数，不是成绩条数或课程门次。",
                  "high_grade_attention": f"入学年级不晚于{settings.GRADUATING_GRADE}级，且至少有一门必修课存在明确未通过成绩的去重学生数；待核验候选不计入。",
                  "supply_priority": "课程保障优先级综合影响学生数、当前开课证据、教师覆盖和替代关系，仅用于安排核查顺序。",
-                 "boundary": "本专题不输出能否毕业或获得学位的结论；正式结果以学校毕业审核和学位审核为准。"}})
+                 "boundary": "本专题不输出能否毕业或获得学位的结论；正式结果以学校毕业审核和学位审核为准。"}}
+    cached_payload = dict(payload)
+    cached_payload["_all_students"] = filtered
+    _GRADUATION_TOPIC_CACHE[cache_key] = (db_mtime, time.monotonic(), cached_payload)
+    return ok(payload)
 
 
 @router.get("/topics/course-quality")
