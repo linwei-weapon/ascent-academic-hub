@@ -351,6 +351,32 @@ def course_quality_detail(course_id: str, semester_from: Optional[str] = None, s
                "offering_boundary": "当前真实教学任务主要覆盖一个接入学期，只能展示已接入供给，不能据此判断未来是否开课或资源是否充足。"})
 
 
+@router.get("/topics/faculty-resource-risk")
+def faculty_resource_risk(semester: str = "2023-2024-1", limit: int = Query(100, ge=1, le=300),
+                          conn: sqlite3.Connection = Depends(get_v2_db), user: dict = Depends(require_v2_all_reader)):
+    rows = dbm.query(conn, """SELECT t.*,COALESCE(c.name,t.course_id) course_name,c.organization_id,
+      COALESCE(o.lesson_count,0) lesson_count,COALESCE(o.enrolled,0) enrolled
+      FROM agg_course_team t LEFT JOIN dim_course c ON c.course_id=t.course_id
+      LEFT JOIN agg_course_offering o ON o.semester_id=t.semester_id AND o.course_id=t.course_id
+      WHERE t.semester_id=?""", (semester,))
+    for x in rows:
+        reasons=[]
+        if x["teacher_count"] == 1: reasons.append("single_teacher")
+        if x["unknown_title_count"] > 0: reasons.append("title_incomplete")
+        known=x["teacher_count"]-x["unknown_title_count"]
+        if known>0 and x["professor_count"]+x["associate_professor_count"]==0: reasons.append("no_senior_title")
+        x["attention_reasons"]=reasons; x["known_title_count"]=known
+    attention=[x for x in rows if x["attention_reasons"]]
+    attention.sort(key=lambda x:("single_teacher" not in x["attention_reasons"],-x["enrolled"],x["course_id"]))
+    return ok({"semester":semester,"summary":{"courses":len(rows),"single_teacher_courses":sum(x["teacher_count"]==1 for x in rows),
+      "title_incomplete_courses":sum(x["unknown_title_count"]>0 for x in rows),
+      "no_senior_title_courses":sum("no_senior_title" in x["attention_reasons"] for x in rows),
+      "teachers":dbm.scalar(conn,"SELECT COUNT(DISTINCT staff_id) FROM lesson_teacher lt JOIN teaching_lesson l ON l.lesson_id=lt.lesson_id WHERE l.semester_id=?",(semester,)) or 0},
+      "courses":attention[:limit],"definition":{"single_teacher":"该学期该课程只有1名实际授课教师，表示当期教学任务单点承担，不等于长期人才断层。",
+      "title_incomplete":"团队至少1名教师缺少可用职称，不能据此形成完整职称梯队结论。","no_senior_title":"职称已知成员中未见教授或副教授，仅作为团队结构核查线索。",
+      "boundary":"当前仅有一个真实教学任务学期；年龄没有真实数据，因此不判断年龄断层，不评价教师个人能力。"}})
+
+
 @router.get("/students/{student_id}/growth")
 def student_growth(student_id: str, timeline_limit: int = Query(100, ge=1, le=500),
                    conn: sqlite3.Connection = Depends(get_v2_db), user: dict = Depends(require_v2_reader)):

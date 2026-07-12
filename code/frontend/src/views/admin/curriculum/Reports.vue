@@ -63,7 +63,7 @@ const topics = [
   { key:'faculty', index:'04', title:'资源与师资风险', status:'部分可用', tone:'faculty',
     value:'识别核心课程单点承担、年龄和职称梯队、接续活跃度及特殊空间约束。',
     questions:['哪些核心课程长期依赖单一教师？','课程团队年龄或职称结构是否存在接续风险？','特殊教室和高峰时段是否限制课程供给？'],
-    actions:[{label:'查看课程团队',path:'/admin/faculty/team',primary:true},{label:'查看师资结构',path:'/admin/faculty'}],
+    actions:[{label:'进入专题',path:'/admin/reports/faculty-resource-risk',primary:true},{label:'查看课程团队',path:'/admin/faculty/team'}],
     boundary:'年龄风险必须等待真实人事年龄段；不使用模拟画像评价教师。' },
   { key:'schedule', index:'05', title:'排课策略与方案优化', status:'规划中', tone:'schedule',
     value:'沉淀历史排课规律，预测新学年压力，支持冲突诊断和候选方案 A/B 比较。',
