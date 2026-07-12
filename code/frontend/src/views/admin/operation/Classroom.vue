@@ -22,6 +22,19 @@
       <KpiCard v-for="k in kpis" :key="k.label" :label="k.label" :value="k.value" :sub="k.sub" :hint="k.formula" :tone="kpiTone(k.label)" />
     </div>
 
+    <el-alert type="success" :closable="false" show-icon style="margin-bottom:12px"
+      title="V2 教室资源可用基数"
+      :description="`现有房间 ${v2Rooms.summary.total_rooms || 0} 间；按“可用、非虚拟、座位数大于0”口径，可用于利用率分母的教室 ${v2Rooms.summary.usable_rooms || 0} 间。可用数量由上游主数据提供，本系统只消费和分析。`" />
+    <div class="sa-card" style="margin-bottom:16px">
+      <div class="sa-card-title">分楼宇可用教室基数 <span class="extra">V2真实房间与楼宇主数据</span></div>
+      <el-table :data="v2Rooms.buildings" size="small" stripe max-height="300">
+        <el-table-column prop="building" label="教学楼" min-width="180" />
+        <el-table-column prop="total_rooms" label="房间总数" width="110" align="right" />
+        <el-table-column prop="usable_rooms" label="可用教室数" width="120" align="right" />
+        <el-table-column prop="usable_seats" label="可用座位数" width="120" align="right" />
+      </el-table>
+    </div>
+
     <el-row :gutter="16" style="margin-bottom:16px">
       <el-col :span="14">
         <div class="sa-card">
@@ -116,6 +129,7 @@ const data = reactive<{heatmap:Record<string,Record<string,number>>;buildings:an
 const capacity = reactive<any>({slots:[],summary:{slotCount:0,avgRemainingPct:0,availableCount:0},dataLimitation:''})
 const candidates = reactive<any>({candidates:[],warning:''})
 const candidateLoaded = ref(false)
+const v2Rooms = reactive<any>({ summary: {}, buildings: [], denominator: '' })
 
 async function loadCandidates() {
   if (!fBuilding.value || !fDay.value || !fPeriod.value) return
@@ -153,6 +167,8 @@ onMounted(async () => {
   roomTypes.value = meta.roomTypes || []
   buildings.value = meta.buildings || []
   fSemester.value = meta.current
+  const roomSummary = await http.get<any>('/v2/rooms/summary')
+  if (roomSummary) Object.assign(v2Rooms, roomSummary)
   await load()
 })
 

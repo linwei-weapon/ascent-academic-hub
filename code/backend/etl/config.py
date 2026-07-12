@@ -37,6 +37,13 @@ PLAN_DOCX = {
 DB_PATH = BACKEND_DIR / "db" / "analytics.sqlite"
 SCHEMA_SQL = BACKEND_DIR / "etl" / "schema.sql"
 
+# V2 真实数据接入验证库。默认与现有演示库完全隔离，可分别通过环境变量覆盖。
+V2_DB_PATH = Path(os.environ.get("V2_DB_PATH", BACKEND_DIR / "db" / "analytics_v2.sqlite"))
+V2_SCHEMA_SQL = BACKEND_DIR / "etl" / "schema_v2.sql"
+V2_SOURCE_ROOT = Path(os.environ.get(
+    "V2_SOURCE_ROOT", r"D:\AI教育\AI学业助手\15-原始数据\数据"
+))
+
 # 当前学期（真当前，时间序列数据中最新学期）。
 # 历史遗留：LATEST_REAL_SEMESTER/SIM_SEMESTER 在单 Excel + simulate 时代区分
 # “真实最新”与“模拟下一学期”；时间序列改造后 9 学期全为真，统一以

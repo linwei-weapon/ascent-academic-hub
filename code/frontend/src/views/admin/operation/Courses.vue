@@ -67,6 +67,22 @@
       <el-button size="small" type="primary" text @click="clearCollegeFilter">← 返回全院视图</el-button>
     </div>
 
+    <el-alert type="success" :closable="false" show-icon style="margin-bottom:12px"
+      title="V2 真实教学任务证据"
+      :description="`已关联 ${v2Offering.total} 门课程的真实教学任务；下表固定展示 ${v2Offering.semester} 学期，避免与原型模拟趋势混用。`" />
+    <div class="sa-card" style="margin-bottom:16px">
+      <div class="sa-card-title">单门课程开课情况 <span class="extra">V2 · 教学任务聚合，最多展示100门</span></div>
+      <el-table :data="v2Offering.items" size="small" stripe max-height="360">
+        <el-table-column prop="course_id" label="课程代码" width="140" />
+        <el-table-column prop="course_name" label="课程名称" min-width="190" />
+        <el-table-column prop="category" label="课程类别" width="120" />
+        <el-table-column prop="nature" label="课程性质" width="120" />
+        <el-table-column prop="lesson_count" label="教学班" width="85" align="right" />
+        <el-table-column prop="teacher_count" label="教师数" width="80" align="right" />
+        <el-table-column prop="enrolled" label="选课人次" width="90" align="right" />
+      </el-table>
+    </div>
+
     <div class="sa-kpi-row">
       <KpiCard v-for="k in kpis" :key="k.label" :label="k.label" :value="k.value" :hint="k.formula" :tone="k.label.includes('合班')?'amber':'primary'" />
     </div>
@@ -142,6 +158,7 @@ import EChart from '@/components/EChart.vue'
 import { COLLEGE_MAP } from '@/constants/colleges'
 import { getFilterMeta, type SemesterOpt } from '@/utils/meta'
 import { ElMessageBox } from 'element-plus'
+import { getV2TeachingSemester } from '@/utils/v2meta'
 const router = useRouter()
 const route = useRoute()
 
@@ -181,6 +198,7 @@ const qualityIssues = ref<any[]>([])
 const qualityManage = ref(false)
 const auditVisible = ref(false)
 const qualityAudit = ref<any[]>([])
+const v2Offering = reactive<any>({ items: [], total: 0, semester: '' })
 const qualityStatusLabel = (status:string) => ({open:'待处理',reviewing:'复核中',closed:'已关闭'} as Record<string,string>)[status] || status
 const qualityStatusType = (status:string) => ({open:'danger',reviewing:'warning',closed:'success'} as Record<string,any>)[status] || 'info'
 async function showQualityAudit(row:any) {
@@ -214,6 +232,11 @@ async function load() {
   const q = await http.get<any>('/admin/operation/data-quality?' + qParams.toString())
   qualityIssues.value = q?.list || []
   qualityManage.value = !!q?.permissions?.manage
+  const realSemester = await getV2TeachingSemester()
+  if (realSemester) {
+    const v2 = await http.get<any>(`/v2/courses/offerings?semester=${encodeURIComponent(realSemester)}&limit=100`)
+    if (v2) Object.assign(v2Offering, v2)
+  } else Object.assign(v2Offering, { items: [], total: 0, semester: '暂无真实教学任务学期' })
 }
 onMounted(async () => {
   const meta = await getFilterMeta()

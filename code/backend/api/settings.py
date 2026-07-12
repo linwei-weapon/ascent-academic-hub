@@ -4,6 +4,7 @@ import os
 from backend.etl import config as etl_config
 
 DB_PATH = str(etl_config.DB_PATH)
+V2_DB_PATH = str(etl_config.V2_DB_PATH)
 
 # JWT（演示密钥；生产应走环境变量/密钥管理）
 APP_ENV = os.getenv("BI_APP_ENV", "development").lower()

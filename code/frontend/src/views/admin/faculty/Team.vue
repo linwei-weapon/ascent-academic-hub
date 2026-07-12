@@ -37,6 +37,20 @@
       <el-alert v-if="evidence.limitation" type="warning" :closable="false" show-icon style="margin-bottom:12px"
         title="证据边界：团队成员与授课记录为真实数据，年龄、学历和教龄为模拟画像"
         :description="evidence.limitation" />
+      <el-alert v-if="v2Team.summary" type="success" :closable="false" show-icon style="margin-bottom:12px"
+        title="V2 真实课程团队证据"
+        :description="`${v2Team.summary.semester_id} 学期共有 ${v2Team.summary.teacher_count} 名实际授课教师；职称缺失 ${v2Team.summary.unknown_title_count} 人，缺失部分不参与人才梯队结论。`" />
+
+      <div v-if="v2Team.summary" class="sa-card" style="margin-bottom:16px">
+        <div class="sa-card-title">真实授课团队成员 <span class="extra">来源：教学任务教师关联</span></div>
+        <el-table :data="v2Team.members" size="small" stripe max-height="360" @row-click="goV2Teacher" row-class-name="row-clickable">
+          <el-table-column prop="staff_id" label="教师代码" width="120" />
+          <el-table-column prop="display_name" label="教师" min-width="120"><template #default="{row}"><span class="link">{{ row.display_name }}</span></template></el-table-column>
+          <el-table-column prop="title" label="职称" width="120"><template #default="{row}">{{ row.title || '待补充' }}</template></el-table-column>
+          <el-table-column prop="organization_id" label="组织代码" width="120" />
+          <el-table-column prop="source" label="证据来源" width="110" />
+        </el-table>
+      </div>
 
       <!-- KPI 行 -->
       <div class="sa-kpi-row">
@@ -108,6 +122,7 @@ import KpiCard from '@/components/KpiCard.vue'
 import EChart from '@/components/EChart.vue'
 import { http } from '@/utils/http'
 import { useRouter } from 'vue-router'
+import { getV2TeachingSemester } from '@/utils/v2meta'
 
 const router = useRouter()
 
@@ -120,6 +135,7 @@ const gapRisks = ref<any[]>([])
 const evidence = ref<any>({})
 const supportSuggestions = ref<any[]>([])
 const decisionBoundary = ref('')
+const v2Team = reactive<any>({ summary: null, members: [] })
 
 const kpis = ref<any[]>([])
 
@@ -176,9 +192,19 @@ async function loadTeam(courseId: string) {
       { label: '模拟风险场景', value: gapRisks.value.length ? `${gapRisks.value.length}项` : '未识别', formula: '基于模拟年龄画像识别，需真实档案核验', tone: gapRisks.value.length ? 'danger' as const : 'primary' as const },
     ]
   } catch { /* http 工具已 toast */ }
+  try {
+    const semester = await getV2TeachingSemester()
+    if (!semester) throw new Error('no real teaching semester')
+    const real = await http.get<any>(`/v2/courses/${encodeURIComponent(courseId)}/team?semester=${encodeURIComponent(semester)}`)
+    Object.assign(v2Team, real || { summary: null, members: [] })
+  } catch {
+    v2Team.summary = null
+    v2Team.members = []
+  }
 }
 
 function goTeacher(row:any) { router.push('/admin/faculty/' + row.teacherId) }
+function goV2Teacher(row:any) { router.push('/admin/faculty/' + row.staff_id) }
 
 function computeProfRatio() {
   if (!team.value.length) return '—'

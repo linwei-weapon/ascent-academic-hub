@@ -73,6 +73,18 @@
         <el-descriptions-item label="典型班额">{{ data.schedulePattern.classSizeTendency }}<template v-if="data.schedulePattern.avgClassSize !== null">（均值 {{ data.schedulePattern.avgClassSize }}）</template></el-descriptions-item>
       </el-descriptions>
     </div>
+
+    <div v-if="v2Preference.loaded" class="sa-card" style="margin-top:16px">
+      <div class="sa-card-title">V2 历史实际排课时间分布 <span class="extra">{{ v2Preference.semester }} · 非教师主动填报</span></div>
+      <el-alert type="success" :closable="false" show-icon :title="v2Preference.scope" style="margin-bottom:12px" />
+      <el-table :data="preferenceRows" size="small" stripe>
+        <el-table-column prop="day" label="星期" width="100" />
+        <el-table-column prop="morning" label="上午排课次数" align="right" />
+        <el-table-column prop="afternoon" label="下午排课次数" align="right" />
+        <el-table-column prop="evening" label="晚间排课次数" align="right" />
+        <el-table-column prop="total" label="合计" align="right" />
+      </el-table>
+    </div>
   </div>
 </template>
 
@@ -82,18 +94,39 @@ import { reactive, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import KpiCard from '@/components/KpiCard.vue'
 import EChart from '@/components/EChart.vue'
+import { getV2TeachingSemester } from '@/utils/v2meta'
 const route = useRoute(); const router = useRouter()
 const semLabel = computed(() => (route.query.semester as string) || '')
 const data = reactive<any>({ name: '', code: '', deptName: '', title: '', education: '', degree: '', school: '', kpis: [], semesters: [], scoreTrend: [], currentCourses: [], currentCourseTotal:0, currentCourseDisplayLimit:100, dataQuality:null, teachingHistory: [], evidence: {}, schedulePattern: { sampleCount:0, semesterCount:0, campuses:[], classrooms:[], courseNatures:[], avgClassSize:null, classSizeTendency:'暂无', confidence:'低', readiness:'暂无数据', limitation:'' } })
+const v2Preference = reactive<any>({ loaded: false, semester: '', cells: [], scope: '' })
 async function load() {
   const qs = semLabel.value ? '?semester=' + encodeURIComponent(semLabel.value) : ''
-  const d = await http.get('/admin/faculty/' + route.params.id + qs)
-  if (d) Object.assign(data, d)
+  try {
+    const d = await http.get('/admin/faculty/' + route.params.id + qs)
+    if (d) Object.assign(data, d)
+  } catch { /* V2教师可能尚未进入旧画像库，继续加载真实排课证据 */ }
+  try {
+    const semester = await getV2TeachingSemester()
+    if (!semester) throw new Error('no real teaching semester')
+    const real = await http.get<any>(`/v2/teachers/${encodeURIComponent(String(route.params.id))}/schedule-preference?semester=${encodeURIComponent(semester)}`)
+    Object.assign(v2Preference, real || {}, { loaded: true })
+  } catch {
+    Object.assign(v2Preference, { loaded: false, semester: '', cells: [], scope: '' })
+  }
 }
 onMounted(load)
 watch(() => [route.params.id, route.query.semester], load)
 function goCourse(row: any) { router.push({ path: '/admin/course/' + row.id, query: semLabel.value ? { semester: semLabel.value } : {} }) }
 function patternText(items:any[]) { return items?.length ? items.map(x => `${x.label} ${x.pct}%`).join('、') : '暂无数据' }
+const preferenceRows = computed(() => {
+  const labels:Record<number,string> = {1:'周一',2:'周二',3:'周三',4:'周四',5:'周五',6:'周六',7:'周日'}
+  return Array.from({length:7}, (_,i) => {
+    const cells = (v2Preference.cells || []).filter((x:any) => x.weekday === i + 1)
+    const count = (part:string) => cells.filter((x:any) => x.day_part === part).reduce((s:number,x:any) => s + x.meeting_count, 0)
+    const morning=count('morning'), afternoon=count('afternoon'), evening=count('evening')
+    return { day:labels[i+1], morning, afternoon, evening, total:morning+afternoon+evening }
+  }).filter(x => x.total > 0)
+})
 
 const scoreOption = computed(() => {
   const s = data.scoreTrend || []

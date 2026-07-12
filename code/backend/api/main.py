@@ -10,6 +10,7 @@ from . import settings
 from .routers import (auth, dashboard, alert, curriculum, reports,
                       operation, faculty, settings as settings_router, students,
                       admin_rbac, meta, teacher)
+from .routers import v2
 
 app = FastAPI(title="高校学业BI · 平台管理端 API", version="0.3.0")
 
@@ -54,3 +55,4 @@ app.include_router(students.router)
 app.include_router(admin_rbac.router)
 app.include_router(meta.router)
 app.include_router(teacher.router)  # V1.1新增：任课教师视图
+app.include_router(v2.router)       # V2真实数据验证接口（只读）

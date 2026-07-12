@@ -33,6 +33,10 @@
       <template v-if="data.graduateOn"><el-divider direction="vertical" /><span>预计毕业：{{ data.graduateOn }}</span></template>
     </div>
 
+    <el-alert v-if="v2Status==='ok'" type="success" :closable="false" show-icon class="v2-banner">
+      <template #title>V2真实数据档案 · 成绩有效结果、培养方案、学籍异动和毕业结果已统一关联</template>
+    </el-alert>
+
     <el-row :gutter="12" style="margin-bottom:12px">
       <el-col :span="8">
         <KpiCard v-if="data.kpis[0]" :label="data.kpis[0].label" :value="data.kpis[0].value" :sub="data.kpis[0].sub" :hint="data.kpis[0].formula" :tone="kpiTone(data.kpis[0].label, data.kpis[0].value)" />
@@ -91,6 +95,68 @@
         </el-table-column>
         <el-table-column prop="earnedCredits" label="已修学分" width="80" align="right" />
       </el-table>
+    </div>
+
+    <!-- V2 成长指标与困难证据 -->
+    <div class="sa-card" v-if="v2Status==='ok' && v2Growth.indicator">
+      <div class="sa-card-title">V2 成长指标 <span class="extra">growth-v1 · 可回溯证据</span></div>
+      <el-row :gutter="12" class="v2-metrics">
+        <el-col :span="4"><div class="metric"><b>{{ v2Growth.indicator.passed_courses }}</b><span>已通过课程</span></div></el-col>
+        <el-col :span="4"><div class="metric danger"><b>{{ v2Growth.indicator.failed_courses }}</b><span>当前未通过</span></div></el-col>
+        <el-col :span="4"><div class="metric"><b>{{ fmtNumber(v2Growth.indicator.earned_credits) }}</b><span>已获学分</span></div></el-col>
+        <el-col :span="4"><div class="metric"><b>{{ fmtNumber(v2Growth.indicator.avg_gpa) }}</b><span>平均 GPA</span></div></el-col>
+        <el-col :span="4"><div class="metric amber"><b>{{ v2Growth.indicator.retake_attempts }}</b><span>重修尝试</span></div></el-col>
+        <el-col :span="4"><div class="metric"><b>{{ v2Growth.indicator.status_events }}</b><span>学籍异动</span></div></el-col>
+      </el-row>
+      <div v-if="v2Growth.flags?.length" class="flag-list">
+        <span class="sa-faint">困难证据：</span>
+        <el-tag v-for="flag in v2Growth.flags" :key="flag.flag_code" :type="flag.severity==='high'?'danger':'warning'" effect="light">
+          {{ flagLabel(flag.flag_code) }} · {{ flag.evidence_count }}
+        </el-tag>
+      </div>
+      <div v-else class="sa-faint" style="font-size:12px;margin-top:10px">当前没有V2困难标签</div>
+    </div>
+
+    <!-- V2 培养方案课程状态 -->
+    <div class="sa-card" v-if="v2Status==='ok' && v2Growth.student?.plan_id">
+      <div class="sa-card-title">培养方案课程状态 <span class="extra">{{ v2Growth.student.plan_name || '已绑定方案' }}</span></div>
+      <el-alert type="info" :closable="false" show-icon class="wording-alert"
+        title="“尚无完成证据”仅表示当前成绩与认定记录未发现完成结果，不等同于漏选或不能毕业。" />
+      <el-tabs v-model="planTab">
+        <el-tab-pane label="明确未通过（可行动）" name="actionable">
+          <el-table :data="actionableCourses.items" size="small" empty-text="没有明确未通过的必修课程">
+            <el-table-column prop="course_id" label="课程代码" width="120" />
+            <el-table-column prop="course_name" label="课程名称" min-width="180" />
+            <el-table-column prop="module" label="模块" width="140" />
+            <el-table-column prop="suggested_term" label="建议学期" width="90" />
+            <el-table-column prop="effective_score" label="有效成绩" width="90" align="right" />
+            <el-table-column label="建议" width="100"><template #default><el-tag type="danger">优先重修</el-tag></template></el-table-column>
+          </el-table>
+        </el-tab-pane>
+        <el-tab-pane :label="`尚无完成证据（前${candidateCourses.items.length}条）`" name="candidate">
+          <el-table :data="candidateCourses.items" size="small" empty-text="没有候选课程缺口">
+            <el-table-column prop="course_id" label="课程代码" width="120" />
+            <el-table-column prop="course_name" label="课程名称" min-width="180" />
+            <el-table-column prop="module" label="模块" width="140" />
+            <el-table-column prop="requirement_type" label="性质" width="80" />
+            <el-table-column prop="suggested_term" label="建议学期" width="90" />
+            <el-table-column label="状态" width="130"><template #default><el-tag type="info">待选课/认定核验</el-tag></template></el-table-column>
+          </el-table>
+          <div class="sa-faint" style="font-size:11px;margin-top:8px">候选总数 {{ candidateCourses.total }}，当前仅展示前100条。</div>
+        </el-tab-pane>
+      </el-tabs>
+    </div>
+
+    <!-- V2 标准成长时间线 -->
+    <div class="sa-card" v-if="v2Status==='ok' && v2Growth.timeline?.length">
+      <div class="sa-card-title">标准成长时间线 <span class="extra">学期学习结果 / 学籍异动 / 毕业学位</span></div>
+      <el-timeline>
+        <el-timeline-item v-for="(event,index) in v2Growth.timeline" :key="index"
+          :timestamp="event.event_date || event.semester_id || '—'" :type="timelineType(event.event_type)" placement="top">
+          <b>{{ event.title }}</b>
+          <div class="sa-faint timeline-detail">{{ timelineDetail(event) }}</div>
+        </el-timeline-item>
+      </el-timeline>
     </div>
 
     <!-- V1.1 挂科溯源 -->
@@ -163,6 +229,11 @@ const data = reactive<any>({
   code: '', name: '', collegeId: '', collegeName: '', majorName: '', className: '',
   enrollOn: '', graduateOn: '', kpis: [], gpaHistory: [], alertHistory: [], scores: []
 })
+const v2Status = ref<'loading'|'ok'|'unavailable'>('loading')
+const v2Growth = reactive<any>({ student: null, indicator: null, flags: [], timeline: [], graduation: [] })
+const actionableCourses = reactive<any>({ items: [], total: 0 })
+const candidateCourses = reactive<any>({ items: [], total: 0 })
+const planTab = ref('actionable')
 
 onMounted(async () => {
   try {
@@ -172,7 +243,40 @@ onMounted(async () => {
   } catch {
     status.value = 'error'
   }
+  try {
+    const id = String(route.params.id)
+    const [growth, actionable, candidates] = await Promise.all([
+      http.get<any>('/v2/students/' + id + '/growth?timeline_limit=80'),
+      http.get<any>('/v2/students/' + id + '/plan-courses?actionable=true&limit=200'),
+      http.get<any>('/v2/students/' + id + '/plan-courses?status=not_completed&limit=100'),
+    ])
+    Object.assign(v2Growth, growth)
+    Object.assign(actionableCourses, actionable)
+    Object.assign(candidateCourses, candidates)
+    v2Status.value = 'ok'
+  } catch {
+    v2Status.value = 'unavailable'
+  }
 })
+
+function fmtNumber(value: any) { return value == null ? '—' : Number(value).toFixed(2).replace(/\.00$/, '') }
+function flagLabel(code: string) {
+  return ({ multiple_current_failures: '当前多门未通过', repeated_course_failure: '同一课程重复失败', required_course_gap: '必修课程明确失败' } as Record<string,string>)[code] || code
+}
+function timelineType(type: string): 'primary'|'success'|'warning'|'danger'|'info' {
+  if (type === 'graduation') return 'success'
+  if (type === 'status_change') return 'warning'
+  return 'primary'
+}
+function timelineDetail(event: any) {
+  try {
+    const d = JSON.parse(event.detail_json || '{}')
+    if (event.event_type === 'semester_result') return `课程 ${d.courses || 0} 门，通过 ${d.passed || 0} 门，未通过 ${d.failed || 0} 门，平均成绩 ${d.avg_score ?? '—'}`
+    if (event.event_type === 'status_change') return [d.before_status, d.after_status].filter(Boolean).join(' → ') + (d.reason ? ` · ${d.reason}` : '')
+    if (event.event_type === 'graduation') return `${d.graduation_status || '—'} · ${d.degree_status || '—'}`
+  } catch { return '' }
+  return ''
+}
 
 function tagType(level: string) { return level === '严重' ? 'danger' : level === '警告' ? 'warning' : 'info' }
 function kpiTone(label: string, value: any): 'primary'|'teal'|'danger'|'amber' {
@@ -219,4 +323,14 @@ const gpaOption = computed(() => {
 .alert-row:last-child { border-bottom: none; }
 .link { color: var(--sa-primary); cursor: pointer; font-weight: 500; }
 .link:hover { text-decoration: underline; }
+.v2-banner { margin-bottom: 12px; }
+.v2-metrics { margin-top: 4px; }
+.metric { background:#F8FAFC; border:1px solid #E2E8F0; border-radius:8px; padding:12px; text-align:center; }
+.metric b { display:block; color:#1E3A5F; font-size:22px; font-variant-numeric:tabular-nums; }
+.metric span { display:block; color:#64748B; font-size:11px; margin-top:4px; }
+.metric.danger b { color:#DC2626; }
+.metric.amber b { color:#D97706; }
+.flag-list { display:flex; align-items:center; flex-wrap:wrap; gap:6px; margin-top:12px; }
+.wording-alert { margin-bottom:8px; }
+.timeline-detail { font-size:12px; margin-top:4px; line-height:1.6; }
 </style>

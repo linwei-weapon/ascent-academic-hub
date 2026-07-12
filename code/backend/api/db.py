@@ -21,6 +21,14 @@ def get_conn_rw() -> sqlite3.Connection:
     return conn
 
 
+def get_v2_conn() -> sqlite3.Connection:
+    """V2真实数据验证库只读连接；与现有演示库隔离。"""
+    conn = sqlite3.connect(f"file:{settings.V2_DB_PATH}?mode=ro", uri=True,
+                           check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
 def query(conn: sqlite3.Connection, sql: str, params=()) -> list[dict]:
     return [dict(r) for r in conn.execute(sql, params).fetchall()]
 

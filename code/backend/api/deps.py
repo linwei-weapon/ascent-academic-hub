@@ -30,6 +30,15 @@ def get_db_rw() -> Generator[sqlite3.Connection, None, None]:
         conn.close()
 
 
+def get_v2_db() -> Generator[sqlite3.Connection, None, None]:
+    """V2只读数据库依赖。鉴权仍由现有库的get_current_user完成。"""
+    conn = dbm.get_v2_conn()
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+
 # 管理员角色（本轮以 dean 充当系统管理员）
 ADMIN_ROLES = {"dean"}
 

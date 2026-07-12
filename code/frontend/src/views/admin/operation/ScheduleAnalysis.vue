@@ -19,6 +19,26 @@
       </el-col>
     </el-row>
 
+    <el-alert type="success" :closable="false" show-icon style="margin-bottom:12px"
+      title="V2 真实排课时段证据"
+      :description="v2Schedule.classification" />
+    <el-row :gutter="16" style="margin-bottom:16px">
+      <el-col :span="12">
+        <div class="sa-card">
+          <div class="sa-card-title">体育课 · 实际排课时段热力图 <span class="extra">{{ v2Schedule.semester }}</span></div>
+          <EChart v-if="v2PeCells.length" :option="v2PeOption" :height="250" />
+          <div v-else class="sa-faint" style="padding:20px">当前识别口径下暂无体育课排课片段</div>
+        </div>
+      </el-col>
+      <el-col :span="12">
+        <div class="sa-card">
+          <div class="sa-card-title">思政课 · 实际排课时段热力图 <span class="extra">{{ v2Schedule.semester }}</span></div>
+          <EChart v-if="v2PoliticsCells.length" :option="v2PoliticsOption" :height="250" />
+          <div v-else class="sa-faint" style="padding:20px">当前识别口径下暂无思政课排课片段</div>
+        </div>
+      </el-col>
+    </el-row>
+
     <!-- ====== 模块1+2：类别分布 + 年级交叉 ====== -->
     <el-row :gutter="16" style="margin-bottom:16px">
       <el-col :span="14">
@@ -160,6 +180,7 @@ import { http } from '@/utils/http'
 import { ref, reactive, computed, onMounted } from 'vue'
 import EChart from '@/components/EChart.vue'
 import { getFilterMeta, type SemesterOpt } from '@/utils/meta'
+import { getV2TeachingSemester } from '@/utils/v2meta'
 
 const fSemester = ref('')
 const semesters = ref<SemesterOpt[]>([])
@@ -174,6 +195,9 @@ const buildingLoad = ref<any[]>([])
 const trends = ref<any[]>([])
 const peTrends = ref<any[]>([])
 const politicsTrends = ref<any[]>([])
+const v2Schedule = reactive<any>({ semester: '', classification: '', pe: [], politics: [] })
+const v2PeCells = computed(() => v2Schedule.pe || [])
+const v2PoliticsCells = computed(() => v2Schedule.politics || [])
 
 const CAT_COLORS = ['#2563EB', '#16A34A', '#EA580C', '#F59E0B', '#9333EA', '#DC2626', '#0891B2', '#65A30D']
 
@@ -193,7 +217,37 @@ async function load() {
   trends.value = d.trends || []
   peTrends.value = d.peTrends || []
   politicsTrends.value = d.politicsTrends || []
+  const realSemester = await getV2TeachingSemester()
+  if (!realSemester) {
+    Object.assign(v2Schedule, { semester: '暂无真实教学任务学期', classification: '', pe: [], politics: [] })
+    return
+  }
+  const [pe, politics] = await Promise.all([
+    http.get<any>(`/v2/courses/schedule-distribution?semester=${encodeURIComponent(realSemester)}&focus=pe`),
+    http.get<any>(`/v2/courses/schedule-distribution?semester=${encodeURIComponent(realSemester)}&focus=politics`),
+  ])
+  v2Schedule.semester = pe?.semester || politics?.semester || realSemester
+  v2Schedule.classification = pe?.classification || politics?.classification || ''
+  v2Schedule.pe = pe?.cells || []
+  v2Schedule.politics = politics?.cells || []
 }
+
+function v2TimeOption(cells:any[]) {
+  const days = ['周一','周二','周三','周四','周五','周六','周日']
+  const parts = [{key:'morning',label:'上午'},{key:'afternoon',label:'下午'},{key:'evening',label:'晚间'}]
+  const points = cells.map((x:any) => [x.weekday - 1, parts.findIndex(p => p.key === x.day_part), x.meeting_count])
+  const maxV = Math.max(1, ...cells.map((x:any) => x.meeting_count))
+  return {
+    tooltip:{formatter:(p:any)=>`${days[p.data[0]]} ${parts[p.data[1]].label}<br/>排课片段：<b>${p.data[2]}</b>`},
+    grid:{left:55,right:25,top:10,bottom:45},
+    xAxis:{type:'category',data:days,axisLabel:{fontSize:10}},
+    yAxis:{type:'category',data:parts.map(p=>p.label),axisLabel:{fontSize:11}},
+    visualMap:{min:0,max:maxV,calculable:true,orient:'horizontal',left:'center',bottom:0,inRange:{color:['#EEF2FF','#93C5FD','#3B82F6','#1D4ED8']}},
+    series:[{type:'heatmap',data:points,label:{show:true,formatter:(p:any)=>p.data[2],fontSize:10}}],
+  }
+}
+const v2PeOption = computed(() => v2TimeOption(v2PeCells.value))
+const v2PoliticsOption = computed(() => v2TimeOption(v2PoliticsCells.value))
 
 // ---- 年级×类别热力图 ----
 const gradeHeatOption = computed(() => {
