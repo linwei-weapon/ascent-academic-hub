@@ -1,5 +1,6 @@
 """V2真实数据验证接口。全部只读，响应继续使用{code,msg,data}。"""
 import sqlite3
+from collections import defaultdict
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
@@ -212,14 +213,15 @@ def graduation_readiness_topic(organization_id: Optional[str] = None, major_code
         SUM(CASE WHEN x.requirement_type='必修' THEN 1 ELSE 0 END) required_courses,
         SUM(CASE WHEN x.requirement_type='必修' AND x.completion_status IN ('passed','recognized') THEN 1 ELSE 0 END) required_completed,
         SUM(CASE WHEN x.requirement_type='必修' AND x.completion_status='failed' THEN 1 ELSE 0 END) explicit_required_failures,
-        SUM(CASE WHEN x.requirement_type='必修' AND x.completion_status IN ('not_completed','unknown') THEN 1 ELSE 0 END) candidate_required_gaps,
+        SUM(CASE WHEN x.requirement_type='必修' AND x.completion_status IN ('not_completed','unknown')
+          AND CAST(COALESCE(NULLIF(x.suggested_term,''),'99') AS INTEGER)<=8 THEN 1 ELSE 0 END) due_required_gaps,
         SUM(CASE WHEN x.completion_status='recognized' THEN 1 ELSE 0 END) recognized_courses
       FROM student_plan_course_status x JOIN dim_student s ON s.student_id=x.student_id
       LEFT JOIN curriculum_plan p ON p.plan_id=x.plan_id LEFT JOIN curriculum_plan_course pc ON pc.plan_course_id=x.plan_course_id
       WHERE {where} GROUP BY s.student_id,x.plan_id
     ), classified AS (SELECT *,ROUND(required_completed*100.0/NULLIF(required_courses,0),1) completion_rate,
       CASE WHEN explicit_required_failures>0 THEN 'action_required'
-           WHEN candidate_required_gaps>0 THEN 'verification_required'
+           WHEN due_required_gaps>0 THEN 'verification_required'
            ELSE 'evidence_complete' END readiness_status FROM student_readiness)
     """
     read_cond, read_params = "", []
@@ -227,42 +229,43 @@ def graduation_readiness_topic(organization_id: Optional[str] = None, major_code
         if readiness not in {"action_required", "verification_required", "evidence_complete"}:
             raise ApiError("不支持的准备度状态", code=400, status_code=400)
         read_cond = " WHERE readiness_status=?"; read_params = [readiness]
-    all_params = tuple(params + read_params)
-    summary = dbm.query_one(conn, cte + """SELECT COUNT(*) covered_students,COUNT(DISTINCT plan_id) plan_count,
-      SUM(CASE WHEN readiness_status='action_required' THEN 1 ELSE 0 END) action_required_students,
-      SUM(CASE WHEN readiness_status='verification_required' THEN 1 ELSE 0 END) verification_students,
-      SUM(CASE WHEN readiness_status='evidence_complete' THEN 1 ELSE 0 END) evidence_complete_students,
-      ROUND(AVG(completion_rate),1) avg_completion_rate,SUM(explicit_required_failures) explicit_required_failures,
-      SUM(candidate_required_gaps) candidate_required_gaps FROM classified""", tuple(params)) or {}
-    total = dbm.scalar(conn, cte + "SELECT COUNT(*) FROM classified" + read_cond, all_params) or 0
-    students = dbm.query(conn, cte + "SELECT * FROM classified" + read_cond + """ ORDER BY
-      CASE readiness_status WHEN 'action_required' THEN 1 WHEN 'verification_required' THEN 2 ELSE 3 END,
-      explicit_required_failures DESC,candidate_required_gaps DESC,completion_rate ASC,student_id LIMIT ? OFFSET ?""",
-      tuple(params + read_params + [limit, offset]))
-    majors = dbm.query(conn, cte + """SELECT major_code,major_name,COUNT(*) students,
-      ROUND(AVG(completion_rate),1) avg_completion_rate,SUM(explicit_required_failures) explicit_required_failures,
-      SUM(candidate_required_gaps) candidate_required_gaps,
-      SUM(CASE WHEN readiness_status='action_required' THEN 1 ELSE 0 END) action_required_students
-      FROM classified GROUP BY major_code,major_name ORDER BY action_required_students DESC,candidate_required_gaps DESC LIMIT 15""", tuple(params))
-    modules = dbm.query(conn, f"""SELECT COALESCE(x.module,'未分类') module,
-      SUM(CASE WHEN x.requirement_type='必修' AND x.completion_status='failed' THEN 1 ELSE 0 END) explicit_failures,
-      SUM(CASE WHEN x.requirement_type='必修' AND x.completion_status IN ('not_completed','unknown') THEN 1 ELSE 0 END) candidate_gaps,
-      COUNT(DISTINCT x.student_id) students
-      FROM student_plan_course_status x JOIN dim_student s ON s.student_id=x.student_id WHERE {where}
-      GROUP BY COALESCE(x.module,'未分类') ORDER BY explicit_failures DESC,candidate_gaps DESC LIMIT 12""", tuple(params))
+    all_rows = dbm.query(conn, cte + "SELECT * FROM classified", tuple(params))
+    filtered = [x for x in all_rows if not readiness or x["readiness_status"] == readiness]
+    rank = {"action_required": 0, "verification_required": 1, "evidence_complete": 2}
+    filtered.sort(key=lambda x: (rank[x["readiness_status"]], -x["explicit_required_failures"],
+                                 -x["due_required_gaps"], x["completion_rate"] or 0, x["student_id"]))
+    total = len(filtered); students = filtered[offset:offset + limit]
+    summary = {"covered_students": len(all_rows), "plan_count": len({x["plan_id"] for x in all_rows}),
+      "action_required_students": sum(x["readiness_status"] == "action_required" for x in all_rows),
+      "verification_students": sum(x["readiness_status"] == "verification_required" for x in all_rows),
+      "evidence_complete_students": sum(x["readiness_status"] == "evidence_complete" for x in all_rows),
+      "avg_completion_rate": round(sum(x["completion_rate"] or 0 for x in all_rows) / len(all_rows), 1) if all_rows else 0,
+      "explicit_required_failures": sum(x["explicit_required_failures"] for x in all_rows),
+      "due_required_gaps": sum(x["due_required_gaps"] for x in all_rows)}
+    major_groups = defaultdict(list)
+    for row in all_rows: major_groups[(row["major_code"], row["major_name"])].append(row)
+    majors = []
+    for (code, name), rows in major_groups.items():
+        majors.append({"major_code": code, "major_name": name, "students": len(rows),
+          "avg_completion_rate": round(sum(x["completion_rate"] or 0 for x in rows) / len(rows), 1),
+          "failed_students": sum(x["explicit_required_failures"] > 0 for x in rows),
+          "verification_students": sum(x["due_required_gaps"] > 0 for x in rows)})
+    majors.sort(key=lambda x: (-x["failed_students"], -x["verification_students"])); majors = majors[:15]
     courses = dbm.query(conn, f"""SELECT x.course_id,COALESCE(MAX(c.name),x.course_id) course_name,
-      SUM(CASE WHEN x.completion_status='failed' THEN 1 ELSE 0 END) explicit_failures,
-      SUM(CASE WHEN x.completion_status IN ('not_completed','unknown') THEN 1 ELSE 0 END) candidate_gaps,
-      COUNT(DISTINCT x.student_id) affected_students
+      COUNT(DISTINCT CASE WHEN x.completion_status='failed' THEN x.student_id END) failed_students,
+      COUNT(DISTINCT CASE WHEN x.completion_status IN ('not_completed','unknown')
+        AND CAST(COALESCE(NULLIF(x.suggested_term,''),'99') AS INTEGER)<=8 THEN x.student_id END) verification_students,
+      COUNT(DISTINCT s.major_code) major_count
       FROM student_plan_course_status x JOIN dim_student s ON s.student_id=x.student_id LEFT JOIN dim_course c ON c.course_id=x.course_id
       WHERE {where} AND x.requirement_type='必修' GROUP BY x.course_id
-      HAVING explicit_failures>0 OR candidate_gaps>0 ORDER BY explicit_failures DESC,candidate_gaps DESC LIMIT 12""", tuple(params))
-    return ok({"summary": summary, "majors": majors, "modules": modules, "courses": courses,
+      HAVING failed_students>0 OR verification_students>0 ORDER BY failed_students DESC,verification_students DESC LIMIT 12""", tuple(params))
+    return ok({"summary": summary, "majors": majors, "courses": courses,
                "students": students, "total": total, "limit": limit, "offset": offset,
-               "definition": {"action_required": "培养方案必修课存在明确未通过成绩，可进入修读资源核查。",
-                 "verification_required": "必修课尚无通过、认定或明确失败证据，须结合选课与认定数据核验，不称为漏选。",
-                 "evidence_complete": "当前接入记录中必修课均有通过或认定证据，不等同学校毕业审核通过。",
-                 "completion_rate": "已有通过或认定证据的必修课程数 / 培养方案必修课程数；选修候选池不进入分母。",
+               "definition": {"action_required": "至少有1门培养方案必修课存在明确未通过成绩的去重学生人数。",
+                 "verification_required": "已到建议修读学期但尚无通过、认定或明确未通过记录的去重学生人数；需结合选课与认定数据核验，不称为漏选。",
+                 "evidence_complete": "当前接入记录中未发现明确未通过或到期缺记录的必修课，不等同学校毕业审核通过。",
+                 "completion_rate": "每名学生已有通过或认定记录的必修课占其方案必修课的比例，再按专业或全校求平均；单位为%。",
+                 "number_unit": "专业表为去重学生人数；课程表为涉及该课程的去重学生人数，不是成绩条数或课程门次。",
                  "boundary": "本专题不输出能否毕业或获得学位的结论；正式结果以学校毕业审核和学位审核为准。"}})
 
 
