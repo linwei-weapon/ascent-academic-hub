@@ -14,15 +14,18 @@
 
     <!-- KPI 行（点击联动筛选） -->
     <div class="alert-kpi-row">
-      <div v-for="a in levels" :key="a.key" class="alert-kpi" :class="{ active: activeFilter === a.key }" @click="toggleFilter(a)">
+      <div v-for="a in levels" :key="a.key" class="alert-kpi" :class="{ active: activeFilter === a.key }"
+        role="button" tabindex="0" :aria-pressed="activeFilter === a.key"
+        @click="toggleFilter(a)" @keydown.enter.prevent="toggleFilter(a)" @keydown.space.prevent="toggleFilter(a)">
         <div class="ak-val tnum" :style="{ color: a.color }">{{ data.summary[a.key] }}</div>
         <div class="ak-label"><KpiLabel :label="a.label" :formula="a.formula" /></div>
         <div class="ak-hint">{{ activeFilter === a.key ? '▼ 已筛选' : '点击筛选' }}</div>
       </div>
-      <div class="alert-kpi">
+      <div class="alert-kpi" :class="{ active: activeFilter === 'inbox' }" role="button" tabindex="0"
+        :aria-pressed="activeFilter === 'inbox'" @click="toggleInbox" @keydown.enter.prevent="toggleInbox" @keydown.space.prevent="toggleInbox">
         <div class="ak-val tnum" style="color:#4F46E5">{{ data.summary.inbox }}</div>
         <div class="ak-label"><KpiLabel label="我的待办" formula="分派给当前用户且尚未解决/关闭的预警事件" /></div>
-        <div class="ak-hint">按责任人自动统计</div>
+        <div class="ak-hint">{{ activeFilter === 'inbox' ? '▼ 已筛选' : '点击筛选' }}</div>
       </div>
       <div class="alert-kpi" @click="clearFilters">
         <div class="ak-val tnum" style="color:#0D9488">{{ data.summary.resolvedRate }}</div>
@@ -260,14 +263,13 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, onMounted, ref, computed } from 'vue'
+import { reactive, onMounted, ref, computed, watch } from 'vue'
 import { http } from '@/utils/http';
-import { useRouter } from 'vue-router'
 import KpiLabel from '@/components/KpiLabel.vue';
 import EChart from '@/components/EChart.vue';
 import { exportCsv } from '@/utils/export';
+import { authStore } from '@/store/auth';
 
-const router = useRouter();
 const drawerVisible = ref(false); const student = ref({} as any);
 const workflow = ref({} as any); const followupContent = ref(''); const nextStatus = ref('');
 const savingWorkflow = ref(false); const currentEventId = ref<number | null>(null);
@@ -309,6 +311,10 @@ const filteredList = computed(() => {
   if (fType.value) arr = arr.filter((x: any) => x.type === fType.value);
   if (fLevel.value) arr = arr.filter((x: any) => x.level === fLevel.value);
   if (fStatus.value) arr = arr.filter((x: any) => x.status === fStatus.value);
+  if (activeFilter.value === 'inbox') {
+    const username = authStore.user?.username;
+    arr = arr.filter((x: any) => x.assignee === username && !['已解决', '已关闭'].includes(x.status));
+  }
   return arr;
 });
 const hasFilters = computed(() => Boolean(activeFilter.value || fCollege.value || fType.value || fLevel.value || fStatus.value));
@@ -318,6 +324,7 @@ const activeFilterText = computed(() => {
   if (fStatus.value) parts.push(`状态=${fStatus.value}`);
   if (fCollege.value) parts.push(`学院=${fCollege.value}`);
   if (fType.value) parts.push(`类型=${fType.value}`);
+  if (activeFilter.value === 'inbox') parts.unshift('范围=我的待办');
   return parts.join('、') || '全部预警';
 });
 const pagedList = computed(() => filteredList.value.slice((page.value - 1) * 15, page.value * 15));
@@ -382,10 +389,25 @@ function toggleFilter(a: any) {
   }
   page.value = 1;
 }
+function toggleInbox() {
+  const selected = activeFilter.value === 'inbox';
+  activeFilter.value = selected ? '' : 'inbox';
+  fLevel.value = '';
+  fStatus.value = '';
+  page.value = 1;
+}
 function clearFilters() {
   activeFilter.value = ''; fLevel.value = ''; fStatus.value = ''; fCollege.value = ''; fType.value = '';
   page.value = 1;
 }
+
+watch([fCollege, fType, fLevel, fStatus], () => {
+  // 下拉条件与顶层卡片可组合；手工改掉卡片对应条件时同步取消高亮。
+  const selected = levels.find((item) => item.key === activeFilter.value);
+  if (selected && selected.key === 'resolved' && fStatus.value !== '已解决') activeFilter.value = '';
+  if (selected && selected.key !== 'resolved' && fLevel.value !== selected.label) activeFilter.value = '';
+  page.value = 1;
+});
 
 onMounted(async () => {
   const d = await http.get('/admin/alerts');
@@ -461,6 +483,7 @@ function exportList() {
   padding: 14px 12px; text-align: center; cursor: pointer; transition: all .18s;
 }
 .alert-kpi:hover { border-color: #c7d2fe; transform: translateY(-2px); }
+.alert-kpi:focus-visible { outline: 3px solid #c7d2fe; outline-offset: 2px; }
 .alert-kpi.active { border-color: var(--sa-primary); box-shadow: 0 0 0 3px #eef2ff; }
 .ak-val { font-family: var(--sa-font-head); font-size: 24px; font-weight: 700; line-height: 1; }
 .ak-label { font-size: 12px; color: var(--sa-muted); margin-top: 6px; }
