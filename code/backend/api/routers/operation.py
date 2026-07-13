@@ -513,6 +513,25 @@ def reschedule_candidates(day: int, period: int, building: str,
 # ------------------------------------------------------------------ 调停课趋势
 _REASON_COLOR = {"病假": "#DC2626", "事假": "#EA580C", "公差": "#F59E0B",
                  "教学调整": "#2563EB", "其他": "#94A3B8"}
+_SEMANTIC_REASON_RULES = [
+    ("教师个人安排", ("教师请假", "教师临时", "教师", "病假", "事假", "出差", "会议", "个人"), "#DC2626"),
+    ("教学计划调整", ("教学计划", "教学调整", "课程冲突", "补课"), "#2563EB"),
+    ("教室与设备", ("教室", "设备", "场地", "容量"), "#D97706"),
+    ("学校与学生活动", ("学生活动", "学校活动", "大型活动"), "#7C3AED"),
+    ("节假日与校历", ("节假日", "校历"), "#0D9488"),
+    ("突发与不可抗力", ("天气", "突发", "不可抗力"), "#0891B2"),
+]
+
+
+def _classify_schedule_reason(reason: str) -> dict:
+    text = str(reason or "").strip()
+    for category, keywords, color in _SEMANTIC_REASON_RULES:
+        matched = [keyword for keyword in keywords if keyword in text]
+        if matched:
+            return {"category": category, "matchedKeyword": matched[0], "confidence": "高",
+                    "method": "keyword-rule-v1", "color": color}
+    return {"category": "其他待核验", "matchedKeyword": None, "confidence": "低",
+            "method": "keyword-rule-v1", "color": "#94A3B8"}
 
 
 @router.get("/schedule-changes")
@@ -582,25 +601,41 @@ def schedule_changes(college: Optional[str] = None, semester: Optional[str] = No
                           "totalLessons": tl, "changeCount": r["cnt"], "pct": pct})
     deptRanks.sort(key=lambda x: -x["pct"])
 
-    reasonDist = []
+    reasonDist, semantic_map = [], {}
     for r in dbm.query(conn, f"""
         SELECT reason, COUNT(*) n FROM fact_schedule_change{w}
         GROUP BY reason ORDER BY n DESC""", p):
+        classified = _classify_schedule_reason(r["reason"])
         reasonDist.append({"name": r["reason"], "count": r["n"],
                            "pct": round(r["n"] / total * 100),
-                           "color": _REASON_COLOR.get(r["reason"], "#94A3B8")})
+                           "semanticCategory": classified["category"],
+                           "matchedKeyword": classified["matchedKeyword"],
+                           "confidence": classified["confidence"],
+                           "color": _REASON_COLOR.get(r["reason"], classified["color"])})
+        item = semantic_map.setdefault(classified["category"],
+            {"name": classified["category"], "count": 0, "color": classified["color"], "rawReasons": []})
+        item["count"] += r["n"]
+        item["rawReasons"].append({"text": r["reason"], "count": r["n"], "matchedKeyword": classified["matchedKeyword"]})
+    semanticReasonDist = sorted(semantic_map.values(), key=lambda item: -item["count"])
+    for item in semanticReasonDist:
+        item["pct"] = round(item["count"] / total * 100, 1) if total else 0
 
     frequentTeachers = []
     for r in dbm.query(conn, f"""
-        SELECT s.teacher_id, t.name, t.dept, COUNT(*) cnt,
-               (SELECT reason FROM fact_schedule_change s2 WHERE s2.teacher_id=s.teacher_id
-                GROUP BY reason ORDER BY COUNT(*) DESC LIMIT 1) top_reason
+        SELECT s.teacher_id, t.name, t.dept, COUNT(*) cnt
         FROM fact_schedule_change s JOIN dim_teacher t ON s.teacher_id=t.teacher_id{sw}
-        GROUP BY s.teacher_id HAVING cnt>=3 ORDER BY cnt DESC LIMIT 8""", sp):
+        GROUP BY s.teacher_id HAVING cnt>=3 ORDER BY cnt DESC LIMIT 10""", sp):
+        teacher_reasons = dbm.query(conn, """SELECT reason,COUNT(*) count
+            FROM fact_schedule_change WHERE teacher_id=? AND semester_id=?
+            GROUP BY reason ORDER BY count DESC""", (r["teacher_id"], sem))
+        top_reason = teacher_reasons[0]["reason"] if teacher_reasons else "其他"
         frequentTeachers.append({
             "id": r["teacher_id"], "name": r["name"] or r["teacher_id"],
             "dept": clean_dept(r["dept"]) or "—", "count": r["cnt"],
-            "reason": f"{r['top_reason']}为主"})
+            "reason": f"{_classify_schedule_reason(top_reason)['category']}为主",
+            "rawTopReason": top_reason,
+            "reasonBreakdown": [{**item, "semanticCategory": _classify_schedule_reason(item["reason"])["category"]}
+                                for item in teacher_reasons]})
 
     mmap = {r["month"]: r["n"] for r in dbm.query(
         conn, f"SELECT month, COUNT(*) n FROM fact_schedule_change{w} GROUP BY month", p)}
@@ -608,7 +643,14 @@ def schedule_changes(college: Optional[str] = None, semester: Optional[str] = No
 
     return ok({
         "kpis": kpis, "deptRanks": deptRanks, "reasonDist": reasonDist,
-        "frequentTeachers": frequentTeachers, "monthlyTrend": monthlyTrend})
+        "semanticReasonDist": semanticReasonDist,
+        "classification": {"method": "keyword-rule-v1", "aiEnabled": False,
+            "classifiedRecords": sum(item["count"] for item in semanticReasonDist if item["name"] != "其他待核验"),
+            "unclassifiedRecords": semantic_map.get("其他待核验", {}).get("count", 0),
+            "explanation": "先按可解释关键词规则对原因文本预分类并保留原文；未调用外部AI，生产环境可在匿名化和审核机制明确后替换为受控模型。"},
+        "frequentTeachers": frequentTeachers, "monthlyTrend": monthlyTrend,
+        "evidenceLevel": "scenario_simulation",
+        "dataLimitation": "当前原型调停课记录为固定种子构造数据，仅用于验证分类和核查交互；生产系统必须接入真实调课申请、原始原因文本和审批记录。"})
 
 
 # ------------------------------------------------------------------ 教师负荷

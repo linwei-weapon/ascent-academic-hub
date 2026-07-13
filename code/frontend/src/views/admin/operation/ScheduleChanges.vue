@@ -15,6 +15,10 @@
       <el-button size="small" type="primary" text @click="clearCollegeFilter">← 返回全院视图</el-button>
     </div>
 
+    <el-alert type="warning" :closable="false" show-icon style="margin-bottom:12px"
+      title="当前为调课分析交互原型"
+      :description="data.dataLimitation || '生产系统需接入真实调课申请和原始原因文本。'" />
+
     <div class="sa-kpi-row">
       <KpiCard v-for="k in kpis" :key="k.label" :label="k.label" :value="k.value" :hint="k.formula" :tone="kpiTone(k.label)" />
     </div>
@@ -38,13 +42,14 @@
       </el-col>
       <el-col :span="12">
         <div class="sa-card" style="margin-bottom:12px">
-          <div class="sa-card-title">调课原因分布</div>
-          <EChart v-if="data.reasonDist.length" :option="reasonOption" :height="180" />
+          <div class="sa-card-title">调课原因语义分类 <KpiLabel label="" :formula="data.classification.explanation" /></div>
+          <EChart v-if="data.semanticReasonDist.length" :option="reasonOption" :height="180" />
           <div v-else class="sa-faint" style="font-size:12px">暂无数据</div>
+          <div class="classification-note">规则已分类 {{ data.classification.classifiedRecords || 0 }} 条 · 待核验 {{ data.classification.unclassifiedRecords || 0 }} 条 · 未启用外部AI</div>
         </div>
         <div class="sa-card">
-          <div class="sa-card-title">高频调课教师 <span class="extra">本学期 ≥ 3 次</span></div>
-          <el-table :data="data.frequentTeachers" size="small" @row-click="goTeacher" row-class-name="row-clickable">
+          <div class="sa-card-title">教师调课 TOP10 <span class="extra">本学期 ≥ 3 次 · 点击核查原因</span></div>
+          <el-table :data="data.frequentTeachers" size="small" @row-click="inspectTeacher" row-class-name="row-clickable">
             <el-table-column prop="name" label="教师" width="80"><template #default="{row}"><span class="link">{{ row.name }}</span></template></el-table-column>
             <el-table-column prop="dept" label="学院" width="120" />
             <el-table-column prop="count" label="次数" width="60" align="right" />
@@ -59,6 +64,17 @@
       <EChart v-if="data.monthlyTrend.length" :option="monthlyOption" :height="220" />
       <div v-else class="sa-faint" style="font-size:12px">暂无数据</div>
     </div>
+
+    <el-drawer v-model="teacherDrawer" :title="`${selectedTeacher.name || ''}｜调课原因核查`" size="620px">
+      <el-alert type="info" :closable="false" show-icon title="语义分类仅用于汇总管理原因，核查时必须查看原始原因文本。" />
+      <div class="teacher-summary"><b>{{ selectedTeacher.count || 0 }}</b><span>调停课记录</span><b>{{ selectedTeacher.reasonBreakdown?.length || 0 }}</b><span>原始原因类型</span></div>
+      <el-table :data="selectedTeacher.reasonBreakdown || []" size="small" stripe>
+        <el-table-column prop="reason" label="原始原因文本" min-width="180" />
+        <el-table-column prop="semanticCategory" label="语义分类" width="150" />
+        <el-table-column prop="count" label="次数" width="80" align="right" />
+      </el-table>
+      <el-button type="primary" plain style="margin-top:14px" @click="goTeacher(selectedTeacher)">查看教师教学档案</el-button>
+    </el-drawer>
   </div>
 </template>
 
@@ -85,9 +101,12 @@ const semesters = ref<SemesterOpt[]>([])
 const selectedSemesterLabel = computed(() => semesters.value.find(s => s.value === fSemester.value)?.label || '')
 
 const kpis = ref<any[]>([])
-const data = reactive<{deptRanks:any[];reasonDist:any[];frequentTeachers:any[];monthlyTrend:any[]}>({
-  deptRanks: [], reasonDist: [], frequentTeachers: [], monthlyTrend: [],
+const data = reactive<any>({
+  deptRanks: [], reasonDist: [], semanticReasonDist: [], frequentTeachers: [], monthlyTrend: [], classification: {}, dataLimitation: '',
 })
+const teacherDrawer = ref(false)
+const selectedTeacher = ref<any>({})
+function inspectTeacher(row:any) { selectedTeacher.value = row; teacherDrawer.value = true }
 
 async function load() {
   const cid = route.query.college as string
@@ -97,7 +116,7 @@ async function load() {
   const qs = params.toString() ? `?${params.toString()}` : ''
   const d = await http.get('/admin/operation/schedule-changes' + qs)
   kpis.value = (d && d.kpis) || []
-  Object.assign(data, { deptRanks: [], reasonDist: [], frequentTeachers: [], monthlyTrend: [] }, d || {})
+  Object.assign(data, { deptRanks: [], reasonDist: [], semanticReasonDist: [], frequentTeachers: [], monthlyTrend: [], classification: {}, dataLimitation: '' }, d || {})
 }
 onMounted(async () => {
   const meta = await getFilterMeta()
@@ -118,7 +137,7 @@ const reasonOption = computed(() => ({
   series: [{
     type: 'pie', radius: ['46%', '72%'], center: ['34%', '50%'], avoidLabelOverlap: true,
     itemStyle: { borderColor: '#fff', borderWidth: 2 }, label: { show: false },
-    data: (data.reasonDist || []).map((r: any) => ({ name: r.name, value: r.count, itemStyle: { color: r.color } })),
+    data: (data.semanticReasonDist || []).map((r: any) => ({ name: r.name, value: r.count, itemStyle: { color: r.color } })),
   }],
 }))
 
@@ -146,4 +165,8 @@ const monthlyOption = computed(() => {
 .link:hover { text-decoration: underline; }
 :deep(.row-clickable) { cursor: pointer; }
 :deep(.row-clickable:hover) { background: #eef2ff !important; }
+.classification-note { padding-top:8px; border-top:1px solid var(--sa-border); color:#64748b; font-size:11px; }
+.teacher-summary { display:grid; grid-template-columns:auto 1fr auto 1fr; align-items:end; gap:5px 8px; padding:14px 0; }
+.teacher-summary b { color:#1e3a5f; font-size:24px; }
+.teacher-summary span { color:#64748b; font-size:12px; padding-bottom:3px; }
 </style>
