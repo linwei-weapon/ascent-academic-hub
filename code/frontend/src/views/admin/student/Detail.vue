@@ -70,17 +70,34 @@
       </el-col>
       <el-col :span="12">
         <div class="sa-card">
-          <div class="sa-card-title">预警历史</div>
+          <div class="sa-card-title">预警历史与变化</div>
+          <div v-if="data.alertComparison" class="alert-comparison">
+            <span><b>{{ data.alertComparison.totalCycles || 0 }}</b> 历史</span>
+            <span><b>{{ data.alertComparison.activeAlerts || 0 }}</b> 当前有效</span>
+            <span><b>{{ data.alertComparison.interventionCount || 0 }}</b> 干预</span>
+            <el-tag size="small" effect="plain">{{ data.alertComparison.latestChange || '无预警' }}</el-tag>
+          </div>
           <div v-if="data.alertHistory && data.alertHistory.length">
             <div v-for="a in data.alertHistory" :key="a.time + a.type" class="alert-row">
-              <div style="font-size:12px"><el-tag :type="tagType(a.level)" size="small">{{ a.level }}</el-tag><span style="margin-left:6px">{{ a.type }}</span></div>
-              <div class="sa-faint" style="font-size:11px;margin-top:2px">{{ a.detail }} · {{ a.time }}</div>
+              <div class="alert-head"><div><el-tag :type="tagType(a.level)" size="small">{{ a.level }}</el-tag><span>{{ a.type }}</span></div><small>{{ a.changeType }}</small></div>
+              <div class="sa-faint" style="font-size:11px;margin-top:2px">{{ a.detail }} · {{ a.time }}<span v-if="a.workflowStatusLabel"> · {{ a.workflowStatusLabel }}</span></div>
             </div>
           </div>
           <div v-else class="sa-faint" style="font-size:12px">无预警记录</div>
         </div>
       </el-col>
     </el-row>
+
+    <div class="sa-card intervention-panel" v-if="data.interventionHistory?.length || data.alertStatusHistory?.length">
+      <div class="sa-card-title">学业预警干预记录 <span class="extra">来自本平台人工联系、约谈和帮扶记录</span></div>
+      <el-timeline>
+        <el-timeline-item v-for="item in interventionTimeline" :key="item.key" :timestamp="item.timestamp" placement="top" :type="item.kind==='status'?'primary':''" :hollow="item.kind==='status'">
+          <div class="intervention-head"><b>{{ item.title }}</b><span>{{ item.operator }} · {{ item.type }}（{{ item.level }}）</span></div>
+          <p v-if="item.content">{{ item.content }}</p>
+          <small v-if="item.nextActionAt">计划下次跟进：{{ item.nextActionAt }}</small>
+        </el-timeline-item>
+      </el-timeline>
+    </div>
 
     <!-- V1.1 成长轨迹摘要 -->
     <div class="sa-card" v-if="data.semesterSummary && data.semesterSummary.length">
@@ -262,6 +279,10 @@ const actionableCourses = reactive<any>({ items: [], total: 0 })
 const candidateCourses = reactive<any>({ items: [], total: 0 })
 const advice = reactive<any>({ cards: [], audiences: [], generated_by: '', wording: '' })
 const adviceAudience = ref('student')
+const interventionTimeline = computed(() => [
+  ...(data.interventionHistory || []).map((x:any) => ({...x,key:`followup-${x.event_id}-${x.created_at}`,timestamp:x.created_at,title:x.action_type,content:x.content,nextActionAt:x.next_action_at})),
+  ...(data.alertStatusHistory || []).map((x:any) => ({...x,key:`status-${x.event_id}-${x.changed_at}`,timestamp:x.changed_at,title:`状态更新：${x.fromStatusLabel || '首次记录'} → ${x.toStatusLabel}`,content:x.reason})),
+].sort((a:any,b:any) => String(b.timestamp).localeCompare(String(a.timestamp))))
 const audienceOptions = [
   {value:'student',label:'学生本人视角'}, {value:'counselor',label:'辅导员视角'},
   {value:'class_adviser',label:'班主任视角'}, {value:'college',label:'学院视角'},
@@ -370,6 +391,16 @@ const gpaOption = computed(() => {
 .info-bar { font-size: 12px; color: var(--sa-muted); margin: 8px 0 16px; }
 .alert-row { padding: 6px 0; border-bottom: 1px solid var(--sa-border); }
 .alert-row:last-child { border-bottom: none; }
+.alert-head { display:flex; justify-content:space-between; align-items:center; gap:8px; font-size:12px; }
+.alert-head span { margin-left:6px; }
+.alert-head small { color:#6366f1; }
+.alert-comparison { display:flex; align-items:center; flex-wrap:wrap; gap:6px 10px; padding:7px 8px; margin:5px 0 7px; background:#f8fafc; border-radius:7px; font-size:10px; color:#64748b; }
+.alert-comparison b { color:#1e293b; font-size:13px; }
+.intervention-panel { margin-bottom:16px; }
+.intervention-head { display:flex; justify-content:space-between; gap:10px; font-size:12px; }
+.intervention-head span { color:#94a3b8; font-size:11px; }
+.intervention-panel p { margin:5px 0 2px; color:#475569; font-size:12px; line-height:1.6; }
+.intervention-panel small { color:#d97706; }
 .link { color: var(--sa-primary); cursor: pointer; font-weight: 500; }
 .link:hover { text-decoration: underline; }
 .v2-banner { margin-bottom: 12px; }

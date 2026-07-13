@@ -3,8 +3,13 @@
     <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
       <div>
         <h2 class="sa-page-title">学业预警监控</h2>
-        <p class="sa-page-sub">数据来源：教务系统预警模块 · 点击下方等级卡片可联动筛选预警列表</p>
+        <p class="sa-page-sub">数据来源：学校学籍、成绩数据与当前已激活规则计算结果 · 点击等级卡片筛选核查对象</p>
       </div>
+    </div>
+
+    <div v-if="hasFilters" class="filter-feedback">
+      <div><b>当前查看：</b>{{ activeFilterText }}<span>，匹配 {{ filteredList.length }} 条预警</span></div>
+      <el-button link type="primary" @click="clearFilters">清除全部筛选</el-button>
     </div>
 
     <!-- KPI 行（点击联动筛选） -->
@@ -83,7 +88,7 @@
             <span>预警列表<span class="sa-faint" style="font-weight:400;font-size:12px;margin-left:8px">共 {{ filteredList.length }} 条</span></span>
             <el-button size="small" @click="exportList">导出 CSV</el-button>
           </div>
-          <el-table :data="pagedList" size="small" @row-click="showStudent" row-class-name="row-clickable">
+          <el-table :data="pagedList" size="small" @row-click="showStudent" row-class-name="row-clickable" :class="{'is-filtered':hasFilters}">
             <el-table-column prop="name" label="姓名" width="70"><template #default="{row}"><span class="link">{{ row.name }}</span></template></el-table-column>
             <el-table-column prop="sid" label="学号" width="105" />
             <el-table-column prop="college" label="学院" width="130" />
@@ -165,14 +170,29 @@
         </div>
 
         <div class="sa-card" style="margin-bottom:12px">
-          <div class="sa-card-title">预警历史</div>
+          <div class="sa-card-title">预警历史与变化</div>
+          <div v-if="student.alertComparison" class="comparison-grid">
+            <div><b>{{ student.alertComparison.totalCycles || 0 }}</b><span>历史预警</span></div>
+            <div><b>{{ student.alertComparison.activeAlerts || 0 }}</b><span>当前有效</span></div>
+            <div><b>{{ student.alertComparison.interventionCount || 0 }}</b><span>干预记录</span></div>
+            <div><b>{{ student.alertComparison.latestChange || '—' }}</b><span>最近变化</span></div>
+          </div>
           <div v-if="student.alertHistory && student.alertHistory.length">
             <div v-for="a in student.alertHistory" :key="a.time + a.type" class="rule-row">
-              <div style="font-size:12px"><el-tag :type="tagType(a.level)" size="small">{{ a.level }}</el-tag><span style="margin-left:6px">{{ a.type }}</span></div>
-              <div class="sa-faint" style="font-size:11px;margin-top:1px">{{ a.detail }} · {{ a.time }}</div>
+              <div class="history-head"><div><el-tag :type="tagType(a.level)" size="small">{{ a.level }}</el-tag><span>{{ a.type }}</span></div><el-tag size="small" effect="plain">{{ a.changeType }}</el-tag></div>
+              <div class="sa-faint" style="font-size:11px;margin-top:3px">{{ a.detail }} · {{ a.time }}<span v-if="a.workflowStatusLabel"> · {{ a.workflowStatusLabel }}</span></div>
             </div>
           </div>
           <div v-else class="sa-faint" style="font-size:12px">无历史记录</div>
+        </div>
+
+        <div class="sa-card" style="margin-bottom:12px" v-if="student.interventionHistory?.length">
+          <div class="sa-card-title">已记录干预过程 <span class="extra">同步呈现在学生完整档案</span></div>
+          <div v-for="item in student.interventionHistory" :key="item.event_id + '-' + item.created_at" class="intervention-item">
+            <div><b>{{ item.action_type }}</b><span>{{ item.operator }} · {{ item.created_at }}</span></div>
+            <p>{{ item.content }}</p>
+            <small v-if="item.next_action_at">下次跟进：{{ item.next_action_at }}</small>
+          </div>
         </div>
 
         <div class="sa-card" style="margin-bottom:12px" v-if="workflow.eventId">
@@ -290,6 +310,15 @@ const filteredList = computed(() => {
   if (fLevel.value) arr = arr.filter((x: any) => x.level === fLevel.value);
   if (fStatus.value) arr = arr.filter((x: any) => x.status === fStatus.value);
   return arr;
+});
+const hasFilters = computed(() => Boolean(activeFilter.value || fCollege.value || fType.value || fLevel.value || fStatus.value));
+const activeFilterText = computed(() => {
+  const parts:string[] = [];
+  if (fLevel.value) parts.push(`等级=${fLevel.value}`);
+  if (fStatus.value) parts.push(`状态=${fStatus.value}`);
+  if (fCollege.value) parts.push(`学院=${fCollege.value}`);
+  if (fType.value) parts.push(`类型=${fType.value}`);
+  return parts.join('、') || '全部预警';
 });
 const pagedList = computed(() => filteredList.value.slice((page.value - 1) * 15, page.value * 15));
 
@@ -436,6 +465,10 @@ function exportList() {
 .ak-val { font-family: var(--sa-font-head); font-size: 24px; font-weight: 700; line-height: 1; }
 .ak-label { font-size: 12px; color: var(--sa-muted); margin-top: 6px; }
 .ak-hint { font-size: 10px; color: var(--sa-faint); margin-top: 3px; }
+.filter-feedback { margin:-4px 0 14px; padding:9px 12px; display:flex; justify-content:space-between; align-items:center; background:#eef2ff; border:1px solid #c7d2fe; border-radius:9px; color:#3730a3; font-size:12px; }
+.filter-feedback span { color:#64748b; margin-left:3px; }
+.is-filtered { animation:filter-in .18s ease-out; }
+@keyframes filter-in { from { opacity:.55; transform:translateY(3px) } to { opacity:1; transform:none } }
 
 .focus-grid { display: flex; gap: 12px; flex-wrap: wrap; }
 .focus-card {
@@ -448,6 +481,17 @@ function exportList() {
 
 .rule-row { padding: 6px 0; border-bottom: 1px solid var(--sa-border); }
 .rule-row:last-child { border-bottom: none; }
+.history-head { display:flex; align-items:center; justify-content:space-between; gap:8px; font-size:12px; }
+.history-head span { margin-left:6px; }
+.comparison-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:6px; margin:8px 0 10px; }
+.comparison-grid div { padding:7px 4px; text-align:center; background:#f8fafc; border-radius:7px; }
+.comparison-grid b { display:block; color:#1e293b; font-size:14px; }
+.comparison-grid span { display:block; color:#94a3b8; font-size:10px; margin-top:2px; }
+.intervention-item { padding:9px 0; border-bottom:1px solid var(--sa-border); font-size:12px; }
+.intervention-item:last-child { border-bottom:0; }
+.intervention-item div { display:flex; justify-content:space-between; gap:8px; }
+.intervention-item div span,.intervention-item small { color:#94a3b8; }
+.intervention-item p { margin:5px 0 2px; color:#475569; line-height:1.6; }
 .rule-name { font-size: 12px; font-weight: 600; color: var(--sa-text); }
 .score-row { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid #f1f5f9; font-size: 12px; }
 .score-row:last-child { border-bottom: none; }

@@ -316,10 +316,13 @@ def student_detail(sid: str, user: dict = Depends(get_current_user),
     cur_gpa = gpa_hist[-1] if gpa_hist else 0
     earned = dbm.scalar(conn, "SELECT SUM(credits) FROM fact_grade WHERE student_id=? AND is_pass=1",
                         (sid,)) or 0
-    alert_rows = dbm.query(conn, """
-        SELECT level, type, trigger_detail detail, status, created_at time
-        FROM fact_alert WHERE student_id=? AND COALESCE(is_active,1)=1
-        ORDER BY created_at DESC""", (sid,))
+    all_alert_rows = dbm.query(conn, """
+        SELECT a.alert_id,a.rule_id,a.level,a.type,a.trigger_detail detail,a.status,
+               a.created_at time,COALESCE(a.is_active,1) is_active,e.event_id,
+               e.workflow_status,e.first_detected_at,e.last_detected_at,e.cycle_no
+        FROM fact_alert a LEFT JOIN alert_event e ON e.alert_id=a.alert_id
+        WHERE a.student_id=? ORDER BY a.created_at DESC,a.alert_id DESC""", (sid,))
+    alert_rows = [row for row in all_alert_rows if row["is_active"] == 1]
     top_level = "正常"
     if any(a["level"] == "严重" for a in alert_rows):
         top_level = "⚠ 严重"
@@ -327,6 +330,40 @@ def student_detail(sid: str, user: dict = Depends(get_current_user),
         top_level = "⚠ 警告"
     elif alert_rows:
         top_level = "提醒"
+
+    severity = {"提醒": 1, "警告": 2, "严重": 3}
+    chronological = list(reversed(all_alert_rows))
+    for index, row in enumerate(chronological):
+        previous = chronological[index - 1] if index else None
+        if previous is None:
+            row["change_type"] = "首次预警"
+        elif row["rule_id"] == previous["rule_id"]:
+            row["change_type"] = "持续预警"
+        elif severity.get(row["level"], 0) > severity.get(previous["level"], 0):
+            row["change_type"] = "风险升级"
+        elif severity.get(row["level"], 0) < severity.get(previous["level"], 0):
+            row["change_type"] = "风险缓解"
+        else:
+            row["change_type"] = "类型变化"
+    intervention_rows = dbm.query(conn, """
+        SELECT e.event_id,a.type,a.level,f.operator,f.action_type,f.content,
+               f.next_action_at,f.created_at
+        FROM alert_event e JOIN fact_alert a ON a.alert_id=e.alert_id
+        JOIN alert_followup f ON f.event_id=e.event_id
+        WHERE e.student_id=? ORDER BY f.created_at DESC,f.followup_id DESC""", (sid,))
+    status_rows = dbm.query(conn, """
+        SELECT e.event_id,a.type,a.level,h.from_status,h.to_status,h.operator,
+               h.reason,h.changed_at
+        FROM alert_event e JOIN fact_alert a ON a.alert_id=e.alert_id
+        JOIN alert_status_history h ON h.event_id=e.event_id
+        WHERE e.student_id=? ORDER BY h.changed_at DESC,h.history_id DESC""", (sid,))
+    alert_comparison = {
+        "totalCycles": len(all_alert_rows), "activeAlerts": len(alert_rows),
+        "firstDetectedAt": chronological[0]["time"] if chronological else None,
+        "latestDetectedAt": all_alert_rows[0]["time"] if all_alert_rows else None,
+        "latestChange": all_alert_rows[0].get("change_type") if all_alert_rows else "无预警",
+        "interventionCount": len(intervention_rows),
+    }
 
     kpis = [
         {"label": "当前GPA", "value": f"{cur_gpa:.2f}", "formula": "最新学期平均绩点",
@@ -430,8 +467,19 @@ def student_detail(sid: str, user: dict = Depends(get_current_user),
         "code": st["student_id"], "name": st["name"], "collegeId": st["college_id"],
         "collegeName": st["college"], "majorName": st["major"], "className": st["cls"],
         "enrollOn": st["enroll_on"], "kpis": kpis, "gpaHistory": gpa_hist,
-        "alertHistory": [{"level": a["level"], "type": a["type"], "detail": a["detail"],
-                          "time": a["time"]} for a in alert_rows],
+        "alertHistory": [{"alertId": a["alert_id"], "eventId": a["event_id"],
+                          "level": a["level"], "type": a["type"], "detail": a["detail"],
+                          "time": a["time"], "active": bool(a["is_active"]),
+                          "changeType": a.get("change_type"),
+                          "workflowStatus": a["workflow_status"],
+                          "workflowStatusLabel": WORKFLOW_LABELS.get(a["workflow_status"], a["workflow_status"])
+                          } for a in all_alert_rows],
+        "alertComparison": alert_comparison,
+        "interventionHistory": [{**row, "kind": "followup"} for row in intervention_rows],
+        "alertStatusHistory": [{**row, "kind": "status",
+                                "fromStatusLabel": WORKFLOW_LABELS.get(row["from_status"], row["from_status"]),
+                                "toStatusLabel": WORKFLOW_LABELS.get(row["to_status"], row["to_status"])}
+                               for row in status_rows],
         "scores": scores,
         "failTrace": fail_trace,
         "semesterSummary": semester_summary,
