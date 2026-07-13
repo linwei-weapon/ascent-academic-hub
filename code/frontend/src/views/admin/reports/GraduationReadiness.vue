@@ -25,7 +25,9 @@
       </section>
     </div>
 
-    <section class="sa-card" v-loading="loading"><div class="sa-card-title">学生核查名单 <span class="extra">{{activeMajorName ? '当前专业：'+activeMajorName+'；' : ''}}逐人查看课程级证据</span><el-button v-if="activeMajor" link @click="clearMajor">清除专业筛选</el-button></div>
+    <div v-if="activeMajor" class="scope-bar" style="display:flex;align-items:center;justify-content:space-between;gap:16px;margin:0 0 14px;padding:12px 14px;border:1px solid #c7d2fe;border-radius:9px;background:#eef2ff"><div><b>当前核查范围：</b><el-tag type="primary" effect="light">{{activeMajorName}}</el-tag><span>下方名单仅显示该专业符合当前核查类型的学生</span></div><el-button type="primary" plain size="small" @click="clearMajor">清除专业条件，返回全部专业</el-button></div>
+
+    <section class="sa-card" v-loading="loading"><div class="sa-card-title">学生核查名单 <span class="extra">逐人查看课程级证据</span></div>
       <el-table :data="data.students" stripe><el-table-column prop="student_id" label="学号" width="130"/><el-table-column prop="display_name" label="姓名" width="90"/><el-table-column prop="major_name" label="专业" min-width="145"/><el-table-column prop="entry_grade" label="年级" width="70"/><el-table-column label="必修完成" width="100"><template #default="{row}">{{row.required_completed}} / {{row.required_courses}}</template></el-table-column><el-table-column prop="explicit_required_failures" label="明确未通过" width="100"/><el-table-column prop="due_required_gaps" label="缺结果记录候选" width="120"/><el-table-column label="本行核查重点" min-width="220"><template #default="{row}"><span v-if="row.explicit_required_failures">{{row.explicit_required_failures}}门必修课有明确未通过成绩，优先核对重修与开课资源</span><span v-else-if="row.due_required_gaps">{{row.due_required_gaps}}门课程到建议学期仍缺结果记录，先核对选课与认定</span><span v-else>当前未发现明确课程问题</span></template></el-table-column><el-table-column label="操作" width="100" fixed="right"><template #default="{row}"><el-button link type="primary" @click="student(row)">核查证据</el-button></template></el-table-column></el-table>
       <el-pagination v-if="data.total" v-model:current-page="page" :page-size="50" :total="data.total" layout="total, prev, pager, next" @current-change="load"/>
     </section>
@@ -57,7 +59,7 @@ const kpis=computed(()=>[{label:'方案覆盖可核查学生',value:(data.summar
 function tagType(s:string){return s==='action_required'?'danger':s==='verification_required'?'warning':'success'}
 function applyFilter(){status.value=draftStatus.value;page.value=1;load()}function reset(){draftStatus.value='high_grade_action';status.value='high_grade_action';activeMajor.value='';activeMajorName.value='';page.value=1;load()}
 function useKpi(x:any){if(!x.filter)return;draftStatus.value=x.filter;status.value=x.filter;page.value=1;load()}
-function inspectMajor(row:any){activeMajor.value=row.major_code;activeMajorName.value=row.major_name;page.value=1;load()}
+function inspectMajor(row:any){if(activeMajor.value===row.major_code){clearMajor();return}activeMajor.value=row.major_code;activeMajorName.value=row.major_name;page.value=1;load()}
 function clearMajor(){activeMajor.value='';activeMajorName.value='';page.value=1;load()}
 async function load(){const id=++requestId.value;loading.value=true;try{const q=new URLSearchParams({limit:'50',offset:String((page.value-1)*50)});if(status.value)q.set('readiness',status.value);if(activeMajor.value)q.set('major_code',activeMajor.value);const r=await http.get<any>('/v2/topics/graduation-readiness?'+q);if(id!==requestId.value)return;Object.assign(data,r);Object.assign(definition,r.definition)}finally{if(id===requestId.value){loading.value=false;initialLoading.value=false}}}
 async function student(row:any){const r=await http.get<any>('/v2/topics/graduation-readiness/student/'+encodeURIComponent(row.student_id));Object.assign(studentEvidence,r);studentVisible.value=true}
