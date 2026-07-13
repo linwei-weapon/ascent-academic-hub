@@ -48,12 +48,13 @@
     <div class="sa-card" style="margin-bottom:16px">
       <div class="sa-card-title">
         {{ data.scope?.restricted ? '授权范围学院概览' : '学院横向对比' }}
-        <span class="extra">点击学院行查看详情 · 指标均按当前授权学生范围计算</span>
+        <span class="extra">点击学院行查看详情 · 成绩指标按所选学期和当前授权学生范围计算</span>
       </div>
       <el-table :data="data.colleges" stripe size="small" @row-click="goCollege" row-class-name="college-row-clickable">
         <el-table-column prop="name" label="学院" width="170"><template #default="{row}"><span class="college-link">{{ row.name }}</span></template></el-table-column>
         <el-table-column prop="students" label="人数" width="70" align="right" />
-        <el-table-column label="平均分" width="80" align="right"><template #default="{row}"><span v-if="row.avgScore != null" class="tnum" :style="{color: scoreColor(row.avgScore), fontWeight:700}">{{ row.avgScore }}</span><span v-else class="sa-faint">—</span></template></el-table-column>
+        <el-table-column width="108" align="right"><template #header><span>加权平均分 <KpiLabel label="" formula="当前学期真实课程成绩按课程学分加权：Σ(成绩×学分)÷Σ学分；不含成绩为空或学分≤0的记录" /></span></template><template #default="{row}"><span v-if="row.avgScore != null" class="tnum" :style="{color: scoreColor(row.avgScore), fontWeight:700}">{{ row.avgScore }}</span><span v-else class="sa-faint">—</span></template></el-table-column>
+        <el-table-column width="96" align="right"><template #header><span>平均GPA <KpiLabel label="" formula="先计算每名学生当前学期课程平均GPA，再对学院内有GPA学生求平均，避免修读课程多的学生被重复加权" /></span></template><template #default="{row}"><b v-if="row.avgGpa != null" class="tnum" :style="{color:row.avgGpa>=3?'#0D9488':row.avgGpa<2?'#E11D48':'#4F46E5'}">{{ row.avgGpa }}</b><span v-else class="sa-faint">—</span></template></el-table-column>
         <el-table-column label="当前挂科率" width="90" align="right">
           <template #default="{row}"><span class="tnum" :style="{color:parseFloat(row.currentFailRate)>10?'#DC2626':'#6B7280'}">{{ row.currentFailRate }}</span></template>
         </el-table-column>

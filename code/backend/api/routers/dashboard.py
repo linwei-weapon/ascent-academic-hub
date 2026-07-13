@@ -126,12 +126,22 @@ def dashboard(semester: Optional[str] = None,
         FROM dim_college c JOIN dim_student s ON s.college_id=c.college_id
         {student_where} GROUP BY c.college_id,c.name ORDER BY students DESC""", tuple(scope_params))
     term_by_col = {r["college_id"]: r for r in dbm.query(conn, f"""
-        SELECT s.college_id,AVG(g.score) avg_score,
+        SELECT s.college_id,
+            SUM(CASE WHEN g.score IS NOT NULL AND g.credits>0 THEN g.score*g.credits END)
+              / NULLIF(SUM(CASE WHEN g.score IS NOT NULL AND g.credits>0 THEN g.credits END),0) avg_score,
             SUM(CASE WHEN g.is_pass=1 THEN COALESCE(g.credits,0) ELSE 0 END) passed_credits,
             SUM(COALESCE(g.credits,0)) attempted_credits
         FROM fact_grade g JOIN dim_student s ON g.student_id=s.student_id
         WHERE g.source='real' AND g.semester_id=? AND g.is_pass IS NOT NULL{student_and}
         GROUP BY s.college_id""", tuple([cur] + scope_params))}
+    gpa_by_col = {r["college_id"]: r["avg_gpa"] for r in dbm.query(conn, f"""
+        WITH student_gpa AS (
+          SELECT s.college_id,g.student_id,AVG(g.gpa) student_gpa
+          FROM fact_grade g JOIN dim_student s ON g.student_id=s.student_id
+          WHERE g.source='real' AND g.semester_id=? AND g.gpa IS NOT NULL{student_and}
+          GROUP BY s.college_id,g.student_id)
+        SELECT college_id,AVG(student_gpa) avg_gpa FROM student_gpa GROUP BY college_id
+    """, tuple([cur] + scope_params))}
     alert_by_col = {r["college_id"]: r["n"] for r in dbm.query(conn, f"""
         SELECT s.college_id, COUNT(DISTINCT a.student_id) AS n
         FROM fact_alert a JOIN dim_student s ON a.student_id=s.student_id
@@ -154,6 +164,7 @@ def dashboard(semester: Optional[str] = None,
         colleges.append({
             "id": r["college_id"], "name": r["name"], "students": r["students"],
             "avgScore": round(a.get("avg_score"), 1) if a.get("avg_score") is not None else None,
+            "avgGpa": round(gpa_by_col.get(r["college_id"]), 2) if gpa_by_col.get(r["college_id"]) is not None else None,
             "failRate": _pct(hist_fail_by_col.get(r["college_id"], 0) / r["students"]),
             "currentFailRate": _pct(cur_fail_by_col.get(r["college_id"], 0) / r["students"]),
             "alertRate": _pct(alert_by_col.get(r["college_id"], 0) / r["students"]),
