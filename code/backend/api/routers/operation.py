@@ -391,8 +391,13 @@ def classroom_occupancy(semester: Optional[str] = None, building: Optional[str] 
         COUNT(DISTINCT o.room_name) observedRooms,COUNT(DISTINCT o.activity_date) observedDates,
         MIN(o.activity_date) dateFrom,MAX(o.activity_date) dateTo,
         COUNT(DISTINCT CASE WHEN o.overlap_count>0 THEN o.occupancy_id END) overlapRecords,
-        COUNT(DISTINCT CASE WHEN o.building_mapping_status='pending' THEN o.occupancy_id END) pendingMappingRecords
+        COUNT(DISTINCT CASE WHEN o.building_mapping_status='pending' THEN o.occupancy_id END) pendingMappingRecords,
+        COUNT(DISTINCT CASE WHEN o.is_evening=1 THEN o.occupancy_id END) eveningRecords
         FROM fact_room_occupancy o WHERE """ + fact_where, params)[0]
+    # 晚间记录始终返回当前学期/楼宇的总量，便于开关前后保持管理参照一致。
+    summary["eveningRecords"] = dbm.scalar(conn,
+        "SELECT COUNT(DISTINCT o.occupancy_id) FROM fact_room_occupancy o WHERE " +
+        " AND ".join(fact_conds) + " AND o.is_evening=1", params) or 0
     heat_rows = dbm.query(conn, """SELECT o.weekday,p.period_index,
         COUNT(DISTINCT o.room_name||'|'||o.activity_date) occupiedRoomDays
         FROM fact_room_occupancy o JOIN fact_room_occupancy_period p ON p.occupancy_id=o.occupancy_id
@@ -407,9 +412,15 @@ def classroom_occupancy(semester: Optional[str] = None, building: Optional[str] 
             "occupiedRoomDays": row["occupiedRoomDays"], "observedOpportunities": opportunities,
             "observedUtilizationPct": round(row["occupiedRoomDays"] * 100 / opportunities, 1) if opportunities else 0})
     buildings = dbm.query(conn, """SELECT COALESCE(o.building_name,'待映射') name,
-        COUNT(DISTINCT o.room_name) observedRooms,COUNT(DISTINCT o.occupancy_id) occupancyRecords
-        FROM fact_room_occupancy o WHERE """ + fact_where +
-        " GROUP BY COALESCE(o.building_name,'待映射') ORDER BY occupancyRecords DESC", params)
+        COUNT(DISTINCT o.room_name) observedRooms,COUNT(DISTINCT o.activity_date) observedDates,
+        COUNT(DISTINCT o.occupancy_id) occupancyRecords,
+        COUNT(DISTINCT o.room_name||'|'||o.activity_date||'|'||p.period_index) occupiedRoomSlots
+        FROM fact_room_occupancy o LEFT JOIN fact_room_occupancy_period p ON p.occupancy_id=o.occupancy_id
+        WHERE """ + where + " GROUP BY COALESCE(o.building_name,'待映射') ORDER BY occupancyRecords DESC", params)
+    period_count = 12 if include_evening else 8
+    for row in buildings:
+        denominator = row["observedRooms"] * row["observedDates"] * period_count
+        row["observedLoadPct"] = round(row["occupiedRoomSlots"] * 100 / denominator, 1) if denominator else 0
     activity_types = dbm.query(conn, """SELECT o.activity_type type,COUNT(DISTINCT o.occupancy_id) records
         FROM fact_room_occupancy o WHERE """ + fact_where +
         " GROUP BY o.activity_type ORDER BY records DESC", params)

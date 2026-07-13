@@ -1,242 +1,154 @@
 <template>
-  <div>
+  <div v-loading="loading">
     <div class="sa-head-row">
       <div>
-        <h2 class="sa-page-title">教室资源利用率分析</h2>
-        <p class="sa-page-sub">数据来源：真实楼栋利用率基线 + 固定种子模拟星期/节次分布 · 排课情景分析</p>
+        <h2 class="sa-page-title">实际教室占用分析</h2>
+        <p class="sa-page-sub">从课程、考试、自习及其他活动的实际占用记录观察时序与楼宇负荷</p>
       </div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">
-        <el-select v-model="fRoomType" size="small" style="width:140px" clearable placeholder="全部教室类型" @change="load">
-          <el-option v-for="t in roomTypes" :key="t" :label="t" :value="t" />
-        </el-select>
-        <el-select v-model="fBuilding" size="small" style="width:140px" clearable filterable placeholder="全部楼栋" @change="load">
-          <el-option v-for="b in buildings" :key="b" :label="b" :value="b" />
+      <div class="filters">
+        <el-select v-model="fBuilding" size="small" clearable filterable placeholder="全部楼宇" style="width:160px" @change="load">
+          <el-option v-for="b in buildingOptions" :key="b" :label="b" :value="b" />
         </el-select>
         <el-select v-model="fSemester" size="small" style="width:180px" @change="load">
           <el-option v-for="s in semesters" :key="s.value" :label="s.label" :value="s.value" />
         </el-select>
+        <div class="evening-switch">
+          <span>包含晚间</span><el-switch v-model="includeEvening" @change="load" />
+        </div>
       </div>
     </div>
 
+    <el-alert class="boundary" type="info" :closable="false" show-icon
+      title="当前展示实际占用强度，不等于全校教室利用率"
+      :description="data.denominatorExplanation || '分母仅覆盖本批数据中实际出现过的教室，不能据此判断全校可用教室数量或正式空闲率。'" />
+
     <div class="sa-kpi-row">
-      <KpiCard v-for="k in kpis" :key="k.label" :label="k.label" :value="k.value" :sub="k.sub" :hint="k.formula" :tone="kpiTone(k.label)" />
+      <KpiCard v-for="k in kpis" :key="k.label" :label="k.label" :value="k.value" :sub="k.sub" :hint="k.hint" :tone="k.tone" />
     </div>
 
-    <el-alert type="success" :closable="false" show-icon style="margin-bottom:12px"
-      title="V2 教室资源可用基数"
-      :description="`现有房间 ${v2Rooms.summary.total_rooms || 0} 间；按“可用、非虚拟、座位数大于0”口径，可用于利用率分母的教室 ${v2Rooms.summary.usable_rooms || 0} 间。可用数量由上游主数据提供，本系统只消费和分析。`" />
-    <div class="sa-card" style="margin-bottom:16px">
-      <div class="sa-card-title">分楼宇可用教室基数 <span class="extra">V2真实房间与楼宇主数据</span></div>
-      <el-table :data="v2Rooms.buildings" size="small" stripe max-height="300">
-        <el-table-column prop="building" label="教学楼" min-width="180" />
-        <el-table-column prop="total_rooms" label="房间总数" width="110" align="right" />
-        <el-table-column prop="usable_rooms" label="可用教室数" width="120" align="right" />
-        <el-table-column prop="usable_seats" label="可用座位数" width="120" align="right" />
-      </el-table>
-    </div>
-
-    <el-row :gutter="16" style="margin-bottom:16px">
-      <el-col :span="14">
-        <div class="sa-card">
-          <div class="sa-card-title">
-            利用率热力图
-            <span class="extra">颜色越深利用率越高</span>
-          </div>
-          <EChart v-if="hasHeatmap" :option="heatOption" :height="260" />
-          <div v-else class="sa-faint" style="font-size:12px">暂无热力图数据</div>
+    <el-row :gutter="16" class="section-row">
+      <el-col :span="15">
+        <div class="sa-card full-height">
+          <div class="sa-card-title">实际占用时序热力图 <KpiLabel label="" formula="单元格=该星期与节次发生占用的教室日数÷已观测教室数×该星期实际采集天数" /></div>
+          <div class="chart-note">用于寻找集中占用时段；切换“包含晚间”可比较日间与晚间资源使用。</div>
+          <EChart v-if="data.heatmap.length" :option="heatOption" :height="360" />
+          <el-empty v-else description="当前条件下暂无实际占用记录" :image-size="72" />
         </div>
       </el-col>
-      <el-col :span="10">
-        <div class="sa-card" style="margin-bottom:12px">
-          <div class="sa-card-title">分教学楼利用率 <KpiLabel label="" formula="该教学楼已占用教室时段÷可用时段×100%" /></div>
-          <EChart v-if="data.buildings.length" :option="buildingOption" :height="Math.max(140, data.buildings.length*26)" />
-          <div v-else class="sa-faint" style="font-size:12px">暂无数据</div>
-        </div>
-        <div class="sa-card">
-          <div class="sa-card-title">分类型利用率 <KpiLabel label="" formula="按教室类型(普通/多媒体/实验室/体育)统计" /></div>
-          <EChart v-if="data.types.length" :option="typeOption" :height="Math.max(120, data.types.length*30)" />
-          <div v-else class="sa-faint" style="font-size:12px">暂无数据</div>
+      <el-col :span="9">
+        <div class="sa-card full-height">
+          <div class="sa-card-title">占用活动构成 <KpiLabel label="" formula="按每条实际教室占用事件分类计数；同一事件跨多个节次只计一次" /></div>
+          <div class="chart-note">判断资源压力主要来自常规教学，还是考试、自习及临时活动。</div>
+          <EChart v-if="data.activityTypes.length" :option="activityOption" :height="360" />
+          <el-empty v-else description="暂无活动分类数据" :image-size="72" />
         </div>
       </el-col>
     </el-row>
 
     <div class="sa-card">
-      <div class="sa-card-title" style="display:flex;justify-content:space-between">
-        <span>时段余量情景分析 <span class="extra">用于方案比较，不代表真实空闲</span></span>
-        <div style="display:flex;gap:8px">
-          <el-select v-model="fDay" size="small" clearable placeholder="全部星期" style="width:110px" @change="loadCapacity">
-            <el-option v-for="(d,i) in days" :key="d" :label="d" :value="i+1" />
-          </el-select>
-          <el-select v-model="fPeriod" size="small" clearable placeholder="全部节次" style="width:110px" @change="loadCapacity">
-            <el-option v-for="p in periods" :key="p.key" :label="p.label" :value="p.key" />
-          </el-select>
-          <el-button size="small" type="primary" :disabled="!fBuilding||!fDay||!fPeriod" @click="loadCandidates">生成调度候选</el-button>
-        </div>
-      </div>
-      <el-alert type="info" :closable="false" :title="capacity.dataLimitation" style="margin-bottom:10px" />
-      <div class="sa-faint" style="font-size:12px;margin-bottom:8px">平均余量 {{ capacity.summary.avgRemainingPct }}% · 余量充足时段 {{ capacity.summary.availableCount }}/{{ capacity.summary.slotCount }}</div>
-      <el-table :data="capacity.slots" size="small" stripe max-height="360">
-        <el-table-column prop="building" label="教学楼" min-width="130" />
-        <el-table-column prop="roomType" label="类型" width="110" />
-        <el-table-column prop="dayLabel" label="星期" width="80" />
-        <el-table-column prop="periodLabel" label="节次" width="90" />
-        <el-table-column label="已用/余量" min-width="180"><template #default="{row}"><el-progress :percentage="row.usedPct" :stroke-width="8" /><span class="sa-faint">余量 {{ row.remainingPct }}%</span></template></el-table-column>
-        <el-table-column label="状态" width="90"><template #default="{row}"><el-tag size="small" :type="row.status==='余量充足'?'success':row.status==='可协调'?'warning':'danger'">{{ row.status }}</el-tag></template></el-table-column>
+      <div class="sa-card-title">楼宇实际占用负荷 <KpiLabel label="" formula="楼宇负荷=已占用教室日节次÷该楼宇已观测教室数×实际采集日期数×纳入节次数" /></div>
+      <div class="chart-note">优先关注占用负荷高且记录量大的楼宇；“待映射”表示源教室名称尚不能可靠归属楼宇。</div>
+      <el-table :data="data.buildings" size="small" stripe max-height="430">
+        <el-table-column prop="name" label="楼宇" min-width="170" />
+        <el-table-column prop="observedRooms" label="已观测教室" width="120" align="right" />
+        <el-table-column prop="observedDates" label="采集日期" width="105" align="right" />
+        <el-table-column prop="occupancyRecords" label="占用记录" width="120" align="right" />
+        <el-table-column prop="occupiedRoomSlots" label="占用教室日节次" width="145" align="right" />
+        <el-table-column label="观测负荷" min-width="220">
+          <template #default="{ row }">
+            <el-progress :percentage="row.observedLoadPct" :stroke-width="9" :color="loadColor(row.observedLoadPct)" />
+          </template>
+        </el-table-column>
       </el-table>
-      <template v-if="candidateLoaded">
-        <el-alert type="warning" :closable="false" :title="candidates.warning" style="margin:14px 0 10px" />
-        <div class="sa-card-title">课程调度情景候选 <span class="extra">仅情景模拟，按模拟余量和班额排序</span></div>
-        <el-table :data="candidates.candidates" size="small" stripe max-height="400">
-          <el-table-column prop="courseId" label="课程代码" width="130" />
-          <el-table-column prop="courseName" label="课程名称" min-width="180" />
-          <el-table-column prop="dept" label="开课单位" min-width="150" />
-          <el-table-column prop="avgEnrolled" label="平均班额" width="90" align="right" />
-          <el-table-column prop="priorityScore" label="筛选分" width="80" align="right" />
-          <el-table-column label="结论" width="100"><template #default="{row}"><el-tag type="warning" size="small">{{ row.readiness }}</el-tag></template></el-table-column>
-          <el-table-column label="待核验约束" min-width="220"><template #default="{row}">{{ row.unverifiedConstraints.join('、') }}</template></el-table-column>
-        </el-table>
-      </template>
     </div>
+
+    <el-alert v-if="data.summary.overlapRecords || data.summary.pendingMappingRecords" class="quality" type="warning" :closable="false" show-icon
+      :title="`待核查：${fmt(data.summary.overlapRecords)} 条时段重叠，${fmt(data.summary.pendingMappingRecords)} 条楼宇待映射`"
+      description="这些记录已作为源数据核查线索保留，没有参与自动删除或主观修正。" />
   </div>
 </template>
 
 <script setup lang="ts">
+import { computed, onMounted, reactive, ref } from 'vue'
 import { http } from '@/utils/http'
-import { reactive, ref, computed, onMounted } from 'vue'
-import KpiLabel from '@/components/KpiLabel.vue'
-import KpiCard from '@/components/KpiCard.vue'
-import EChart from '@/components/EChart.vue'
 import { getFilterMeta, type SemesterOpt } from '@/utils/meta'
+import EChart from '@/components/EChart.vue'
+import KpiCard from '@/components/KpiCard.vue'
+import KpiLabel from '@/components/KpiLabel.vue'
 
-const days = ['周一', '周二', '周三', '周四', '周五']
-const periods = [
-  { label: '1-2节', key: 1 }, { label: '3-4节', key: 2 },
-  { label: '5-6节', key: 3 }, { label: '7-8节', key: 4 },
-]
+const loading = ref(false)
 const fSemester = ref('')
-const fRoomType = ref('')
 const fBuilding = ref('')
-const fDay = ref<number|''>('')
-const fPeriod = ref<number|''>('')
+const includeEvening = ref(true)
 const semesters = ref<SemesterOpt[]>([])
-const roomTypes = ref<string[]>([])
-const buildings = ref<string[]>([])
+const buildingOptions = ref<string[]>([])
+const data = reactive<any>({ summary: {}, heatmap: [], buildings: [], activityTypes: [] })
+const weekdays: Record<number,string> = { 1:'周一', 2:'周二', 3:'周三', 4:'周四', 5:'周五', 6:'周六', 7:'周日' }
+const activityLabels: Record<string,string> = {
+  course:'课程教学', exam:'考试考务', self_study:'自习使用', admission_review:'招生复试',
+  teaching_other:'其他教学', event:'会议活动', other:'其他占用',
+}
 
-const kpis = ref<any[]>([])
-const data = reactive<{heatmap:Record<string,Record<string,number>>;buildings:any[];types:any[]}>({
-  heatmap: {}, buildings: [], types: [],
+function fmt(value: number) { return Number(value || 0).toLocaleString('zh-CN') }
+function loadColor(value: number) { return value >= 50 ? '#DC2626' : value >= 30 ? '#D97706' : '#0D9488' }
+
+const kpis = computed(() => {
+  const s = data.summary || {}
+  const peak = Math.max(0, ...(data.heatmap || []).map((x:any) => Number(x.observedUtilizationPct || 0)))
+  return [
+    { label:'实际占用记录', value:fmt(s.occupancyRecords), sub:`覆盖 ${fmt(s.observedDates)} 个日期`, hint:'每条教室占用事件计一次，不按跨越节次重复计数', tone:'primary' },
+    { label:'已观测教室', value:fmt(s.observedRooms), sub:'不是学校可用教室总数', hint:'本批数据中至少出现过一次占用的不同教室数', tone:'teal' },
+    { label:'最高时段负荷', value:`${peak}%`, sub:'定位集中占用时段', hint:'所有星期×节次网格中的最高观测占用比例', tone:'danger' },
+    { label:'晚间占用记录', value:fmt(s.eveningRecords), sub:includeEvening.value?'已纳入当前分析':'当前图表已排除晚间', hint:'开始时间在18:00后或覆盖第9—12节的占用事件', tone:'amber' },
+  ]
 })
-const capacity = reactive<any>({slots:[],summary:{slotCount:0,avgRemainingPct:0,availableCount:0},dataLimitation:''})
-const candidates = reactive<any>({candidates:[],warning:''})
-const candidateLoaded = ref(false)
-const v2Rooms = reactive<any>({ summary: {}, buildings: [], denominator: '' })
 
-async function loadCandidates() {
-  if (!fBuilding.value || !fDay.value || !fPeriod.value) return
-  const params = new URLSearchParams({semester:fSemester.value,building:fBuilding.value,day:String(fDay.value),period:String(fPeriod.value)})
-  const d = await http.get('/admin/operation/reschedule-candidates?' + params.toString())
-  Object.assign(candidates, d || {candidates:[]}); candidateLoaded.value = true
-}
+const heatOption = computed(() => {
+  const periods = includeEvening.value ? Array.from({length:12},(_,i)=>i+1) : Array.from({length:8},(_,i)=>i+1)
+  const days = [1,2,3,4,5,6,7]
+  const lookup = new Map((data.heatmap || []).map((x:any) => [`${x.weekday}-${x.period}`, x]))
+  const cells:any[] = []
+  days.forEach((day,x) => periods.forEach((period,y) => {
+    const row:any = lookup.get(`${day}-${period}`)
+    cells.push([x,y,row?.observedUtilizationPct || 0,row?.occupiedRoomDays || 0])
+  }))
+  return {
+    grid:{left:58,right:18,top:10,bottom:48},
+    tooltip:{formatter:(p:any)=>`${weekdays[days[p.data[0]]]} 第${periods[p.data[1]]}节<br/>观测负荷：<b>${p.data[2]}%</b><br/>占用教室日数：${p.data[3]}`},
+    xAxis:{type:'category',data:days.map(d=>weekdays[d]),splitArea:{show:true}},
+    yAxis:{type:'category',data:periods.map(p=>`第${p}节`),splitArea:{show:true}},
+    visualMap:{min:0,max:Math.max(10,...cells.map(x=>x[2])),calculable:true,orient:'horizontal',left:'center',bottom:0,inRange:{color:['#EFF6FF','#93C5FD','#FBBF24','#DC2626']}},
+    series:[{type:'heatmap',data:cells,label:{show:true,formatter:(p:any)=>p.data[2] ? `${p.data[2]}%` : ''},itemStyle:{borderColor:'#fff',borderWidth:2}}],
+  }
+})
 
-async function loadCapacity() {
-  candidateLoaded.value = false
-  const params = new URLSearchParams()
-  if (fSemester.value) params.set('semester', fSemester.value)
-  if (fBuilding.value) params.set('building', fBuilding.value)
-  if (fDay.value) params.set('day', String(fDay.value))
-  if (fPeriod.value) params.set('period', String(fPeriod.value))
-  const d = await http.get('/admin/operation/capacity-slots?' + params.toString())
-  Object.assign(capacity, d || {slots:[],summary:{}})
-}
+const activityOption = computed(() => ({
+  tooltip:{trigger:'item',formatter:'{b}<br/>{c} 条（{d}%）'},
+  legend:{bottom:0,type:'scroll'},
+  series:[{type:'pie',radius:['40%','68%'],center:['50%','43%'],label:{formatter:'{b}\n{c} 条'},
+    data:(data.activityTypes || []).map((x:any)=>({name:activityLabels[x.type] || x.type,value:x.records}))}],
+}))
 
 async function load() {
-  const params = new URLSearchParams()
-  if (fSemester.value) params.set('semester', fSemester.value)
-  if (fRoomType.value) params.set('room_type', fRoomType.value)
-  if (fBuilding.value) params.set('building', fBuilding.value)
-  const qs = params.toString() ? `?${params.toString()}` : ''
-  const d = await http.get('/admin/operation/classroom' + qs)
-  // 切学期可能命中空数据，重置以避免残留上一次结果
-  data.heatmap = {}; data.buildings = []; data.types = []
-  if (d) { kpis.value = d.kpis || []; Object.assign(data, d) }
-  await loadCapacity()
+  loading.value = true
+  try {
+    const params = new URLSearchParams({ include_evening:String(includeEvening.value) })
+    if (fSemester.value) params.set('semester', fSemester.value)
+    if (fBuilding.value) params.set('building', fBuilding.value)
+    const result = await http.get<any>('/admin/operation/classroom-occupancy?' + params.toString())
+    Object.assign(data, result || { summary:{}, heatmap:[], buildings:[], activityTypes:[] })
+    if (!fBuilding.value) buildingOptions.value = (result?.buildings || []).map((x:any)=>x.name).filter((x:string)=>x && x !== '待映射')
+  } finally { loading.value = false }
 }
+
 onMounted(async () => {
   const meta = await getFilterMeta()
   semesters.value = meta.semesters.slice().reverse()
-  roomTypes.value = meta.roomTypes || []
-  buildings.value = meta.buildings || []
-  fSemester.value = meta.current
-  const roomSummary = await http.get<any>('/v2/rooms/summary')
-  if (roomSummary) Object.assign(v2Rooms, roomSummary)
+  fSemester.value = '2025-2026-2'
   await load()
-})
-
-function kpiTone(label: string): 'primary'|'teal'|'danger'|'amber' {
-  if (label.includes('高峰')) return 'danger'
-  if (label.includes('教学楼数')) return 'teal'
-  return 'primary'
-}
-
-const hasHeatmap = computed(() => Object.keys(data.heatmap || {}).length > 0)
-
-const heatOption = computed(() => {
-  const cells: any[] = []
-  let maxV = 100
-  days.forEach((d, x) => {
-    periods.forEach((p, y) => {
-      const v = data.heatmap?.[d]?.[p.key]
-      if (v !== undefined && v !== null) { cells.push([x, y, v]); maxV = Math.max(maxV, v) }
-    })
-  })
-  return {
-    grid: { left: 60, right: 16, top: 10, bottom: 50, containLabel: false },
-    tooltip: { position: 'top', formatter: (p: any) => `${days[p.value[0]]} ${periods[p.value[1]].label}：${p.value[2]}%` },
-    xAxis: { type: 'category', data: days, axisLabel: { color: '#475569', fontSize: 11 }, axisLine: { lineStyle: { color: '#E2E8F0' } }, axisTick: { show: false }, splitArea: { show: true } },
-    yAxis: { type: 'category', data: periods.map(p => p.label), axisLabel: { color: '#475569', fontSize: 11 }, axisLine: { lineStyle: { color: '#E2E8F0' } }, axisTick: { show: false }, splitArea: { show: true } },
-    visualMap: { min: 0, max: maxV, calculable: true, orient: 'horizontal', left: 'center', bottom: 4, itemHeight: 80, textStyle: { color: '#64748B', fontSize: 11 }, inRange: { color: ['#ecfdf5', '#fef3c7', '#fecaca', '#E11D48'] } },
-    series: [{
-      type: 'heatmap', data: cells,
-      label: { show: true, formatter: (p: any) => p.value[2] + '%', color: '#334155', fontSize: 11 },
-      itemStyle: { borderColor: '#fff', borderWidth: 2 },
-      emphasis: { itemStyle: { shadowBlur: 8, shadowColor: 'rgba(0,0,0,0.2)' } },
-    }],
-  }
-})
-
-function utilColor(p: number) { return p > 85 ? '#E11D48' : p > 60 ? '#D97706' : '#0D9488' }
-
-const buildingOption = computed(() => {
-  const b = [...(data.buildings || [])].reverse()
-  return {
-    grid: { left: 6, right: 30, top: 6, bottom: 4, containLabel: true },
-    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, formatter: '{b}：{c}%' },
-    xAxis: { type: 'value', max: 100, axisLabel: { color: '#94A3B8', formatter: '{value}%' }, splitLine: { lineStyle: { color: '#EEF1F5' } } },
-    yAxis: { type: 'category', data: b.map((x: any) => x.name), axisLabel: { color: '#475569', fontSize: 11 }, axisLine: { lineStyle: { color: '#E2E8F0' } }, axisTick: { show: false } },
-    series: [{
-      type: 'bar', barWidth: '56%', itemStyle: { borderRadius: [0, 4, 4, 0] },
-      data: b.map((x: any) => ({ value: x.pct, itemStyle: { color: utilColor(x.pct) } })),
-      label: { show: true, position: 'right', formatter: '{c}%', color: '#64748B', fontSize: 11 },
-    }],
-  }
-})
-
-const typeOption = computed(() => {
-  const t = [...(data.types || [])].reverse()
-  return {
-    grid: { left: 6, right: 30, top: 6, bottom: 4, containLabel: true },
-    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, formatter: '{b}：{c}%' },
-    xAxis: { type: 'value', max: 100, axisLabel: { color: '#94A3B8', formatter: '{value}%' }, splitLine: { lineStyle: { color: '#EEF1F5' } } },
-    yAxis: { type: 'category', data: t.map((x: any) => x.name), axisLabel: { color: '#475569', fontSize: 11 }, axisLine: { lineStyle: { color: '#E2E8F0' } }, axisTick: { show: false } },
-    series: [{
-      type: 'bar', barWidth: '50%', itemStyle: { color: '#4F46E5', borderRadius: [0, 4, 4, 0] },
-      data: t.map((x: any) => x.pct),
-      label: { show: true, position: 'right', formatter: '{c}%', color: '#64748B', fontSize: 11 },
-    }],
-  }
 })
 </script>
 
 <style scoped>
-.sa-head-row { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 14px; }
+.sa-head-row{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;margin-bottom:14px}.filters{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end}.evening-switch{height:32px;display:flex;align-items:center;gap:8px;padding:0 10px;border:1px solid #dcdfe6;border-radius:4px;color:#475569;font-size:13px}.boundary{margin-bottom:14px}.section-row{margin-bottom:16px}.full-height{height:100%;box-sizing:border-box}.chart-note{font-size:12px;color:#64748b;margin:4px 0 8px}.quality{margin-top:14px}
 </style>
