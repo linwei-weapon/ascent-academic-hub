@@ -914,17 +914,33 @@ def student_advice(student_id: str, conn: sqlite3.Connection = Depends(get_v2_db
 
 @router.get("/courses/offerings")
 def course_offerings(semester: str = "2023-2024-1", category: Optional[str] = None,
+                     keyword: Optional[str] = None,
+                     sort: str = Query("scale", pattern="^(scale|attention)$"),
                      limit: int = Query(100, ge=1, le=500), offset: int = Query(0, ge=0),
                      conn: sqlite3.Connection = Depends(get_v2_db), user: dict = Depends(require_v2_all_reader)):
     cond, params = ["a.semester_id=?"], [semester]
     if category:
         cond.append("c.category=?"); params.append(category)
+    if keyword:
+        cond.append("(a.course_id LIKE ? OR c.name LIKE ?)")
+        term = f"%{keyword.strip()}%"; params.extend([term, term])
     where = " AND ".join(cond)
     total = dbm.scalar(conn, f"SELECT COUNT(*) FROM agg_course_offering a LEFT JOIN dim_course c ON c.course_id=a.course_id WHERE {where}", tuple(params)) or 0
-    rows = dbm.query(conn, f"""SELECT a.*,c.name course_name,c.category,c.nature,c.organization_id
+    attention = """(CASE WHEN a.lesson_count>0 AND a.enrolled*1.0/a.lesson_count>=120 THEN 2
+        WHEN a.lesson_count>0 AND a.enrolled*1.0/a.lesson_count>=80 THEN 1 ELSE 0 END
+        + CASE WHEN a.teacher_count=1 AND a.lesson_count>=3 THEN 2 ELSE 0 END
+        + CASE WHEN a.lesson_count=1 AND a.enrolled>=80 THEN 2 ELSE 0 END)"""
+    order_by = f"{attention} DESC,a.enrolled DESC,a.lesson_count DESC" if sort == "attention" else "a.lesson_count DESC,a.enrolled DESC"
+    summary = dbm.query_one(conn, f"""SELECT COALESCE(SUM(a.lesson_count),0) lesson_count,
+        COALESCE(SUM(a.enrolled),0) enrolled,
+        SUM(CASE WHEN {attention}>0 THEN 1 ELSE 0 END) attention_count
+        FROM agg_course_offering a LEFT JOIN dim_course c ON c.course_id=a.course_id WHERE {where}""", tuple(params))
+    rows = dbm.query(conn, f"""SELECT a.*,c.name course_name,c.category,c.nature,c.organization_id,
+        {attention} attention_score
         FROM agg_course_offering a LEFT JOIN dim_course c ON c.course_id=a.course_id WHERE {where}
-        ORDER BY a.lesson_count DESC,a.enrolled DESC LIMIT ? OFFSET ?""", tuple(params + [limit, offset]))
-    return ok({"items": rows, "total": total, "semester": semester})
+        ORDER BY {order_by} LIMIT ? OFFSET ?""", tuple(params + [limit, offset]))
+    return ok({"items": rows, "total": total, "semester": semester, "sort": sort, "summary": summary,
+               "definition": {"attention": "大班额、单一教师覆盖多个教学班、单班集中供给的可核查提示；不是课程质量排名"}})
 
 
 @router.get("/courses/schedule-distribution")

@@ -69,17 +69,20 @@
 
     <el-alert type="success" :closable="false" show-icon style="margin-bottom:12px"
       title="V2 真实教学任务证据"
-      :description="`已关联 ${v2Offering.total} 门课程的真实教学任务；下表固定展示 ${v2Offering.semester} 学期，避免与原型模拟趋势混用。`" />
+      :description="`已关联 ${v2Offering.total} 门课程的真实教学任务；首页只显示需要优先核查的10门课程，完整清单可分页查询。`" />
     <div class="sa-card" style="margin-bottom:16px">
-      <div class="sa-card-title">单门课程开课情况 <span class="extra">V2 · 教学任务聚合，最多展示100门</span></div>
-      <el-table :data="v2Offering.items" size="small" stripe max-height="360">
+      <div class="sa-card-title">
+        <span>开课保障关注 TOP10 <span class="extra">按大班额、单一教师多班覆盖和单班集中供给排序，不是课程质量排名</span></span>
+        <el-button size="small" type="primary" plain @click="openOfferingDrawer">查看全部 {{ v2Offering.total }} 门</el-button>
+      </div>
+      <el-table :data="decisionOfferings.slice(0,10)" size="small" stripe>
         <el-table-column prop="course_id" label="课程代码" width="140" />
         <el-table-column prop="course_name" label="课程名称" min-width="190" />
-        <el-table-column prop="category" label="课程类别" width="120" />
-        <el-table-column prop="nature" label="课程性质" width="120" />
         <el-table-column prop="lesson_count" label="教学班" width="85" align="right" />
         <el-table-column prop="teacher_count" label="教师数" width="80" align="right" />
         <el-table-column prop="enrolled" label="选课人次" width="90" align="right" />
+        <el-table-column prop="avgClassSize" label="平均班额" width="90" align="right" />
+        <el-table-column label="优先核查原因" min-width="250"><template #default="{row}"><span v-if="row.attention.length">{{ row.attention.join('；') }}</span><span v-else class="sa-faint">规模较大，建议常规核查</span></template></el-table-column>
       </el-table>
     </div>
 
@@ -130,18 +133,25 @@
     <el-alert type="warning" :closable="false" show-icon
       title="历史趋势暂不展示"
       description="当前 V2 真实教学任务主要覆盖一个学期，旧原型趋势可能包含模拟学期。待接入连续真实教学任务后，再展示跨学期开课门数、教学班数和平均班额变化。" />
-    <div class="sa-card" style="margin-top:16px">
-      <div class="sa-card-title">课程明细 <span class="extra">当前筛选最多展示100门，可按课程代码或名称定位</span></div>
-      <el-table :data="data.courseList" size="small" stripe>
-        <el-table-column prop="courseId" label="课程代码" width="140" />
-        <el-table-column prop="courseName" label="课程名称" min-width="190" />
-        <el-table-column prop="dept" label="开课单位" min-width="160" />
-        <el-table-column prop="courseNature" label="性质" width="90" />
-        <el-table-column prop="lessonCount" label="教学班" width="80" align="right" />
-        <el-table-column prop="avgEnrolled" label="平均班额" width="90" align="right" />
-        <el-table-column prop="studentCount" label="选课人次" width="90" align="right" />
+    <el-drawer v-model="offeringDrawer.visible" title="全部课程开课情况" size="980px">
+      <div class="drawer-toolbar">
+        <el-input v-model="offeringDrawer.keyword" clearable placeholder="输入课程代码或名称" style="width:260px" @keyup.enter="searchOfferings" @clear="searchOfferings" />
+        <el-button type="primary" @click="searchOfferings">查询</el-button>
+        <span>共 {{ offeringDrawer.total }} 门课程 · {{ offeringDrawer.semester }}</span>
+      </div>
+      <el-alert type="info" :closable="false" show-icon style="margin-bottom:12px" title="完整清单按教学班数和选课人次排序，可搜索并分页；首页TOP10使用管理关注规则单独排序。" />
+      <el-table :data="offeringDrawer.items" size="small" stripe v-loading="offeringDrawer.loading" max-height="620">
+        <el-table-column prop="course_id" label="课程代码" width="140" />
+        <el-table-column prop="course_name" label="课程名称" min-width="200" />
+        <el-table-column prop="category" label="类别" width="110" />
+        <el-table-column prop="nature" label="性质" width="110" />
+        <el-table-column prop="lesson_count" label="教学班" width="80" align="right" />
+        <el-table-column prop="teacher_count" label="教师" width="70" align="right" />
+        <el-table-column prop="enrolled" label="选课人次" width="90" align="right" />
+        <el-table-column label="平均班额" width="90" align="right"><template #default="{row}">{{ row.lesson_count ? Math.round(row.enrolled/row.lesson_count) : 0 }}</template></el-table-column>
       </el-table>
-    </div>
+      <el-pagination v-model:current-page="offeringDrawer.page" :page-size="offeringDrawer.pageSize" :total="offeringDrawer.total" layout="total,prev,pager,next" style="justify-content:flex-end;margin-top:14px" @current-change="loadOfferingPage" />
+    </el-drawer>
   </div>
 </template>
 
@@ -196,6 +206,7 @@ const qualityManage = ref(false)
 const auditVisible = ref(false)
 const qualityAudit = ref<any[]>([])
 const v2Offering = reactive<any>({ items: [], total: 0, semester: '' })
+const offeringDrawer = reactive<any>({ visible:false, loading:false, items:[], total:0, semester:'', keyword:'', page:1, pageSize:20 })
 const decisionOfferings = computed(() => (v2Offering.items || []).map((row:any) => {
   const avgClassSize = row.lesson_count ? Math.round(row.enrolled / row.lesson_count) : 0
   const attention:string[] = []
@@ -206,16 +217,29 @@ const decisionOfferings = computed(() => (v2Offering.items || []).map((row:any) 
   return { ...row, avgClassSize, attention }
 }).sort((a:any,b:any) => b.attention.length-a.attention.length || b.enrolled-a.enrolled))
 const realKpis = computed(() => {
-  const items = v2Offering.items || []
-  const lessons = items.reduce((sum:number,x:any) => sum + (x.lesson_count || 0), 0)
-  const enrolled = items.reduce((sum:number,x:any) => sum + (x.enrolled || 0), 0)
+  const lessons = v2Offering.summary?.lesson_count || 0
+  const enrolled = v2Offering.summary?.enrolled || 0
   return [
     {label:'已关联课程',value:`${v2Offering.total || 0}门`,formula:'真实教学任务中成功关联课程主数据的去重课程数',tone:'primary' as const},
     {label:'教学班',value:`${lessons}个`,formula:'当前已接入真实学期的教学任务班次合计',tone:'primary' as const},
     {label:'平均班额',value:lessons?`${Math.round(enrolled/lessons)}人`:'—',formula:'真实教学任务选课人次÷教学班数',tone:'teal' as const},
-    {label:'需核查课程',value:`${decisionOfferings.value.filter((x:any)=>x.attention.length).length}门`,formula:'触发大班、单班集中或单一教师多班覆盖提示的课程数',tone:'amber' as const},
+    {label:'需核查课程',value:`${v2Offering.summary?.attention_count || 0}门`,formula:'触发大班、单班集中或单一教师多班覆盖提示的课程数',tone:'amber' as const},
   ]
 })
+async function loadOfferingPage() {
+  offeringDrawer.loading = true
+  try {
+    const params = new URLSearchParams({semester:offeringDrawer.semester,limit:String(offeringDrawer.pageSize),offset:String((offeringDrawer.page-1)*offeringDrawer.pageSize),sort:'scale'})
+    if (offeringDrawer.keyword.trim()) params.set('keyword',offeringDrawer.keyword.trim())
+    const result = await http.get<any>('/v2/courses/offerings?' + params.toString())
+    Object.assign(offeringDrawer,{items:result?.items||[],total:result?.total||0})
+  } finally { offeringDrawer.loading = false }
+}
+async function openOfferingDrawer() {
+  offeringDrawer.visible = true; offeringDrawer.semester = v2Offering.semester; offeringDrawer.page = 1; offeringDrawer.keyword = ''
+  await loadOfferingPage()
+}
+async function searchOfferings() { offeringDrawer.page = 1; await loadOfferingPage() }
 const qualityStatusLabel = (status:string) => ({open:'待处理',reviewing:'复核中',closed:'已关闭'} as Record<string,string>)[status] || status
 const qualityStatusType = (status:string) => ({open:'danger',reviewing:'warning',closed:'success'} as Record<string,any>)[status] || 'info'
 async function showQualityAudit(row:any) {
@@ -251,7 +275,7 @@ async function load() {
   qualityManage.value = !!q?.permissions?.manage
   const realSemester = await getV2TeachingSemester()
   if (realSemester) {
-    const v2 = await http.get<any>(`/v2/courses/offerings?semester=${encodeURIComponent(realSemester)}&limit=100`)
+    const v2 = await http.get<any>(`/v2/courses/offerings?semester=${encodeURIComponent(realSemester)}&limit=10&sort=attention`)
     if (v2) Object.assign(v2Offering, v2)
   } else Object.assign(v2Offering, { items: [], total: 0, semester: '暂无真实教学任务学期' })
 }
@@ -329,4 +353,6 @@ const trendOption = computed(() => {
 :deep(.row-clickable) { cursor: pointer; }
 :deep(.row-clickable:hover) { background: #eef2ff !important; }
 .management-note { margin:10px 0 0; padding-top:10px; border-top:1px solid var(--sa-border); color:#64748B; font-size:12px; line-height:1.7; }
+.drawer-toolbar { display:flex; align-items:center; gap:8px; margin-bottom:12px; }
+.drawer-toolbar span { margin-left:auto; color:#64748b; font-size:12px; }
 </style>
