@@ -1,7 +1,7 @@
 <template>
   <div>
-    <el-breadcrumb separator="›" style="margin-bottom:12px">
-      <el-breadcrumb-item :to="{path:'/admin/alert'}">预警查看</el-breadcrumb-item>
+    <el-breadcrumb v-if="!embedded" separator="›" style="margin-bottom:12px">
+      <el-breadcrumb-item :to="{path:'/admin/alert'}">学业预警监控</el-breadcrumb-item>
       <el-breadcrumb-item>规则自发现</el-breadcrumb-item>
     </el-breadcrumb>
     <div class="sa-head-row">
@@ -58,7 +58,7 @@
             <span v-else class="sa-faint">历史规则</span>
           </template>
         </el-table-column>
-        <el-table-column width="130"><template #default><el-button text type="primary" @click="$router.push('/admin/settings')">查看规则治理</el-button></template></el-table-column>
+        <el-table-column width="130"><template #default><el-button text type="primary" @click="$router.push('/admin/alert?tab=rules')">查看规则治理</el-button></template></el-table-column>
       </el-table>
     </div>
 
@@ -82,6 +82,7 @@
 </template>
 
 <script setup lang="ts">
+withDefaults(defineProps<{embedded?:boolean}>(), {embedded:false})
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { http } from '@/utils/http'

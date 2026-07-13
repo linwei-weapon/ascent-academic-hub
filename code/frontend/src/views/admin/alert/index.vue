@@ -5,7 +5,6 @@
         <h2 class="sa-page-title">学业预警监控</h2>
         <p class="sa-page-sub">数据来源：教务系统预警模块 · 点击下方等级卡片可联动筛选预警列表</p>
       </div>
-      <el-button size="small" type="primary" plain @click="$router.push('/admin/alert/discovery')">规则自发现</el-button>
     </div>
 
     <!-- KPI 行（点击联动筛选） -->

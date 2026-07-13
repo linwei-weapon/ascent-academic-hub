@@ -52,9 +52,7 @@ ROLES = [
 MENUS = [
     # ── 业务模块 ──
     ("/admin/dashboard",              "数据大屏",       "Odometer",    1,  None),
-    ("/admin/alert",                  "预警中心",       "Warning",     2,  None),
-    ("/admin/alert/rules",            "预警规则配置",   "Setting",     3,  "/admin/alert"),
-    ("/admin/alert/discovery",        "规则自发现",     "MagicStick",  4,  "/admin/alert"),
+    ("/admin/alert",                  "学业预警监控",   "Warning",     2,  None),
     ("/admin/operation",              "教学运行",       "Calendar",    5,  None),
     ("/admin/operation/courses",      "课程总览",       "Calendar",    6,  "/admin/operation"),
     ("/admin/operation/classroom",    "教室利用率",     "OfficeBuilding",7, "/admin/operation"),
@@ -89,8 +87,6 @@ ROLE_MENU = {
         "school_leader", "dean", "dept_research",
         "college_dean", "college_secretary", "counselor",
     ],
-    "/admin/alert/rules":     ["dean"],
-    "/admin/alert/discovery": ["dean"],
     # 教学运行（4 角色，父级+4 子页）
     "/admin/operation": [
         "dean", "dept_operation", "college_dean", "college_secretary",

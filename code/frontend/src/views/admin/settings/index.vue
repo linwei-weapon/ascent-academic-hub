@@ -2,14 +2,15 @@
   <div>
     <div class="sa-head-row">
       <div>
-        <h2 class="sa-page-title">系统设置</h2>
-        <p class="sa-page-sub">数据来源：预警规则表(sys_alert_rule)。阈值由规则引擎在数据重算时按本页配置判定。</p>
+        <el-breadcrumb v-if="alertRules&&!embedded" separator="/" style="margin-bottom:8px"><el-breadcrumb-item :to="{path:'/admin/alert'}">学业预警监控</el-breadcrumb-item><el-breadcrumb-item>预警规则治理</el-breadcrumb-item></el-breadcrumb>
+        <h2 class="sa-page-title">{{alertRules?'预警规则治理':'系统设置'}}</h2>
+        <p class="sa-page-sub">{{alertRules?'管理预警规则阈值、变更试算、审核发布与激活，所有变更均进入治理流程。':'维护学期与运行环境等系统级参数；业务规则已归入对应业务模块。'}}</p>
       </div>
     </div>
 
     <el-tabs v-model="activeTab" class="sa-tabs">
       <!-- 预警规则配置 -->
-      <el-tab-pane label="预警规则" name="rules">
+      <el-tab-pane v-if="alertRules" label="预警规则" name="rules">
         <div class="sa-card">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
             <div class="sa-card-title" style="margin:0">预警规则配置 <span class="extra">引擎内置规则 · 阈值可调</span></div>
@@ -94,8 +95,8 @@
 
         <div class="sa-card" style="margin-top:14px;display:flex;justify-content:space-between;align-items:center">
           <div>
-            <div class="sa-card-title">规则自发现已迁移至预警中心</div>
-            <div class="sa-faint" style="font-size:12px">规则建议在预警中心形成，采纳后回到本页完成试算、复核、发布与激活。</div>
+            <div class="sa-card-title">规则自发现</div>
+            <div class="sa-faint" style="font-size:12px">切换到“规则自发现”Tab查看关联分析建议；采纳后回到本Tab完成试算、复核、发布与激活。</div>
           </div>
           <el-button type="primary" plain size="small" @click="$router.push('/admin/alert/discovery')">进入规则自发现</el-button>
         </div>
@@ -186,7 +187,7 @@
       </el-tab-pane>
 
       <!-- 学期配置 -->
-      <el-tab-pane label="学期配置" name="semester">
+      <el-tab-pane v-if="!alertRules" label="学期配置" name="semester">
         <div class="sa-card">
           <div class="sa-card-title">当前学期信息</div>
           <el-empty :image-size="100">
@@ -201,7 +202,7 @@
       </el-tab-pane>
 
       <!-- 数据备份 -->
-      <el-tab-pane label="数据备份" name="backup">
+      <el-tab-pane v-if="!alertRules" label="数据备份" name="backup">
         <div class="sa-card">
           <div class="sa-card-title">备份策略</div>
           <el-empty :image-size="100">
@@ -289,11 +290,15 @@ import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { http, getToken } from '@/utils/http'
 
+const props = withDefaults(defineProps<{alertRules?:boolean;embedded?:boolean}>(), {alertRules:false,embedded:false})
+const alertRules = props.alertRules
+const embedded = props.embedded
+
 interface Condition { key: string; label: string; op: string; unit: string; value: number; min: number; max: number; step: number }
 interface Rule { id: string; name: string; level: string; triggerType: string; conditions: Condition[]; params: string; editable: boolean; enabled: boolean }
 interface RuleChange { changeId:number; ruleId:string; status:string; reason:string; impact:any; createdBy:string; isFresh?:boolean }
 
-const activeTab = ref('rules')
+const activeTab = ref(alertRules ? 'rules' : 'semester')
 const rules = reactive<Rule[]>([])
 const rulePermissions = ref<string[]>([])
 function hasPerm(permission:string) { return rulePermissions.value.includes(permission) }
@@ -478,6 +483,7 @@ async function reviewRule(id: number, action: string) {
 }
 
 onMounted(async () => {
+  if (!alertRules) return
   try {
     const p = await http.get<any>('/admin/settings/rule-permissions/me')
     rulePermissions.value = p.permissions || []
