@@ -90,6 +90,9 @@ def management_overview(college: Optional[str] = None, semester: Optional[str] =
         scoped = dbm.query_one(conn, f"SELECT college_id FROM dim_college WHERE {col_scope}", col_params)
         if scoped: college = scoped["college_id"]
     sem = semester or REAL
+    college_dimension = dbm.query(conn, "SELECT college_id,name FROM dim_college")
+    college_ids_by_name = {clean_dept(x["name"]): x["college_id"] for x in college_dimension}
+    known_college_names = set(college_ids_by_name)
     college_name = dbm.scalar(conn, "SELECT name FROM dim_college WHERE college_id=?", (college,)) if college else None
     params: list = [sem]
     college_sql = ""
@@ -114,7 +117,11 @@ def management_overview(college: Optional[str] = None, semester: Optional[str] =
         if item["teacher_id"]: team_sets[item["course_id"]].add(str(item["teacher_id"]).strip())
         for teacher_id in str(item["teacher_ids"] or "").replace("，", ";").replace(",", ";").split(";"):
             if teacher_id.strip(): team_sets[item["course_id"]].add(teacher_id.strip())
-    teacher_meta = {x["teacher_id"]: x for x in dbm.query(conn, "SELECT teacher_id,title FROM dim_teacher")}
+    if not college_name:
+        course_rows = [row for row in course_rows if clean_dept(row["college_name"]) in known_college_names]
+        valid_course_ids = {row["course_id"] for row in course_rows}
+        team_sets = defaultdict(set, {course_id: members for course_id, members in team_sets.items() if course_id in valid_course_ids})
+    teacher_meta = {x["teacher_id"]: x for x in dbm.query(conn, "SELECT teacher_id,title,dept FROM dim_teacher")}
     for row in course_rows:
         member_ids = team_sets.get(row["course_id"], set())
         row["teacher_count"] = len(member_ids)
@@ -139,6 +146,8 @@ def management_overview(college: Optional[str] = None, semester: Optional[str] =
       SUM(COALESCE(l.enrolled,0)) enrolled FROM fact_lesson l LEFT JOIN dim_teacher t ON t.teacher_id=l.teacher_id
       WHERE l.semester_id=? AND NULLIF(TRIM(l.teacher_id),'') IS NOT NULL {teacher_college_sql}
       GROUP BY l.teacher_id ORDER BY lesson_count DESC,enrolled DESC""", tuple(teacher_params))
+    if not college_name:
+        teacher_rows = [row for row in teacher_rows if clean_dept(row["college_name"]) in known_college_names]
     teachers = teacher_rows[:30]
     colleges_map = {}
     for row in course_rows:
@@ -147,12 +156,15 @@ def management_overview(college: Optional[str] = None, semester: Optional[str] =
         bucket["courses"] += 1; bucket["lessons"] += row["lesson_count"]; bucket["enrolled"] += row["enrolled"] or 0
         bucket["single_teacher_courses"] += int(row["teacher_count"] == 1)
         bucket["high_impact_courses"] += int(row["teacher_count"] == 1 and row["enrolled"] >= 100)
-    college_rows = sorted(colleges_map.values(), key=lambda x: (-x["high_impact_courses"], -x["single_teacher_courses"], x["college_name"]))
+    for row in colleges_map.values():
+        row["college_id"] = college_ids_by_name.get(clean_dept(row["college_name"]))
+    college_rows = sorted([row for row in colleges_map.values() if row["college_id"]],
+                          key=lambda x: (-x["high_impact_courses"], -x["single_teacher_courses"], x["college_name"]))
     active_ids = set().union(*team_sets.values()) if team_sets else set()
     title_known = sum(bool(str(teacher_meta.get(x, {}).get("title") or "").strip()) for x in active_ids)
-    professor_rows = dbm.query(conn, "SELECT teacher_id FROM dim_teacher WHERE title LIKE '%教授%' AND title NOT LIKE '%副教授%'" +
-      (" AND TRIM(COALESCE(dept,''))=?" if college_name else ""), (college_name,) if college_name else ())
-    professor_ids = {x["teacher_id"] for x in professor_rows}
+    professor_ids = {teacher_id for teacher_id, meta in teacher_meta.items()
+      if normalize_title(meta.get("title")) == "教授"
+      and (clean_dept(meta.get("dept")) == college_name if college_name else clean_dept(meta.get("dept")) in known_college_names)}
     professor_active = len(professor_ids & active_ids)
     total_enrolled = sum(x["enrolled"] or 0 for x in course_rows)
     top_load = sum(x["enrolled"] or 0 for x in teacher_rows[:max(1, round(len(teacher_rows)*0.1))])

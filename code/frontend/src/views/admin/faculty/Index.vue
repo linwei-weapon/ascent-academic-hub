@@ -1,18 +1,13 @@
 <template>
-  <div>
+  <div v-loading="pageLoading">
     <div class="head">
       <div>
         <h2 class="sa-page-title">本科教学师资保障分析</h2>
-        <p class="sa-page-sub">从真实教学任务识别课程团队单点承担、任务集中和教授本科教学参与核查对象。</p>
+        <p class="sa-page-sub">从全校发现师资保障重点，再在抽屉中连续核查学院和课程团队，核查过程不离开当前页面。</p>
       </div>
-      <div class="filters">
-        <el-select v-model="semester" placeholder="选择学期" @change="load">
-          <el-option v-for="s in semesters" :key="s.value" :label="s.label" :value="s.value" />
-        </el-select>
-        <el-select v-model="college" clearable filterable placeholder="全部学院" @change="onCollegeChange">
-          <el-option v-for="x in colleges" :key="x.id" :label="x.name" :value="x.id" />
-        </el-select>
-      </div>
+      <el-select v-model="semester" class="semester" placeholder="选择学期" @change="changeSemester">
+        <el-option v-for="s in semesters" :key="s.value" :label="s.label" :value="s.value" />
+      </el-select>
     </div>
 
     <el-alert
@@ -23,127 +18,186 @@
       :description="definition.boundary"
     />
 
-    <div v-if="data.college" class="scope-banner">
-      <div>
-        <span class="scope-label">当前核查范围</span>
-        <b>{{ data.college }}</b>
-        <span>以下指标、风险课程和主讲任务均已按该学院筛选</span>
-      </div>
-      <el-button type="primary" plain @click="clearCollege">返回全校范围</el-button>
-    </div>
-
     <div class="sa-kpi-row kpi-summary">
-      <KpiCard
-        v-for="k in kpis"
-        :key="k.label"
-        :label="k.label"
-        :value="k.value"
-        :sub="k.note"
-        :hint="k.help"
-        :tone="k.tone"
-      />
+      <KpiCard v-for="item in schoolKpis" :key="item.label" v-bind="item" />
     </div>
 
-    <section class="sa-card workspace" v-loading="loading">
-      <el-tabs v-model="activeView" class="view-tabs">
-        <el-tab-pane name="college">
-          <template #label><span>学院保障概览 <em>{{ data.colleges.length }}</em></span></template>
-          <div class="section-head">
-            <div>
-              <h3>学院本科教学师资保障概览</h3>
-              <p>先比较单点课程数量，再进入学院查看具体课程，不在概览表中重复解释管理用途。</p>
-            </div>
-          </div>
-          <el-table :data="data.colleges" stripe size="small">
-            <el-table-column prop="college_name" label="学院" min-width="180" />
-            <el-table-column prop="courses" label="开课课程" width="100" />
-            <el-table-column prop="lessons" label="教学班" width="90" />
-            <el-table-column prop="enrolled" label="选课人次" width="105" />
-            <el-table-column prop="single_teacher_courses" label="单一教师课程" width="120" />
-            <el-table-column prop="high_impact_courses" width="140">
-              <template #header><KpiLabel label="高影响单点课程" formula="当前学期仅1名实际授课教师，且累计选课人次不少于100的课程；100人为原型核查阈值。" /></template>
-              <template #default="{ row }">
-                <el-tag :type="row.high_impact_courses ? 'danger' : 'success'">{{ row.high_impact_courses }}</el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column label="操作" width="130" fixed="right">
-              <template #default="{ row }">
-                <el-button link type="primary" @click="inspectCollege(row)">查看风险课程</el-button>
-              </template>
-            </el-table-column>
-          </el-table>
-        </el-tab-pane>
+    <div class="management-summary">
+      <div class="summary-mark">本学期核查重点</div>
+      <div>
+        全校共有 <b>{{ data.summary.high_impact_courses || 0 }}</b> 门高影响单点课程，涉及
+        <b>{{ affectedCollegeCount }}</b> 个学院；建议优先核实下一学期仍有较大开课规模、但当前仅由一名教师覆盖的课程。
+      </div>
+    </div>
 
-        <el-tab-pane name="risk">
-          <template #label><span>风险课程核查 <em>{{ data.risk_courses.length }}</em></span></template>
-          <div class="section-head">
-            <div>
-              <h3>需要核查的课程团队</h3>
-              <p>核查理由来自当期教师覆盖、教学规模和职称证据，不代表教师能力或教学质量。</p>
-            </div>
-            <el-button v-if="data.college" link type="primary" @click="activeView = 'college'">查看学院概览</el-button>
+    <div class="overview-grid">
+      <section class="sa-card college-card">
+        <div class="section-head">
+          <div>
+            <h3>学院师资保障概览</h3>
+            <p>点击学院整行打开核查抽屉；关闭抽屉后保留当前学期、列表位置和全校指标。</p>
           </div>
-          <el-table :data="data.risk_courses" stripe>
-            <el-table-column prop="course_name" label="课程" min-width="190" show-overflow-tooltip />
-            <el-table-column prop="college_name" label="开课学院" min-width="145" />
-            <el-table-column prop="course_nature" label="课程性质" width="105" />
-            <el-table-column prop="lesson_count" label="教学班" width="75" />
-            <el-table-column prop="enrolled" label="选课人次" width="90" />
-            <el-table-column prop="teacher_count" label="实际教师" width="85" />
-            <el-table-column label="职称证据" width="95">
-              <template #default="{ row }">{{ row.known_title_teachers }} / {{ row.teacher_count }}</template>
-            </el-table-column>
-            <el-table-column label="优先级" width="80">
-              <template #default="{ row }"><el-tag :type="row.priority === '高' ? 'danger' : 'warning'">{{ row.priority }}</el-tag></template>
-            </el-table-column>
-            <el-table-column label="核查理由" min-width="280">
-              <template #default="{ row }">{{ row.attention_reasons.join('；') }}</template>
-            </el-table-column>
-            <el-table-column label="操作" width="100" fixed="right">
-              <template #default="{ row }"><el-button link type="primary" @click="goTeam(row)">团队证据</el-button></template>
-            </el-table-column>
-          </el-table>
-        </el-tab-pane>
+          <el-input v-model="collegeKeyword" clearable placeholder="搜索学院" class="college-search" />
+        </div>
+        <el-table
+          :data="filteredColleges"
+          stripe
+          size="small"
+          row-class-name="college-row"
+          @row-click="openCollege"
+          @cell-mouse-enter="schedulePrefetch"
+          @cell-mouse-leave="cancelPrefetch"
+        >
+          <el-table-column prop="college_name" label="学院" min-width="175">
+            <template #default="{ row }"><span class="college-link">{{ row.college_name }}</span></template>
+          </el-table-column>
+          <el-table-column prop="courses" label="开课课程" width="90" align="right" />
+          <el-table-column prop="lessons" label="教学班" width="80" align="right" />
+          <el-table-column prop="enrolled" label="选课人次" width="95" align="right" />
+          <el-table-column prop="single_teacher_courses" label="单点课程" width="90" align="right" />
+          <el-table-column prop="high_impact_courses" width="125" align="center">
+            <template #header><KpiLabel label="高影响单点" formula="当前学期仅1名实际授课教师，且累计选课人次不少于100的课程；100人为原型核查阈值。" /></template>
+            <template #default="{ row }"><el-tag :type="row.high_impact_courses ? 'danger' : 'success'">{{ row.high_impact_courses }}</el-tag></template>
+          </el-table-column>
+          <el-table-column label="保障状态" width="100" align="center">
+            <template #default="{ row }">
+              <el-tag :type="row.high_impact_courses ? 'danger' : row.single_teacher_courses ? 'warning' : 'success'" effect="plain">
+                {{ row.high_impact_courses ? '优先核查' : row.single_teacher_courses ? '常规核查' : '相对稳定' }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="90" fixed="right">
+            <template #default="{ row }"><el-button link type="primary" @click.stop="openCollege(row)">核查</el-button></template>
+          </el-table-column>
+        </el-table>
+      </section>
 
-        <el-tab-pane name="teacher">
-          <template #label><span>主讲任务核查 <em>{{ data.teachers.length }}</em></span></template>
-          <div class="section-head">
-            <div>
-              <h3>主讲教学任务集中教师</h3>
-              <p>按主讲教师字段统计教学班和选课人次；联合授课缺少分工比例，当前不拆分工作量。</p>
-            </div>
-          </div>
-          <el-table :data="data.teachers" size="small" stripe>
-            <el-table-column prop="teacher_name" label="教师" width="110" />
-            <el-table-column prop="college_name" label="学院" min-width="160" />
-            <el-table-column prop="title" label="职称" width="110"><template #default="{ row }">{{ row.title || '待补充' }}</template></el-table-column>
-            <el-table-column prop="course_count" label="课程数" width="85" />
-            <el-table-column prop="lesson_count" label="教学班数" width="90" />
-            <el-table-column prop="enrolled" label="覆盖选课人次" width="120" />
-            <el-table-column label="核查边界" min-width="320">
-              <template #default>核对是否为正常团队分工、合班记录或任务集中，不能据此直接认定超负荷。</template>
-            </el-table-column>
-            <el-table-column label="操作" width="95" fixed="right">
-              <template #default="{ row }"><el-button link type="primary" @click="goTeacher(row)">教学档案</el-button></template>
-            </el-table-column>
-          </el-table>
-        </el-tab-pane>
-      </el-tabs>
-    </section>
+      <aside class="sa-card focus-card">
+        <div class="sa-card-title">全校重点课程 <span class="extra">按影响范围优先</span></div>
+        <div v-if="schoolFocusCourses.length" class="focus-list">
+          <button v-for="course in schoolFocusCourses" :key="course.course_id" class="focus-item" @click="openCourseFromSchool(course)">
+            <span class="focus-name">{{ course.course_name }}</span>
+            <span class="focus-college">{{ course.college_name }}</span>
+            <span class="focus-reason">{{ course.teacher_count }}名教师 · {{ course.enrolled }}选课人次 · {{ course.lesson_count }}个教学班</span>
+            <el-tag size="small" type="danger">{{ course.priority }}优先级</el-tag>
+          </button>
+        </div>
+        <el-empty v-else description="当前没有重点核查课程" />
+        <div class="focus-note">
+          <b>如何使用</b>
+          <p>先从左侧选择学院完成责任范围核查；也可直接点击重点课程，在同一抽屉中查看团队证据。</p>
+        </div>
+      </aside>
+    </div>
 
     <section class="sa-card explain">
-      <div class="sa-card-title">指标口径与管理动作</div>
-      <p><b>单一教师覆盖课程：</b>{{ definition.single_teacher_courses }} 管理动作是核查是否需要协同备课和接续教师。</p>
-      <p><b>高影响单点课程：</b>{{ definition.high_impact_courses }} 管理动作是结合下一学期开课规模优先安排资源。</p>
+      <div class="sa-card-title">指标口径与管理边界</div>
+      <p><b>高影响单点课程：</b>{{ definition.high_impact_courses }}</p>
       <p><b>教授本科教学参与率：</b>{{ definition.professor_participation }}</p>
-      <p><b>职称证据完整率：</b>{{ definition.title_completeness }} 完整率不足时不形成职称梯队结论。</p>
-      <p><b>任务集中度：</b>{{ definition.load_share }}</p>
+      <p><b>主讲任务集中度：</b>{{ definition.load_share }}</p>
+      <p><b>职称证据完整率：</b>{{ definition.title_completeness }} 当前完整率为 {{ data.summary.title_completeness_rate ?? '—' }}%。</p>
     </section>
+
+    <el-drawer
+      v-model="drawerVisible"
+      class="faculty-drawer"
+      :size="drawerWidth"
+      :destroy-on-close="false"
+      :close-on-click-modal="false"
+      @closed="afterDrawerClosed"
+    >
+      <template #header>
+        <div class="drawer-heading">
+          <el-button v-if="drawerMode === 'course' && selectedCollege" link type="primary" @click="backToCollege">← 返回学院核查</el-button>
+          <div>
+            <h2>{{ drawerTitle }}</h2>
+            <p>{{ drawerSubtitle }}</p>
+          </div>
+        </div>
+      </template>
+
+      <div v-loading="drawerLoading" class="drawer-body">
+        <template v-if="drawerMode === 'college' && collegeDetail">
+          <el-alert type="info" :closable="false" show-icon title="核查说明" description="以下内容仅替换抽屉区域；全校概览保持在后台，关闭抽屉不会重新请求全校数据。" />
+          <div class="sa-kpi-row drawer-kpis">
+            <KpiCard v-for="item in collegeKpis" :key="item.label" v-bind="item" />
+          </div>
+
+          <div class="drawer-grid">
+            <section class="drawer-section risk-section">
+              <div class="section-head">
+                <div><h3>需要核查的课程团队</h3><p>核查原因来自当期授课覆盖、教学规模和职称证据，不代表教师能力。</p></div>
+              </div>
+              <el-table :data="collegeDetail.risk_courses" stripe max-height="520">
+                <el-table-column prop="course_name" label="课程" min-width="180" show-overflow-tooltip />
+                <el-table-column prop="course_nature" label="课程性质" width="100" />
+                <el-table-column prop="lesson_count" label="教学班" width="72" align="right" />
+                <el-table-column prop="enrolled" label="选课人次" width="88" align="right" />
+                <el-table-column prop="teacher_count" label="教师" width="65" align="right" />
+                <el-table-column label="核查理由" min-width="240"><template #default="{ row }">{{ row.attention_reasons.join('；') }}</template></el-table-column>
+                <el-table-column label="操作" width="92" fixed="right"><template #default="{ row }"><el-button link type="primary" @click="openCourse(row)">团队证据</el-button></template></el-table-column>
+              </el-table>
+            </section>
+
+            <aside class="drawer-section teacher-section">
+              <div class="section-head"><div><h3>主讲任务集中 TOP5</h3><p>仅用于核对任务分工，不认定超负荷。</p></div></div>
+              <div v-for="teacher in collegeTopTeachers" :key="teacher.teacher_id" class="teacher-item">
+                <div><b>{{ teacher.teacher_name }}</b><span>{{ teacher.title || '职称待补充' }}</span></div>
+                <p>{{ teacher.course_count }}门课程 · {{ teacher.lesson_count }}个教学班</p>
+                <strong>{{ teacher.enrolled }}人次</strong>
+                <el-button link type="primary" @click="goTeacher(teacher)">教学档案</el-button>
+              </div>
+              <el-collapse v-if="collegeDetail.teachers.length > 5" class="more-teachers">
+                <el-collapse-item :title="`查看其余 ${collegeDetail.teachers.length - 5} 名主讲教师`" name="more">
+                  <div v-for="teacher in collegeDetail.teachers.slice(5)" :key="teacher.teacher_id" class="teacher-compact">
+                    <span>{{ teacher.teacher_name }}</span><span>{{ teacher.lesson_count }}班 / {{ teacher.enrolled }}人次</span>
+                  </div>
+                </el-collapse-item>
+              </el-collapse>
+            </aside>
+          </div>
+        </template>
+
+        <template v-else-if="drawerMode === 'course' && courseDetail">
+          <el-alert type="warning" :closable="false" show-icon title="课程团队证据边界" :description="courseDetail.boundary" />
+          <div class="sa-kpi-row drawer-kpis">
+            <KpiCard label="实际授课教师" :value="`${courseDetail.summary.teacher_count} 人`" hint="当前学期教学任务主教师与联合教师去重人数" tone="primary" />
+            <KpiCard label="教学班" :value="`${courseDetail.summary.lesson_count} 个`" hint="当前学期该课程教学班数" tone="plain" />
+            <KpiCard label="覆盖选课人次" :value="`${courseDetail.summary.enrolled} 人次`" hint="当前学期各教学班选课人次之和" tone="amber" />
+            <KpiCard label="教授/副教授" :value="`${courseDetail.summary.professor_count} / ${courseDetail.summary.associate_professor_count} 人`" hint="按教师主数据规范化职称统计" tone="teal" />
+            <KpiCard label="职称待补充" :value="`${courseDetail.summary.unknown_title_count} 人`" hint="团队成员中职称字段为空的人数" :tone="courseDetail.summary.unknown_title_count ? 'danger' : 'teal'" />
+          </div>
+          <div class="course-grid">
+            <section class="drawer-section">
+              <div class="section-head"><div><h3>实际授课团队成员</h3><p>来源于当前学期真实教学任务。</p></div></div>
+              <el-table :data="courseDetail.members" stripe>
+                <el-table-column prop="display_name" label="教师" min-width="110" />
+                <el-table-column prop="staff_id" label="教师代码" width="125" />
+                <el-table-column prop="title" label="职称" width="110"><template #default="{ row }">{{ row.title || '待补充' }}</template></el-table-column>
+                <el-table-column prop="organization_id" label="所属组织" min-width="150" />
+                <el-table-column label="操作" width="90"><template #default="{ row }"><el-button link type="primary" @click="goTeacherFromMember(row)">教学档案</el-button></template></el-table-column>
+              </el-table>
+            </section>
+            <section class="drawer-section">
+              <div class="section-head"><div><h3>历史开课供给证据</h3><p>只证明已接入学期曾开设，不代表未来开课计划。</p></div></div>
+              <el-table :data="courseDetail.offerings" stripe max-height="360">
+                <el-table-column prop="semesterId" label="学期" width="120" />
+                <el-table-column prop="lessonCount" label="教学班" width="75" align="right" />
+                <el-table-column prop="teacherCount" label="教师" width="65" align="right" />
+                <el-table-column prop="capacity" label="容量" width="75" align="right" />
+                <el-table-column prop="enrolled" label="选课人次" width="90" align="right" />
+                <el-table-column prop="avgClassSize" label="平均班额" width="85" align="right" />
+              </el-table>
+            </section>
+          </div>
+        </template>
+      </div>
+    </el-drawer>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { http } from '@/utils/http'
 import { getFilterMeta, type SemesterOpt } from '@/utils/meta'
@@ -153,73 +207,166 @@ import KpiLabel from '@/components/KpiLabel.vue'
 
 const router = useRouter()
 const semester = ref('')
-const college = ref('')
-const activeView = ref('college')
 const semesters = ref<SemesterOpt[]>([])
-const loading = ref(false)
-const colleges = Object.entries(COLLEGE_MAP).map(([id, name]) => ({ id, name }))
-const data = reactive<any>({ summary: {}, colleges: [], risk_courses: [], teachers: [], college: '' })
+const pageLoading = ref(false)
+const drawerLoading = ref(false)
+const drawerVisible = ref(false)
+const drawerMode = ref<'college' | 'course'>('college')
+const collegeKeyword = ref('')
+const selectedCollege = ref<{ id: string; name: string } | null>(null)
+const selectedCourse = ref<{ id: string; name: string } | null>(null)
+const collegeDetail = ref<any>(null)
+const courseDetail = ref<any>(null)
+const data = reactive<any>({ summary: {}, colleges: [], risk_courses: [], teachers: [] })
 const definition = reactive<any>({})
+const collegeCache = new Map<string, any>()
+const courseCache = new Map<string, any>()
+let prefetchTimer: ReturnType<typeof setTimeout> | null = null
 
+const collegeOptions = Object.entries(COLLEGE_MAP).map(([id, name]) => ({ id, name }))
+const collegeIdByName = new Map(collegeOptions.map(item => [item.name, item.id]))
 const fmt = (value: any, suffix = '') => value === null || value === undefined ? '—' : value + suffix
-const kpis = computed(() => [
-  { label: '本科教学活跃教师', value: fmt(data.summary.active_teachers, ' 人'), note: `覆盖 ${data.summary.courses || 0} 门课程`, help: definition.active_teachers || '', tone: 'primary' as const },
-  { label: '单一教师覆盖课程', value: fmt(data.summary.single_teacher_courses, ' 门'), note: '当前学期仅1名实际授课教师', help: definition.single_teacher_courses || '', tone: 'amber' as const },
-  { label: '高影响单点课程', value: fmt(data.summary.high_impact_courses, ' 门'), note: '单一教师且选课人次≥100', help: definition.high_impact_courses || '', tone: 'danger' as const },
-  { label: '教授本科教学参与率', value: fmt(data.summary.professor_participation_rate, '%'), note: `${data.summary.professor_active || 0} / ${data.summary.professor_total || 0} 人`, help: definition.professor_participation || '', tone: 'teal' as const },
-  { label: '职称证据完整率', value: fmt(data.summary.title_completeness_rate, '%'), note: '决定能否分析职称梯队', help: definition.title_completeness || '', tone: 'teal' as const },
-  { label: '前10%主讲教师任务占比', value: fmt(data.summary.top10_load_share, '%'), note: '按主讲字段覆盖选课人次计算', help: definition.load_share || '', tone: 'plain' as const },
+const affectedCollegeCount = computed(() => data.colleges.filter((item: any) => item.high_impact_courses > 0).length)
+const schoolFocusCourses = computed(() => data.risk_courses.slice(0, 5))
+const filteredColleges = computed(() => {
+  const keyword = collegeKeyword.value.trim()
+  return keyword ? data.colleges.filter((item: any) => item.college_name.includes(keyword)) : data.colleges
+})
+const drawerWidth = computed(() => window.innerWidth >= 1600 ? '74%' : window.innerWidth >= 1200 ? '82%' : '94%')
+const drawerTitle = computed(() => drawerMode.value === 'course' ? `${selectedCourse.value?.name || '课程'} · 团队保障证据` : `${selectedCollege.value?.name || '学院'} · 师资保障核查`)
+const drawerSubtitle = computed(() => drawerMode.value === 'course' ? `${semester.value}学期 · 在当前抽屉内返回学院核查，不重新加载学院数据` : `${semester.value}学期 · 关闭抽屉即可回到原全校概览`)
+const collegeTopTeachers = computed(() => (collegeDetail.value?.teachers || []).slice(0, 5))
+
+const schoolKpis = computed(() => [
+  { label: '本科教学活跃教师', value: fmt(data.summary.active_teachers, ' 人'), sub: `覆盖 ${data.summary.courses || 0} 门课程`, hint: definition.active_teachers || '', tone: 'primary' as const },
+  { label: '单一教师覆盖课程', value: fmt(data.summary.single_teacher_courses, ' 门'), sub: '当前学期仅1名实际授课教师', hint: definition.single_teacher_courses || '', tone: 'amber' as const },
+  { label: '高影响单点课程', value: fmt(data.summary.high_impact_courses, ' 门'), sub: `涉及 ${affectedCollegeCount.value} 个学院`, hint: definition.high_impact_courses || '', tone: 'danger' as const },
+  { label: '教授本科教学参与率', value: fmt(data.summary.professor_participation_rate, '%'), sub: `${data.summary.professor_active || 0} / ${data.summary.professor_total || 0} 人`, hint: definition.professor_participation || '', tone: 'teal' as const },
+  { label: '前10%主讲教师任务占比', value: fmt(data.summary.top10_load_share, '%'), sub: '按主讲字段覆盖选课人次计算', hint: definition.load_share || '', tone: 'plain' as const },
 ])
 
-async function load() {
-  loading.value = true
+const collegeKpis = computed(() => {
+  const summary = collegeDetail.value?.summary || {}
+  return [
+    { label: '实际授课教师', value: fmt(summary.active_teachers, ' 人'), sub: `覆盖 ${summary.courses || 0} 门课程`, hint: definition.active_teachers || '', tone: 'primary' as const },
+    { label: '单点承担课程', value: fmt(summary.single_teacher_courses, ' 门'), sub: '当前学期仅1名实际授课教师', hint: definition.single_teacher_courses || '', tone: 'amber' as const },
+    { label: '高影响单点课程', value: fmt(summary.high_impact_courses, ' 门'), sub: '单一教师且选课人次≥100', hint: definition.high_impact_courses || '', tone: 'danger' as const },
+    { label: '教授参与率', value: fmt(summary.professor_participation_rate, '%'), sub: `${summary.professor_active || 0} / ${summary.professor_total || 0} 人`, hint: definition.professor_participation || '', tone: 'teal' as const },
+    { label: '前10%主讲任务占比', value: fmt(summary.top10_load_share, '%'), sub: '仅表示任务集中程度', hint: definition.load_share || '', tone: 'plain' as const },
+  ]
+})
+
+async function loadSchool() {
+  pageLoading.value = true
   try {
-    const query = new URLSearchParams()
-    if (semester.value) query.set('semester', semester.value)
-    if (college.value) query.set('college', college.value)
-    const result = await http.get<any>('/admin/faculty/management-overview?' + query)
+    const result = await http.get<any>(`/admin/faculty/management-overview?semester=${encodeURIComponent(semester.value)}`)
     Object.assign(data, result)
     Object.assign(definition, result.definition)
   } finally {
-    loading.value = false
+    pageLoading.value = false
   }
 }
 
-async function onCollegeChange() {
-  await load()
-  if (college.value) activeView.value = 'risk'
+async function fetchCollege(id: string) {
+  const key = `${semester.value}:${id}`
+  if (collegeCache.has(key)) return collegeCache.get(key)
+  const query = new URLSearchParams({ semester: semester.value, college: id })
+  const result = await http.get<any>('/admin/faculty/management-overview?' + query)
+  collegeCache.set(key, result)
+  return result
 }
 
-async function inspectCollege(row: any) {
-  const match = colleges.find(item => item.name === row.college_name)
-  if (!match) return
-  college.value = match.id
-  activeView.value = 'risk'
-  await load()
+async function openCollege(row: any) {
+  const id = row.college_id || collegeIdByName.get(row.college_name)
+  if (!id) return
+  selectedCollege.value = { id, name: row.college_name }
+  selectedCourse.value = null
+  courseDetail.value = null
+  drawerMode.value = 'college'
+  drawerVisible.value = true
+  const cached = collegeCache.get(`${semester.value}:${id}`)
+  if (cached) {
+    collegeDetail.value = cached
+    return
+  }
+  collegeDetail.value = null
+  drawerLoading.value = true
+  try { collegeDetail.value = await fetchCollege(id) } finally { drawerLoading.value = false }
 }
 
-async function clearCollege() {
-  college.value = ''
-  activeView.value = 'college'
-  await load()
+function schedulePrefetch(row: any) {
+  cancelPrefetch()
+  const id = row.college_id || collegeIdByName.get(row.college_name)
+  if (!id || collegeCache.has(`${semester.value}:${id}`)) return
+  prefetchTimer = setTimeout(() => { void fetchCollege(id).catch(() => undefined) }, 250)
 }
 
-function goTeam(row: any) {
-  router.push({ path: '/admin/faculty/team', query: { courseId: row.course_id, courseName: row.course_name } })
+function cancelPrefetch() {
+  if (prefetchTimer) clearTimeout(prefetchTimer)
+  prefetchTimer = null
 }
 
-function goTeacher(row: any) {
-  router.push('/admin/faculty/' + row.teacher_id)
+async function openCourse(row: any) {
+  selectedCourse.value = { id: row.course_id, name: row.course_name }
+  drawerMode.value = 'course'
+  const key = `${semester.value}:${row.course_id}`
+  if (courseCache.has(key)) {
+    courseDetail.value = courseCache.get(key)
+    return
+  }
+  courseDetail.value = null
+  drawerLoading.value = true
+  try {
+    const result = await http.get<any>(`/admin/faculty/management-course/${encodeURIComponent(row.course_id)}?semester=${encodeURIComponent(semester.value)}`)
+    courseCache.set(key, result)
+    courseDetail.value = result
+  } finally { drawerLoading.value = false }
+}
+
+async function openCourseFromSchool(row: any) {
+  const id = data.colleges.find((item: any) => item.college_name === row.college_name)?.college_id || collegeIdByName.get(row.college_name)
+  selectedCollege.value = id ? { id, name: row.college_name } : null
+  drawerVisible.value = true
+  if (id) {
+    const cached = collegeCache.get(`${semester.value}:${id}`)
+    if (cached) collegeDetail.value = cached
+    else void fetchCollege(id).then(result => { collegeDetail.value = result }).catch(() => undefined)
+  }
+  await openCourse(row)
+}
+
+function backToCollege() {
+  drawerMode.value = 'college'
+  selectedCourse.value = null
+  courseDetail.value = null
+}
+
+function afterDrawerClosed() {
+  drawerMode.value = 'college'
+  selectedCourse.value = null
+  courseDetail.value = null
+  drawerLoading.value = false
+}
+
+function goTeacher(row: any) { router.push('/admin/faculty/' + row.teacher_id) }
+function goTeacherFromMember(row: any) { router.push('/admin/faculty/' + row.staff_id) }
+
+async function changeSemester() {
+  drawerVisible.value = false
+  collegeCache.clear()
+  courseCache.clear()
+  await loadSchool()
 }
 
 onMounted(async () => {
   const meta = await getFilterMeta()
   semesters.value = (meta.semesters || []).slice().reverse()
   semester.value = semesters.value[0]?.value || ''
-  await load()
+  await loadSchool()
 })
+onBeforeUnmount(cancelPrefetch)
 </script>
 
 <style scoped>
-.head{display:flex;justify-content:space-between;align-items:flex-start;gap:18px}.filters{display:flex;gap:10px}.filters .el-select{width:180px}.scope-banner{display:flex;align-items:center;justify-content:space-between;gap:16px;margin:14px 0 0;padding:11px 14px;border:1px solid #c7d2fe;border-radius:10px;background:#eef2ff;color:#475569}.scope-banner>div{display:flex;align-items:center;gap:10px}.scope-label{padding:3px 8px;border-radius:999px;background:#4f46e5;color:#fff;font-size:12px}.kpi-summary{margin-top:14px}.workspace{margin-bottom:14px;min-height:420px}.view-tabs :deep(.el-tabs__header){margin-bottom:18px}.view-tabs :deep(.el-tabs__item){height:42px;padding:0 22px;font-size:14px}.view-tabs em{display:inline-block;margin-left:6px;padding:1px 7px;border-radius:10px;background:#eef2ff;color:#4f46e5;font-size:11px;font-style:normal}.section-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}.section-head h3{margin:0 0 5px;font-size:16px;color:#0f172a}.section-head p{margin:0;color:#64748b;font-size:12px}.explain p{font-size:13px;line-height:1.8;color:#475569}
+.head{display:flex;justify-content:space-between;align-items:flex-start;gap:18px}.semester{width:190px}.kpi-summary{margin-top:14px}.management-summary{display:flex;align-items:center;gap:14px;margin-bottom:14px;padding:12px 16px;border:1px solid #c7d2fe;border-radius:12px;background:#eef2ff;color:#475569;font-size:13px;line-height:1.6}.management-summary b{color:#312e81;font-size:15px}.summary-mark{flex:none;padding:4px 9px;border-radius:999px;background:#4f46e5;color:#fff;font-size:12px}.overview-grid{display:grid;grid-template-columns:minmax(0,2fr) minmax(300px,.82fr);gap:14px;align-items:start;margin-bottom:14px}.college-card,.focus-card{min-width:0}.section-head{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:12px}.section-head h3{margin:0 0 5px;font-size:16px;color:#0f172a}.section-head p{margin:0;color:#64748b;font-size:12px;line-height:1.5}.college-search{width:190px}:deep(.college-row){cursor:pointer}:deep(.college-row:hover .college-link){text-decoration:underline}.college-link{color:#4338ca;font-weight:600}.focus-list{display:flex;flex-direction:column;gap:8px}.focus-item{position:relative;display:grid;grid-template-columns:1fr auto;gap:4px 8px;width:100%;padding:11px;border:1px solid #e2e8f0;border-radius:10px;background:#fff;text-align:left;cursor:pointer}.focus-item:hover{border-color:#a5b4fc;background:#f8faff}.focus-name{overflow:hidden;color:#0f172a;font-weight:600;text-overflow:ellipsis;white-space:nowrap}.focus-college,.focus-reason{color:#64748b;font-size:11px}.focus-item .el-tag{grid-column:2;grid-row:1/3;align-self:center}.focus-note{margin-top:14px;padding:12px;border-radius:10px;background:#f8fafc;color:#475569;font-size:12px}.focus-note p{margin:5px 0 0;line-height:1.6}.explain p{margin:5px 0;color:#475569;font-size:13px;line-height:1.7}.drawer-heading{display:flex;align-items:flex-start;gap:12px}.drawer-heading h2{margin:0;color:#0f172a;font-size:20px}.drawer-heading p{margin:5px 0 0;color:#64748b;font-size:12px}.drawer-body{min-height:520px}.drawer-kpis{margin:14px 0}.drawer-grid{display:grid;grid-template-columns:minmax(0,2.3fr) minmax(260px,.8fr);gap:14px;align-items:start}.drawer-section{padding:15px;border:1px solid #e2e8f0;border-radius:12px;background:#fff}.teacher-item{position:relative;padding:11px 0;border-bottom:1px solid #eef2f7}.teacher-item:last-child{border-bottom:0}.teacher-item div{display:flex;justify-content:space-between;gap:8px}.teacher-item span,.teacher-item p{color:#64748b;font-size:11px}.teacher-item p{margin:5px 0}.teacher-item strong{color:#0f172a}.teacher-item .el-button{float:right}.more-teachers{margin-top:8px}.teacher-compact{display:flex;justify-content:space-between;padding:6px 0;color:#475569;font-size:12px}.course-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px;align-items:start}@media(max-width:1250px){.overview-grid{grid-template-columns:1fr}.drawer-grid,.course-grid{grid-template-columns:1fr}}
 </style>
