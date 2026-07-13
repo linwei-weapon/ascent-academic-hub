@@ -241,34 +241,39 @@ def analysis(semester: Optional[str] = None, grade: Optional[str] = None,
         pair = grade_sems[-2:]
     migration = {"fromSemester": pair[0] if len(pair) == 2 else None,
                  "toSemester": pair[1] if len(pair) == 2 else None,
-                 "improved": 0, "stable": 0, "declined": 0,
+                 "improved": 0, "stable": 0, "declined": 0, "mixed": 0,
                  "insufficient": total_stu, "compared": 0, "avgDelta": None,
-                 "threshold": 0.3}
+                 "avgFailDelta": None, "threshold": 0.3, "failThreshold": 1,
+                 "definition": "同时比较学期平均GPA和挂科门次；任一指标明显变化且另一指标未反向恶化，判为改善或恶化；两个指标方向冲突时列为变化分化。"}
     if len(pair) == 2:
         ph = ",".join("?" * 2)
         mig_student = (" AND g.student_id IN (SELECT student_id FROM dim_student WHERE "
                        + " AND ".join(scond) + ")") if scond else ""
-        mig_rows = dbm.query(conn, f"""SELECT g.student_id,g.semester_id,AVG(g.gpa) gpa
-            FROM fact_grade g WHERE g.gpa IS NOT NULL AND g.semester_id IN ({ph}){mig_student}
+        mig_rows = dbm.query(conn, f"""SELECT g.student_id,g.semester_id,AVG(g.gpa) gpa,
+            SUM(CASE WHEN g.is_pass=0 THEN 1 ELSE 0 END) fail_count,COUNT(*) grade_count
+            FROM fact_grade g WHERE g.semester_id IN ({ph}){mig_student}
             GROUP BY g.student_id,g.semester_id""", tuple(pair + sparams))
         by_student = {}
         for row in mig_rows:
-            by_student.setdefault(row["student_id"], {})[row["semester_id"]] = row["gpa"]
+            by_student.setdefault(row["student_id"], {})[row["semester_id"]] = row
         deltas = []
+        fail_deltas = []
         for values in by_student.values():
             if pair[0] not in values or pair[1] not in values:
                 continue
-            delta = values[pair[1]] - values[pair[0]]
-            deltas.append(delta)
-            if delta >= 0.3:
-                migration["improved"] += 1
-            elif delta <= -0.3:
-                migration["declined"] += 1
-            else:
-                migration["stable"] += 1
-        migration["compared"] = len(deltas)
-        migration["insufficient"] = max(total_stu - len(deltas), 0)
+            old, new = values[pair[0]], values[pair[1]]
+            gpa_delta = (new["gpa"] - old["gpa"]) if old["gpa"] is not None and new["gpa"] is not None else None
+            fail_delta = (new["fail_count"] or 0) - (old["fail_count"] or 0)
+            if gpa_delta is not None: deltas.append(gpa_delta)
+            improve_signal = (gpa_delta is not None and gpa_delta >= 0.3) or fail_delta <= -1
+            decline_signal = (gpa_delta is not None and gpa_delta <= -0.3) or fail_delta >= 1
+            category = "mixed" if improve_signal and decline_signal else "improved" if improve_signal else "declined" if decline_signal else "stable"
+            migration[category] += 1
+            fail_deltas.append(fail_delta)
+        migration["compared"] = len(fail_deltas)
+        migration["insufficient"] = max(total_stu - len(fail_deltas), 0)
         migration["avgDelta"] = round(sum(deltas) / len(deltas), 2) if deltas else None
+        migration["avgFailDelta"] = round(sum(fail_deltas) / len(fail_deltas), 2) if fail_deltas else None
 
     # 挂科模式：基于当前筛选范围内的真实不及格记录，可相互重叠。
     pattern_where, pattern_params = _grade_clauses("g")
@@ -303,7 +308,7 @@ def analysis(semester: Optional[str] = None, grade: Optional[str] = None,
                "failCourses": failCourses, "migration": migration,
                "failPatterns": failPatterns,
                "evidence": {
-                   "real": ["学籍、成绩、GPA、挂科、当前有效预警、跨学期GPA迁移、历史挂科模式"],
+                   "real": ["学籍、成绩、GPA、挂科、当前有效预警、跨学期GPA与挂科联合迁移、历史挂科模式"],
                    "simulated": ["毕业结果、学位授予结果、非真实培养方案专业的学分要求"],
                    "limitation": "毕业率和学位授予率来自固定种子合成业务表；学分完成度仅在真实培养方案覆盖专业可精确解释。"
                }})
@@ -404,26 +409,32 @@ def student_list(semester: Optional[str] = None, grade: Optional[str] = None,
         }
         _include_ids(pattern_ids[pattern])
 
-    valid_migrations = {"improved", "stable", "declined", "insufficient"}
+    valid_migrations = {"improved", "stable", "declined", "mixed", "insufficient"}
     if migration:
         if migration not in valid_migrations:
             raise ApiError("无效的画像迁移分类", code=400, status_code=400)
         if not from_semester or not to_semester or from_semester >= to_semester:
             raise ApiError("画像迁移下钻需要有效的起止学期", code=400, status_code=400)
-        mrows = dbm.query(conn, """SELECT student_id,semester_id,AVG(gpa) gpa
-            FROM fact_grade WHERE gpa IS NOT NULL AND semester_id IN (?,?)
+        mrows = dbm.query(conn, """SELECT student_id,semester_id,AVG(gpa) gpa,
+            SUM(CASE WHEN is_pass=0 THEN 1 ELSE 0 END) fail_count,COUNT(*) grade_count
+            FROM fact_grade WHERE semester_id IN (?,?)
             GROUP BY student_id,semester_id""", (from_semester, to_semester))
         mvalues = {}
         for row in mrows:
-            mvalues.setdefault(row["student_id"], {})[row["semester_id"]] = row["gpa"]
-        categories = {"improved": set(), "stable": set(), "declined": set()}
+            mvalues.setdefault(row["student_id"], {})[row["semester_id"]] = row
+        categories = {"improved": set(), "stable": set(), "declined": set(), "mixed": set()}
         compared = set()
         for sid, values in mvalues.items():
             if from_semester not in values or to_semester not in values:
                 continue
             compared.add(sid)
-            delta = values[to_semester] - values[from_semester]
-            categories["improved" if delta >= 0.3 else "declined" if delta <= -0.3 else "stable"].add(sid)
+            old, new = values[from_semester], values[to_semester]
+            gpa_delta = (new["gpa"] - old["gpa"]) if old["gpa"] is not None and new["gpa"] is not None else None
+            fail_delta = (new["fail_count"] or 0) - (old["fail_count"] or 0)
+            improve_signal = (gpa_delta is not None and gpa_delta >= 0.3) or fail_delta <= -1
+            decline_signal = (gpa_delta is not None and gpa_delta <= -0.3) or fail_delta >= 1
+            category = "mixed" if improve_signal and decline_signal else "improved" if improve_signal else "declined" if decline_signal else "stable"
+            categories[category].add(sid)
         if migration == "insufficient":
             if compared:
                 values = sorted(compared)

@@ -82,16 +82,17 @@
         <div class="sa-card" style="height:100%">
           <div class="sa-card-title">
             相邻学期画像迁移
-            <KpiLabel label="" :formula="`比较${data.migration.fromSemester || '—'}与${data.migration.toSemester || '—'}的学生学期平均GPA；变化达到±${data.migration.threshold}视为改善或恶化`" />
+            <KpiLabel label="" :formula="data.migration.definition || '同时比较相邻学期GPA与挂科门次变化'" />
           </div>
           <div v-if="data.migration.fromSemester && data.migration.toSemester" class="migration-meta">
             <span>{{ data.migration.fromSemester }}</span><b>→</b><span>{{ data.migration.toSemester }}</span>
-            <em>有效对比 {{ data.migration.compared }} 人 · 平均变化 {{ data.migration.avgDelta == null ? '—' : (data.migration.avgDelta > 0 ? '+' : '') + data.migration.avgDelta }}</em>
+            <em>有效对比 {{ data.migration.compared }} 人 · GPA平均变化 {{ signed(data.migration.avgDelta) }} · 挂科平均变化 {{ signed(data.migration.avgFailDelta) }}门次</em>
           </div>
           <div class="migration-kpis">
             <div class="drill-card" @click="goMigration('improved', '改善')"><KpiCard label="改善" :value="`${data.migration.improved}人`" tone="teal" /></div>
             <div class="drill-card" @click="goMigration('stable', '稳定')"><KpiCard label="稳定" :value="`${data.migration.stable}人`" tone="primary" /></div>
             <div class="drill-card" @click="goMigration('declined', '恶化')"><KpiCard label="恶化" :value="`${data.migration.declined}人`" tone="danger" /></div>
+            <div class="drill-card" @click="goMigration('mixed', '变化分化')"><KpiCard label="变化分化" :value="`${data.migration.mixed}人`" tone="amber" /></div>
             <div class="drill-card" @click="goMigration('insufficient', '数据不足')"><KpiCard label="数据不足" :value="`${data.migration.insufficient}人`" tone="amber" /></div>
           </div>
           <div v-if="!data.migration.fromSemester || !data.migration.toSemester" class="sa-faint" style="font-size:12px">当前范围不足两个可比较学期</div>
@@ -170,8 +171,9 @@ const studentKpis = ref<any[]>([])
 const evidence = ref<any>({})
 const data = reactive<any>({
   clusters: [], gradeGpa: [], creditDist: [], failCourses: [], failPatterns: [],
-  migration: { fromSemester: null, toSemester: null, improved: 0, stable: 0, declined: 0, insufficient: 0, compared: 0, avgDelta: null, threshold: 0.3 },
+  migration: { fromSemester: null, toSemester: null, improved: 0, stable: 0, declined: 0, mixed: 0, insufficient: 0, compared: 0, avgDelta: null, avgFailDelta: null, threshold: 0.3, failThreshold: 1 },
 })
+function signed(value: number | null) { return value == null ? '—' : `${value > 0 ? '+' : ''}${value}` }
 async function load() {
   const params = new URLSearchParams()
   if (fSemester.value) params.set('semester', fSemester.value)
@@ -281,7 +283,7 @@ onMounted(async () => {
 .migration-meta { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; color: #475569; font-size: 13px; }
 .migration-meta b { color: var(--sa-primary); }
 .migration-meta em { margin-left: auto; color: #64748B; font-style: normal; font-size: 12px; }
-.migration-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.migration-kpis { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
 .drill-card { cursor: pointer; border-radius: 14px; transition: transform .15s ease, box-shadow .15s ease; }
 .drill-card:hover { transform: translateY(-2px); box-shadow: 0 8px 18px rgba(15,23,42,.08); }
 .link { color: var(--sa-primary); cursor: pointer; font-weight: 500; }
