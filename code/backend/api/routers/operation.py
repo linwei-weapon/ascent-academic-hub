@@ -747,6 +747,56 @@ def teacher_load(college: Optional[str] = None, semester: Optional[str] = None,
         if len(overloaded) >= 10:
             break
 
+    # 高负荷核查 TOP10：按可审计的总学时排序，不使用不透明综合分，也不直接认定“超负荷”。
+    # 学生覆盖人次、教学班数、课程数与平均班额作为管理核查证据。
+    teacher_load_rows = dbm.query(conn, """
+        SELECT l.teacher_id, COALESCE(MAX(t.name), l.teacher_id) name,
+               MAX(t.dept) dept,
+               COUNT(DISTINCT l.course_id) course_count,
+               COUNT(DISTINCT l.lesson_id) lesson_count,
+               ROUND(SUM(COALESCE(l.total_hours, 0)), 1) total_hours,
+               SUM(COALESCE(l.enrolled, 0)) student_visits,
+               ROUND(AVG(NULLIF(l.enrolled, 0)), 1) avg_class_size
+        FROM fact_lesson l
+        LEFT JOIN dim_teacher t ON t.teacher_id=l.teacher_id
+        WHERE l.semester_id=? AND NULLIF(TRIM(l.teacher_id), '') IS NOT NULL
+        GROUP BY l.teacher_id
+        ORDER BY total_hours DESC, student_visits DESC, lesson_count DESC
+    """, (sem,))
+    teacher_load_rows = [r for r in teacher_load_rows
+                         if in_college is None or r["teacher_id"] in in_college][:10]
+    topTeachers = []
+    for rank, r in enumerate(teacher_load_rows, 1):
+        courses = dbm.query(conn, """
+            SELECT l.course_id, COALESCE(MAX(c.name), l.course_id) course_name,
+                   COUNT(DISTINCT l.lesson_id) lesson_count,
+                   ROUND(SUM(COALESCE(l.total_hours, 0)), 1) total_hours,
+                   SUM(COALESCE(l.enrolled, 0)) student_visits,
+                   ROUND(AVG(NULLIF(l.enrolled, 0)), 1) avg_class_size
+            FROM fact_lesson l
+            LEFT JOIN dim_course c ON c.course_id=l.course_id
+            WHERE l.semester_id=? AND l.teacher_id=?
+            GROUP BY l.course_id
+            ORDER BY total_hours DESC, student_visits DESC
+        """, (sem, r["teacher_id"]))
+        topTeachers.append({
+            "rank": rank, "id": r["teacher_id"], "name": r["name"],
+            "title": title_of.get(r["teacher_id"], "其他"),
+            "dept": clean_dept(r["dept"]) or "未归属",
+            "hours": r["total_hours"] or 0,
+            "courses": r["course_count"] or 0,
+            "lessons": r["lesson_count"] or 0,
+            "studentVisits": r["student_visits"] or 0,
+            "avgClassSize": r["avg_class_size"] or 0,
+            "reviewReason": f"总学时位列当前范围第{rank}，需结合教学班、学生覆盖与课程构成核查",
+            "courseBreakdown": [{
+                "courseId": x["course_id"], "courseName": x["course_name"],
+                "lessons": x["lesson_count"], "hours": x["total_hours"] or 0,
+                "studentVisits": x["student_visits"] or 0,
+                "avgClassSize": x["avg_class_size"] or 0,
+            } for x in courses],
+        })
+
     # 各学院负荷
     name2cid = {r["name"]: r["college_id"] for r in dbm.query(
         conn, "SELECT college_id,name FROM dim_college")}
@@ -794,7 +844,12 @@ def teacher_load(college: Optional[str] = None, semester: Optional[str] = None,
     ]
     return ok({
         "kpis": kpis, "titleLoad": titleLoad, "loadDist": loadDist,
-        "overloaded": overloaded, "deptLoad": deptLoad})
+        "overloaded": overloaded, "topTeachers": topTeachers, "deptLoad": deptLoad,
+        "topTeacherPolicy": {
+            "title": "高负荷核查 TOP10",
+            "ranking": "按当前筛选范围内总学时降序；同学时按学生覆盖人次、教学班数排序",
+            "boundary": "仅用于定位优先核查对象，不等同于教师超负荷认定；最终结论需结合学校工作量办法、合讲拆分及减免规则。"
+        }})
 
 
 # ------------------------------------------------------------------ 课程排课分析
