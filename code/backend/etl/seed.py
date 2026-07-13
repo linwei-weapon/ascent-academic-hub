@@ -59,7 +59,7 @@ MENUS = [
     ("/admin/operation/schedule-changes","调停课分析",  "Warning",     8,  "/admin/operation"),
     ("/admin/operation/teacher-load", "教师负荷",       "User",        9,  "/admin/operation"),
     ("/admin/curriculum",             "培养质量",       "Reading",     10, None),
-    ("/admin/faculty",                "师资结构",       "User",        11, None),
+    ("/admin/faculty",                "师资保障分析",   "User",        11, None),
     ("/admin/students/analysis",      "学生学业",       "DataLine",    12, None),
     ("/admin/students/list",          "学生清单",       "List",        13, "/admin/students/analysis"),
     ("/admin/reports",                "报表中心",       "Document",    14, None),

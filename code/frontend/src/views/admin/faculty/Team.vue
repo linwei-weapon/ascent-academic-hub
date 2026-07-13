@@ -1,228 +1,37 @@
 <template>
   <div>
-    <el-breadcrumb separator="›" style="margin-bottom:12px">
-      <el-breadcrumb-item :to="{path:'/admin/faculty'}">师资结构分析</el-breadcrumb-item>
-      <el-breadcrumb-item>课程教学团队分析</el-breadcrumb-item>
-    </el-breadcrumb>
+    <el-breadcrumb separator="/" class="crumb"><el-breadcrumb-item to="/admin/faculty">本科教学师资保障分析</el-breadcrumb-item><el-breadcrumb-item>课程团队核查</el-breadcrumb-item></el-breadcrumb>
+    <div class="head"><div><h2 class="sa-page-title">课程团队保障核查</h2><p class="sa-page-sub">核查课程的实际授课成员、教学规模、职称证据和接续保障，不评价教师个人能力。</p></div></div>
+    <div class="search sa-card"><el-input v-model="query" clearable placeholder="输入课程名称或代码" @keyup.enter="search"/><el-button type="primary" :loading="searching" @click="search">查询课程</el-button></div>
+    <div v-if="results.length" class="results"><el-tag v-for="c in results" :key="c.id" effect="plain" @click="select(c)">{{c.name}}（{{c.code}}）</el-tag></div>
 
-    <div class="sa-head-row">
-      <div>
-        <h2 class="sa-page-title">课程教学团队分析</h2>
-        <p class="sa-page-sub">按课程查看授课团队构成、职称分布与师资缺口风险</p>
-      </div>
-    </div>
+    <template v-if="course">
+      <div class="scope"><span>当前课程：<b>{{course.name}}</b>（{{course.code}}）</span><el-button link type="primary" @click="clear">重新选择</el-button></div>
+      <el-alert type="warning" :closable="false" show-icon title="证据边界" :description="boundary"/>
+      <div class="kpis"><div v-for="x in kpis" :key="x.label" class="kpi"><span>{{x.label}}</span><b>{{x.value}}</b><small>{{x.note}}</small></div></div>
 
-    <!-- 课程搜索 -->
-    <div class="sa-card" style="margin-bottom:16px">
-      <div style="display:flex;gap:12px;align-items:center">
-        <el-input v-model="courseQuery" placeholder="输入课程名称或代码" size="small" style="width:360px" clearable
-          @keyup.enter="searchCourse" />
-        <el-button type="primary" size="small" @click="searchCourse" :loading="searching">查询</el-button>
-        <span v-if="searchResults.length" class="sa-faint" style="font-size:12px">
-          搜索到 {{ searchResults.length }} 门课程，点击选择：
-        </span>
-      </div>
-      <div v-if="searchResults.length" style="margin-top:10px;display:flex;flex-wrap:wrap;gap:6px">
-        <el-tag v-for="c in searchResults" :key="c.id" type="primary" effect="plain" style="cursor:pointer"
-          @click="selectCourse(c)">
-          {{ c.name }}（{{ c.code }}）
-        </el-tag>
-      </div>
-    </div>
+      <div class="grid"><section class="sa-card"><div class="sa-card-title">实际授课团队成员 <span class="extra">来源：教学任务教师关联</span></div><el-table :data="team.members||[]" stripe size="small"><el-table-column prop="display_name" label="教师" min-width="110"/><el-table-column prop="staff_id" label="教师代码" width="120"/><el-table-column prop="title" label="职称" width="120"><template #default="{row}">{{row.title||'待补充'}}</template></el-table-column><el-table-column prop="organization_id" label="组织代码" width="120"/><el-table-column label="证据状态" width="105"><template #default="{row}"><el-tag :type="row.title?'success':'warning'">{{row.title?'职称已知':'职称缺失'}}</el-tag></template></el-table-column><el-table-column label="操作" width="90"><template #default="{row}"><el-button link type="primary" @click="teacher(row)">教学档案</el-button></template></el-table-column></el-table></section>
+      <section class="sa-card"><div class="sa-card-title">历史开课供给证据</div><el-table :data="supply.offerings||[]" size="small"><el-table-column prop="semesterId" label="学期" width="115"/><el-table-column prop="lessonCount" label="教学班" width="75"/><el-table-column prop="teacherCount" label="教师" width="70"/><el-table-column prop="capacity" label="容量" width="75"/><el-table-column prop="enrolled" label="选课人次" width="85"/><el-table-column prop="avgClassSize" label="平均班额" width="85"/></el-table></section></div>
 
-    <template v-if="selectedCourse">
-      <div class="filter-banner">
-        <span>当前课程：<b>{{ selectedCourse.name }}</b>（{{ selectedCourse.code }}）· {{ selectedCourse.dept || '' }}</span>
-      </div>
-      <el-alert v-if="evidence.limitation" type="warning" :closable="false" show-icon style="margin-bottom:12px"
-        title="证据边界：团队成员与授课记录为真实数据，年龄、学历和教龄为模拟画像"
-        :description="evidence.limitation" />
-      <el-alert v-if="v2Team.summary" type="success" :closable="false" show-icon style="margin-bottom:12px"
-        title="V2 真实课程团队证据"
-        :description="`${v2Team.summary.semester_id} 学期共有 ${v2Team.summary.teacher_count} 名实际授课教师；职称缺失 ${v2Team.summary.unknown_title_count} 人，缺失部分不参与人才梯队结论。`" />
+      <section class="sa-card"><div class="sa-card-title">管理核查结论</div><el-table :data="checks" stripe><el-table-column prop="level" label="级别" width="85"><template #default="{row}"><el-tag :type="row.level==='优先'?'danger':row.level==='核验'?'warning':'info'">{{row.level}}</el-tag></template></el-table-column><el-table-column prop="topic" label="核查事项" width="160"/><el-table-column prop="basis" label="事实依据" min-width="250"/><el-table-column prop="action" label="建议管理动作" min-width="300"/></el-table></section>
 
-      <div v-if="v2Team.summary" class="sa-card" style="margin-bottom:16px">
-        <div class="sa-card-title">真实授课团队成员 <span class="extra">来源：教学任务教师关联</span></div>
-        <el-table :data="v2Team.members" size="small" stripe max-height="360" @row-click="goV2Teacher" row-class-name="row-clickable">
-          <el-table-column prop="staff_id" label="教师代码" width="120" />
-          <el-table-column prop="display_name" label="教师" min-width="120"><template #default="{row}"><span class="link">{{ row.display_name }}</span></template></el-table-column>
-          <el-table-column prop="title" label="职称" width="120"><template #default="{row}">{{ row.title || '待补充' }}</template></el-table-column>
-          <el-table-column prop="organization_id" label="组织代码" width="120" />
-          <el-table-column prop="source" label="证据来源" width="110" />
-        </el-table>
-      </div>
-
-      <!-- KPI 行 -->
-      <div class="sa-kpi-row">
-        <KpiCard v-for="k in kpis" :key="k.label" :label="k.label" :value="k.value" :hint="k.formula" :tone="k.tone" />
-      </div>
-
-      <el-row :gutter="16" style="margin-bottom:16px">
-        <!-- 团队成员表 -->
-        <el-col :span="14">
-          <div class="sa-card">
-            <div class="sa-card-title">授课团队成员</div>
-            <el-table v-if="team.length" :data="team" size="small" @row-click="goTeacher" row-class-name="row-clickable">
-              <el-table-column prop="name" label="教师" width="90"><template #default="{row}"><span class="link">{{ row.name }}</span></template></el-table-column>
-              <el-table-column prop="title" label="职称" width="100" />
-              <el-table-column prop="education" label="学历（模拟）" width="105" />
-              <el-table-column prop="age" label="年龄（模拟）" width="95" align="right" />
-              <el-table-column prop="teachingYears" label="教龄（模拟）" width="95" align="right" />
-              <el-table-column prop="teachingCount" label="近两学期教学班" width="115" align="right" />
-              <el-table-column prop="coursesThisSemester" label="本学期授课门数" width="110" align="right" />
-              <el-table-column label="历史教室倾向（行为推断）" min-width="165"><template #default="{row}">{{ row.observedClassroom }}<span v-if="row.observedClassroomPct" class="sa-faint"> · {{ row.observedClassroomPct }}%</span></template></el-table-column>
-            </el-table>
-            <div v-else class="sa-faint" style="font-size:12px;padding:20px;text-align:center">暂无团队成员数据</div>
-          </div>
-        </el-col>
-
-        <!-- 职称分布 -->
-        <el-col :span="10">
-          <div class="sa-card" style="height:100%">
-            <div class="sa-card-title">团队职称分布 <KpiLabel label="" formula="授课团队中各职称层级的人数占比" /></div>
-            <EChart v-if="titleDist.length" :option="titleDistOption" :height="200" />
-            <div v-else class="sa-faint" style="font-size:12px;padding:60px 0;text-align:center">请在下方查询后查看图表</div>
-          </div>
-        </el-col>
-      </el-row>
-
-      <!-- 梯队模拟场景 -->
-      <div class="sa-card">
-        <div class="sa-card-title">师资梯队模拟场景</div>
-        <el-alert v-if="gapRisks.length === 0" title="当前模拟画像未识别明显梯队风险，仍需真实人员档案核验" type="info" :closable="false" show-icon />
-        <div v-else>
-          <div v-for="(r, i) in gapRisks" :key="i" style="margin-bottom:8px">
-            <el-alert :title="r.title" :description="r.desc" :type="r.level === '高' ? 'error' : r.level === '中' ? 'warning' : 'info'"
-              :closable="false" show-icon />
-          </div>
-        </div>
-      </div>
-
-      <div class="sa-card" style="margin-top:16px">
-        <div class="sa-card-title">团队建设核验建议 <span class="extra">仅依据真实授课覆盖与数据质量台账</span></div>
-        <el-alert type="info" :closable="false" show-icon :title="decisionBoundary" style="margin-bottom:10px" />
-        <el-table :data="supportSuggestions" size="small" stripe>
-          <el-table-column prop="level" label="关注级别" width="90" />
-          <el-table-column prop="topic" label="主题" width="150" />
-          <el-table-column prop="basis" label="事实依据" min-width="220" />
-          <el-table-column prop="suggestion" label="核验建议" min-width="300" />
-          <el-table-column prop="readiness" label="状态" width="100" />
-        </el-table>
-      </div>
+      <section class="sa-card explain"><div class="sa-card-title">如何理解本页</div><p><b>团队人数：</b>当前真实教学任务中与该课程关联的去重教师，不等于学校所有具备授课资格的教师。</p><p><b>单点承担：</b>当前仅发现1名实际授课教师，应核查下一轮开课的备课和接续安排，但不等于已发生人才断层。</p><p><b>职称结构：</b>只对职称已知成员进行描述；存在缺失时不得形成完整梯队结论。</p><p><b>历史开课：</b>证明已接入学期曾经开设，不承诺未来继续开设。</p></section>
     </template>
-
-    <el-empty v-else description="请输入课程名称查询授课团队" :image-size="80" />
+    <el-empty v-else description="请选择一门课程开始团队核查"/>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed } from 'vue'
-import KpiLabel from '@/components/KpiLabel.vue'
-import KpiCard from '@/components/KpiCard.vue'
-import EChart from '@/components/EChart.vue'
-import { http } from '@/utils/http'
-import { useRouter } from 'vue-router'
-import { getV2TeachingSemester } from '@/utils/v2meta'
-
-const router = useRouter()
-
-const courseQuery = ref('')
-const searching = ref(false)
-const searchResults = ref<any[]>([])
-const selectedCourse = ref<any>(null)
-const team = ref<any[]>([])
-const gapRisks = ref<any[]>([])
-const evidence = ref<any>({})
-const supportSuggestions = ref<any[]>([])
-const decisionBoundary = ref('')
-const v2Team = reactive<any>({ summary: null, members: [] })
-
-const kpis = ref<any[]>([])
-
-const titleDist = computed(() => {
-  const m: Record<string, number> = {}
-  team.value.forEach(t => {
-    const title = t.title || '其他'
-    m[title] = (m[title] || 0) + 1
-  })
-  return Object.entries(m).map(([name, value]) => ({ name, value }))
-})
-
-const TITLE_COLORS = ['#4F46E5', '#0D9488', '#D97706', '#6366F1', '#0EA5E9', '#94A3B8']
-const titleDistOption = computed(() => ({
-  tooltip: { trigger: 'item', formatter: '{b}：{c}人（{d}%）' },
-  legend: { type: 'scroll', orient: 'vertical', right: 0, top: 'center', itemWidth: 10, itemHeight: 10, textStyle: { color: '#64748B', fontSize: 11 } },
-  series: [{
-    type: 'pie', radius: ['46%', '72%'], center: ['34%', '50%'], avoidLabelOverlap: true,
-    itemStyle: { borderColor: '#fff', borderWidth: 2 },
-    label: { show: false },
-    data: titleDist.value.map((d: any, i: number) => ({ name: d.name, value: d.value, itemStyle: { color: TITLE_COLORS[i % TITLE_COLORS.length] } })),
-  }],
-}))
-
-async function searchCourse() {
-  if (!courseQuery.value.trim()) return
-  searching.value = true
-  try {
-    const data = await http.get<any>(`/admin/faculty/team/search?q=${encodeURIComponent(courseQuery.value)}`)
-    searchResults.value = data || []
-  } catch { /* http 工具已 toast */ }
-  finally { searching.value = false }
-}
-
-async function selectCourse(c: any) {
-  selectedCourse.value = c
-  searchResults.value = []
-  courseQuery.value = ''
-  await loadTeam(c.id)
-}
-
-async function loadTeam(courseId: string) {
-  try {
-    const data = await http.get<any>(`/admin/faculty/team/${courseId}`)
-    team.value = data.team || []
-    gapRisks.value = data.gapRisks || []
-    evidence.value = data.evidence || {}
-    supportSuggestions.value = data.supportSuggestions || []
-    decisionBoundary.value = data.decisionBoundary || ''
-    kpis.value = data.kpis || [
-      { label: '团队人数', value: team.value.length, formula: '参与授课的教师总数', tone: 'primary' as const },
-      { label: '教授占比', value: computeProfRatio(), formula: '教授人数 ÷ 团队总人数', tone: 'teal' as const },
-      { label: '模拟平均教龄', value: computeAvgAge(), formula: '模拟画像中的团队成员教龄平均值', tone: 'primary' as const },
-      { label: '模拟风险场景', value: gapRisks.value.length ? `${gapRisks.value.length}项` : '未识别', formula: '基于模拟年龄画像识别，需真实档案核验', tone: gapRisks.value.length ? 'danger' as const : 'primary' as const },
-    ]
-  } catch { /* http 工具已 toast */ }
-  try {
-    const semester = await getV2TeachingSemester()
-    if (!semester) throw new Error('no real teaching semester')
-    const real = await http.get<any>(`/v2/courses/${encodeURIComponent(courseId)}/team?semester=${encodeURIComponent(semester)}`)
-    Object.assign(v2Team, real || { summary: null, members: [] })
-  } catch {
-    v2Team.summary = null
-    v2Team.members = []
-  }
-}
-
-function goTeacher(row:any) { router.push('/admin/faculty/' + row.teacherId) }
-function goV2Teacher(row:any) { router.push('/admin/faculty/' + row.staff_id) }
-
-function computeProfRatio() {
-  if (!team.value.length) return '—'
-  const profs = team.value.filter(t => t.title === '教授')
-  return Math.round(profs.length / team.value.length * 100) + '%'
-}
-
-function computeAvgAge() {
-  const arr = team.value.map(t => t.teachingYears).filter(v => typeof v === 'number')
-  if (!arr.length) return '—'
-  return (arr.reduce((a, b) => a + b, 0) / arr.length).toFixed(1) + '年'
-}
+import{computed,onMounted,reactive,ref}from'vue';import{useRoute,useRouter}from'vue-router';import{http}from'@/utils/http';import{getV2TeachingSemester}from'@/utils/v2meta'
+const route=useRoute(),router=useRouter(),query=ref(''),searching=ref(false),results=ref<any[]>([]),course=ref<any>(),semester=ref(''),team=reactive<any>({summary:null,members:[]}),supply=reactive<any>({offerings:[],availability:{}})
+const boundary=computed(()=>`${team.summary?.semester_id||semester.value}学期的成员来自实际教学任务。当前缺少完整年龄、学历、课程资格和未来开课计划，因此不判断年龄断层、个人能力或未来必然缺师。${supply.boundary||''}`)
+const kpis=computed(()=>{const s=team.summary||{};return[{label:'实际授课教师',value:(s.teacher_count||0)+' 人',note:'当前教学任务去重教师'},{label:'职称已知',value:Math.max(0,(s.teacher_count||0)-(s.unknown_title_count||0))+' 人',note:`缺失 ${s.unknown_title_count||0} 人`},{label:'教授/副教授',value:`${s.professor_count||0} / ${s.associate_professor_count||0} 人`,note:'仅统计职称已知成员'},{label:'历史开课学期',value:(supply.offerings?.length||0)+' 个',note:'当前已接入证据'},{label:'替代关系',value:(supply.substitutions?.length||0)+' 条',note:'不等于师资替代'}]})
+const checks=computed(()=>{const s=team.summary||{},rows:any[]=[];if((s.teacher_count||0)===1)rows.push({level:'优先',topic:'课程单点承担',basis:'当前教学任务仅关联1名实际授课教师',action:'核查下一轮开课规模、协同备课教师和临时替课安排。'});else if((s.teacher_count||0)===2)rows.push({level:'核验',topic:'团队覆盖偏窄',basis:'当前教学任务关联2名教师',action:'结合教学班数量和未来开课计划核查团队冗余度。'});else rows.push({level:'观察',topic:'团队覆盖',basis:`当前关联${s.teacher_count||0}名实际授课教师`,action:'保持常规观察，结合后续学期确认团队稳定性。'});if(s.unknown_title_count)rows.push({level:'核验',topic:'职称证据缺失',basis:`${s.unknown_title_count}名成员缺少职称`,action:'先补齐教师主数据，再判断职称梯队结构。'});if(!supply.availability?.hasFuturePlanEvidence)rows.push({level:'核验',topic:'未来开课保障',basis:'当前未接入未来开课计划',action:'由排课人员结合下一学年教学任务确认课程是否开设及师资容量。'});return rows})
+async function search(){if(!query.value.trim())return;searching.value=true;try{results.value=await http.get<any>('/admin/faculty/team/search?q='+encodeURIComponent(query.value))}finally{searching.value=false}}
+async function select(c:any){course.value={name:c.name,code:c.code||c.id,id:c.id};results.value=[];query.value='';await load(c.id)}
+async function load(id:string){const r=await http.get<any>(`/admin/faculty/management-course/${encodeURIComponent(id)}?semester=${encodeURIComponent(semester.value)}`);Object.assign(team,{summary:r.summary,members:r.members});Object.assign(supply,{offerings:r.offerings,substitutions:[],availability:{hasFuturePlanEvidence:false},boundary:r.boundary})}
+function clear(){course.value=undefined;Object.assign(team,{summary:null,members:[]});Object.assign(supply,{offerings:[],availability:{}})}function teacher(row:any){router.push('/admin/faculty/'+row.staff_id)}
+onMounted(async()=>{semester.value=await getV2TeachingSemester()||'2023-2024-1';const id=String(route.query.courseId||'');if(id)await select({id,code:id,name:String(route.query.courseName||id)})})
 </script>
 
-<style scoped>
-.sa-head-row { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 14px; }
-.filter-banner { background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 10px; padding: 8px 14px; margin-bottom: 12px; font-size: 12px; color: var(--sa-primary); }
-.link { color: var(--sa-primary); cursor: pointer; font-weight: 500; }
-.link:hover { text-decoration: underline; }
-:deep(.row-clickable) { cursor: pointer; }
-</style>
+<style scoped>.crumb{margin-bottom:10px}.head{display:flex;justify-content:space-between}.search{display:flex;gap:10px;margin-bottom:10px}.search .el-input{max-width:420px}.results{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:12px}.results .el-tag{cursor:pointer}.scope{display:flex;justify-content:space-between;padding:11px 14px;margin-bottom:12px;background:#eef2ff;border:1px solid #c7d2fe;border-radius:9px}.kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin:14px 0}.kpi{padding:14px;background:#fff;border:1px solid var(--sa-border);border-radius:9px}.kpi span,.kpi small{display:block;color:#64748b}.kpi b{display:block;margin:6px 0;font-size:22px}.grid{display:grid;grid-template-columns:1.2fr 1fr;gap:14px}.sa-card{margin-bottom:14px}.explain p{font-size:13px;line-height:1.8;color:#475569}</style>

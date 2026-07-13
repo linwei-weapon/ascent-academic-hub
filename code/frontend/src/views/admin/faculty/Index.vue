@@ -1,185 +1,39 @@
 <template>
   <div>
-    <div class="sa-head-row">
-      <div>
-        <h2 class="sa-page-title">师资结构分析</h2>
-        <p class="sa-page-sub">数据来源：教职工画像(fact_teacher_profile) + 真实排课(fact_lesson) + 真实成绩(fact_grade)</p>
-      </div>
-      <div style="display:flex;gap:8px">
-        <el-select v-model="fTitle" size="small" style="width:130px" clearable placeholder="全部职称" @change="load">
-          <el-option v-for="t in titles" :key="t" :label="t" :value="t" />
-        </el-select>
-        <el-select v-model="fSemester" size="small" style="width:180px" clearable placeholder="全部学期" @change="load">
-          <el-option v-for="s in semesters" :key="s.value" :label="s.label" :value="s.value" />
-        </el-select>
-      </div>
+    <div class="head"><div><h2 class="sa-page-title">本科教学师资保障分析</h2><p class="sa-page-sub">从真实教学任务识别课程团队单点承担、任务集中和教授本科教学参与核查对象。</p></div><div class="filters"><el-select v-model="semester" placeholder="选择学期" @change="load"><el-option v-for="s in semesters" :key="s.value" :label="s.label" :value="s.value"/></el-select><el-select v-model="college" clearable filterable placeholder="全部学院" @change="load"><el-option v-for="x in colleges" :key="x.id" :label="x.name" :value="x.id"/></el-select></div></div>
+    <el-alert type="warning" :closable="false" show-icon title="本页用于师资供给与课程团队核查，不用于教师个人评价" :description="definition.boundary"/>
+
+    <div class="kpis">
+      <div v-for="k in kpis" :key="k.label" class="kpi"><span>{{k.label}} <KpiLabel label="" :formula="k.help"/></span><b>{{k.value}}</b><small>{{k.note}}</small></div>
     </div>
 
-    <el-alert v-if="evidence.limitation" type="warning" :closable="false" show-icon style="margin-bottom:12px"
-      title="师资画像证据说明：职称与教学记录来自真实源，学历、年龄、学缘和教龄为模拟字段"
-      :description="evidence.limitation" />
+    <section class="sa-card"><div class="sa-card-title">学院本科教学师资保障对比 <span class="extra">点击“核查学院”联动本页全部数据</span></div>
+      <el-table :data="data.colleges" stripe size="small"><el-table-column prop="college_name" label="学院" min-width="160"/><el-table-column prop="courses" label="开课课程" width="90"/><el-table-column prop="lessons" label="教学班" width="80"/><el-table-column prop="enrolled" label="选课人次" width="95"/><el-table-column prop="single_teacher_courses" label="单点课程" width="90"/><el-table-column prop="high_impact_courses" label="高影响单点" width="105"><template #default="{row}"><el-tag :type="row.high_impact_courses?'danger':'success'">{{row.high_impact_courses}}</el-tag></template></el-table-column><el-table-column label="管理用途" min-width="210"><template #default="{row}">{{row.high_impact_courses?'优先核查高影响课程的备课与接续安排':row.single_teacher_courses?'核查单一教师课程的团队覆盖':'当前未发现单点课程'}}</template></el-table-column><el-table-column label="操作" width="100"><template #default="{row}"><el-button link type="primary" @click="inspectCollege(row)">核查学院</el-button></template></el-table-column></el-table>
+      <div v-if="data.college" class="scope"><span>当前学院：<b>{{data.college}}</b></span><el-button link type="primary" @click="clearCollege">清除学院条件</el-button></div>
+    </section>
 
-    <div v-if="collegeFilter" class="filter-banner">
-      <span>当前学院视图：<b>{{ collegeFilter.name }}</b></span>
-      <el-button size="small" type="primary" text @click="clearCollegeFilter">← 返回全校视图</el-button>
-    </div>
+    <section class="sa-card"><div class="sa-card-title">需要优先核查的课程团队 <span class="extra">风险来自当期授课覆盖和职称证据，不代表教师能力</span></div>
+      <el-table :data="data.risk_courses" stripe><el-table-column prop="course_name" label="课程" min-width="180" show-overflow-tooltip/><el-table-column prop="college_name" label="开课学院" min-width="140"/><el-table-column prop="course_nature" label="课程性质" width="105"/><el-table-column prop="lesson_count" label="教学班" width="75"/><el-table-column prop="enrolled" label="选课人次" width="90"/><el-table-column prop="teacher_count" label="实际教师" width="85"/><el-table-column label="职称已知" width="90"><template #default="{row}">{{row.known_title_teachers}} / {{row.teacher_count}}</template></el-table-column><el-table-column label="优先级" width="80"><template #default="{row}"><el-tag :type="row.priority==='高'?'danger':'warning'">{{row.priority}}</el-tag></template></el-table-column><el-table-column label="为什么核查" min-width="260"><template #default="{row}">{{row.attention_reasons.join('；')}}</template></el-table-column><el-table-column label="操作" width="100" fixed="right"><template #default="{row}"><el-button link type="primary" @click="goTeam(row)">团队证据</el-button></template></el-table-column></el-table>
+    </section>
 
-    <div class="sa-kpi-row">
-      <KpiCard v-for="k in facultyKpis" :key="k.label" :label="k.label" :value="k.value" :hint="k.formula" :tone="kpiTone(k.label, k.value)" />
-    </div>
+    <section class="sa-card"><div class="sa-card-title">主讲教学任务集中教师 <span class="extra">按主讲教师字段的教学班数和选课人次排序；联合授课暂不拆分工作量</span></div>
+      <el-table :data="data.teachers" size="small" stripe><el-table-column prop="teacher_name" label="教师" width="100"/><el-table-column prop="college_name" label="学院" min-width="150"/><el-table-column prop="title" label="职称" width="105"><template #default="{row}">{{row.title||'待补充'}}</template></el-table-column><el-table-column prop="course_count" label="课程数" width="85"/><el-table-column prop="lesson_count" label="教学班数" width="90"/><el-table-column prop="enrolled" label="覆盖选课人次" width="110"/><el-table-column label="核查说明" min-width="260"><template #default="{row}">核对是否为正常团队分工、合班记录或任务集中；不能据此直接认定超负荷</template></el-table-column><el-table-column label="操作" width="90"><template #default="{row}"><el-button link type="primary" @click="goTeacher(row)">教学档案</el-button></template></el-table-column></el-table>
+    </section>
 
-    <el-row :gutter="16" style="margin-bottom:16px">
-      <el-col :span="6" v-for="(d, di) in data.structure" :key="d.title">
-        <div class="sa-card" style="height:100%">
-          <div class="sa-card-title" style="font-size:13px">{{ d.title }}</div>
-          <EChart v-if="d.items && d.items.length" :option="structOption(d, di)" :height="160" />
-          <div v-else class="sa-faint" style="font-size:12px">暂无数据</div>
-        </div>
-      </el-col>
-    </el-row>
-
-    <el-row :gutter="16" style="margin-bottom:16px">
-      <el-col :span="14">
-        <div class="sa-card">
-          <div class="sa-card-title">教授/副教授为本科生上课率（按学院） <KpiLabel label="" formula="为本科生授课的教授(副教授)÷该学院教授(副教授)总数。教育部要求教授上课率≥85%" /></div>
-          <el-table :data="data.teachingRates" size="small" @row-click="goCollege" row-class-name="row-clickable">
-            <el-table-column prop="name" label="学院" width="130"><template #default="{row}"><span class="link">{{ row.name }}</span></template></el-table-column>
-            <el-table-column prop="profTotal" label="教授数" width="70" align="right" />
-            <el-table-column label="教授上课率" min-width="170"><template #default="{row}">
-              <div style="display:flex;align-items:center;gap:8px">
-                <el-progress :percentage="row.profRate" :show-text="false" :stroke-width="9" :color="row.profRate>=85?'#0D9488':'#E11D48'" style="flex:1" />
-                <span class="tnum" :style="{color:row.profRate>=85?'#0D9488':'#E11D48',fontWeight:600,minWidth:'48px',textAlign:'right'}">{{ row.profRate }}% {{ row.profRate>=85?'✓':'↓' }}</span>
-              </div>
-            </template></el-table-column>
-            <el-table-column label="副教授上课率" min-width="150"><template #default="{row}">
-              <div style="display:flex;align-items:center;gap:8px">
-                <el-progress :percentage="row.assocRate" :show-text="false" :stroke-width="9" color="#4F46E5" style="flex:1" />
-                <span class="tnum" style="color:#4F46E5;font-weight:600;min-width:42px;text-align:right">{{ row.assocRate }}%</span>
-              </div>
-            </template></el-table-column>
-          </el-table>
-        </div>
-      </el-col>
-
-      <el-col :span="10">
-        <div class="sa-card">
-          <div class="sa-card-title">教师任课均分排行 <KpiLabel label="" formula="本学期可归因教学班学生平均分排行(修读≥20)。↑优于全体任课均分" /></div>
-          <div v-if="data.teacherTrends.length">
-            <div v-for="t in data.teacherTrends" :key="t.id" class="trend-row" @click="goTeacher(t)">
-              <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
-                <span><span class="link">{{ t.name }}</span> <span class="sa-faint">· {{ t.title }} · {{ t.dept }}</span></span>
-                <span class="tnum" :style="{color:t.trend==='up'?'#0D9488':'#E11D48',fontWeight:600}">{{ t.avgScore }}分 {{ t.trend==='up'?'↑':'↓' }}</span>
-              </div>
-              <div style="display:flex;align-items:center;gap:8px">
-                <el-progress :percentage="Math.min(Math.round(t.avgScore),100)" :show-text="false" :stroke-width="8" :color="t.avgScore>=80?'#0D9488':t.avgScore>=70?'#4F46E5':'#D97706'" style="flex:1" />
-                <span class="sa-faint" style="font-size:11px;width:64px;text-align:right">{{ t.students }}人修读</span>
-              </div>
-            </div>
-          </div>
-          <div v-else class="sa-faint" style="font-size:12px">暂无数据</div>
-        </div>
-      </el-col>
-    </el-row>
-
-    <div class="sa-card">
-      <div class="sa-card-title">未上课教授名单 <KpiLabel label="" formula="本学期未承担本科生课程的教授名单，需关注原因" /></div>
-      <el-table v-if="data.notTeaching.length" :data="data.notTeaching" size="small">
-        <el-table-column prop="name" label="姓名" width="90" />
-        <el-table-column prop="title" label="职称" width="70" />
-        <el-table-column prop="dept" label="学院" width="150" />
-        <el-table-column prop="reason" label="原因" min-width="220" />
-        <el-table-column prop="semesters" label="连续未上课" width="110" />
-      </el-table>
-      <div v-else class="sa-faint" style="font-size:12px">本学期无未上课教授</div>
-    </div>
-
-    <div style="margin-top:16px;text-align:right">
-      <el-button type="primary" @click="router.push('/admin/faculty/team')">课程教学团队分析 →</el-button>
-    </div>
+    <section class="sa-card explain"><div class="sa-card-title">指标口径与管理动作</div><p><b>单一教师覆盖课程：</b>{{definition.single_teacher_courses}} 管理动作是核查是否需要协同备课和接续教师。</p><p><b>高影响单点课程：</b>{{definition.high_impact_courses}} 管理动作是结合下一学期开课规模优先安排资源。</p><p><b>教授本科教学参与率：</b>{{definition.professor_participation}}</p><p><b>职称证据完整率：</b>{{definition.title_completeness}} 完整率不足时不形成职称梯队结论。</p><p><b>任务集中度：</b>{{definition.load_share}}</p></section>
   </div>
 </template>
 
 <script setup lang="ts">
-import { http } from '@/utils/http'
-import { reactive, ref, watch, onMounted } from 'vue'
-import { useRouter, useRoute } from 'vue-router'
-import KpiLabel from '@/components/KpiLabel.vue'
-import KpiCard from '@/components/KpiCard.vue'
-import EChart from '@/components/EChart.vue'
-import { COLLEGE_MAP } from '@/constants/colleges'
-import { getFilterMeta, type SemesterOpt } from '@/utils/meta'
-const router = useRouter(); const route = useRoute()
-const collegeFilter = ref<{id:string;name:string}|null>(null)
-const collegeMap = COLLEGE_MAP
-function applyCollegeFilter() { const cid = route.query.college as string; collegeFilter.value = (cid && collegeMap[cid]) ? { id: cid, name: collegeMap[cid] } : null }
-applyCollegeFilter(); watch(() => route.query.college, () => { applyCollegeFilter(); load() })
-function clearCollegeFilter() { collegeFilter.value = null; router.replace({ query: {} }) }
-function goCollege(row: any) { router.push({ query: { college: row.id } }) }
-function goTeacher(row: any) { router.push({ path: '/admin/faculty/' + row.id, query: fSemester.value ? { semester: fSemester.value } : {} }) }
-
-const fTitle = ref('')
-const fSemester = ref('')
-const titles = ref<string[]>([])
-const semesters = ref<SemesterOpt[]>([])
-
-const facultyKpis = ref<any[]>([])
-const evidence = ref<any>({})
-const data = reactive<{structure:any[];teachingRates:any[];teacherTrends:any[];notTeaching:any[]}>({
-  structure: [], teachingRates: [], teacherTrends: [], notTeaching: [],
-})
-
-async function load() {
-  const cid = route.query.college as string
-  const params = new URLSearchParams()
-  if (cid && collegeMap[cid]) params.set('college', cid)
-  if (fTitle.value) params.set('title', fTitle.value)
-  if (fSemester.value) params.set('semester', fSemester.value)
-  const qs = params.toString() ? `?${params.toString()}` : ''
-  const d = await http.get('/admin/faculty/structure' + qs)
-  if (d) { facultyKpis.value = d.facultyKpis || []; evidence.value = d.evidence || {}; Object.assign(data, d) }
-}
-onMounted(async () => {
-  const meta = await getFilterMeta()
-  titles.value = meta.titles || []
-  semesters.value = meta.semesters.slice().reverse()
-  await load()
-})
-
-function kpiTone(label: string, value: any): 'primary'|'teal'|'danger'|'amber' {
-  if (label.includes('上课率')) return parseFloat(String(value)) >= 85 ? 'teal' : 'danger'
-  if (label.includes('博士') || label.includes('生师比')) return 'teal'
-  return 'primary'
-}
-
-const STRUCT_COLORS = [
-  ['#4F46E5', '#6366F1', '#A5B4FC', '#C7D2FE', '#E0E7FF'],
-  ['#0D9488', '#2DD4BF', '#99F6E4', '#CCFBF1'],
-  ['#D97706', '#F59E0B', '#FCD34D', '#FEF08A'],
-  ['#6366F1', '#0EA5E9', '#94A3B8', '#CBD5E1'],
-]
-function structOption(d: any, di: number) {
-  const palette = STRUCT_COLORS[di % STRUCT_COLORS.length]
-  return {
-    tooltip: { trigger: 'item', formatter: '{b}：{c}人（{d}%）' },
-    series: [{
-      type: 'pie', radius: ['42%', '70%'], center: ['50%', '50%'], avoidLabelOverlap: true,
-      itemStyle: { borderColor: '#fff', borderWidth: 2 },
-      label: { show: true, fontSize: 10, color: '#64748B', formatter: '{b}\n{d}%' },
-      labelLine: { length: 6, length2: 6 },
-      data: (d.items || []).map((it: any, i: number) => ({ name: it.label, value: it.value, itemStyle: { color: palette[i % palette.length] } })),
-    }],
-  }
-}
+import{computed,onMounted,reactive,ref}from'vue';import{useRouter}from'vue-router';import{http}from'@/utils/http';import{getFilterMeta,type SemesterOpt}from'@/utils/meta';import{COLLEGE_MAP}from'@/constants/colleges';import KpiLabel from'@/components/KpiLabel.vue'
+const router=useRouter(),semester=ref(''),college=ref(''),semesters=ref<SemesterOpt[]>([]),loading=ref(false)
+const colleges=Object.entries(COLLEGE_MAP).map(([id,name])=>({id,name})),data=reactive<any>({summary:{},colleges:[],risk_courses:[],teachers:[],college:''}),definition=reactive<any>({})
+const fmt=(v:any,suffix='')=>v===null||v===undefined?'—':v+suffix
+const kpis=computed(()=>[{label:'本科教学活跃教师',value:fmt(data.summary.active_teachers,' 人'),note:`覆盖 ${data.summary.courses||0} 门课程`,help:definition.active_teachers||''},{label:'单一教师覆盖课程',value:fmt(data.summary.single_teacher_courses,' 门'),note:'当期教学任务单点承担',help:definition.single_teacher_courses||''},{label:'高影响单点课程',value:fmt(data.summary.high_impact_courses,' 门'),note:'优先核查接续资源',help:definition.high_impact_courses||''},{label:'教授本科教学参与率',value:fmt(data.summary.professor_participation_rate,'%'),note:`${data.summary.professor_active||0} / ${data.summary.professor_total||0} 人`,help:definition.professor_participation||''},{label:'职称证据完整率',value:fmt(data.summary.title_completeness_rate,'%'),note:'决定能否分析职称梯队',help:definition.title_completeness||''},{label:'前10%主讲教师任务占比',value:fmt(data.summary.top10_load_share,'%'),note:'按主讲字段覆盖选课人次计算',help:definition.load_share||''}])
+async function load(){loading.value=true;try{const q=new URLSearchParams();if(semester.value)q.set('semester',semester.value);if(college.value)q.set('college',college.value);const r=await http.get<any>('/admin/faculty/management-overview?'+q);Object.assign(data,r);Object.assign(definition,r.definition)}finally{loading.value=false}}
+function inspectCollege(row:any){const match=colleges.find(x=>x.name===row.college_name);if(match){college.value=match.id;load()}}function clearCollege(){college.value='';load()}
+function goTeam(row:any){router.push({path:'/admin/faculty/team',query:{courseId:row.course_id,courseName:row.course_name}})}function goTeacher(row:any){router.push('/admin/faculty/'+row.teacher_id)}
+onMounted(async()=>{const meta=await getFilterMeta();semesters.value=(meta.semesters||[]).slice().reverse();semester.value=semesters.value[0]?.value||'';await load()})
 </script>
 
-<style scoped>
-.sa-head-row { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 14px; }
-.filter-banner { background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 10px; padding: 8px 14px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: var(--sa-primary); }
-.trend-row { padding: 8px 0; border-bottom: 1px solid var(--sa-border); cursor: pointer; }
-.trend-row:last-child { border-bottom: none; }
-.trend-row:hover { background: #f8fafc; }
-.link { color: var(--sa-primary); cursor: pointer; font-weight: 500; }
-.link:hover { text-decoration: underline; }
-:deep(.row-clickable) { cursor: pointer; }
-:deep(.row-clickable:hover) { background: #eef2ff !important; }
-</style>
+<style scoped>.head{display:flex;justify-content:space-between;align-items:flex-start;gap:18px}.filters{display:flex;gap:10px}.filters .el-select{width:180px}.kpis{display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin:14px 0}.kpi{padding:14px;background:#fff;border:1px solid var(--sa-border);border-radius:10px}.kpi span,.kpi small{display:block;color:#64748b}.kpi b{display:block;margin:6px 0;font-size:23px;color:#0f172a}.sa-card{margin-bottom:14px}.scope{display:flex;justify-content:space-between;margin-top:10px;padding:9px 12px;background:#eef2ff;border-radius:8px;color:#475569}.explain p{font-size:13px;line-height:1.8;color:#475569}@media(max-width:1200px){.kpis{grid-template-columns:repeat(3,1fr)}}</style>

@@ -1,7 +1,7 @@
 <template>
   <div>
     <el-breadcrumb separator="›" style="margin-bottom:12px">
-      <el-breadcrumb-item :to="{path:'/admin/faculty'}">师资结构分析</el-breadcrumb-item>
+      <el-breadcrumb-item :to="{path:'/admin/faculty'}">师资保障分析</el-breadcrumb-item>
       <el-breadcrumb-item>{{ data.name || '教师详情' }}</el-breadcrumb-item>
     </el-breadcrumb>
 

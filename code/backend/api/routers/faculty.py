@@ -3,6 +3,7 @@
 真实排课 fact_lesson + 真实成绩 fact_grade。学院下钻用真实 college_id（C01-C16）。
 """
 import sqlite3
+from collections import defaultdict
 from typing import Optional
 
 from fastapi import APIRouter, Depends
@@ -77,6 +78,137 @@ def _historical_schedule_pattern(conn: sqlite3.Connection, teacher_id: str) -> d
             "classSizeTendency": size_label, "confidence": confidence,
             "readiness": "待数据核验" if has_issue else "可供排课参考",
             "limitation": "该结果是历史排课行为统计，不等同于教师主动表达的意愿；源数据无真实星期和节次字段，因此不分析时段偏好。"}
+
+
+@router.get("/management-overview")
+def management_overview(college: Optional[str] = None, semester: Optional[str] = None,
+                        user: dict = Depends(get_current_user),
+                        conn: sqlite3.Connection = Depends(get_db)):
+    """本科教学师资保障总览，仅使用真实教师主数据与教学任务。"""
+    col_scope, col_params = college_data_scope(user, conn)
+    if col_scope and not college:
+        scoped = dbm.query_one(conn, f"SELECT college_id FROM dim_college WHERE {col_scope}", col_params)
+        if scoped: college = scoped["college_id"]
+    sem = semester or REAL
+    college_name = dbm.scalar(conn, "SELECT name FROM dim_college WHERE college_id=?", (college,)) if college else None
+    params: list = [sem]
+    college_sql = ""
+    if college_name:
+        college_sql = " AND TRIM(COALESCE(t.dept,''))=?"
+        params.append(college_name)
+    course_rows = dbm.query(conn, f"""SELECT l.course_id,COALESCE(MAX(c.name),l.course_id) course_name,
+      COALESCE(MAX(c.course_nature),'未标注') course_nature,COALESCE(MAX(t.dept),'待映射学院') college_name,
+      COUNT(DISTINCT l.lesson_id) lesson_count,COUNT(DISTINCT l.teacher_id) teacher_count,
+      SUM(COALESCE(l.enrolled,0)) enrolled,
+      COUNT(DISTINCT CASE WHEN NULLIF(TRIM(t.title),'') IS NOT NULL THEN l.teacher_id END) known_title_teachers,
+      COUNT(DISTINCT CASE WHEN t.title LIKE '%教授%' THEN l.teacher_id END) senior_title_teachers
+      FROM fact_lesson l LEFT JOIN dim_course c ON c.course_id=l.course_id
+      LEFT JOIN dim_teacher t ON t.teacher_id=l.teacher_id
+      WHERE l.semester_id=? AND NULLIF(TRIM(l.course_id),'') IS NOT NULL {college_sql}
+      GROUP BY l.course_id""", tuple(params))
+    lesson_team_rows = dbm.query(conn, f"""SELECT l.course_id,l.teacher_id,l.teacher_ids
+      FROM fact_lesson l LEFT JOIN dim_teacher t ON t.teacher_id=l.teacher_id
+      WHERE l.semester_id=? AND NULLIF(TRIM(l.course_id),'') IS NOT NULL {college_sql}""", tuple(params))
+    team_sets = defaultdict(set)
+    for item in lesson_team_rows:
+        if item["teacher_id"]: team_sets[item["course_id"]].add(str(item["teacher_id"]).strip())
+        for teacher_id in str(item["teacher_ids"] or "").replace("，", ";").replace(",", ";").split(";"):
+            if teacher_id.strip(): team_sets[item["course_id"]].add(teacher_id.strip())
+    teacher_meta = {x["teacher_id"]: x for x in dbm.query(conn, "SELECT teacher_id,title FROM dim_teacher")}
+    for row in course_rows:
+        member_ids = team_sets.get(row["course_id"], set())
+        row["teacher_count"] = len(member_ids)
+        row["known_title_teachers"] = sum(bool(str(teacher_meta.get(x, {}).get("title") or "").strip()) for x in member_ids)
+        row["senior_title_teachers"] = sum("教授" in str(teacher_meta.get(x, {}).get("title") or "") for x in member_ids)
+        reasons = []
+        if row["teacher_count"] == 1: reasons.append("当前学期仅1名实际授课教师")
+        if row["teacher_count"] <= 2 and row["lesson_count"] >= 3: reasons.append(f"{row['lesson_count']}个教学班仅由{row['teacher_count']}名教师覆盖")
+        if row["enrolled"] >= 100 and row["teacher_count"] == 1: reasons.append(f"单一教师覆盖{row['enrolled']}人次")
+        if row["known_title_teachers"] < row["teacher_count"]: reasons.append("团队职称证据不完整")
+        row["attention_reasons"] = reasons
+        row["priority"] = "高" if row["teacher_count"] == 1 and row["enrolled"] >= 100 else ("中" if reasons else "常规")
+    risk_courses = sorted([x for x in course_rows if x["attention_reasons"]],
+                          key=lambda x: (x["priority"] != "高", x["priority"] != "中", -x["enrolled"]))[:30]
+    teacher_params: list = [sem]
+    teacher_college_sql = ""
+    if college_name:
+        teacher_college_sql = " AND TRIM(COALESCE(t.dept,''))=?"; teacher_params.append(college_name)
+    teacher_rows = dbm.query(conn, f"""SELECT l.teacher_id,COALESCE(MAX(t.name),l.teacher_id) teacher_name,
+      COALESCE(MAX(t.dept),'待映射学院') college_name,MAX(t.title) title,
+      COUNT(DISTINCT l.course_id) course_count,COUNT(DISTINCT l.lesson_id) lesson_count,
+      SUM(COALESCE(l.enrolled,0)) enrolled FROM fact_lesson l LEFT JOIN dim_teacher t ON t.teacher_id=l.teacher_id
+      WHERE l.semester_id=? AND NULLIF(TRIM(l.teacher_id),'') IS NOT NULL {teacher_college_sql}
+      GROUP BY l.teacher_id ORDER BY lesson_count DESC,enrolled DESC""", tuple(teacher_params))
+    teachers = teacher_rows[:30]
+    colleges_map = {}
+    for row in course_rows:
+        bucket = colleges_map.setdefault(row["college_name"], {"college_name": row["college_name"], "courses": 0,
+          "lessons": 0, "enrolled": 0, "single_teacher_courses": 0, "high_impact_courses": 0})
+        bucket["courses"] += 1; bucket["lessons"] += row["lesson_count"]; bucket["enrolled"] += row["enrolled"] or 0
+        bucket["single_teacher_courses"] += int(row["teacher_count"] == 1)
+        bucket["high_impact_courses"] += int(row["teacher_count"] == 1 and row["enrolled"] >= 100)
+    college_rows = sorted(colleges_map.values(), key=lambda x: (-x["high_impact_courses"], -x["single_teacher_courses"], x["college_name"]))
+    active_ids = set().union(*team_sets.values()) if team_sets else set()
+    title_known = sum(bool(str(teacher_meta.get(x, {}).get("title") or "").strip()) for x in active_ids)
+    professor_rows = dbm.query(conn, "SELECT teacher_id FROM dim_teacher WHERE title LIKE '%教授%' AND title NOT LIKE '%副教授%'" +
+      (" AND TRIM(COALESCE(dept,''))=?" if college_name else ""), (college_name,) if college_name else ())
+    professor_ids = {x["teacher_id"] for x in professor_rows}
+    professor_active = len(professor_ids & active_ids)
+    total_enrolled = sum(x["enrolled"] or 0 for x in course_rows)
+    top_load = sum(x["enrolled"] or 0 for x in teacher_rows[:max(1, round(len(teacher_rows)*0.1))])
+    summary = {"active_teachers": len(active_ids), "courses": len(course_rows),
+      "single_teacher_courses": sum(x["teacher_count"] == 1 for x in course_rows),
+      "high_impact_courses": sum(x["teacher_count"] == 1 and x["enrolled"] >= 100 for x in course_rows),
+      "professor_total": len(professor_ids), "professor_active": professor_active,
+      "professor_participation_rate": round(professor_active*100/len(professor_ids),1) if professor_ids else None,
+      "title_completeness_rate": round(title_known*100/len(active_ids),1) if active_ids else 0,
+      "top10_load_share": round(top_load*100/total_enrolled,1) if total_enrolled else 0}
+    return ok({"semester": sem, "college": college_name, "summary": summary, "colleges": college_rows,
+      "risk_courses": risk_courses, "teachers": teachers,
+      "definition": {"active_teachers": "当前筛选学期至少承担1个本科教学班的去重教师数。",
+        "single_teacher_courses": "当前学期教学任务只关联1名实际授课教师的去重课程数；只表示当期单点承担。",
+        "high_impact_courses": "单一教师覆盖且选课人次不少于100的课程数；100人为原型核查阈值，不是学校定额。",
+        "professor_participation": "当前教师主数据中职称含教授且承担本科教学任务的人数÷教授人数；缺岗位状态，需人工核验分母。",
+        "title_completeness": "实际授课教师中职称字段非空人数÷实际授课教师人数。",
+        "load_share": "按主讲教师字段覆盖选课人次排序，前10%教师的覆盖人次占比；联合授课因缺少工作量分配比例暂不拆分，仅表示任务集中度。",
+        "boundary": "本页只用于核查本科教学师资供给和课程团队连续性；不评价教师个人教学质量，不使用模拟年龄、学历、教龄或学缘形成结论。"}})
+
+
+@router.get("/management-course/{course_id}")
+def management_course(course_id: str, semester: Optional[str] = None,
+                      user: dict = Depends(get_current_user), conn: sqlite3.Connection = Depends(get_db)):
+    sem = semester or REAL
+    col_scope, col_params = college_data_scope(user, conn)
+    if col_scope:
+        allowed = {x["name"] for x in dbm.query(conn, f"SELECT name FROM dim_college WHERE {col_scope}", col_params)}
+        course_depts = {clean_dept(x["dept"]) for x in dbm.query(conn, """SELECT DISTINCT t.dept FROM fact_lesson l
+          JOIN dim_teacher t ON t.teacher_id=l.teacher_id WHERE l.course_id=?""", (course_id,)) if x.get("dept")}
+        if not (allowed & course_depts):
+            raise ApiError("无权限查看该课程团队", code=403, status_code=403)
+    lessons = dbm.query(conn, """SELECT lesson_id,semester_id,teacher_id,teacher_ids,enrolled,capacity
+      FROM fact_lesson WHERE course_id=? AND semester_id=?""", (course_id, sem))
+    if not lessons: raise ApiError("当前学期暂无该课程教学任务", code=404, status_code=404)
+    member_ids = set()
+    for item in lessons:
+        if item["teacher_id"]: member_ids.add(str(item["teacher_id"]).strip())
+        for teacher_id in str(item["teacher_ids"] or "").replace("，", ";").replace(",", ";").split(";"):
+            if teacher_id.strip(): member_ids.add(teacher_id.strip())
+    marks = ",".join("?" for _ in member_ids)
+    members = dbm.query(conn, f"""SELECT teacher_id staff_id,name display_name,title,dept organization_id,source
+      FROM dim_teacher WHERE teacher_id IN ({marks}) ORDER BY name""", tuple(member_ids)) if member_ids else []
+    known = [x for x in members if str(x.get("title") or "").strip()]
+    offerings = dbm.query(conn, """SELECT semester_id semesterId,COUNT(DISTINCT lesson_id) lessonCount,
+      COUNT(DISTINCT teacher_id) teacherCount,SUM(COALESCE(capacity,0)) capacity,
+      SUM(COALESCE(enrolled,0)) enrolled,ROUND(AVG(enrolled),1) avgClassSize
+      FROM fact_lesson WHERE course_id=? GROUP BY semester_id ORDER BY semester_id DESC""", (course_id,))
+    course = dbm.query_one(conn, "SELECT course_id courseId,name courseName,course_nature courseNature FROM dim_course WHERE course_id=?", (course_id,)) or {"courseId":course_id,"courseName":course_id}
+    return ok({"course": course, "summary": {"semester_id": sem, "teacher_count": len(member_ids),
+      "unknown_title_count": len(member_ids)-len(known),
+      "professor_count": sum(normalize_title(x.get("title")) == "教授" for x in known),
+      "associate_professor_count": sum(normalize_title(x.get("title")) == "副教授" for x in known),
+      "lesson_count": len(lessons), "enrolled": sum(x.get("enrolled") or 0 for x in lessons)},
+      "members": members, "offerings": offerings,
+      "boundary": "成员来自真实教学任务的主教师及联合教师字段；历史开课只证明已接入学期曾开设，当前缺少未来开课计划、教师资格、真实年龄和完整岗位状态。"})
 
 
 @router.get("/structure")
