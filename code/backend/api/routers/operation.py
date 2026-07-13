@@ -368,6 +368,59 @@ def classroom(semester: Optional[str] = None, room_type: Optional[str] = None,
         "dataSource": "真实楼栋利用率基线 + 固定种子模拟星期/节次分布"})
 
 
+@router.get("/classroom-occupancy")
+def classroom_occupancy(semester: Optional[str] = None, building: Optional[str] = None,
+                        include_evening: bool = True,
+                        user: dict = Depends(get_current_user),
+                        conn: sqlite3.Connection = Depends(get_db)):
+    """实际教室占用证据；分母仅为源文件中出现过的已观测教室。"""
+    if not dbm.scalar(conn, "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='fact_room_occupancy'"):
+        return ok({"available": False, "evidenceLevel": "not_ingested"})
+    sem = semester or dbm.scalar(conn, "SELECT MAX(semester_id) FROM fact_room_occupancy")
+    fact_conds, params = ["o.semester_id=?"], [sem]
+    if building:
+        fact_conds.append("o.building_name=?"); params.append(building)
+    conds = list(fact_conds)
+    if not include_evening:
+        conds.append("p.period_index<=8")
+    where = " AND ".join(conds)
+    fact_where = " AND ".join(fact_conds)
+    if not include_evening:
+        fact_where += " AND EXISTS (SELECT 1 FROM fact_room_occupancy_period fp WHERE fp.occupancy_id=o.occupancy_id AND fp.period_index<=8)"
+    summary = dbm.query(conn, """SELECT COUNT(DISTINCT o.occupancy_id) occupancyRecords,
+        COUNT(DISTINCT o.room_name) observedRooms,COUNT(DISTINCT o.activity_date) observedDates,
+        MIN(o.activity_date) dateFrom,MAX(o.activity_date) dateTo,
+        COUNT(DISTINCT CASE WHEN o.overlap_count>0 THEN o.occupancy_id END) overlapRecords,
+        COUNT(DISTINCT CASE WHEN o.building_mapping_status='pending' THEN o.occupancy_id END) pendingMappingRecords
+        FROM fact_room_occupancy o WHERE """ + fact_where, params)[0]
+    heat_rows = dbm.query(conn, """SELECT o.weekday,p.period_index,
+        COUNT(DISTINCT o.room_name||'|'||o.activity_date) occupiedRoomDays
+        FROM fact_room_occupancy o JOIN fact_room_occupancy_period p ON p.occupancy_id=o.occupancy_id
+        WHERE """ + where + " GROUP BY o.weekday,p.period_index ORDER BY o.weekday,p.period_index", params)
+    day_counts = {r["weekday"]: r["days"] for r in dbm.query(conn,
+        "SELECT weekday,COUNT(DISTINCT activity_date) days FROM fact_room_occupancy WHERE semester_id=? GROUP BY weekday", (sem,))}
+    observed_rooms = summary["observedRooms"] or 0
+    heatmap = []
+    for row in heat_rows:
+        opportunities = observed_rooms * day_counts.get(row["weekday"], 0)
+        heatmap.append({"weekday": row["weekday"], "period": row["period_index"],
+            "occupiedRoomDays": row["occupiedRoomDays"], "observedOpportunities": opportunities,
+            "observedUtilizationPct": round(row["occupiedRoomDays"] * 100 / opportunities, 1) if opportunities else 0})
+    buildings = dbm.query(conn, """SELECT COALESCE(o.building_name,'待映射') name,
+        COUNT(DISTINCT o.room_name) observedRooms,COUNT(DISTINCT o.occupancy_id) occupancyRecords
+        FROM fact_room_occupancy o WHERE """ + fact_where +
+        " GROUP BY COALESCE(o.building_name,'待映射') ORDER BY occupancyRecords DESC", params)
+    activity_types = dbm.query(conn, """SELECT o.activity_type type,COUNT(DISTINCT o.occupancy_id) records
+        FROM fact_room_occupancy o WHERE """ + fact_where +
+        " GROUP BY o.activity_type ORDER BY records DESC", params)
+    return ok({"available": True, "semester": sem, "includeEvening": include_evening,
+        "summary": summary, "heatmap": heatmap, "buildings": buildings, "activityTypes": activity_types,
+        "evidenceLevel": "actual_occupancy",
+        "denominator": "observed_rooms",
+        "denominatorExplanation": "利用率分母为本批数据中曾发生占用的已观测教室×实际出现的日期，不代表学校正式可用教室全集。",
+        "managementBoundary": "可用于识别占用时序、晚间使用、楼宇负荷和异常重叠；不可直接解释为全校教室空闲率或可用教室数量。"})
+
+
 @router.get("/capacity-slots")
 def capacity_slots(semester: Optional[str] = None, day: Optional[int] = None,
                    period: Optional[int] = None, building: Optional[str] = None,
