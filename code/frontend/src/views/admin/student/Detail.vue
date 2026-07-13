@@ -88,30 +88,21 @@
       </el-col>
     </el-row>
 
-    <div class="sa-card intervention-panel" v-if="data.interventionHistory?.length || data.alertStatusHistory?.length">
-      <div class="sa-card-title">学业预警干预记录 <span class="extra">来自本平台人工联系、约谈和帮扶记录</span></div>
-      <el-timeline>
-        <el-timeline-item v-for="item in interventionTimeline" :key="item.key" :timestamp="item.timestamp" placement="top" :type="item.kind==='status'?'primary':''" :hollow="item.kind==='status'">
-          <div class="intervention-head"><b>{{ item.title }}</b><span>{{ item.operator }} · {{ item.type }}（{{ item.level }}）</span></div>
-          <p v-if="item.content">{{ item.content }}</p>
-          <small v-if="item.nextActionAt">计划下次跟进：{{ item.nextActionAt }}</small>
+    <div class="sa-card growth-timeline-card" v-if="unifiedTimeline.length">
+      <div class="growth-head">
+        <div><div class="sa-card-title">学生成长轨迹</div><div class="sa-faint growth-sub">按时间合并学期表现、挂科、预警、干预和学籍事件；点击类型可快速聚焦。</div></div>
+        <el-radio-group v-model="timelineFilter" size="small"><el-radio-button label="all">全部</el-radio-button><el-radio-button label="academic">学业</el-radio-button><el-radio-button label="alert">预警</el-radio-button><el-radio-button label="intervention">干预</el-radio-button><el-radio-button label="status">学籍</el-radio-button></el-radio-group>
+      </div>
+      <div class="trajectory-summary">
+        <span>学期表现 <b>{{ timelineCounts.academic }}</b></span><span>挂科事件 <b>{{ timelineCounts.failure }}</b></span><span>预警记录 <b>{{ timelineCounts.alert }}</b></span><span>人工干预 <b>{{ timelineCounts.intervention }}</b></span><span>学籍/毕业 <b>{{ timelineCounts.status }}</b></span>
+      </div>
+      <el-timeline class="unified-timeline">
+        <el-timeline-item v-for="item in filteredTimeline" :key="item.key" :timestamp="item.timestamp" placement="top" :type="item.color" :hollow="item.hollow">
+          <div class="timeline-event-head"><div><el-tag size="small" :type="item.tagType">{{ item.typeLabel }}</el-tag><b>{{ item.title }}</b></div><span v-if="item.state">{{ item.state }}</span></div>
+          <p>{{ item.detail }}</p><small v-if="item.evidence">依据：{{ item.evidence }}</small><small v-if="item.nextAction"> · 下次跟进：{{ item.nextAction }}</small>
         </el-timeline-item>
       </el-timeline>
-    </div>
-
-    <!-- V1.1 成长轨迹摘要 -->
-    <div class="sa-card" v-if="data.semesterSummary && data.semesterSummary.length">
-      <div class="sa-card-title">成长轨迹 <span class="extra">逐学期 GPA/挂科/学分</span></div>
-      <el-table :data="data.semesterSummary" size="small">
-        <el-table-column prop="semester" label="学期" width="120" />
-        <el-table-column prop="gpa" label="GPA" width="70" align="right">
-          <template #default="{row}"><span class="tnum" :style="{color:row.gpa>=2.0?'#16A34A':'#DC2626'}">{{ row.gpa }}</span></template>
-        </el-table-column>
-        <el-table-column prop="failCount" label="挂科门数" width="80" align="right">
-          <template #default="{row}"><span :style="{color:row.failCount>0?'#DC2626':'#6B7280',fontWeight:row.failCount>0?700:400}">{{ row.failCount }}</span></template>
-        </el-table-column>
-        <el-table-column prop="earnedCredits" label="已修学分" width="80" align="right" />
-      </el-table>
+      <el-empty v-if="!filteredTimeline.length" description="当前类型没有成长事件" :image-size="70" />
     </div>
 
     <!-- 确定性学业建议：AI启用前的可追溯原型 -->
@@ -185,18 +176,6 @@
           <div class="sa-faint" style="font-size:11px;margin-top:8px">候选总数 {{ candidateCourses.total }}，当前仅展示前100条。</div>
         </el-tab-pane>
       </el-tabs>
-    </div>
-
-    <!-- V2 标准成长时间线 -->
-    <div class="sa-card" v-if="v2Status==='ok' && v2Growth.timeline?.length">
-      <div class="sa-card-title">标准成长时间线 <span class="extra">学期学习结果 / 学籍异动 / 毕业学位</span></div>
-      <el-timeline>
-        <el-timeline-item v-for="(event,index) in v2Growth.timeline" :key="index"
-          :timestamp="event.event_date || event.semester_id || '—'" :type="timelineType(event.event_type)" placement="top">
-          <b>{{ event.title }}</b>
-          <div class="sa-faint timeline-detail">{{ timelineDetail(event) }}</div>
-        </el-timeline-item>
-      </el-timeline>
     </div>
 
     <!-- V1.1 挂科溯源 -->
@@ -279,10 +258,30 @@ const actionableCourses = reactive<any>({ items: [], total: 0 })
 const candidateCourses = reactive<any>({ items: [], total: 0 })
 const advice = reactive<any>({ cards: [], audiences: [], generated_by: '', wording: '' })
 const adviceAudience = ref('student')
+const timelineFilter = ref('all')
 const interventionTimeline = computed(() => [
   ...(data.interventionHistory || []).map((x:any) => ({...x,key:`followup-${x.event_id}-${x.created_at}`,timestamp:x.created_at,title:x.action_type,content:x.content,nextActionAt:x.next_action_at})),
   ...(data.alertStatusHistory || []).map((x:any) => ({...x,key:`status-${x.event_id}-${x.changed_at}`,timestamp:x.changed_at,title:`状态更新：${x.fromStatusLabel || '首次记录'} → ${x.toStatusLabel}`,content:x.reason})),
 ].sort((a:any,b:any) => String(b.timestamp).localeCompare(String(a.timestamp))))
+type TimelineColor = 'primary'|'success'|'warning'|'danger'|'info'
+const unifiedTimeline = computed(() => {
+  const items:any[] = []
+  for (const s of data.semesterSummary || []) items.push({key:`semester-${s.semester}`,category:'academic',subtype:'academic',timestamp:s.semester,typeLabel:'学期表现',title:`${s.semester} 学业结果`,detail:`GPA ${s.gpa}，挂科 ${s.failCount} 门次，获得学分 ${s.earnedCredits}`,evidence:'成绩有效结果按学期聚合',color:(s.failCount>0?'warning':'success') as TimelineColor,tagType:s.failCount>0?'warning':'success'})
+  for (const f of data.failTrace || []) for (const sem of f.semesters || []) items.push({key:`failure-${f.courseName}-${sem}`,category:'academic',subtype:'failure',timestamp:sem,typeLabel:'课程未通过',title:f.courseName,detail:`该课程未通过；累计记录 ${f.failCount} 次`,evidence:`授课教师 ${f.teacherName || '待核验'} · 开课单位 ${f.college || '待核验'}`,color:'danger' as TimelineColor,tagType:'danger'})
+  for (const a of data.alertHistory || []) items.push({key:`alert-${a.alertId}-${a.time}`,category:'alert',subtype:'alert',timestamp:a.time||'—',typeLabel:'学业预警',title:`${a.level} · ${a.type}`,detail:a.detail||'未提供触发说明',evidence:a.changeType||'历史预警记录',state:a.workflowStatusLabel,color:(a.level==='严重'?'danger':'warning') as TimelineColor,tagType:a.level==='严重'?'danger':'warning'})
+  for (const x of data.interventionHistory || []) items.push({key:`followup-${x.event_id}-${x.created_at}`,category:'intervention',subtype:'intervention',timestamp:x.created_at||'—',typeLabel:'人工干预',title:x.action_type||'跟进记录',detail:x.content||'未填写处置内容',evidence:`${x.operator||'未知操作人'} · ${x.type||'预警'}（${x.level||'—'}）`,nextAction:x.next_action_at,color:'primary' as TimelineColor,tagType:'primary'})
+  for (const x of data.alertStatusHistory || []) items.push({key:`workflow-${x.event_id}-${x.changed_at}`,category:'intervention',subtype:'intervention',timestamp:x.changed_at||'—',typeLabel:'处置流转',title:`${x.fromStatusLabel||'首次记录'} → ${x.toStatusLabel||'—'}`,detail:x.reason||'未填写状态变更说明',evidence:x.operator||'未知操作人',color:'info' as TimelineColor,tagType:'info',hollow:true})
+  for (const e of v2Growth.timeline || []) if (e.event_type !== 'semester_result') items.push({key:`v2-${e.event_type}-${e.event_date||e.semester_id}-${e.title}`,category:'status',subtype:'status',timestamp:e.event_date||e.semester_id||'—',typeLabel:e.event_type==='graduation'?'毕业结果':'学籍事件',title:e.title,detail:timelineDetail(e)||'已记录',evidence:'统一学生成长事件',color:timelineType(e.event_type),tagType:e.event_type==='graduation'?'success':'warning'})
+  return items.sort((a,b)=>String(b.timestamp).localeCompare(String(a.timestamp)))
+})
+const filteredTimeline = computed(() => timelineFilter.value==='all' ? unifiedTimeline.value : unifiedTimeline.value.filter(x=>x.category===timelineFilter.value))
+const timelineCounts = computed(() => ({
+  academic: unifiedTimeline.value.filter(x=>x.subtype==='academic').length,
+  failure: unifiedTimeline.value.filter(x=>x.subtype==='failure').length,
+  alert: unifiedTimeline.value.filter(x=>x.subtype==='alert').length,
+  intervention: unifiedTimeline.value.filter(x=>x.subtype==='intervention').length,
+  status: unifiedTimeline.value.filter(x=>x.subtype==='status').length,
+}))
 const audienceOptions = [
   {value:'student',label:'学生本人视角'}, {value:'counselor',label:'辅导员视角'},
   {value:'class_adviser',label:'班主任视角'}, {value:'college',label:'学院视角'},
@@ -401,6 +400,16 @@ const gpaOption = computed(() => {
 .intervention-head span { color:#94a3b8; font-size:11px; }
 .intervention-panel p { margin:5px 0 2px; color:#475569; font-size:12px; line-height:1.6; }
 .intervention-panel small { color:#d97706; }
+.growth-timeline-card { margin-bottom:16px; }
+.growth-head { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; }
+.growth-sub { font-size:11px; margin-top:3px; }
+.trajectory-summary { display:flex; flex-wrap:wrap; gap:8px 18px; margin:12px 0 16px; padding:10px 12px; background:#f8fafc; border-radius:8px; color:#64748b; font-size:12px; }
+.trajectory-summary b { color:#1e293b; margin-left:4px; }
+.timeline-event-head { display:flex; justify-content:space-between; align-items:center; gap:12px; }
+.timeline-event-head b { margin-left:8px; color:#1e293b; font-size:13px; }
+.timeline-event-head > span { color:#6366f1; font-size:11px; }
+.unified-timeline p { margin:5px 0 2px; color:#475569; font-size:12px; line-height:1.6; }
+.unified-timeline small { color:#94a3b8; font-size:11px; }
 .link { color: var(--sa-primary); cursor: pointer; font-weight: 500; }
 .link:hover { text-decoration: underline; }
 .v2-banner { margin-bottom: 12px; }
@@ -425,5 +434,5 @@ const gpaOption = computed(() => {
 .advice-evidence,.advice-limit { font-size:11px; color:#64748B; line-height:1.6; }
 .advice-limit { color:#92400E; margin-top:3px; }
 .advice-footer { font-size:11px; margin-top:12px; text-align:right; }
-@media (max-width:1000px) { .advice-list { grid-template-columns:1fr; } }
+@media (max-width:1000px) { .advice-list { grid-template-columns:1fr; } .growth-head { flex-direction:column; } }
 </style>
