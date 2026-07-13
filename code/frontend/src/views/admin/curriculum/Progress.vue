@@ -54,21 +54,34 @@
           </template>
         </el-table-column>
         <el-table-column label="操作" width="90" fixed="right">
-          <template #default="{row}"><el-button link type="primary" @click="openStudent(row)">学生档案</el-button></template>
+          <template #default="{row}"><el-button link type="primary" @click="openStudent(row)">详情</el-button></template>
         </el-table-column>
       </el-table>
     </template>
+
+    <el-drawer v-model="detailVisible" :title="`${selectedStudent.name || ''}｜培养方案进度详情`" size="900px">
+      <div v-loading="detailLoading" style="min-height:320px">
+        <el-alert type="info" :closable="false" show-icon title="本详情只核查培养方案课程完成证据，不跳转学业预警档案；“待核验”不等同于漏选或不能毕业。" />
+        <el-descriptions :column="4" border size="small" style="margin:14px 0">
+          <el-descriptions-item label="学号">{{ selectedStudent.studentId }}</el-descriptions-item><el-descriptions-item label="年级">{{ selectedStudent.grade || '—' }}</el-descriptions-item><el-descriptions-item label="方案">{{ planName }}</el-descriptions-item><el-descriptions-item label="证据状态"><el-tag size="small" :type="selectedStudent.status==='明确需处理'?'danger':selectedStudent.status==='待核验'?'warning':'success'">{{ selectedStudent.status }}</el-tag></el-descriptions-item>
+        </el-descriptions>
+        <div class="detail-kpis"><KpiCard label="方案课程" :value="`${selectedStudent.planCourses || 0}门`" hint="当前方案结构化课程总数" tone="primary" /><KpiCard label="已有完成证据" :value="`${selectedStudent.completedCourses || 0}门`" hint="存在通过成绩或课程替代认定的课程" tone="teal" /><KpiCard label="明确未通过必修" :value="`${failedCourses.length}门`" hint="必修课程存在明确未通过成绩，可直接形成重修核查清单" tone="danger" /><KpiCard label="到期待核验" :value="`${verificationCourses.length}门`" hint="建议修读学期已到但尚无完成或失败证据，需结合选课数据核验" tone="amber" /></div>
+        <el-tabs v-model="detailTab" style="margin-top:14px">
+          <el-tab-pane :label="`明确未通过必修 (${failedCourses.length})`" name="failed"><el-table :data="failedCourses" size="small" empty-text="没有明确未通过的必修课程"><el-table-column prop="course_id" label="课程代码" width="120" /><el-table-column prop="course_name" label="课程" min-width="190" /><el-table-column prop="module" label="模块" width="150" /><el-table-column prop="suggested_term" label="建议学期" width="90" /><el-table-column prop="effective_score" label="有效成绩" width="90" align="right" /><el-table-column label="核查原因" min-width="170"><template #default>必修课存在明确未通过成绩</template></el-table-column></el-table></el-tab-pane>
+          <el-tab-pane :label="`到期待核验 (${verificationCourses.length})`" name="verification"><el-table :data="verificationCourses" size="small" empty-text="没有到期待核验课程"><el-table-column prop="course_id" label="课程代码" width="120" /><el-table-column prop="course_name" label="课程" min-width="190" /><el-table-column prop="module" label="模块" width="150" /><el-table-column prop="requirement_type" label="性质" width="75" /><el-table-column prop="suggested_term" label="建议学期" width="90" /><el-table-column label="核查内容" min-width="200"><template #default>核验是否已选课、缓修、替代或成绩尚未同步</template></el-table-column></el-table></el-tab-pane>
+          <el-tab-pane label="全部方案课程" name="all"><el-table :data="detailCourses" size="small" max-height="520"><el-table-column prop="course_id" label="课程代码" width="120" /><el-table-column prop="course_name" label="课程" min-width="180" /><el-table-column prop="module" label="模块" width="140" /><el-table-column prop="requirement_type" label="性质" width="75" /><el-table-column prop="suggested_term" label="建议学期" width="90" /><el-table-column label="完成证据" width="120"><template #default="{row}"><el-tag size="small" :type="courseTag(row.completion_status)">{{ courseStatus(row.completion_status) }}</el-tag></template></el-table-column></el-table></el-tab-pane>
+        </el-tabs>
+      </div>
+    </el-drawer>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
-import { useRouter } from 'vue-router'
 import { http } from '@/utils/http'
 import KpiCard from '@/components/KpiCard.vue'
 
 const props = defineProps<{ majorId: string }>()
-const router = useRouter()
 
 const loading = ref(false)
 const planName = ref('')
@@ -79,6 +92,13 @@ const summary = ref<any>({ coveredStudents:0, avgCourseCompletionRate:0, actionR
 const definition = ref<any>({ boundary:'' })
 const keyword = ref('')
 const statusFilter = ref('')
+const detailVisible = ref(false)
+const detailLoading = ref(false)
+const detailTab = ref('failed')
+const selectedStudent = ref<any>({})
+const detailCourses = ref<any[]>([])
+const failedCourses = computed(() => detailCourses.value.filter(x => x.requirement_type === '必修' && x.completion_status === 'failed'))
+const verificationCourses = computed(() => detailCourses.value.filter(x => x.requirement_type === '必修' && ['not_completed','unknown'].includes(x.completion_status) && Number(x.is_overdue) === 1))
 const filteredProgress = computed(() => progress.value.filter(row =>
   (!keyword.value || row.studentId.toLowerCase().includes(keyword.value.toLowerCase()) || (row.name || '').includes(keyword.value)) &&
   (!statusFilter.value || row.status === statusFilter.value)
@@ -115,11 +135,19 @@ async function load(major: string) {
   finally { loading.value = false }
 }
 
-function openStudent(row:any) {
-  router.push({ path:'/admin/student/' + row.studentId,
-    query:{ returnTo:'/admin/curriculum', returnLabel:'培养质量分析' } })
+async function openStudent(row:any) {
+  selectedStudent.value = row; detailVisible.value = true; detailLoading.value = true
+  detailTab.value = row.failedRequired ? 'failed' : row.verificationRequired ? 'verification' : 'all'
+  try { const d = await http.get<any>(`/v2/students/${encodeURIComponent(row.studentId)}/plan-courses?limit=1000`); detailCourses.value = d?.items || [] }
+  finally { detailLoading.value = false }
 }
+function courseStatus(status:string){return({passed:'成绩通过',recognized:'替代/认定',failed:'明确未通过',not_completed:'尚无完成证据',unknown:'证据未知'} as Record<string,string>)[status]||status||'未知'}
+function courseTag(status:string):'success'|'danger'|'warning'|'info'{return ['passed','recognized'].includes(status)?'success':status==='failed'?'danger':status==='not_completed'?'warning':'info'}
 
 onMounted(() => load(props.majorId))
 watch(() => props.majorId, (v) => load(v))
 </script>
+
+<style scoped>
+.detail-kpis { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; }
+</style>
