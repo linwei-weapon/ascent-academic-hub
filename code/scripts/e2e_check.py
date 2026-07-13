@@ -534,7 +534,8 @@ def main():
     migration = sa["migration"]
     check("students 迁移分类合计",
           migration["compared"],
-          migration["improved"] + migration["stable"] + migration["declined"])
+          migration["improved"] + migration["stable"] + migration["declined"]
+          + migration["mixed"])
     check("students 迁移覆盖完整学生范围",
           scalar(c, "SELECT COUNT(*) FROM dim_student"),
           migration["compared"] + migration["insufficient"])
@@ -560,7 +561,7 @@ def main():
     check("students 学院角色挂科模式下钻范围", scoped_patterns["repeat_course"],
           scoped_repeat["total"])
     if migration["fromSemester"] and migration["toSemester"]:
-        for migration_key in ("improved", "stable", "declined", "insufficient"):
+        for migration_key in ("improved", "stable", "declined", "mixed", "insufficient"):
             query = urllib.parse.urlencode({
                 "migration": migration_key,
                 "from_semester": migration["fromSemester"],
