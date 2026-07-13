@@ -24,7 +24,7 @@ export const router = createRouter({
         { path: 'alert', component: () => import('@/views/admin/alert/Workspace.vue') },
         { path: 'alert/monitor', redirect: '/admin/alert?tab=monitor' },
         { path: 'alert/rules', redirect: '/admin/alert?tab=rules' },
-        { path: 'alert/discovery', redirect: '/admin/alert?tab=discovery' },
+        { path: 'alert/discovery', redirect: '/admin/alert?tab=rules' },
 
         // ====== 教学运行分析 ======
         { path: 'operation/courses', component: () => import('@/views/admin/operation/Index.vue') },

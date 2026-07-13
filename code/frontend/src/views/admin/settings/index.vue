@@ -93,7 +93,7 @@
           </div>
         </div>
 
-        <div class="sa-card" style="margin-top:14px;display:flex;justify-content:space-between;align-items:center">
+        <div v-if="false" class="sa-card" style="margin-top:14px;display:flex;justify-content:space-between;align-items:center">
           <div>
             <div class="sa-card-title">规则自发现</div>
             <div class="sa-faint" style="font-size:12px">切换到“规则自发现”Tab查看关联分析建议；采纳后回到本Tab完成试算、复核、发布与激活。</div>

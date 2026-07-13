@@ -58,7 +58,7 @@
             <span v-else class="sa-faint">历史规则</span>
           </template>
         </el-table-column>
-        <el-table-column width="130"><template #default><el-button text type="primary" @click="$router.push('/admin/alert?tab=rules')">查看规则治理</el-button></template></el-table-column>
+        <el-table-column width="130"><template #default><span class="sa-faint">已进入上方规则治理流程</span></template></el-table-column>
       </el-table>
     </div>
 
