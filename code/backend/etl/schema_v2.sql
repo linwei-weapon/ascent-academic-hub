@@ -158,6 +158,7 @@ CREATE TABLE IF NOT EXISTS curriculum_plan_module_requirement (
     module_name TEXT NOT NULL,
     requirement_type TEXT,
     minimum_credits REAL NOT NULL,
+    minimum_courses INTEGER,
     raw_hierarchy TEXT,
     source_file TEXT,
     source_table INTEGER,

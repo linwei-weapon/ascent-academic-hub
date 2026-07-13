@@ -294,7 +294,7 @@ def curriculum_plan_detail(plan_id: str,
         requirement_title title,requirement_text text,source_file sourceFile
         FROM curriculum_graduation_requirement WHERE plan_id=? ORDER BY requirement_no""", (plan_id,))
     module_requirements = dbm.query(conn, """SELECT parent_module parentModule,module_name moduleName,
-        requirement_type requirementType,minimum_credits minimumCredits,raw_hierarchy rawHierarchy,
+        requirement_type requirementType,minimum_credits minimumCredits,minimum_courses minimumCourses,raw_hierarchy rawHierarchy,
         source_file sourceFile,source_table sourceTable
         FROM curriculum_plan_module_requirement WHERE plan_id=?
         ORDER BY source_table,module_requirement_id""", (plan_id,))
@@ -875,7 +875,56 @@ def student_plan_courses(student_id: str, status: Optional[str] = None,
         LEFT JOIN curriculum_plan_course pc ON pc.plan_course_id=x.plan_course_id
         WHERE {where} ORDER BY x.is_actionable DESC,x.is_overdue DESC,x.suggested_term,x.course_id LIMIT ? OFFSET ?""",
         tuple(params + [limit, offset]))
+    plan_id = dbm.scalar(conn, "SELECT plan_id FROM dim_student WHERE student_id=?", (student_id,))
+    module_progress = []
+    if plan_id:
+        full_rows = dbm.query(conn, """SELECT COALESCE(NULLIF(x.module,''),'未标注模块') module,
+            x.requirement_type,x.completion_status,COALESCE(pc.credits,0) plan_credits,
+            COALESCE(x.earned_credits,CASE WHEN x.completion_status='recognized' THEN pc.credits ELSE 0 END,0) earned_credits
+            FROM student_plan_course_status x LEFT JOIN curriculum_plan_course pc ON pc.plan_course_id=x.plan_course_id
+            WHERE x.student_id=? AND x.rule_version='growth-v1'""", (student_id,))
+        requirements = dbm.query(conn, """SELECT module_name,minimum_credits,minimum_courses
+            FROM curriculum_plan_module_requirement WHERE plan_id=?""", (plan_id,))
+        def norm(value):
+            return "".join(str(value or "").split()).replace("（", "(").replace("）", ")")
+        req_map = {}
+        for requirement in requirements:
+            key = norm(requirement["module_name"])
+            bucket = req_map.setdefault(key, {"credits": 0.0, "courses": 0})
+            bucket["credits"] = max(bucket["credits"], float(requirement["minimum_credits"] or 0))
+            bucket["courses"] = max(bucket["courses"], int(requirement["minimum_courses"] or 0))
+        grouped = {}
+        for item in full_rows:
+            grouped.setdefault(item["module"], []).append(item)
+        for module, items in sorted(grouped.items()):
+            completed = [x for x in items if x["completion_status"] in {"passed", "recognized"}]
+            required_items = [x for x in items if x["requirement_type"] == "必修"]
+            required_completed = [x for x in required_items if x["completion_status"] in {"passed", "recognized"}]
+            rule = req_map.get(norm(module), {"credits": 0.0, "courses": 0})
+            earned = round(sum(float(x["earned_credits"] or 0) for x in completed), 1)
+            if rule["credits"] > 0:
+                rule_type, target, achieved = "credit", rule["credits"], earned
+                rule_label = f"最低{rule['credits']:g}学分"
+            elif rule["courses"] > 0:
+                rule_type, target, achieved = "course_count", rule["courses"], len(completed)
+                rule_label = f"至少完成{rule['courses']}门"
+            elif required_items:
+                rule_type, target, achieved = "required_courses", len(required_items), len(required_completed)
+                rule_label = f"模块内{len(required_items)}门必修课全部完成"
+            else:
+                rule_type, target, achieved = "not_assessable", None, len(completed)
+                rule_label = "缺少学分、门数和必修属性，暂不判定"
+            module_progress.append({"module": module, "ruleType": rule_type, "ruleLabel": rule_label,
+                "target": target, "achieved": achieved, "earnedCredits": earned,
+                "completedCourses": len(completed), "totalCourses": len(items),
+                "requiredCompleted": len(required_completed), "requiredCourses": len(required_items),
+                "isComplete": bool(target is not None and achieved >= target)})
     return ok({"items": rows, "total": total, "limit": limit, "offset": offset,
+               "moduleProgress": module_progress,
+               "moduleRuleDefinition": {"credit": "模块最低学分大于0时，按已完成课程学分判断。",
+                 "course_count": "模块学分为空或0且有最低门数时，按已完成课程门数判断。",
+                 "required_courses": "学分和门数均无要求时，按模块内必修课程是否全部完成判断。",
+                 "not_assessable": "三类规则证据均缺失时不自动形成完成结论。"},
                "wording": "not_completed表示截至当前成绩和认定记录尚无完成证据，不等同于漏选"})
 
 

@@ -25,6 +25,7 @@ REQUIRED_TABLES = {
 }
 
 MIGRATION_COLUMNS = {
+    "curriculum_plan_module_requirement": {"minimum_courses": "INTEGER"},
     "curriculum_plan": {"major_name": "TEXT", "required_min_credits": "REAL",
         "elective_min_credits": "REAL", "practice_min_credits": "REAL",
         "degree_requirement": "TEXT", "credit_rule_source_file": "TEXT"},

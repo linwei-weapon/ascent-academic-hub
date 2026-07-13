@@ -77,6 +77,31 @@ def table_module_requirements(item: dict) -> list[dict]:
             nature = "必修" if any("必修" in x for x in labels) else ("选修" if any("选修" in x for x in labels) else None)
             rules.append({"parent_module": current_parent, "module_name": module_name,
                           "requirement_type": nature, "minimum_credits": float(match.group(1)),
+                          "minimum_courses": None,
+                          "raw_hierarchy": " / ".join(labels), "source_table": table.get("index")})
+        # 部分方案模块不规定学分而规定最低完成门数，保留独立字段供三级回退使用。
+        cursor = 0
+        current_parent = None
+        for match in re.finditer(r"要求门数\s*[：:]\s*(\d+)", text):
+            segment = text[cursor:match.start()]
+            cursor = match.end()
+            tokens = [clean(x) for x in re.split(r"[\r\x07]+", segment) if clean(x)]
+            first_course = next((i for i, token in enumerate(tokens) if COURSE_CODE_RE.fullmatch(token)), len(tokens))
+            labels = [x for x in tokens[:first_course] if x not in TABLE_HEADERS and x not in {"必修", "选修"}]
+            labels = [x for x in labels if not re.fullmatch(r"\d+(?:\.\d+)?", x)]
+            if not labels:
+                continue
+            labels = labels[-3:]
+            typed = next((x for x in labels if "必修" in x or "选修" in x), "")
+            if typed:
+                current_parent = typed
+            module_name = labels[-1]
+            if module_name == current_parent and len(labels) > 1:
+                module_name = labels[-2]
+            nature = "必修" if any("必修" in x for x in labels) else ("选修" if any("选修" in x for x in labels) else None)
+            rules.append({"parent_module": current_parent, "module_name": module_name,
+                          "requirement_type": nature, "minimum_credits": 0.0,
+                          "minimum_courses": int(match.group(1)),
                           "raw_hierarchy": " / ".join(labels), "source_table": table.get("index")})
     return rules
 
@@ -181,9 +206,9 @@ def load_documents(input_path: Path, db_path: Path | None = None) -> dict:
                 requirement_count += 1
             for rule in doc["module_requirements"]:
                 conn.execute("""INSERT OR IGNORE INTO curriculum_plan_module_requirement
-                    (plan_id,parent_module,module_name,requirement_type,minimum_credits,raw_hierarchy,source_file,source_table)
-                    VALUES(?,?,?,?,?,?,?,?)""", (plan["plan_id"], rule["parent_module"], rule["module_name"],
-                    rule["requirement_type"], rule["minimum_credits"], rule["raw_hierarchy"],
+                    (plan_id,parent_module,module_name,requirement_type,minimum_credits,minimum_courses,raw_hierarchy,source_file,source_table)
+                    VALUES(?,?,?,?,?,?,?,?,?)""", (plan["plan_id"], rule["parent_module"], rule["module_name"],
+                    rule["requirement_type"], rule["minimum_credits"], rule.get("minimum_courses"), rule["raw_hierarchy"],
                     doc["file_name"], rule["source_table"]))
         conn.commit()
     except Exception:

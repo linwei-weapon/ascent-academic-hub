@@ -58,7 +58,10 @@ def build_growth(db_path: Path | None = None) -> dict:
             # 只有存在明确未通过成绩的必修课程才是可行动缺口。
             actionable = int(required == "必修" and status == "failed")
             suggested_no = term_number(suggested)
-            overdue = int(actionable and suggested_no is not None and suggested_no < CURRENT_STUDY_TERM)
+            # 到期只表示建议修读学期已过且尚无完成证据；与“明确可行动”分开。
+            # failed 可直接形成重修核查，not_completed/unknown 只能进入选课/认定核验。
+            overdue = int(status not in {"passed", "recognized"} and suggested_no is not None
+                          and suggested_no < CURRENT_STUDY_TERM)
             status_rows.append((_status_id(sid, pcid), sid, pid, pcid, cid, module, required,
                                 suggested, status, actionable, overdue, attempt, score,
                                 credits or (0 if status not in {"passed", "recognized"} else None),
