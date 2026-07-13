@@ -32,17 +32,16 @@
       <el-button type="primary" plain @click="clearCollege">返回全校范围</el-button>
     </div>
 
-    <div class="kpis">
-      <div v-for="k in kpis" :key="k.label" class="kpi">
-        <span class="kpi-label">
-          {{ k.label }}
-          <el-tooltip :content="k.help" placement="top" :show-after="200">
-            <span class="help">?</span>
-          </el-tooltip>
-        </span>
-        <b>{{ k.value }}</b>
-        <small>{{ k.note }}</small>
-      </div>
+    <div class="sa-kpi-row kpi-summary">
+      <KpiCard
+        v-for="k in kpis"
+        :key="k.label"
+        :label="k.label"
+        :value="k.value"
+        :sub="k.note"
+        :hint="k.help"
+        :tone="k.tone"
+      />
     </div>
 
     <section class="sa-card workspace" v-loading="loading">
@@ -62,12 +61,7 @@
             <el-table-column prop="enrolled" label="选课人次" width="105" />
             <el-table-column prop="single_teacher_courses" label="单一教师课程" width="120" />
             <el-table-column prop="high_impact_courses" width="140">
-              <template #header>
-                <span>高影响单点课程</span>
-                <el-tooltip content="当前学期仅1名实际授课教师，且累计选课人次不少于100的课程；100人为原型核查阈值。" placement="top">
-                  <span class="help">?</span>
-                </el-tooltip>
-              </template>
+              <template #header><KpiLabel label="高影响单点课程" formula="当前学期仅1名实际授课教师，且累计选课人次不少于100的课程；100人为原型核查阈值。" /></template>
               <template #default="{ row }">
                 <el-tag :type="row.high_impact_courses ? 'danger' : 'success'">{{ row.high_impact_courses }}</el-tag>
               </template>
@@ -154,6 +148,8 @@ import { useRouter } from 'vue-router'
 import { http } from '@/utils/http'
 import { getFilterMeta, type SemesterOpt } from '@/utils/meta'
 import { COLLEGE_MAP } from '@/constants/colleges'
+import KpiCard from '@/components/KpiCard.vue'
+import KpiLabel from '@/components/KpiLabel.vue'
 
 const router = useRouter()
 const semester = ref('')
@@ -167,12 +163,12 @@ const definition = reactive<any>({})
 
 const fmt = (value: any, suffix = '') => value === null || value === undefined ? '—' : value + suffix
 const kpis = computed(() => [
-  { label: '本科教学活跃教师', value: fmt(data.summary.active_teachers, ' 人'), note: `覆盖 ${data.summary.courses || 0} 门课程`, help: definition.active_teachers || '' },
-  { label: '单一教师覆盖课程', value: fmt(data.summary.single_teacher_courses, ' 门'), note: '当前学期仅1名实际授课教师', help: definition.single_teacher_courses || '' },
-  { label: '高影响单点课程', value: fmt(data.summary.high_impact_courses, ' 门'), note: '单一教师且选课人次≥100', help: definition.high_impact_courses || '' },
-  { label: '教授本科教学参与率', value: fmt(data.summary.professor_participation_rate, '%'), note: `${data.summary.professor_active || 0} / ${data.summary.professor_total || 0} 人`, help: definition.professor_participation || '' },
-  { label: '职称证据完整率', value: fmt(data.summary.title_completeness_rate, '%'), note: '决定能否分析职称梯队', help: definition.title_completeness || '' },
-  { label: '前10%主讲教师任务占比', value: fmt(data.summary.top10_load_share, '%'), note: '按主讲字段覆盖选课人次计算', help: definition.load_share || '' },
+  { label: '本科教学活跃教师', value: fmt(data.summary.active_teachers, ' 人'), note: `覆盖 ${data.summary.courses || 0} 门课程`, help: definition.active_teachers || '', tone: 'primary' as const },
+  { label: '单一教师覆盖课程', value: fmt(data.summary.single_teacher_courses, ' 门'), note: '当前学期仅1名实际授课教师', help: definition.single_teacher_courses || '', tone: 'amber' as const },
+  { label: '高影响单点课程', value: fmt(data.summary.high_impact_courses, ' 门'), note: '单一教师且选课人次≥100', help: definition.high_impact_courses || '', tone: 'danger' as const },
+  { label: '教授本科教学参与率', value: fmt(data.summary.professor_participation_rate, '%'), note: `${data.summary.professor_active || 0} / ${data.summary.professor_total || 0} 人`, help: definition.professor_participation || '', tone: 'teal' as const },
+  { label: '职称证据完整率', value: fmt(data.summary.title_completeness_rate, '%'), note: '决定能否分析职称梯队', help: definition.title_completeness || '', tone: 'teal' as const },
+  { label: '前10%主讲教师任务占比', value: fmt(data.summary.top10_load_share, '%'), note: '按主讲字段覆盖选课人次计算', help: definition.load_share || '', tone: 'plain' as const },
 ])
 
 async function load() {
@@ -225,5 +221,5 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.head{display:flex;justify-content:space-between;align-items:flex-start;gap:18px}.filters{display:flex;gap:10px}.filters .el-select{width:180px}.scope-banner{display:flex;align-items:center;justify-content:space-between;gap:16px;margin:14px 0 0;padding:11px 14px;border:1px solid #c7d2fe;border-radius:10px;background:#eef2ff;color:#475569}.scope-banner>div{display:flex;align-items:center;gap:10px}.scope-label{padding:3px 8px;border-radius:999px;background:#4f46e5;color:#fff;font-size:12px}.kpis{display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin:14px 0}.kpi{padding:14px;background:#fff;border:1px solid var(--sa-border);border-radius:10px}.kpi-label,.kpi small{display:block;color:#64748b}.kpi b{display:block;margin:6px 0;font-size:23px;color:#0f172a}.help{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;margin-left:3px;border:1px solid #94a3b8;border-radius:50%;color:#64748b;font-size:11px;cursor:help}.workspace{margin-bottom:14px;min-height:420px}.view-tabs :deep(.el-tabs__header){margin-bottom:18px}.view-tabs :deep(.el-tabs__item){height:42px;padding:0 22px;font-size:14px}.view-tabs em{display:inline-block;margin-left:6px;padding:1px 7px;border-radius:10px;background:#eef2ff;color:#4f46e5;font-size:11px;font-style:normal}.section-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}.section-head h3{margin:0 0 5px;font-size:16px;color:#0f172a}.section-head p{margin:0;color:#64748b;font-size:12px}.explain p{font-size:13px;line-height:1.8;color:#475569}@media(max-width:1200px){.kpis{grid-template-columns:repeat(3,1fr)}}
+.head{display:flex;justify-content:space-between;align-items:flex-start;gap:18px}.filters{display:flex;gap:10px}.filters .el-select{width:180px}.scope-banner{display:flex;align-items:center;justify-content:space-between;gap:16px;margin:14px 0 0;padding:11px 14px;border:1px solid #c7d2fe;border-radius:10px;background:#eef2ff;color:#475569}.scope-banner>div{display:flex;align-items:center;gap:10px}.scope-label{padding:3px 8px;border-radius:999px;background:#4f46e5;color:#fff;font-size:12px}.kpi-summary{margin-top:14px}.workspace{margin-bottom:14px;min-height:420px}.view-tabs :deep(.el-tabs__header){margin-bottom:18px}.view-tabs :deep(.el-tabs__item){height:42px;padding:0 22px;font-size:14px}.view-tabs em{display:inline-block;margin-left:6px;padding:1px 7px;border-radius:10px;background:#eef2ff;color:#4f46e5;font-size:11px;font-style:normal}.section-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}.section-head h3{margin:0 0 5px;font-size:16px;color:#0f172a}.section-head p{margin:0;color:#64748b;font-size:12px}.explain p{font-size:13px;line-height:1.8;color:#475569}
 </style>
