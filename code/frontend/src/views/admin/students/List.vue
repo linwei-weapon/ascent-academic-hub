@@ -58,10 +58,10 @@
 
     <!-- 学生表格 -->
     <div class="sa-card student-table-card">
-      <div class="sa-card-title list-title"><span>学生明细</span><span class="extra">点击姓名或右侧按钮查看学业档案</span></div>
+      <div class="sa-card-title list-title"><span>学生明细</span><span class="extra">点击姓名或“详情”在当前页面核查，筛选条件不会丢失</span></div>
       <el-table :data="students" stripe v-loading="loading" class="student-table">
         <el-table-column prop="sid" label="学号" width="130"><template #default="{row}"><span class="tnum sid">{{ row.sid }}</span></template></el-table-column>
-        <el-table-column prop="name" label="姓名" width="100"><template #default="{row}"><el-button link type="primary" class="name-link" @click.stop="goStudent(row)">{{ row.name }}</el-button></template></el-table-column>
+        <el-table-column prop="name" label="姓名" width="100"><template #default="{row}"><el-button link type="primary" class="name-link" @click.stop="openReview(row)">{{ row.name }}</el-button></template></el-table-column>
         <el-table-column prop="college" label="学院" min-width="160" show-overflow-tooltip />
         <el-table-column label="专业" min-width="140" show-overflow-tooltip>
           <template #default="{row}"><span>{{ row.majorName || row.major }}</span></template>
@@ -87,7 +87,7 @@
           </template>
         </el-table-column>
         <el-table-column label="操作" width="100" fixed="right" align="center">
-          <template #default="{row}"><el-button size="small" type="primary" plain @click.stop="goStudent(row)">查看档案</el-button></template>
+          <template #default="{row}"><el-button size="small" type="primary" plain @click.stop="openReview(row)">详情</el-button></template>
         </el-table-column>
       </el-table>
 
@@ -97,6 +97,28 @@
         <el-pagination v-model:current-page="page" :page-size="pageSize" :total="total" layout="total, prev, pager, next, jumper" small @current-change="loadPage" />
       </div>
     </div>
+
+    <el-drawer v-model="reviewVisible" :title="`${review.name || ''}｜学业画像核查`" size="920px">
+      <div v-loading="reviewLoading" style="min-height:300px">
+        <el-alert type="info" :closable="false" show-icon title="本抽屉汇总当前学生的成绩、挂科和历史预警证据；管理判断仍需结合培养方案和实际沟通。" />
+        <el-descriptions :column="4" border size="small" style="margin:14px 0">
+          <el-descriptions-item label="学号">{{ review.code || '—' }}</el-descriptions-item><el-descriptions-item label="学院">{{ review.collegeName || '—' }}</el-descriptions-item><el-descriptions-item label="专业">{{ review.majorName || '—' }}</el-descriptions-item><el-descriptions-item label="班级">{{ review.className || '—' }}</el-descriptions-item>
+        </el-descriptions>
+        <div class="review-kpis"><KpiCard v-for="k in review.kpis || []" :key="k.label" :label="k.label" :value="k.value" :hint="k.formula" :tone="reviewTone(k.label,k.value)" /></div>
+        <el-tabs v-model="reviewTab" class="review-tabs">
+          <el-tab-pane label="学期变化" name="semester">
+            <el-table :data="review.semesterSummary || []" size="small"><el-table-column prop="semester" label="学期" width="150" /><el-table-column prop="gpa" label="GPA" width="90" align="right" /><el-table-column label="GPA变化" width="100" align="right"><template #default="{row,$index}">{{ deltaText(review.semesterSummary,$index,'gpa') }}</template></el-table-column><el-table-column prop="failCount" label="挂科门次" width="100" align="right" /><el-table-column label="挂科变化" width="100" align="right"><template #default="{row,$index}">{{ deltaText(review.semesterSummary,$index,'failCount') }}</template></el-table-column><el-table-column prop="earnedCredits" label="获得学分" width="100" align="right" /></el-table>
+          </el-tab-pane>
+          <el-tab-pane :label="`挂科分析 (${(review.failTrace || []).length})`" name="failure">
+            <el-table :data="review.failTrace || []" size="small"><el-table-column prop="courseName" label="课程" min-width="190" /><el-table-column prop="failCount" label="挂科次数" width="90" align="right" /><el-table-column label="发生学期" min-width="180"><template #default="{row}">{{ (row.semesters || []).join('、') }}</template></el-table-column><el-table-column prop="teacherName" label="授课教师" width="110" /><el-table-column prop="college" label="开课单位" min-width="150" /></el-table>
+          </el-tab-pane>
+          <el-tab-pane :label="`预警记录 (${(review.alertHistory || []).length})`" name="alert">
+            <el-table :data="review.alertHistory || []" size="small"><el-table-column prop="time" label="时间" width="150" /><el-table-column prop="level" label="等级" width="76" /><el-table-column prop="type" label="预警类型" width="130" /><el-table-column prop="changeType" label="与上次相比" width="100" /><el-table-column prop="workflowStatusLabel" label="处置状态" width="100" /><el-table-column prop="detail" label="触发证据" min-width="210" show-overflow-tooltip /></el-table>
+          </el-tab-pane>
+        </el-tabs>
+        <div class="drawer-actions"><el-button type="primary" @click="goStudent({sid:review.code})">打开完整学生档案</el-button></div>
+      </div>
+    </el-drawer>
   </div>
 </template>
 
@@ -105,6 +127,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { http } from '@/utils/http'
 import { getFilterMeta, type SemesterOpt, type MajorOpt, type ClassOpt } from '@/utils/meta'
+import KpiCard from '@/components/KpiCard.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -142,6 +165,10 @@ const loading = ref(false)
 const students = ref<any[]>([])
 const total = ref(0)
 const avgGpa = ref<number | null>(null)
+const reviewVisible = ref(false)
+const reviewLoading = ref(false)
+const reviewTab = ref('semester')
+const review = ref<any>({})
 
 // ── 筛选器选项 ──
 const semesters = ref<SemesterOpt[]>([])
@@ -238,6 +265,11 @@ async function loadPage(p: number) {
 }
 
 // ── 操作 ──
+async function openReview(row: any) {
+  reviewVisible.value = true; reviewLoading.value = true; reviewTab.value = 'semester'; review.value = { name: row.name, code: row.sid }
+  try { const d = await http.get<any>(`/admin/student/${encodeURIComponent(row.sid)}`); if (d) review.value = d }
+  finally { reviewLoading.value = false }
+}
 function search() { page.value = 1; loadPage(1) }
 function reset() {
   fCollege.value = ''; fMajor.value = ''; fGrade.value = ''
@@ -290,6 +322,8 @@ function alertTagType(level: string): string {
   if (level.includes('警告')) return 'warning'
   return 'info'
 }
+function reviewTone(label:string,value:any):'primary'|'teal'|'danger'|'amber'{if(label.includes('预警'))return String(value).includes('正常')?'teal':'danger';if(label.includes('GPA'))return Number(value)>=3?'teal':Number(value)<2?'danger':'amber';return'primary'}
+function deltaText(rows:any[],index:number,key:string){if(index===0)return'—';const d=Number(rows[index]?.[key]||0)-Number(rows[index-1]?.[key]||0);return`${d>0?'+':''}${Math.round(d*100)/100}`}
 </script>
 
 <style scoped>
@@ -302,4 +336,7 @@ function alertTagType(level: string): string {
 :deep(.student-table th.el-table__cell) { background:#F8FAFC; color:#475569; font-weight:600; height:44px; }
 :deep(.student-table td.el-table__cell) { padding:10px 0; }
 :deep(.student-table .el-table__row:hover > td.el-table__cell) { background:#F5F7FF; }
+.review-kpis { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; }
+.review-tabs { margin-top:14px; }
+.drawer-actions { display:flex; justify-content:flex-end; margin-top:16px; }
 </style>
