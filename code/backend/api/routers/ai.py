@@ -1905,3 +1905,244 @@ def management_ai_briefing(period: str = "morning",
     }
     _MANAGEMENT_BRIEFING_CACHE[cache_key] = (time.time(), payload)
     return ok(payload)
+
+
+def _simulation_priority(score: float) -> str:
+    if score >= 75:
+        return "high"
+    if score >= 45:
+        return "medium"
+    return "low"
+
+
+@router.get("/simulation/graduation-course-support")
+def graduation_course_support_simulation(semester: Optional[str] = None,
+                                         limit: int = 12,
+                                         user: dict = Depends(get_current_user),
+                                         conn: sqlite3.Connection = Depends(get_v2_db)):
+    """AI 决策模拟：毕业准备课程保障与重修资源配置。
+
+    输出的是管理测算，用于比较方案优先级，不作为毕业审核、开课审批或资源承诺。
+    """
+    if user.get("role_id") not in V2_ALL_SCOPE_ROLES:
+        raise ApiError("当前角色没有V2全校决策模拟访问范围", code=403, status_code=403)
+    if not _table_exists(conn, "student_plan_course_status"):
+        raise ApiError("暂无培养方案完成状态数据，无法进行毕业准备模拟", code=404, status_code=404)
+
+    teaching_semester = semester or _safe_scalar(conn, "SELECT MAX(semester_id) FROM teaching_lesson", default="2023-2024-1")
+    limit = max(5, min(int(limit or 12), 30))
+    rows = dbm.query(conn, """
+        SELECT x.course_id,
+               COALESCE(MAX(c.name),x.course_id) course_name,
+               COALESCE(MAX(x.module),'') module,
+               COUNT(DISTINCT CASE WHEN x.completion_status='failed' THEN x.student_id END) failed_students,
+               COUNT(DISTINCT CASE WHEN x.completion_status IN ('not_completed','unknown') AND COALESCE(x.is_overdue,0)=1 THEN x.student_id END) verification_students,
+               COUNT(DISTINCT x.student_id) involved_students,
+               COUNT(DISTINCT s.major_code) major_count
+        FROM student_plan_course_status x
+        JOIN dim_student s ON s.student_id=x.student_id
+        LEFT JOIN dim_course c ON c.course_id=x.course_id
+        WHERE x.rule_version='growth-v1' AND x.requirement_type='必修'
+        GROUP BY x.course_id
+        HAVING failed_students>0 OR verification_students>0
+        ORDER BY failed_students DESC, verification_students DESC, major_count DESC
+        LIMIT ?
+    """, (limit,))
+    if not rows:
+        raise ApiError("暂无可模拟的毕业准备课程缺口", code=404, status_code=404)
+
+    course_ids = [r["course_id"] for r in rows]
+    marks = ",".join("?" for _ in course_ids)
+    supply = {r["course_id"]: r for r in _safe_query(conn, f"""
+        SELECT l.course_id,
+               COUNT(DISTINCT l.lesson_id) lesson_count,
+               COUNT(DISTINCT lt.staff_id) teacher_count,
+               SUM(COALESCE(l.capacity,0)) capacity,
+               SUM(COALESCE(l.enrolled,0)) enrolled
+        FROM teaching_lesson l
+        LEFT JOIN lesson_teacher lt ON lt.lesson_id=l.lesson_id
+        WHERE l.semester_id=? AND l.course_id IN ({marks})
+        GROUP BY l.course_id
+    """, tuple([teaching_semester] + course_ids))}
+    teams = {r["course_id"]: r for r in _safe_query(conn, f"""
+        SELECT * FROM agg_course_team
+        WHERE semester_id=? AND course_id IN ({marks})
+    """, tuple([teaching_semester] + course_ids))}
+    substitutions = {r["course_id"]: r["substitution_count"] for r in _safe_query(conn, f"""
+        SELECT original_course_id course_id,COUNT(DISTINCT substitution_id) substitution_count
+        FROM student_course_substitution
+        WHERE original_course_id IN ({marks})
+        GROUP BY original_course_id
+    """, tuple(course_ids))}
+
+    course_items = []
+    totals = {
+        "failedStudents": 0,
+        "verificationStudents": 0,
+        "involvedStudents": 0,
+        "majorCoverage": 0,
+    }
+    for row in rows:
+        cid = row["course_id"]
+        sup = supply.get(cid, {})
+        team = teams.get(cid, {})
+        failed = int(row.get("failed_students") or 0)
+        verify = int(row.get("verification_students") or 0)
+        majors = int(row.get("major_count") or 0)
+        capacity = int(sup.get("capacity") or 0)
+        enrolled = int(sup.get("enrolled") or 0)
+        spare = max(capacity - enrolled, 0)
+        lesson_count = int(sup.get("lesson_count") or 0)
+        teacher_count = int(team.get("teacher_count") or sup.get("teacher_count") or 0)
+        subst = int(substitutions.get(cid) or 0)
+        team_reasons = _faculty_course_attention(team) if team else []
+        bottlenecks = []
+        if failed >= 10:
+            bottlenecks.append("明确未通过学生较多")
+        if verify >= 10:
+            bottlenecks.append("到期缺证据学生较多")
+        if lesson_count == 0:
+            bottlenecks.append("当前无开课供给证据")
+        if teacher_count <= 1:
+            bottlenecks.append("课程团队备份能力需核查")
+        if subst == 0:
+            bottlenecks.append("暂无课程替代关系证据")
+
+        retake_capacity = max(spare, 30 if failed >= 20 else 20 if failed else 0)
+        retake_impact = min(failed, retake_capacity)
+        recognition_impact = min(verify, max(subst * 5, round(verify * (0.35 if subst else 0.12))))
+        tutoring_impact = min(failed, max(0, round(failed * 0.22) + min(lesson_count, 3) * 2))
+        team_impact = min(failed + verify, 18 if teacher_count <= 1 else 8 if "title_incomplete" in team_reasons else 0)
+
+        courses_score = failed * 2.2 + verify * 1.2 + majors * 5
+        if lesson_count == 0:
+            courses_score += 18
+        if teacher_count <= 1:
+            courses_score += 14
+        if subst == 0:
+            courses_score += 5
+
+        course_items.append({
+            "courseId": cid,
+            "courseName": row.get("course_name") or cid,
+            "module": row.get("module") or "未标明模块",
+            "failedStudents": failed,
+            "verificationStudents": verify,
+            "involvedStudents": int(row.get("involved_students") or 0),
+            "majorCount": majors,
+            "lessonCount": lesson_count,
+            "teacherCount": teacher_count,
+            "capacity": capacity,
+            "enrolled": enrolled,
+            "spareSeats": spare,
+            "substitutionCount": subst,
+            "bottlenecks": bottlenecks or ["常规关注"],
+            "priority": _simulation_priority(courses_score),
+            "priorityScore": round(courses_score, 1),
+            "estimatedImpact": {
+                "retakeClass": retake_impact,
+                "recognitionAudit": recognition_impact,
+                "learningSupport": tutoring_impact,
+                "teamAssurance": team_impact,
+            },
+        })
+        totals["failedStudents"] += failed
+        totals["verificationStudents"] += verify
+        totals["involvedStudents"] += int(row.get("involved_students") or 0)
+        totals["majorCoverage"] += majors
+
+    def sum_impact(key: str) -> int:
+        return int(sum(item["estimatedImpact"][key] for item in course_items))
+
+    scenarios = [
+        {
+            "id": "retake-class",
+            "title": "方案A：优先开设重修/补修班",
+            "priority": _simulation_priority(sum_impact("retakeClass") * 2.5),
+            "estimatedStudents": sum_impact("retakeClass"),
+            "costLevel": "较高",
+            "implementationDifficulty": "中高",
+            "bestFor": "明确未通过学生较多、且课程仍有师资或教室供给空间的必修课。",
+            "logic": "按课程明确未通过人数、当前余量和最小开班规模估算可覆盖学生，不承诺最终通过。",
+            "actions": ["确认课程负责人和开班容量", "优先安排覆盖多专业的必修课", "同步通知学院形成学生名单"],
+        },
+        {
+            "id": "recognition-audit",
+            "title": "方案B：课程替代/认定集中核查",
+            "priority": _simulation_priority(sum_impact("recognitionAudit") * 3.2),
+            "estimatedStudents": sum_impact("recognitionAudit"),
+            "costLevel": "较低",
+            "implementationDifficulty": "中",
+            "bestFor": "到期缺证据较多、且可能存在课程替代、转专业、认定或数据未回写的课程。",
+            "logic": "按到期缺证据人数与已有替代关系线索估算核查收益，核心价值是先排除数据证据缺口。",
+            "actions": ["核对替代课程关系", "补录已通过但未回写的认定记录", "将仍未通过学生转入重修资源清单"],
+        },
+        {
+            "id": "learning-support",
+            "title": "方案C：学习支持与过程帮扶",
+            "priority": _simulation_priority(sum_impact("learningSupport") * 2.1),
+            "estimatedStudents": sum_impact("learningSupport"),
+            "costLevel": "中",
+            "implementationDifficulty": "中",
+            "bestFor": "课程挂科率较高但仍有正常开课供给，适合通过答疑、助教、学习小组改善通过机会。",
+            "logic": "按明确未通过人数和当前教学班数量估算可被学习支持覆盖的学生规模。",
+            "actions": ["组织课程答疑和学习资源包", "把学生名单推送给学院和课程团队", "关注重复挂科和低年级受挫学生"],
+        },
+        {
+            "id": "team-assurance",
+            "title": "方案D：课程团队保障核查",
+            "priority": _simulation_priority(sum_impact("teamAssurance") * 2.8),
+            "estimatedStudents": sum_impact("teamAssurance"),
+            "costLevel": "中",
+            "implementationDifficulty": "中高",
+            "bestFor": "单教师承担、职称信息不完整或课程团队备份能力不足的高影响课程。",
+            "logic": "该方案主要降低教学连续性风险，估算覆盖的是被保障动作影响的课程缺口学生规模。",
+            "actions": ["确认备份教师和课程资料", "核查下学期是否具备稳定开课能力", "补齐教师职称与团队主数据"],
+        },
+    ]
+    scenarios.sort(key=lambda x: (0 if x["priority"] == "high" else 1 if x["priority"] == "medium" else 2, -x["estimatedStudents"]))
+
+    best = scenarios[0]
+    summary = (
+        f"本次模拟选取 {len(course_items)} 门毕业准备相关必修课程，涉及明确未通过 {totals['failedStudents']} 人次、"
+        f"到期缺证据 {totals['verificationStudents']} 人次。AI建议优先考虑“{best['title']}”，"
+        f"预计可优先覆盖约 {best['estimatedStudents']} 名/人次学生，但需由教务处和学院确认资源条件。"
+    )
+
+    return ok({
+        "targetType": "decisionSimulation",
+        "targetId": f"graduation-course-support-{teaching_semester}",
+        "targetName": "AI决策模拟：毕业准备课程保障",
+        "scenario": "graduation_course_support",
+        "source": "ai_sample",
+        "sourceLabel": "AI增强决策模拟样本",
+        "generatedBy": "offline_llm_curated_sample_with_rule_simulation",
+        "generatedAt": _now(),
+        "semester": teaching_semester,
+        "summary": summary,
+        "metrics": [
+            {"label": "模拟课程", "value": len(course_items), "unit": "门", "hint": "必修课中存在明确未通过或到期缺证据的重点课程"},
+            {"label": "明确未通过", "value": totals["failedStudents"], "unit": "人次", "hint": "按课程汇总，可能包含同一学生多门课程"},
+            {"label": "到期缺证据", "value": totals["verificationStudents"], "unit": "人次", "hint": "建议学期已到但尚无通过/失败/认定证据"},
+            {"label": "覆盖专业", "value": totals["majorCoverage"], "unit": "专业次", "hint": "课程涉及专业数量汇总，用于判断跨专业影响"},
+        ],
+        "scenarios": scenarios,
+        "courses": course_items,
+        "recommendation": {
+            "bestScenarioId": best["id"],
+            "bestScenarioTitle": best["title"],
+            "reason": f"{best['title']}在当前数据下预计覆盖规模最高或优先级最高，适合作为第一轮管理动作。",
+            "combinedStrategy": "建议先做课程替代/认定核查排除证据缺口，再对明确未通过集中的课程组织重修或补修班；对单教师承担课程同步做团队保障核查。",
+        },
+        "nextActions": [
+            "按优先级导出课程清单，交由学院确认学生名单和课程负责人。",
+            "先核查到期缺证据，避免把数据缺口误判为学生未完成。",
+            "对明确未通过学生较多的课程评估重修班容量、教师与教室资源。",
+            "对单教师承担课程确认备份教师和下学期开课稳定性。",
+        ],
+        "limitations": [
+            "模拟结果是管理测算，不是预测承诺，也不代表学生最终通过或毕业结论。",
+            "当前未接入完整选课过程、学生个人意愿、教师实际可用时间和教室排课冲突，因此容量估算需人工核查。",
+            "同一学生可能出现在多门课程中，课程层面的覆盖人数存在人次口径，正式行动前需生成去重学生名单。",
+        ],
+    })

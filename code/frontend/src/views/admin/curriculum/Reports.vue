@@ -78,6 +78,21 @@ const topics = [
     boundary: '当前为原型阶段 AI 增强样本，保证演示稳定；生产系统可按学校授权接入真实大模型。',
   },
   {
+    key: 'ai-simulation',
+    index: 'AI+',
+    title: 'AI决策模拟',
+    status: 'AI增强',
+    tone: 'simulation',
+    value: '围绕毕业准备课程保障，比较重修班、课程替代认定核查、学习支持和课程团队保障等不同管理动作的覆盖规模、成本和落地难度。',
+    questions: [
+      '如果资源有限，哪些课程应该优先开重修或补修？',
+      '哪些问题先做认定核查就可能减少误判？',
+      '不同方案的覆盖学生规模、成本和实施难度如何比较？',
+    ],
+    actions: [{ label: '进入模拟', path: '/admin/reports/decision-simulation', primary: true }],
+    boundary: '模拟结果是管理测算，不是毕业结论、开课承诺或学生最终通过预测。',
+  },
+  {
     key: 'risk',
     index: '01',
     title: '学业风险与低年级受挫',

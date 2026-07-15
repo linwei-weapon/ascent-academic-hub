@@ -97,3 +97,11 @@ export function getManagementBriefing(query: { period?: 'morning' | 'term'; seme
   const qs = params.toString()
   return http.get<any>(`/admin/ai/briefing/management${qs ? `?${qs}` : ''}`)
 }
+
+export function getGraduationCourseSupportSimulation(query: { semester?: string; limit?: number } = {}) {
+  const params = new URLSearchParams()
+  if (query.semester) params.set('semester', query.semester)
+  if (query.limit) params.set('limit', String(query.limit))
+  const qs = params.toString()
+  return http.get<any>(`/admin/ai/simulation/graduation-course-support${qs ? `?${qs}` : ''}`)
+}
