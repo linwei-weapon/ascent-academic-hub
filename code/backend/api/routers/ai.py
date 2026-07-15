@@ -740,3 +740,140 @@ def operation_course_offering_insight(course_id: str, semester: str = "2023-2024
             "班额阈值用于管理核查提示，不直接评价课程质量或教师教学效果。",
         ],
     })
+
+
+@router.get("/insight/operation/classroom-occupancy")
+def operation_classroom_occupancy_insight(semester: Optional[str] = None,
+                                          building: Optional[str] = None,
+                                          include_evening: bool = True,
+                                          user: dict = Depends(get_current_user),
+                                          conn: sqlite3.Connection = Depends(get_db)):
+    if not dbm.scalar(conn, "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='fact_room_occupancy'"):
+        raise ApiError("暂无实际教室占用数据", code=404, status_code=404)
+    sem = semester or dbm.scalar(conn, "SELECT MAX(semester_id) FROM fact_room_occupancy")
+    fact_conds, params = ["o.semester_id=?"], [sem]
+    if building:
+        fact_conds.append("o.building_name=?")
+        params.append(building)
+    where = " AND ".join(fact_conds)
+    period_filter = "" if include_evening else " AND p.period_index<=8"
+    summary = dbm.query_one(conn, f"""
+        SELECT COUNT(DISTINCT o.occupancy_id) occupancyRecords,
+               COUNT(DISTINCT o.room_name) observedRooms,
+               COUNT(DISTINCT o.activity_date) observedDates,
+               COUNT(DISTINCT CASE WHEN o.overlap_count>0 THEN o.occupancy_id END) overlapRecords,
+               COUNT(DISTINCT CASE WHEN o.building_mapping_status='pending' THEN o.occupancy_id END) pendingMappingRecords,
+               COUNT(DISTINCT CASE WHEN o.is_evening=1 THEN o.occupancy_id END) eveningRecords
+        FROM fact_room_occupancy o
+        WHERE {where}
+    """, tuple(params)) or {}
+    heat_rows = dbm.query(conn, f"""
+        SELECT o.weekday,p.period_index,
+               COUNT(DISTINCT o.room_name||'|'||o.activity_date) occupiedRoomDays
+        FROM fact_room_occupancy o
+        JOIN fact_room_occupancy_period p ON p.occupancy_id=o.occupancy_id
+        WHERE {where}{period_filter}
+        GROUP BY o.weekday,p.period_index
+        ORDER BY occupiedRoomDays DESC
+        LIMIT 5
+    """, tuple(params))
+    day_counts = {r["weekday"]: r["days"] for r in dbm.query(conn, """
+        SELECT weekday,COUNT(DISTINCT activity_date) days
+        FROM fact_room_occupancy
+        WHERE semester_id=?
+        GROUP BY weekday
+    """, (sem,))}
+    observed_rooms = summary.get("observedRooms") or 0
+    for row in heat_rows:
+        opportunities = observed_rooms * day_counts.get(row["weekday"], 0)
+        row["observedUtilizationPct"] = round(row["occupiedRoomDays"] * 100 / opportunities, 1) if opportunities else 0
+    buildings = dbm.query(conn, f"""
+        SELECT COALESCE(o.building_name,'待映射') name,
+               COUNT(DISTINCT o.room_name) observedRooms,
+               COUNT(DISTINCT o.activity_date) observedDates,
+               COUNT(DISTINCT o.occupancy_id) occupancyRecords,
+               COUNT(DISTINCT o.room_name||'|'||o.activity_date||'|'||p.period_index) occupiedRoomSlots
+        FROM fact_room_occupancy o
+        LEFT JOIN fact_room_occupancy_period p ON p.occupancy_id=o.occupancy_id
+        WHERE {where}{period_filter}
+        GROUP BY COALESCE(o.building_name,'待映射')
+        ORDER BY occupancyRecords DESC
+        LIMIT 8
+    """, tuple(params))
+    period_count = 12 if include_evening else 8
+    for row in buildings:
+        denominator = (row.get("observedRooms") or 0) * (row.get("observedDates") or 0) * period_count
+        row["observedLoadPct"] = round((row.get("occupiedRoomSlots") or 0) * 100 / denominator, 1) if denominator else 0
+    top_building = buildings[0] if buildings else {}
+    peak = heat_rows[0] if heat_rows else {}
+    activity_rows = dbm.query(conn, f"""
+        SELECT o.activity_type type,COUNT(DISTINCT o.occupancy_id) records
+        FROM fact_room_occupancy o
+        WHERE {where}
+        GROUP BY o.activity_type
+        ORDER BY records DESC
+        LIMIT 4
+    """, tuple(params))
+    evening_records = summary.get("eveningRecords") or 0
+    occupancy_records = summary.get("occupancyRecords") or 0
+    evening_share = round(evening_records * 100 / occupancy_records, 1) if occupancy_records else 0
+    top_load = top_building.get("observedLoadPct") or 0
+    overlap = summary.get("overlapRecords") or 0
+    pending_mapping = summary.get("pendingMappingRecords") or 0
+    risk = "critical" if top_load >= 50 or overlap >= 100 or pending_mapping >= 100 else "warning" if top_load >= 30 or evening_share >= 15 or overlap else "info"
+    reasons: list[str] = []
+    if top_building:
+        reasons.append(f"{top_building['name']} 的观察负荷最高，为 {top_load}%，应优先核查是否存在时段集中或活动集中占用。")
+    if peak:
+        reasons.append(f"最高占用时段出现在周{peak.get('weekday')}第 {peak.get('period_index')} 节，观察占用强度为 {peak.get('observedUtilizationPct')}%。")
+    if evening_share:
+        reasons.append(f"晚间占用记录占 {evening_share}%，建议结合“是否包含晚间”开关比较日间与晚间资源压力。")
+    if overlap:
+        reasons.append(f"存在 {overlap} 条时段重叠记录，应作为源数据核查线索，避免误判真实资源紧张。")
+    if pending_mapping:
+        reasons.append(f"存在 {pending_mapping} 条楼宇待映射记录，需先治理教室名称/楼宇映射后再用于正式资源决策。")
+    target_name = f"{building}教室占用" if building else "全校教室占用"
+    summary_text = (
+        f"{target_name}在 {sem} 学期共观察到 {occupancy_records} 条实际占用记录，"
+        f"覆盖 {summary.get('observedRooms') or 0} 间已观察教室、{summary.get('observedDates') or 0} 个日期。"
+        + (f" 当前最高负荷楼宇为 {top_building.get('name')}，观察负荷 {top_load}%。" if top_building else "")
+    )
+    return ok({
+        "targetType": "operationClassroomOccupancy",
+        "targetId": building or "all-buildings",
+        "targetName": target_name,
+        "scenario": "operation_classroom_occupancy",
+        "riskLevel": risk,
+        "riskLabel": RISK_LABEL[risk],
+        "riskTone": TONE[risk],
+        "source": "ai_sample" if risk in {"critical", "warning"} else "rule",
+        "sourceLabel": "AI增强研判样本" if risk in {"critical", "warning"} else "规则研判兜底",
+        "generatedBy": "offline_llm_curated_sample" if risk in {"critical", "warning"} else "deterministic_rule_engine",
+        "generatedAt": _now(),
+        "summary": summary_text,
+        "confidence": "高" if occupancy_records else "中",
+        "profile": {"college": "教学运行", "major": "教室资源", "semester": sem},
+        "evidence": [
+            {"label": "实际占用记录", "value": f"{occupancy_records} 条", "detail": "课程、考试、自习及其他活动占用事件", "tone": "info"},
+            {"label": "已观察教室", "value": f"{summary.get('observedRooms') or 0} 间", "detail": "不是学校正式可用教室总数", "tone": "info"},
+            {"label": "最高楼宇负荷", "value": f"{top_load}%", "detail": top_building.get("name") or "暂无楼宇数据", "tone": "danger" if top_load >= 50 else "warning" if top_load >= 30 else "success"},
+            {"label": "晚间占用", "value": f"{evening_records} 条", "detail": f"占全部记录 {evening_share}%", "tone": "warning" if evening_share >= 15 else "info"},
+            {"label": "待核查记录", "value": f"{overlap + pending_mapping} 条", "detail": f"重叠 {overlap}；楼宇待映射 {pending_mapping}", "tone": "danger" if overlap + pending_mapping >= 100 else "warning" if overlap + pending_mapping else "success"},
+        ],
+        "reasons": reasons or ["当前筛选范围未发现明显教室占用压力，可作为常规运行观察对象。"],
+        "suggestions": [
+            {"role": "教务处", "priority": "high" if risk == "critical" else "medium", "action": "识别资源压力楼宇与高峰时段", "detail": "优先查看高负荷楼宇、高峰节次和晚间占用，判断是否需要调整排课策略或开放更多资源。"},
+            {"role": "排课人员", "priority": "high" if top_load >= 50 else "medium", "action": "优化楼宇与时段分配", "detail": "对高峰节次进行课程、考试、自习等活动分层核查，避免同一楼宇在同一时段过度集中。"},
+            {"role": "数据治理人员", "priority": "high" if pending_mapping or overlap else "medium", "action": "处理楼宇映射和重叠记录", "detail": "先修正待映射教室和时段重叠记录，再把结果用于正式教室资源决策。"},
+        ],
+        "nextActions": [
+            "切换“包含晚间”开关，比较日间资源压力和晚间资源使用结构。",
+            "点开最高负荷楼宇的 AI 研判，确认压力来自课程教学、考试、自习还是临时活动。",
+            "对待映射和重叠记录建立源数据核查清单，避免把数据问题误判为资源问题。",
+        ],
+        "focusItems": {"buildings": buildings[:5], "peakSlots": heat_rows[:5], "activityTypes": activity_rows},
+        "limitations": [
+            "当前结果基于已接入的实际教室占用记录，不等同于全校正式教室空闲率。",
+            "分母使用已观察教室和实际采集日期，生产系统应接入正式可用教室清单、座位数和占用审批全量数据。",
+        ],
+    })

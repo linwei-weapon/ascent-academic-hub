@@ -35,3 +35,12 @@ export function getOperationCourseAIInsight(courseId: string, semester?: string)
   const qs = params.toString()
   return http.get<any>(`/admin/ai/insight/operation/course-offering/${encodeURIComponent(courseId)}${qs ? `?${qs}` : ''}`)
 }
+
+export function getClassroomOccupancyAIInsight(query: { semester?: string; building?: string; includeEvening?: boolean } = {}) {
+  const params = new URLSearchParams()
+  if (query.semester) params.set('semester', query.semester)
+  if (query.building) params.set('building', query.building)
+  if (query.includeEvening !== undefined) params.set('include_evening', String(query.includeEvening))
+  const qs = params.toString()
+  return http.get<any>(`/admin/ai/insight/operation/classroom-occupancy${qs ? `?${qs}` : ''}`)
+}
