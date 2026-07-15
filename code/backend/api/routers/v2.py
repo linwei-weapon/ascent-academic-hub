@@ -16,7 +16,25 @@ router = APIRouter(prefix="/api/v2", tags=["v2"])
 V2_ALL_SCOPE_ROLES = {"school_leader", "dean", "dept_operation", "dept_research", "dept_practice", "quality_office"}
 V2_MAPPED_SCOPE_ROLES = {"college_dean", "college_secretary", "counselor", "dept_director"}
 _GRADUATION_TOPIC_CACHE: dict[tuple, tuple[float, float, dict]] = {}
-_GRADUATION_TOPIC_CACHE_TTL = 300
+_GRADUATION_TOPIC_CACHE_TTL = 900
+_QUERY_CACHE: dict[tuple, tuple[float, float, dict]] = {}
+_QUERY_CACHE_TTL = 900
+
+
+def _query_cache_get(key: tuple) -> Optional[dict]:
+    cached = _QUERY_CACHE.get(key)
+    if not cached:
+        return None
+    db_mtime = os.path.getmtime(settings.V2_DB_PATH)
+    if cached[0] != db_mtime or time.monotonic() - cached[1] >= _QUERY_CACHE_TTL:
+        _QUERY_CACHE.pop(key, None)
+        return None
+    return cached[2]
+
+
+def _query_cache_put(key: tuple, payload: dict) -> dict:
+    _QUERY_CACHE[key] = (os.path.getmtime(settings.V2_DB_PATH), time.monotonic(), payload)
+    return payload
 
 
 def require_v2_reader(user: dict = Depends(get_current_user)) -> dict:
@@ -37,20 +55,32 @@ def require_v2_all_reader(user: dict = Depends(get_current_user)) -> dict:
 def curriculum_options(conn: sqlite3.Connection = Depends(get_v2_db),
                        user: dict = Depends(require_v2_reader)):
     """真实方案选择项：学院、年级、专业、方案四级联动所需的轻量元数据。"""
+    cache_key = ("curriculum_options",)
+    cached = _query_cache_get(cache_key)
+    if cached is not None:
+        return ok(cached)
     rows = dbm.query(conn, """
+        WITH student_counts AS (
+          SELECT s.plan_id,COUNT(DISTINCT s.student_id) studentCount,
+            MIN(COALESCE(o.organization_id,s.organization_id)) collegeId,
+            MIN(COALESCE(o.name,s.organization_id,'未映射学院')) collegeName
+          FROM dim_student s LEFT JOIN dim_organization o ON o.organization_id=s.organization_id
+          WHERE s.plan_id IS NOT NULL GROUP BY s.plan_id
+        ), course_counts AS (
+          SELECT plan_id,COUNT(*) courseCount FROM curriculum_plan_course GROUP BY plan_id
+        ), requirement_counts AS (
+          SELECT plan_id,COUNT(*) requirementCount FROM curriculum_graduation_requirement GROUP BY plan_id
+        )
         SELECT p.plan_id planId,p.plan_name planName,p.grade,p.major_code majorCode,
                p.major_name majorName,
-               COALESCE(o.organization_id,s.organization_id) collegeId,
-               COALESCE(o.name,s.organization_id,'未映射学院') collegeName,
-               COUNT(DISTINCT s.student_id) studentCount,
-               COUNT(DISTINCT pc.plan_course_id) courseCount,
-               COUNT(DISTINCT gr.requirement_id) requirementCount
+               sc.collegeId,COALESCE(sc.collegeName,'未映射学院') collegeName,
+               COALESCE(sc.studentCount,0) studentCount,
+               COALESCE(cc.courseCount,0) courseCount,
+               COALESCE(rc.requirementCount,0) requirementCount
         FROM curriculum_plan p
-        LEFT JOIN dim_student s ON s.plan_id=p.plan_id
-        LEFT JOIN dim_organization o ON o.organization_id=s.organization_id
-        LEFT JOIN curriculum_plan_course pc ON pc.plan_id=p.plan_id
-        LEFT JOIN curriculum_graduation_requirement gr ON gr.plan_id=p.plan_id
-        GROUP BY p.plan_id
+        LEFT JOIN student_counts sc ON sc.plan_id=p.plan_id
+        LEFT JOIN course_counts cc ON cc.plan_id=p.plan_id
+        LEFT JOIN requirement_counts rc ON rc.plan_id=p.plan_id
         ORDER BY collegeName,p.grade DESC,p.major_name,p.plan_name
     """)
     for row in rows:
@@ -58,21 +88,30 @@ def curriculum_options(conn: sqlite3.Connection = Depends(get_v2_db),
             "courses_only" if row["courseCount"] else "metadata_only")
         row["coverageLabel"] = {"document_and_courses": "原文与课程表齐全",
           "courses_only": "仅课程表，缺方案原文", "metadata_only": "仅方案元数据"}[row["coverageStatus"]]
-    return ok({"plans": rows, "total": len(rows)})
+    return ok(_query_cache_put(cache_key, {"plans": rows, "total": len(rows)}))
 
 
 @router.get("/curriculum/management-overview")
 def curriculum_management_overview(conn: sqlite3.Connection = Depends(get_v2_db),
                                    user: dict = Depends(require_v2_reader)):
+    cache_key = ("curriculum_management_overview", user.get("username"), user.get("role_id"))
+    cached = _query_cache_get(cache_key)
+    if cached is not None:
+        return ok(cached)
     scope, scope_params = _student_scope(user, conn, "s")
     student_where = f"WHERE {scope}" if scope else ""
-    plans = dbm.query(conn, """SELECT p.plan_id,p.plan_name,p.major_name,
-      COUNT(DISTINCT pc.plan_course_id) course_count,
-      COUNT(DISTINCT gr.requirement_id) requirement_count,
-      COUNT(DISTINCT mr.module_requirement_id) module_rule_count
-      FROM curriculum_plan p LEFT JOIN curriculum_plan_course pc ON pc.plan_id=p.plan_id
-      LEFT JOIN curriculum_graduation_requirement gr ON gr.plan_id=p.plan_id
-      LEFT JOIN curriculum_plan_module_requirement mr ON mr.plan_id=p.plan_id GROUP BY p.plan_id""")
+    plans = dbm.query(conn, """WITH course_counts AS (
+        SELECT plan_id,COUNT(*) course_count FROM curriculum_plan_course GROUP BY plan_id
+      ), requirement_counts AS (
+        SELECT plan_id,COUNT(*) requirement_count FROM curriculum_graduation_requirement GROUP BY plan_id
+      ), module_counts AS (
+        SELECT plan_id,COUNT(*) module_rule_count FROM curriculum_plan_module_requirement GROUP BY plan_id
+      ) SELECT p.plan_id,p.plan_name,p.major_name,
+        COALESCE(c.course_count,0) course_count,COALESCE(r.requirement_count,0) requirement_count,
+        COALESCE(m.module_rule_count,0) module_rule_count FROM curriculum_plan p
+      LEFT JOIN course_counts c ON c.plan_id=p.plan_id
+      LEFT JOIN requirement_counts r ON r.plan_id=p.plan_id
+      LEFT JOIN module_counts m ON m.plan_id=p.plan_id""")
     students = dbm.query(conn, f"""SELECT s.student_id,s.organization_id,s.major_code,s.major_name,s.plan_id,
       COALESCE(o.name,s.organization_id,'未映射学院') college_name
       FROM dim_student s LEFT JOIN dim_organization o ON o.organization_id=s.organization_id {student_where}""", tuple(scope_params))
@@ -129,7 +168,7 @@ def curriculum_management_overview(conn: sqlite3.Connection = Depends(get_v2_db)
       "coursesWithoutOfferingEvidence": no_offering,
       "singleTeacherCourses": single_teacher,
     }
-    return ok({"summary": summary, "colleges": college_rows[:30], "majors": major_rows[:50],
+    payload = {"summary": summary, "colleges": college_rows[:30], "majors": major_rows[:50],
       "bottleneckCourses": course_rows,
       "definition": {
         "completeStructurePlans": "同时具备结构化课程、毕业要求原文和模块要求学分的方案数。",
@@ -138,7 +177,8 @@ def curriculum_management_overview(conn: sqlite3.Connection = Depends(get_v2_db)
         "coursesWithoutOfferingEvidence": "方案引用课程中，在当前已接入真实教学任务范围内未发现开课记录的去重课程数；不等同未来不开课。",
         "singleTeacherCourses": "当前已接入教学任务中仅关联一名教师的方案课程数，用于资源连续性核查。",
         "boundary": "总览用于发现需进一步核验的管理事项，不输出毕业审核、方案合规或教学质量结论。"
-      }})
+      }}
+    return ok(_query_cache_put(cache_key, payload))
 
 
 @router.get("/curriculum/management-students")
@@ -460,6 +500,11 @@ def early_setback_topic(organization_id: Optional[str] = None, major_code: Optio
                         limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0),
                         conn: sqlite3.Connection = Depends(get_v2_db), user: dict = Depends(require_v2_reader)):
     """大一首次挂科及后续恢复专题；只使用已发布、未作废且通过口径明确的成绩。"""
+    cache_key = ("early_setback", user.get("username"), user.get("role_id"),
+                 organization_id, major_code, entry_grade, limit, offset)
+    cached = _query_cache_get(cache_key)
+    if cached is not None:
+        return ok(cached)
     cond, params = ["s.entry_grade BETWEEN 2000 AND 2100"], []
     scope, scope_params = _student_scope(user, conn, "s")
     if scope:
@@ -539,7 +584,7 @@ def early_setback_topic(organization_id: Optional[str] = None, major_code: Optio
       GROUP BY g.course_id ORDER BY affected_students DESC,failed_attempts DESC LIMIT 10""", tuple(params))
     eligible = summary.get("eligible_students") or 0; setback = summary.get("setback_students") or 0
     summary["setback_rate"] = round(setback * 100.0 / eligible, 2) if eligible else 0
-    return ok({"summary": summary, "by_grade": by_grade, "by_major": by_major, "courses": courses,
+    payload = {"summary": summary, "by_grade": by_grade, "by_major": by_major, "courses": courses,
                "students": students, "total": total, "limit": limit, "offset": offset,
                "definition": {"first_year": "观察范围：有有效入学年，且大一第一或第二学期至少有1条有效成绩的去重学生。",
                  "setback": "大一第一或第二学期至少出现1条明确未通过成绩的去重学生；比例分母为纳入观察的学生。",
@@ -548,7 +593,8 @@ def early_setback_topic(organization_id: Optional[str] = None, major_code: Optio
                  "persistent": "后续未通过门次超过大一阶段，表示未通过记录仍持续出现，不推断个人原因。", "pending_observation": "大一有未通过记录，但尚无后续常规学期成绩可用于判断。",
                  "management_value": "人数反映需要配置多少关注资源，比例用于发现群体集中度；课程集中提示基础课支持，专业持续人数提示学院优先核查。",
                  "number_unit": "学生指标均为去重人数；课程表“未通过记录数”允许同一学生多次出现。",
-                 "boundary": "群体筛查不推断个人原因，不自动建立帮扶任务；无有效入学年或无大一常规学期成绩者不进入分母。"}})
+                 "boundary": "群体筛查不推断个人原因，不自动建立帮扶任务；无有效入学年或无大一常规学期成绩者不进入分母。"}}
+    return ok(_query_cache_put(cache_key, payload))
 
 
 @router.get("/topics/graduation-readiness")

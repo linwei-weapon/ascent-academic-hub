@@ -500,11 +500,23 @@ CREATE TABLE IF NOT EXISTS access_scope_mapping (
 );
 
 CREATE INDEX IF NOT EXISTS idx_grade_attempt_student_course ON grade_attempt(student_id, course_id);
+CREATE INDEX IF NOT EXISTS idx_grade_attempt_student_term_valid
+    ON grade_attempt(student_id, semester_id, is_published, is_void, is_pass);
+CREATE INDEX IF NOT EXISTS idx_student_plan ON dim_student(plan_id, student_id);
+CREATE INDEX IF NOT EXISTS idx_student_org_major_grade
+    ON dim_student(organization_id, major_code, entry_grade, student_id);
+CREATE INDEX IF NOT EXISTS idx_plan_course_plan ON curriculum_plan_course(plan_id, plan_course_id);
+CREATE INDEX IF NOT EXISTS idx_plan_requirement_plan ON curriculum_graduation_requirement(plan_id, requirement_id);
+CREATE INDEX IF NOT EXISTS idx_plan_module_plan ON curriculum_plan_module_requirement(plan_id, module_requirement_id);
 CREATE INDEX IF NOT EXISTS idx_lesson_semester_course ON teaching_lesson(semester_id, course_id);
 CREATE INDEX IF NOT EXISTS idx_meeting_lesson ON course_meeting(lesson_id);
 CREATE INDEX IF NOT EXISTS idx_status_event_student ON student_status_event(student_id, effective_at);
 CREATE INDEX IF NOT EXISTS idx_scope_student ON staff_student_scope(student_id, relation_type);
 CREATE INDEX IF NOT EXISTS idx_plan_status_student ON student_plan_course_status(student_id, completion_status);
+CREATE INDEX IF NOT EXISTS idx_plan_status_rule_student
+    ON student_plan_course_status(rule_version, student_id, plan_id, requirement_type, completion_status, is_overdue);
+CREATE INDEX IF NOT EXISTS idx_plan_status_rule_course
+    ON student_plan_course_status(rule_version, course_id, requirement_type, completion_status, is_overdue, student_id);
 CREATE INDEX IF NOT EXISTS idx_lesson_course_supply ON teaching_lesson(course_id, lesson_id);
 CREATE INDEX IF NOT EXISTS idx_lesson_teacher_lesson ON lesson_teacher(lesson_id, staff_id);
 CREATE INDEX IF NOT EXISTS idx_substitution_original ON student_course_substitution(original_course_id, substitution_id);

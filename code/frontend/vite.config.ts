@@ -1105,7 +1105,9 @@ export default ({ mode }: { mode: string }) => {
     base: VITE_BASE_URL,
     server: {
       port: Number(VITE_PORT), host: true,
-      proxy: { '/api': { target: 'http://localhost:8000', changeOrigin: true } },
+      // 使用显式 IPv4 回环地址，避免 Windows 上 localhost 优先解析为 ::1，
+      // 而后端仅监听 127.0.0.1 时代理请求失败。
+      proxy: { '/api': { target: 'http://127.0.0.1:8000', changeOrigin: true } },
     },
     resolve: {
       alias: {

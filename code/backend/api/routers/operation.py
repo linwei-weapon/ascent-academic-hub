@@ -3,6 +3,7 @@
 +合成调停课(fact_schedule_change)。学院下钻用真实 college_id（C01-C16）。
 """
 import sqlite3
+import time
 from datetime import datetime
 from typing import Optional
 
@@ -22,6 +23,8 @@ _PALETTE = ["#2563EB", "#16A34A", "#EA580C", "#F59E0B", "#9333EA", "#60A5FA",
 # 单学期教学班 > 阈值 → 判为源库生成缺陷，统计时排除
 _TEACHER_CAP = 200
 _QUALITY_MANAGERS = {"dean", "dept_operation"}
+_CLASSROOM_OCCUPANCY_CACHE: dict[tuple, tuple[str, float, dict]] = {}
+_CLASSROOM_OCCUPANCY_CACHE_TTL = 900
 
 
 class QualityStatusIn(BaseModel):
@@ -376,6 +379,12 @@ def classroom_occupancy(semester: Optional[str] = None, building: Optional[str] 
     """实际教室占用证据；分母仅为源文件中出现过的已观测教室。"""
     if not dbm.scalar(conn, "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='fact_room_occupancy'"):
         return ok({"available": False, "evidenceLevel": "not_ingested"})
+    cache_key = (semester, building, include_evening)
+    batch_signature = str(dbm.scalar(conn, """SELECT COALESCE(MAX(imported_at),'')||':'||
+        COALESCE(SUM(loaded_rows),0) FROM etl_room_occupancy_batch""") or "")
+    cached = _CLASSROOM_OCCUPANCY_CACHE.get(cache_key)
+    if cached and cached[0] == batch_signature and time.monotonic() - cached[1] < _CLASSROOM_OCCUPANCY_CACHE_TTL:
+        return ok(cached[2])
     sem = semester or dbm.scalar(conn, "SELECT MAX(semester_id) FROM fact_room_occupancy")
     fact_conds, params = ["o.semester_id=?"], [sem]
     if building:
@@ -424,12 +433,14 @@ def classroom_occupancy(semester: Optional[str] = None, building: Optional[str] 
     activity_types = dbm.query(conn, """SELECT o.activity_type type,COUNT(DISTINCT o.occupancy_id) records
         FROM fact_room_occupancy o WHERE """ + fact_where +
         " GROUP BY o.activity_type ORDER BY records DESC", params)
-    return ok({"available": True, "semester": sem, "includeEvening": include_evening,
+    payload = {"available": True, "semester": sem, "includeEvening": include_evening,
         "summary": summary, "heatmap": heatmap, "buildings": buildings, "activityTypes": activity_types,
         "evidenceLevel": "actual_occupancy",
         "denominator": "observed_rooms",
         "denominatorExplanation": "利用率分母为本批数据中曾发生占用的已观测教室×实际出现的日期，不代表学校正式可用教室全集。",
-        "managementBoundary": "可用于识别占用时序、晚间使用、楼宇负荷和异常重叠；不可直接解释为全校教室空闲率或可用教室数量。"})
+        "managementBoundary": "可用于识别占用时序、晚间使用、楼宇负荷和异常重叠；不可直接解释为全校教室空闲率或可用教室数量。"}
+    _CLASSROOM_OCCUPANCY_CACHE[cache_key] = (batch_signature, time.monotonic(), payload)
+    return ok(payload)
 
 
 @router.get("/capacity-slots")

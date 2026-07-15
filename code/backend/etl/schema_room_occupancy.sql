@@ -47,6 +47,8 @@ CREATE TABLE IF NOT EXISTS fact_room_occupancy_period (
 
 CREATE INDEX IF NOT EXISTS idx_room_occ_period
     ON fact_room_occupancy_period(period_index, occupancy_id);
+CREATE INDEX IF NOT EXISTS idx_room_occ_period_occupancy
+    ON fact_room_occupancy_period(occupancy_id, period_index);
 
 CREATE TABLE IF NOT EXISTS dim_observed_room (
     room_name                TEXT PRIMARY KEY,

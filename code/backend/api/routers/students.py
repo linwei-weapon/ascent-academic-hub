@@ -3,6 +3,7 @@
 支持维度过滤：semester(学期) / grade(年级) / college(学院码)，无值=全量。
 """
 import sqlite3
+import time
 from typing import Optional
 
 from fastapi import APIRouter, Depends
@@ -12,6 +13,8 @@ from ..deps import get_db, get_current_user, student_data_scope
 from ..envelope import ApiError, ok
 
 router = APIRouter(prefix="/api/admin/students", tags=["students"])
+_ANALYSIS_CACHE: dict[tuple, tuple[float, dict]] = {}
+_ANALYSIS_CACHE_TTL = 900
 
 
 @router.get("/analysis")
@@ -21,6 +24,11 @@ def analysis(semester: Optional[str] = None, grade: Optional[str] = None,
              required: Optional[str] = None, year: Optional[str] = None,
              user: dict = Depends(get_current_user),
              conn: sqlite3.Connection = Depends(get_db)):
+    cache_key = (user.get("username"), user.get("role_id"), semester, grade, college,
+                 major, class_id, retake, required, year)
+    cached = _ANALYSIS_CACHE.get(cache_key)
+    if cached and time.monotonic() - cached[0] < _ANALYSIS_CACHE_TTL:
+        return ok(cached[1])
     # 学生维度过滤（学院/年级/专业/班级）：限定参与统计的学生集合。无值=全量。
     scond, sparams = [], []
     if college:
@@ -303,7 +311,7 @@ def analysis(semester: Optional[str] = None, grade: Optional[str] = None,
          "definition": "存在重修标记且结果仍不及格"},
     ]
 
-    return ok({"studentKpis": studentKpis, "clusters": clusters,
+    payload = {"studentKpis": studentKpis, "clusters": clusters,
                "gradeGpa": gradeGpa, "creditDist": creditDist,
                "failCourses": failCourses, "migration": migration,
                "failPatterns": failPatterns,
@@ -311,7 +319,9 @@ def analysis(semester: Optional[str] = None, grade: Optional[str] = None,
                    "real": ["学籍、成绩、GPA、挂科、当前有效预警、跨学期GPA与挂科联合迁移、历史挂科模式"],
                    "simulated": ["毕业结果、学位授予结果、非真实培养方案专业的学分要求"],
                    "limitation": "毕业率和学位授予率来自固定种子合成业务表；学分完成度仅在真实培养方案覆盖专业可精确解释。"
-               }})
+               }}
+    _ANALYSIS_CACHE[cache_key] = (time.monotonic(), payload)
+    return ok(payload)
 
 
 @router.get("/list")
