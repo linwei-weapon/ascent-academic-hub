@@ -51,7 +51,8 @@
         <div v-for="m in data.metrics || []" :key="m.label" class="metric-card" :class="m.tone">
           <span>{{ m.label }}</span>
           <b>{{ m.value }}<small>{{ m.unit }}</small></b>
-          <p>{{ m.hint }}</p>
+          <p>{{ m.managementValue || m.hint }}</p>
+          <small v-if="m.source">来源：{{ m.source }}</small>
         </div>
       </div>
 
@@ -71,6 +72,11 @@
           </el-table-column>
           <el-table-column prop="summary" label="AI摘要" min-width="260" />
           <el-table-column prop="why" label="为什么要看" min-width="280" />
+          <el-table-column label="依据来源" min-width="180">
+            <template #default="{ row }">
+              <span class="source-text">{{ row.source || listText(trace.dataSources) }}</span>
+            </template>
+          </el-table-column>
           <el-table-column label="操作" width="130" fixed="right">
             <template #default="{ row }">
               <el-button link type="primary" @click="go(row.route)">{{ row.action || '进入专题' }}</el-button>
@@ -91,6 +97,7 @@
             <div v-for="e in s.evidence || []" :key="e.label" class="evidence">
               <span>{{ e.label }}</span>
               <b>{{ e.value }}<small>{{ e.unit }}</small></b>
+              <em v-if="e.source">来源：{{ e.source }}</em>
             </div>
           </div>
         </section>
@@ -115,6 +122,7 @@
           <el-descriptions-item label="命中规则">{{ listText(trace.rules) }}</el-descriptions-item>
           <el-descriptions-item label="公式/口径">{{ trace.formula || '—' }}</el-descriptions-item>
           <el-descriptions-item label="使用边界">{{ trace.boundary || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="解释来源">{{ explanationSourceText }}</el-descriptions-item>
         </el-descriptions>
       </section>
 
@@ -148,6 +156,11 @@ const data = reactive<any>({})
 
 const sourceLabelText = computed(() => normalizeSourceLabel(data.sourceLabel || 'AI辅助管理简报'))
 const trace = computed(() => data.traceability || {})
+const explanationSourceText = computed(() => {
+  const sources = data.explanationSources || trace.value.explanationSources || []
+  if (!Array.isArray(sources) || !sources.length) return '—'
+  return sources.map((x: any) => `${x.name || '解释'}：${x.source || '—'}${x.usage ? `（${x.usage}）` : ''}`).join('；')
+})
 
 function normalizeSourceLabel(label: string) {
   return String(label || '').replace('AI增强', 'AI辅助').replace('样本', '')
@@ -298,6 +311,15 @@ onMounted(load)
   line-height: 1.5;
 }
 
+.metric-card > small,
+.source-text {
+  display: block;
+  margin-top: 6px;
+  color: #64748b;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
 .priority-title {
   display: flex;
   gap: 8px;
@@ -372,6 +394,15 @@ onMounted(load)
   font-size: 11px;
   color: #64748b;
   margin-left: 2px;
+}
+
+.evidence em {
+  display: block;
+  margin-top: 5px;
+  color: #94a3b8;
+  font-size: 11px;
+  font-style: normal;
+  line-height: 1.5;
 }
 
 .role-grid {

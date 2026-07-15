@@ -42,7 +42,8 @@
         <div v-for="m in data.metrics || []" :key="m.label" class="metric-card">
           <span>{{ m.label }}</span>
           <b>{{ m.value }}<small>{{ m.unit }}</small></b>
-          <p>{{ m.hint }}</p>
+          <p>{{ m.managementValue || m.hint }}</p>
+          <small v-if="m.source">来源：{{ m.source }}</small>
         </div>
       </div>
 
@@ -83,6 +84,12 @@
           </div>
           <p class="best-for">{{ s.bestFor }}</p>
           <p class="logic">{{ s.logic }}</p>
+          <div v-if="s.evidenceBasis?.length" class="basis-list">
+            <div v-for="b in s.evidenceBasis" :key="b.source + b.usage" class="basis-item">
+              <span>依据来源：{{ b.source }}</span>
+              <small>{{ b.usage }}</small>
+            </div>
+          </div>
           <ol>
             <li v-for="a in s.actions || []" :key="a">{{ a }}</li>
           </ol>
@@ -126,6 +133,7 @@
           <el-descriptions-item label="命中规则">{{ listText(trace.rules) }}</el-descriptions-item>
           <el-descriptions-item label="公式/口径">{{ trace.formula || '—' }}</el-descriptions-item>
           <el-descriptions-item label="使用边界">{{ trace.boundary || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="解释来源">{{ explanationSourceText }}</el-descriptions-item>
         </el-descriptions>
       </section>
 
@@ -157,6 +165,11 @@ const data = reactive<any>({})
 
 const sourceLabelText = computed(() => normalizeSourceLabel(data.sourceLabel || 'AI辅助决策模拟'))
 const trace = computed(() => data.traceability || {})
+const explanationSourceText = computed(() => {
+  const sources = data.explanationSources || trace.value.explanationSources || []
+  if (!Array.isArray(sources) || !sources.length) return '—'
+  return sources.map((x: any) => `${x.name || '解释'}：${x.source || '—'}${x.usage ? `（${x.usage}）` : ''}`).join('；')
+})
 
 function normalizeSourceLabel(label: string) {
   return String(label || '').replace('AI增强', 'AI辅助').replace('样本', '')
@@ -301,6 +314,14 @@ onMounted(load)
   line-height: 1.5;
 }
 
+.metric-card > small {
+  display: block;
+  margin-top: 6px;
+  color: #64748b;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
 .recommendation {
   display: grid;
   grid-template-columns: 1fr 1.5fr;
@@ -391,6 +412,32 @@ onMounted(load)
   padding: 10px;
   border-radius: 8px;
   background: #f8fafc;
+}
+
+.basis-list {
+  display: grid;
+  gap: 7px;
+  margin: 10px 0;
+}
+
+.basis-item {
+  padding: 9px 10px;
+  border: 1px dashed #fed7aa;
+  border-radius: 8px;
+  background: #fffbeb;
+}
+
+.basis-item span,
+.basis-item small {
+  display: block;
+  color: #92400e;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.basis-item small {
+  margin-top: 4px;
+  color: #a16207;
 }
 
 .tag {

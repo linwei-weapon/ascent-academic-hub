@@ -41,6 +41,230 @@ WORKFLOW_BY_LABEL = {
 V2_ALL_SCOPE_ROLES = {"school_leader", "dean", "dept_operation", "dept_research", "dept_practice", "quality_office"}
 V2_MAPPED_SCOPE_ROLES = {"college_dean", "college_secretary", "counselor", "dept_director"}
 
+DEFAULT_TRACEABILITY = {
+    "dataSources": ["当前页面已接入的业务数据表"],
+    "calculationLogic": "按当前对象的关键证据、命中规则、影响范围和管理优先级生成AI辅助研判。",
+    "rules": ["优先使用结构化事实数据；无完整证据时仅提示核查，不直接给出正式业务结论"],
+    "formula": "管理优先级 = 风险强度 + 影响范围 + 可行动性 + 数据证据充分度",
+    "boundary": "仅用于管理核查和决策辅助，不替代正式审批、毕业审核、教师评价或业务结论。",
+    "explanationSources": [
+        {"name": "AI结论", "source": "当前对象的证据项、命中规则和管理建议", "usage": "用于解释为什么需要关注，以及下一步应由谁核查。"}
+    ],
+}
+
+TRACEABILITY_BY_SCENARIO = {
+    "student": {
+        "dataSources": ["fact_alert", "alert_event", "fact_grade", "dim_course", "dim_student"],
+        "calculationLogic": "汇总学生有效预警、成绩通过情况、GPA变化、未通过课程及课程历史未通过率，形成学生个体学业风险研判。",
+        "rules": [
+            "有效预警来自 fact_alert.is_active=1",
+            "未通过课程来自 fact_grade.is_pass=0",
+            "GPA变化按相邻学期平均GPA比较",
+            "高难度课程按同课程历史未通过率识别",
+        ],
+        "formula": "学生风险 = 有效预警等级 + 未通过课程数 + 必修未通过课程数 + GPA下降幅度 + 高未通过率课程暴露",
+        "boundary": "用于辅导员、班主任、学院和教务处核查学生状态，不替代正式成绩认定、处分、毕业资格审核或心理评估。",
+        "explanationSources": [
+            {"name": "预警解释", "source": "fact_alert.level/type/trigger_detail、alert_event.workflow_status", "usage": "确认最近一次预警来源和是否需要延续干预。"},
+            {"name": "课程与GPA解释", "source": "fact_grade.is_pass/gpa/credits、dim_course.name", "usage": "判断学生是否存在课程缺口、GPA下滑或高难度课程暴露。"},
+        ],
+    },
+    "alert_monitor": {
+        "dataSources": ["fact_alert", "alert_event", "fact_grade", "dim_student", "dim_college"],
+        "calculationLogic": "按预警等级、类型和学生成绩记录汇总当前预警池，识别需要优先分派或复核的学生群体。",
+        "rules": ["预警学生按 fact_alert.student_id 去重", "严重/警告优先级高于提醒", "叠加未通过课程数判断处置优先级"],
+        "formula": "预警群体优先级 = 预警等级权重 + 未通过课程数 + 学院影响范围",
+        "boundary": "用于预警监控和名单分派，不代表已完成干预闭环或学生最终风险结论。",
+    },
+    "graduation_readiness": {
+        "dataSources": ["student_plan_course_status", "curriculum_plan_course", "dim_student", "dim_course"],
+        "calculationLogic": "按学生绑定培养方案，核查必修课程完成状态、明确未通过、到期缺证据和模块要求，生成毕业准备核查建议。",
+        "rules": ["明确未通过来自 completion_status='failed'", "到期缺证据来自 completion_status in ('not_completed','unknown') 且 is_overdue=1", "必修优先级高于选修缺口"],
+        "formula": "毕业准备风险 = 必修明确未通过 + 到期缺证据 + 模块完成缺口 + 临近毕业权重",
+        "boundary": "用于毕业准备提前核查，不替代学校正式毕业资格审核。",
+    },
+    "graduation_course_supply": {
+        "dataSources": ["student_plan_course_status", "curriculum_plan_course", "teaching_lesson", "lesson_teacher", "student_course_substitution"],
+        "calculationLogic": "以课程为单位汇总必修未通过、到期缺证据、涉及专业、开课供给、教师覆盖和替代关系，判断课程保障优先级。",
+        "rules": ["学生缺口按课程聚合", "无教学班证据提示供给核查", "替代关系用于降低误判为未完成的风险"],
+        "formula": "课程保障优先级 = 明确未通过人数 + 到期缺证据人数 + 涉及专业数 + 供给/替代证据缺口",
+        "boundary": "用于课程保障和重修资源核查，不代表未来开课承诺。",
+    },
+    "operation_course_offering": {
+        "dataSources": ["teaching_lesson", "lesson_teacher", "fact_grade", "dim_course"],
+        "calculationLogic": "汇总单门课程开课班数、容量、选课人数、教师覆盖和历史未通过情况，判断课程供给与质量核查价值。",
+        "rules": ["供给来自 teaching_lesson.capacity/enrolled", "教师覆盖来自 lesson_teacher.staff_id", "课程质量线索来自 fact_grade.is_pass"],
+        "formula": "课程运行关注度 = 开课供给压力 + 教师覆盖不足 + 历史未通过率 + 影响学生规模",
+        "boundary": "用于教学运行核查，不直接评价课程质量或教师表现。",
+    },
+    "operation_classroom_occupancy": {
+        "dataSources": ["fact_room_occupancy", "dim_building", "dim_room"],
+        "calculationLogic": "按楼宇、教室、日期、星期和节次汇总实际占用，识别高负荷时段、晚间占用、重叠记录和楼宇映射问题。",
+        "rules": ["占用强度按实际占用记录与观察教室/时段计算", "晚间记录单独标识", "重叠与待映射记录作为数据质量核查线索"],
+        "formula": "教室资源关注度 = 峰值占用强度 + 高负荷楼宇 + 晚间占用占比 + 重叠/待映射记录",
+        "boundary": "当前是实际占用观察，不等同学校正式可用教室总量或最终排课容量。",
+    },
+    "operation_schedule_changes": {
+        "dataSources": ["fact_schedule_change", "teaching_lesson", "lesson_teacher", "dim_staff"],
+        "calculationLogic": "对调停课记录按原因文本、月份、教师和课程进行归类统计，识别集中原因与运行波动。",
+        "rules": ["原因文本先做语义归类", "教师TOP只作为核查线索", "月份集中需结合校历和考试周解释"],
+        "formula": "调课关注度 = 调课记录数 + 集中原因占比 + 教师/月份集中度",
+        "boundary": "调课频次不直接等同教学质量问题，应结合审批依据和补课安排判断。",
+    },
+    "operation_schedule_teacher": {
+        "dataSources": ["fact_schedule_change", "lesson_teacher", "dim_staff", "teaching_lesson"],
+        "calculationLogic": "按教师维度汇总调停课次数、原因归类和月份分布，提示是否需要核查审批、补课或排课冲突。",
+        "rules": ["同一教师记录数越集中越需要核查", "原因归类用于解释管理动作，不直接归因个人责任"],
+        "formula": "教师调课关注度 = 调课次数 + 原因集中度 + 月份集中度",
+        "boundary": "用于运行核查，不作为教师教学评价或绩效结论。",
+    },
+    "operation_teacher_load": {
+        "dataSources": ["teaching_lesson", "lesson_teacher", "dim_staff", "dim_course"],
+        "calculationLogic": "按教师、学院、职称汇总教学学时、课程数、教学班数和学生覆盖，识别负荷集中与结构性压力。",
+        "rules": ["学时和教学班来自教学任务", "职称与组织来自教师主数据", "异常高负荷先进入数据质量核查"],
+        "formula": "教师负荷关注度 = 学时 + 课程数 + 教学班数 + 学生覆盖 + 学院/职称结构集中度",
+        "boundary": "用于管理核查排序，不替代学校正式工作量核算、超工作量认定或绩效结论。",
+    },
+    "operation_teacher_load_teacher": {
+        "dataSources": ["teaching_lesson", "lesson_teacher", "dim_staff", "dim_course"],
+        "calculationLogic": "按单个教师汇总教学任务、学时、课程、教学班和学生覆盖，识别是否需要核查任务映射或负荷分担。",
+        "rules": ["超过合理上限时优先提示数据质量核查", "个人负荷只用于排课和资源协调线索"],
+        "formula": "教师个人负荷风险 = 学时 + 课程数 + 教学班数 + 学生覆盖 + 数据异常标记",
+        "boundary": "不直接评价教师个人教学质量或绩效。",
+    },
+    "faculty_resource_risk": {
+        "dataSources": ["agg_course_team", "teaching_lesson", "lesson_teacher", "dim_staff", "dim_course"],
+        "calculationLogic": "按课程团队聚合教师数量、职称结构、年龄线索和学生覆盖，识别单教师、高职称缺口或主数据缺失。",
+        "rules": ["单教师课程提示连续性风险", "职称缺失优先作为主数据治理问题", "无高职称线索提示课程团队梯队核查"],
+        "formula": "课程团队风险 = 单教师权重 + 职称缺口 + 无高职称线索 + 学生覆盖规模",
+        "boundary": "用于课程团队保障核查，不替代教师评价、人事评价或课程质量结论。",
+    },
+    "faculty_resource_course": {
+        "dataSources": ["agg_course_team", "teaching_lesson", "lesson_teacher", "dim_staff", "dim_course"],
+        "calculationLogic": "针对单门课程检查教师人数、职称结构、学生覆盖和开课证据，判断团队保障风险。",
+        "rules": ["单教师且覆盖学生多优先级最高", "职称缺失需先做教师主数据治理", "团队结构风险需结合学院实际师资确认"],
+        "formula": "单课团队保障优先级 = 单教师标记 + 覆盖学生数 + 职称结构风险 + 开课连续性",
+        "boundary": "用于课程团队保障核查，不等同课程质量评价。",
+    },
+    "management_briefing": {
+        "dataSources": ["fact_alert", "fact_grade", "student_plan_course_status", "teaching_lesson", "fact_room_occupancy", "agg_course_team"],
+        "calculationLogic": "按当前接入数据汇总有效预警、培养方案必修课完成证据、课程未通过记录、教学任务、教室占用和课程团队风险，再按管理影响面生成优先级。",
+        "rules": ["有效预警学生按 fact_alert.is_active 去重", "毕业准备按必修课明确未通过和到期缺证据识别", "课程质量按成绩记录未通过率和累计未通过人次识别", "课程团队按单教师、职称缺口和无高职称线索识别"],
+        "formula": "管理优先级 = 高风险学生影响 + 毕业准备可行动问题 + 高影响课程 + 课程团队保障风险 + 运行资源证据",
+        "boundary": "简报用于管理优先级提示，不替代毕业审核、教师评价或正式审批。",
+    },
+    "graduation_course_support": {
+        "dataSources": ["student_plan_course_status", "curriculum_plan_course", "teaching_lesson", "lesson_teacher", "agg_course_team", "student_course_substitution"],
+        "calculationLogic": "先筛选必修课中存在明确未通过或到期缺证据的课程，再叠加开课容量、教师覆盖、课程团队和替代关系，比较不同管理动作的可核查覆盖规模和实施难度。",
+        "rules": ["明确未通过来自 completion_status='failed'", "到期缺证据来自 completion_status in ('not_completed','unknown') 且 is_overdue=1", "重修/补修测算参考课程缺口人数和当前开课余量", "认定核查测算参考到期缺证据人数和替代关系线索", "课程团队保障测算参考单教师或职称信息缺口"],
+        "formula": "方案优先级 = 预计优先核查人次 × 管理收益权重，并结合成本、实施难度和课程团队瓶颈调整。",
+        "boundary": "模拟结果是管理测算，不是学生最终通过预测、毕业结论或开课承诺。",
+    },
+}
+
+METRIC_MANAGEMENT_META = {
+    "有效预警学生": {"source": "fact_alert.student_id / fact_alert.is_active", "managementValue": "判断当前仍需跟踪的预警学生池规模，用于安排学院分派、辅导员沟通和复核优先级。"},
+    "毕业需处理学生": {"source": "student_plan_course_status.completion_status / requirement_type", "managementValue": "识别毕业准备中有明确必修课未通过证据的学生，便于提前组织课程补修、重修或个案核查。"},
+    "高影响挂科课程": {"source": "fact_grade.course_id / fact_grade.is_pass", "managementValue": "定位累计未通过较多、影响学生面较大的课程，用于课程质量复盘和学习支持资源配置。"},
+    "团队核查课程": {"source": "agg_course_team.teacher_count / title_rank", "managementValue": "识别课程团队单点、职称缺口或梯队不足问题，用于下学期开课保障和师资备份。"},
+    "教室占用记录": {"source": "fact_room_occupancy.room_id / weekday / period_index", "managementValue": "判断教室资源分析的数据覆盖度和可用性；记录越完整，楼宇负荷、晚间占用和排课优化判断越可靠。"},
+    "模拟课程": {"source": "student_plan_course_status.course_id / curriculum_plan_course.requirement_type", "managementValue": "限定本次模拟纳入的必修问题课程范围，便于教务处聚焦少量高影响课程先处理。"},
+    "涉及学生": {"source": "student_plan_course_status.student_id 去重", "managementValue": "判断真实影响学生规模，避免只看课程人次而高估或低估管理工作量。"},
+    "明确未通过": {"source": "student_plan_course_status.completion_status='failed'", "managementValue": "估算重修、补修班和学习支持资源的直接需求量。"},
+    "到期缺证据": {"source": "student_plan_course_status.completion_status in ('not_completed','unknown') and is_overdue=1", "managementValue": "识别需要先做认定、替代课程或数据回写核验的问题，避免误判为学生未完成。"},
+    "覆盖专业": {"source": "dim_student.major_code 按课程聚合", "managementValue": "判断该问题是否跨多个专业，决定由教务处牵头还是学院内部处理。"},
+}
+
+
+def _trace_key(payload: dict) -> str:
+    scenario = payload.get("scenario") or ""
+    target_type = payload.get("targetType") or ""
+    if scenario in TRACEABILITY_BY_SCENARIO:
+        return scenario
+    if target_type == "student":
+        return "student"
+    if scenario.startswith("graduation"):
+        return "graduation_readiness"
+    if scenario.startswith("operation_teacher_load_teacher"):
+        return "operation_teacher_load_teacher"
+    if scenario.startswith("operation_teacher_load"):
+        return "operation_teacher_load"
+    if scenario.startswith("operation_schedule_teacher"):
+        return "operation_schedule_teacher"
+    if scenario.startswith("operation_schedule"):
+        return "operation_schedule_changes"
+    if scenario.startswith("faculty_resource_course"):
+        return "faculty_resource_course"
+    if scenario.startswith("faculty_resource"):
+        return "faculty_resource_risk"
+    return target_type or scenario or "default"
+
+
+def _traceability_for(payload: dict) -> dict:
+    base = dict(DEFAULT_TRACEABILITY)
+    specific = TRACEABILITY_BY_SCENARIO.get(_trace_key(payload), {})
+    base.update(specific)
+    existing = payload.get("traceability") or {}
+    base.update({k: v for k, v in existing.items() if v})
+    return base
+
+
+def _join_source(traceability: dict) -> str:
+    sources = traceability.get("dataSources") or []
+    if isinstance(sources, list):
+        return "、".join(sources)
+    return str(sources)
+
+
+def _with_ai_trace(payload: dict) -> dict:
+    if not isinstance(payload, dict):
+        return payload
+    traceability = _traceability_for(payload)
+    payload["traceability"] = traceability
+    default_source = _join_source(traceability)
+
+    for item in payload.get("evidence") or []:
+        if isinstance(item, dict):
+            item.setdefault("source", default_source)
+            item.setdefault("managementValue", "用于支撑本次AI研判的风险等级、原因解释和后续核查动作。")
+
+    for item in payload.get("metrics") or []:
+        if isinstance(item, dict):
+            meta = METRIC_MANAGEMENT_META.get(item.get("label"), {})
+            item.setdefault("source", meta.get("source", default_source))
+            item.setdefault("managementValue", meta.get("managementValue", item.get("hint") or "用于判断管理优先级和后续核查范围。"))
+
+    for item in payload.get("priorities") or []:
+        if isinstance(item, dict):
+            item.setdefault("source", default_source)
+            item.setdefault("managementValue", item.get("why") or "用于把AI摘要转化为管理优先级和专题核查入口。")
+
+    for section in payload.get("sections") or []:
+        if isinstance(section, dict):
+            section.setdefault("source", default_source)
+            for item in section.get("evidence") or []:
+                if isinstance(item, dict):
+                    item.setdefault("source", default_source)
+                    item.setdefault("managementValue", section.get("managementValue") or "用于支撑该专题的管理判断。")
+
+    for item in payload.get("scenarios") or []:
+        if isinstance(item, dict):
+            item.setdefault("source", default_source)
+            item.setdefault("managementValue", item.get("bestFor") or "用于比较不同管理动作的收益、成本和实施难度。")
+            item.setdefault("evidenceBasis", [
+                {"source": default_source, "usage": item.get("logic") or "用于支撑该方案的覆盖规模和优先级判断。"}
+            ])
+
+    if "explanationSources" not in payload:
+        payload["explanationSources"] = traceability.get("explanationSources") or [
+            {"name": "AI解释", "source": default_source, "usage": "用于说明研判原因、管理价值和建议动作的依据。"}
+        ]
+    return payload
+
+
+def ai_ok(payload: dict):
+    return ok(_with_ai_trace(payload))
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
@@ -358,7 +582,7 @@ def _student_insight(conn: sqlite3.Connection, student_id: str, user: dict, scen
 def student_insight(student_id: str, scenario: str = "alert",
                     user: dict = Depends(get_current_user),
                     conn: sqlite3.Connection = Depends(get_db)):
-    return ok(_student_insight(conn, student_id, user, scenario))
+    return ai_ok(_student_insight(conn, student_id, user, scenario))
 
 
 @router.get("/insight/alert-summary")
@@ -405,7 +629,7 @@ def alert_summary(level: Optional[str] = None, type: Optional[str] = None,
         f"当前切片共识别 {total} 条有效预警，其中严重 {critical} 条、警告 {warning} 条。"
         "建议优先查看严重预警且未通过课程较多的学生，再核查是否存在课程供给或帮扶资源不足。"
     )
-    return ok({
+    return ai_ok({
         "targetType": "alertGroup",
         "targetId": "current-alert-filter",
         "targetName": "当前预警切片",
@@ -473,7 +697,7 @@ def graduation_readiness_student_insight(student_id: str,
         f"其中明确未通过 {len(failed)} 门，到期缺结果候选 {len(candidates)} 门。"
         "建议先核查必修未通过课程的重修、补考、替代认定和近期教学班供给。"
     )
-    return ok({
+    return ai_ok({
         "targetType": "graduationStudent",
         "targetId": student_id,
         "targetName": student["display_name"],
@@ -559,7 +783,7 @@ def graduation_readiness_course_insight(course_id: str,
         reasons.append("历史教学证据中教师覆盖较少，若下期开重修或补修班，需要提前确认师资容量。")
     if substitutions:
         reasons.append(f"已发现 {substitutions} 条课程替代关系，可作为学生个体核查时的重要证据。")
-    return ok({
+    return ai_ok({
         "targetType": "graduationCourse",
         "targetId": course_id,
         "targetName": course.get("name") or course_id,
@@ -703,7 +927,7 @@ def operation_course_offering_insight(course_id: str, semester: str = "2023-2024
         f"{teacher_count} 名教师、{enrolled} 人次选课，平均班额 {avg_size} 人。"
         + ("建议作为本轮排课供给优化的优先核查课程。" if attention else "当前未发现明显供给压力，可作为常规观察对象。")
     )
-    return ok({
+    return ai_ok({
         "targetType": "operationCourseOffering",
         "targetId": course_id,
         "targetName": offering.get("course_name") or course.get("name") or course_id,
@@ -844,7 +1068,7 @@ def operation_classroom_occupancy_insight(semester: Optional[str] = None,
         f"覆盖 {summary.get('observedRooms') or 0} 间已观察教室、{summary.get('observedDates') or 0} 个日期。"
         + (f" 当前最高负荷楼宇为 {top_building.get('name')}，观察负荷 {top_load}%。" if top_building else "")
     )
-    return ok({
+    return ai_ok({
         "targetType": "operationClassroomOccupancy",
         "targetId": building or "all-buildings",
         "targetName": target_name,
@@ -997,7 +1221,7 @@ def operation_schedule_changes_insight(semester: Optional[str] = None,
         reasons.append(f"调停课最集中月份为 {top_month['month']} 月，共 {top_month['count']} 条，建议结合考试周、实践周或大型活动安排核查。")
     if teacher_rows:
         reasons.append(f"最高频教师为 {teacher_rows[0]['teacher_name']}，本学期 {teacher_rows[0]['count']} 条记录，建议进入教师维度核查原因是否集中。")
-    return ok({
+    return ai_ok({
         "targetType": "operationScheduleChanges",
         "targetId": college or "current-schedule-change-filter",
         "targetName": target_name,
@@ -1085,7 +1309,7 @@ def operation_schedule_teacher_insight(teacher_id: str, semester: Optional[str] 
         f"{teacher.get('name') or teacher_id}在 {sem} 学期共有 {total} 条调停课记录，停课 {stop_count} 条，"
         f"影响 {affected} 人次。主要原因归类为“{top.get('semanticCategory') or '暂无'}”，建议核查是否属于可提前规避的安排冲突。"
     )
-    return ok({
+    return ai_ok({
         "targetType": "operationScheduleTeacher",
         "targetId": teacher_id,
         "targetName": teacher.get("name") or teacher_id,
@@ -1262,7 +1486,7 @@ def operation_teacher_load_insight(semester: Optional[str] = None,
         reasons.append(f"按职称看，{title_rows[0]['title']} 人均学时最高，为 {title_rows[0]['avgHours']} 学时，可作为结构性投入核查线索。")
     if dept_rows and not college_name:
         reasons.append(f"按学院看，{dept_rows[0]['dept']} 人均学时最高，为 {dept_rows[0]['avgHours']} 学时，建议核查是否存在师资结构或公共课承担压力。")
-    return ok({
+    return ai_ok({
         "targetType": "operationTeacherLoad",
         "targetId": college_id or title or "current-teacher-load-filter",
         "targetName": target_name,
@@ -1319,7 +1543,7 @@ def operation_teacher_load_teacher_insight(teacher_id: str, semester: Optional[s
     quality_issue = _teacher_load_quality_issues(conn, sem).get(teacher_id)
     heuristic_anomaly = (load.get("classes") or 0) > 200 or (load.get("hours") or 0) > 1000 or (load.get("courses") or 0) > 20
     if quality_issue or heuristic_anomaly:
-        return ok({
+        return ai_ok({
             "targetType": "operationTeacherLoadDataQuality",
             "targetId": teacher_id,
             "targetName": teacher.get("name") or teacher_id,
@@ -1388,7 +1612,7 @@ def operation_teacher_load_teacher_insight(teacher_id: str, semester: Optional[s
         "若课程数多且教学班分散，管理重点是排课冲突、备课压力和课程团队替补能力。",
         "若学生覆盖人次高，管理重点是答疑、实验/实践支撑、助教资源和教学质量保障。",
     ]
-    return ok({
+    return ai_ok({
         "targetType": "operationTeacherLoadTeacher",
         "targetId": teacher_id,
         "targetName": teacher.get("name") or teacher_id,
@@ -1500,7 +1724,7 @@ def faculty_resource_risk_insight(semester: str = "2023-2024-1",
         "职称信息不完整首先是主数据治理问题，不能据此直接判断团队梯队。",
         "已知成员无高职称只作为结构核查线索，需结合课程性质、教师资历、学院培养安排和课程团队建设实际判断。",
     ]
-    return ok({
+    return ai_ok({
         "targetType": "facultyResourceRisk",
         "targetId": "faculty-resource-risk",
         "targetName": "资源与师资风险专题",
@@ -1582,7 +1806,7 @@ def faculty_resource_course_insight(course_id: str, semester: str = "2023-2024-1
         explain.append("团队中存在职称缺失，当前不宜直接判断职称梯队，应先补齐人事主数据。")
     if "no_senior_title" in reasons:
         explain.append("已知职称成员中未见教授/副教授，建议结合课程性质核查高职称教师指导或课程负责人安排。")
-    return ok({
+    return ai_ok({
         "targetType": "facultyResourceCourse",
         "targetId": course_id,
         "targetName": row.get("course_name") or course_id,
@@ -1659,7 +1883,7 @@ def management_ai_briefing(period: str = "morning",
     if cached and time.time() - cached[0] < MANAGEMENT_BRIEFING_CACHE_TTL:
         payload = dict(cached[1])
         payload["cache"] = {"hit": True, "ttlSeconds": MANAGEMENT_BRIEFING_CACHE_TTL}
-        return ok(payload)
+        return ai_ok(payload)
 
     active_alert_students = _safe_scalar(conn, """
         SELECT COUNT(DISTINCT student_id) FROM fact_alert
@@ -1913,7 +2137,7 @@ def management_ai_briefing(period: str = "morning",
         "cache": {"hit": False, "ttlSeconds": MANAGEMENT_BRIEFING_CACHE_TTL},
     }
     _MANAGEMENT_BRIEFING_CACHE[cache_key] = (time.time(), payload)
-    return ok(payload)
+    return ai_ok(payload)
 
 
 def _simulation_priority(score: float) -> str:
@@ -1945,7 +2169,7 @@ def graduation_course_support_simulation(semester: Optional[str] = None,
     if cached and time.time() - cached[0] < DECISION_SIMULATION_CACHE_TTL:
         payload = dict(cached[1])
         payload["cache"] = {"hit": True, "ttlSeconds": DECISION_SIMULATION_CACHE_TTL}
-        return ok(payload)
+        return ai_ok(payload)
 
     rows = dbm.query(conn, """
         SELECT x.course_id,
@@ -2180,4 +2404,4 @@ def graduation_course_support_simulation(semester: Optional[str] = None,
         "cache": {"hit": False, "ttlSeconds": DECISION_SIMULATION_CACHE_TTL},
     }
     _DECISION_SIMULATION_CACHE[cache_key] = (time.time(), payload)
-    return ok(payload)
+    return ai_ok(payload)

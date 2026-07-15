@@ -48,6 +48,8 @@
             <span>{{ item.label }}</span>
             <b>{{ item.value }}</b>
             <small>{{ item.detail }}</small>
+            <em v-if="item.source">来源：{{ item.source }}</em>
+            <em v-if="item.managementValue">管理意义：{{ item.managementValue }}</em>
           </div>
         </div>
       </section>
@@ -57,6 +59,13 @@
         <ul class="ai-list">
           <li v-for="item in insight.reasons" :key="item">{{ item }}</li>
         </ul>
+        <div v-if="explanationSources.length" class="source-list">
+          <div v-for="item in explanationSources" :key="item.name + item.source" class="source-item">
+            <b>{{ item.name }}</b>
+            <span>来源：{{ item.source }}</span>
+            <small>{{ item.usage }}</small>
+          </div>
+        </div>
       </section>
 
       <section v-if="insight.suggestions?.length" class="ai-section">
@@ -90,6 +99,7 @@
           <el-descriptions-item label="命中规则">{{ trace.rules }}</el-descriptions-item>
           <el-descriptions-item label="公式/口径">{{ trace.formula }}</el-descriptions-item>
           <el-descriptions-item label="使用边界">{{ trace.boundary }}</el-descriptions-item>
+          <el-descriptions-item label="解释来源">{{ explanationSourceText }}</el-descriptions-item>
         </el-descriptions>
       </section>
 
@@ -121,6 +131,16 @@ const props = defineProps<{
 const emit = defineEmits<{(e: 'update:modelValue', value: boolean): void}>()
 
 const sourceLabel = computed(() => normalizeSourceLabel(props.insight?.sourceLabel || '规则研判'))
+
+const explanationSources = computed(() => {
+  const sources = props.insight?.explanationSources || props.insight?.traceability?.explanationSources || []
+  return Array.isArray(sources) ? sources : []
+})
+
+const explanationSourceText = computed(() => {
+  if (!explanationSources.value.length) return '—'
+  return explanationSources.value.map((x: any) => `${x.name || '解释'}：${x.source || '—'}${x.usage ? `（${x.usage}）` : ''}`).join('；')
+})
 
 const trace = computed(() => {
   const t = props.insight?.traceability || {}
@@ -219,12 +239,18 @@ function shortTime(v: string) {
 .evidence-card span { display: block; font-size: 11px; color: #64748b; }
 .evidence-card b { display: block; margin-top: 4px; color: #1e293b; font-size: 15px; word-break: break-word; }
 .evidence-card small { display: block; margin-top: 4px; color: #94a3b8; font-size: 11px; line-height: 1.5; }
+.evidence-card em { display: block; margin-top: 5px; color: #64748b; font-size: 11px; font-style: normal; line-height: 1.5; }
 .evidence-card.danger { border-color: #fecdd3; background: #fff5f7; }
 .evidence-card.warning { border-color: #fed7aa; background: #fff7ed; }
 .evidence-card.success { border-color: #bbf7d0; background: #f0fdf6; }
 .ai-list { margin: 0; padding-left: 18px; color: #475569; font-size: 13px; line-height: 1.75; }
 .ai-list li { margin-bottom: 5px; }
 .numbered { padding-left: 20px; }
+.source-list { display: grid; gap: 7px; margin-top: 10px; }
+.source-item { padding: 9px 10px; border: 1px dashed #cbd5e1; border-radius: 8px; background: #f8fafc; }
+.source-item b { display: block; color: #334155; font-size: 12px; }
+.source-item span,
+.source-item small { display: block; margin-top: 4px; color: #64748b; font-size: 11px; line-height: 1.5; }
 .suggestion-list { display: grid; gap: 9px; }
 .suggestion-item {
   padding: 10px 12px;
