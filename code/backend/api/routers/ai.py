@@ -1419,3 +1419,200 @@ def operation_teacher_load_teacher_insight(teacher_id: str, semester: Optional[s
         "focusItems": {"courseBreakdown": courses},
         "limitations": ["教师个人负荷研判只用于管理支持和核查排序，不直接评价教师教学质量或绩效。"],
     })
+
+
+def _faculty_course_attention(row: dict) -> list[str]:
+    reasons: list[str] = []
+    if (row.get("teacher_count") or 0) <= 1:
+        reasons.append("single_teacher")
+    if (row.get("unknown_title_count") or 0) > 0:
+        reasons.append("title_incomplete")
+    known = (row.get("teacher_count") or 0) - (row.get("unknown_title_count") or 0)
+    if known > 0 and ((row.get("professor_count") or 0) + (row.get("associate_professor_count") or 0)) == 0:
+        reasons.append("no_senior_title")
+    return reasons
+
+
+def _faculty_reason_label(reason: str) -> str:
+    return {
+        "single_teacher": "当期单一教师承担",
+        "title_incomplete": "职称信息不完整",
+        "no_senior_title": "已知成员无教授/副教授",
+    }.get(reason, reason)
+
+
+def _course_raw_offering(conn: sqlite3.Connection, semester: str, course_id: str) -> dict:
+    return dbm.query_one(conn, """
+        SELECT COUNT(DISTINCT l.lesson_id) lesson_count,
+               SUM(COALESCE(l.enrolled,0)) enrolled,
+               SUM(COALESCE(l.capacity,0)) capacity,
+               SUM(COALESCE(l.total_hours,0)) total_hours
+        FROM teaching_lesson l
+        WHERE l.semester_id=? AND l.course_id=?
+    """, (semester, course_id)) or {"lesson_count": 0, "enrolled": 0, "capacity": 0, "total_hours": 0}
+
+
+@router.get("/insight/faculty-resource-risk")
+def faculty_resource_risk_insight(semester: str = "2023-2024-1",
+                                  user: dict = Depends(get_current_user),
+                                  conn: sqlite3.Connection = Depends(get_v2_db)):
+    if user.get("role_id") not in V2_ALL_SCOPE_ROLES:
+        raise ApiError("当前角色没有V2全校师资专题访问范围", code=403, status_code=403)
+    rows = dbm.query(conn, """
+        SELECT t.*,COALESCE(c.name,t.course_id) course_name,c.organization_id
+        FROM agg_course_team t
+        LEFT JOIN dim_course c ON c.course_id=t.course_id
+        WHERE t.semester_id=?
+    """, (semester,))
+    if not rows:
+        raise ApiError("暂无课程团队数据", code=404, status_code=404)
+    for row in rows:
+        raw = _course_raw_offering(conn, semester, row["course_id"])
+        row["lesson_count"] = raw.get("lesson_count") or 0
+        row["enrolled"] = raw.get("enrolled") or 0
+        row["attention_reasons"] = _faculty_course_attention(row)
+    attention = [r for r in rows if r["attention_reasons"]]
+    attention.sort(key=lambda x: (
+        "single_teacher" not in x["attention_reasons"],
+        "title_incomplete" not in x["attention_reasons"],
+        -int(x.get("enrolled") or 0),
+        x["course_id"],
+    ))
+    single = sum(1 for r in rows if "single_teacher" in r["attention_reasons"])
+    title_gap = sum(1 for r in rows if "title_incomplete" in r["attention_reasons"])
+    no_senior = sum(1 for r in rows if "no_senior_title" in r["attention_reasons"])
+    affected_enrolled = sum((r.get("enrolled") or 0) for r in attention[:20])
+    top = attention[0] if attention else rows[0]
+    risk = "critical" if single >= 10 or title_gap >= 20 else "warning" if attention else "info"
+    summary = (
+        f"{semester} 学期共识别 {len(rows)} 门有真实教学任务的课程团队，其中 {len(attention)} 门需要进一步核查。"
+        f"主要问题包括单一教师承担 {single} 门、职称信息不完整 {title_gap} 门、已知成员无教授/副教授 {no_senior} 门。"
+        f"建议优先核查选课人次较高且同时命中多项原因的课程，例如 {top.get('course_name') or top.get('course_id')}。"
+    )
+    reasons = [
+        "课程团队风险关注的是教学运行保障，不直接评价课程质量或教师个人能力。",
+        "单一教师承担表示当期教学任务存在备份能力核查需求，尤其是公共课、必修课或学生覆盖人次较高课程。",
+        "职称信息不完整首先是主数据治理问题，不能据此直接判断团队梯队。",
+        "已知成员无高职称只作为结构核查线索，需结合课程性质、教师资历、学院培养安排和课程团队建设实际判断。",
+    ]
+    return ok({
+        "targetType": "facultyResourceRisk",
+        "targetId": "faculty-resource-risk",
+        "targetName": "资源与师资风险专题",
+        "scenario": "faculty_resource_risk",
+        "riskLevel": risk,
+        "riskLabel": RISK_LABEL[risk],
+        "riskTone": TONE[risk],
+        "source": "ai_sample" if risk in {"critical", "warning"} else "rule",
+        "sourceLabel": "AI增强研判样本" if risk in {"critical", "warning"} else "规则研判兜底",
+        "generatedBy": "offline_llm_curated_sample" if risk in {"critical", "warning"} else "deterministic_rule_engine",
+        "generatedAt": _now(),
+        "summary": summary,
+        "confidence": "中高",
+        "profile": {"college": "全校", "major": "课程团队保障", "semester": semester},
+        "evidence": [
+            {"label": "真实团队课程", "value": f"{len(rows)} 门", "detail": "有真实教学任务教师关联的去重课程", "tone": "info"},
+            {"label": "需核查课程", "value": f"{len(attention)} 门", "detail": "命中单教师/职称缺口/无高职称线索", "tone": "danger" if attention else "success"},
+            {"label": "单一教师承担", "value": f"{single} 门", "detail": "优先核查备份教师和课程团队支撑", "tone": "danger" if single else "success"},
+            {"label": "职称信息不完整", "value": f"{title_gap} 门", "detail": "优先补齐人事主数据", "tone": "warning" if title_gap else "success"},
+            {"label": "重点覆盖人次", "value": f"{affected_enrolled} 人次", "detail": "TOP20 核查课程的选课人次合计", "tone": "warning" if affected_enrolled else "info"},
+        ],
+        "reasons": reasons,
+        "suggestions": [
+            {"role": "教务处", "priority": "high" if risk == "critical" else "medium", "action": "建立课程团队核查清单", "detail": "优先核查单教师承担且学生覆盖人次高的课程，确认备份教师、教学资料和应急替代机制。"},
+            {"role": "二级学院", "priority": "high" if single else "medium", "action": "完善课程团队梯队", "detail": "对重点课程补充课程团队成员、青年教师培养和高职称教师指导安排。"},
+            {"role": "人事/数据治理", "priority": "high" if title_gap else "medium", "action": "补齐教师职称主数据", "detail": "先处理职称缺失，再进行职称结构、人才梯队和课程团队风险判断。"},
+        ],
+        "nextActions": [
+            "打开命中多项原因的课程 AI 研判，核查是否存在高影响单点。",
+            "按学院导出课程团队核查清单，交由学院确认课程负责人和备份教师。",
+            "补齐职称主数据后重新计算课程团队结构风险。",
+        ],
+        "focusItems": {"courses": attention[:10]},
+        "limitations": [
+            "当前没有教师年龄数据，因此不判断年龄断层。",
+            "当前结果基于一个接入学期的真实教学任务，不等同于长期师资梯队结论。",
+        ],
+    })
+
+
+@router.get("/insight/faculty-resource-risk/course/{course_id}")
+def faculty_resource_course_insight(course_id: str, semester: str = "2023-2024-1",
+                                    user: dict = Depends(get_current_user),
+                                    conn: sqlite3.Connection = Depends(get_v2_db)):
+    if user.get("role_id") not in V2_ALL_SCOPE_ROLES:
+        raise ApiError("当前角色没有V2全校师资专题访问范围", code=403, status_code=403)
+    row = dbm.query_one(conn, """
+        SELECT t.*,COALESCE(c.name,t.course_id) course_name,c.organization_id,c.category,c.nature
+        FROM agg_course_team t
+        LEFT JOIN dim_course c ON c.course_id=t.course_id
+        WHERE t.semester_id=? AND t.course_id=?
+    """, (semester, course_id))
+    if not row:
+        raise ApiError("暂无该课程团队数据", code=404, status_code=404)
+    raw = _course_raw_offering(conn, semester, course_id)
+    members = dbm.query(conn, """
+        SELECT DISTINCT s.staff_id,s.display_name,s.title,s.organization_id,s.status
+        FROM teaching_lesson l
+        JOIN lesson_teacher lt ON lt.lesson_id=l.lesson_id
+        LEFT JOIN dim_staff s ON s.staff_id=lt.staff_id
+        WHERE l.semester_id=? AND l.course_id=?
+        ORDER BY s.title,s.staff_id
+    """, (semester, course_id))
+    reasons = _faculty_course_attention(row)
+    teacher_count = row.get("teacher_count") or 0
+    known = teacher_count - (row.get("unknown_title_count") or 0)
+    senior = (row.get("professor_count") or 0) + (row.get("associate_professor_count") or 0)
+    risk = "critical" if "single_teacher" in reasons and (raw.get("enrolled") or 0) >= 80 else "warning" if reasons else "info"
+    reason_text = "、".join(_faculty_reason_label(r) for r in reasons) or "未命中明显团队风险线索"
+    summary = (
+        f"{row.get('course_name') or course_id}在 {semester} 学期有 {teacher_count} 名实际授课教师、"
+        f"{raw.get('lesson_count') or 0} 个教学班、{raw.get('enrolled') or 0} 人次选课。"
+        f"当前关注原因：{reason_text}。"
+    )
+    explain = []
+    if "single_teacher" in reasons:
+        explain.append("当期仅 1 名教师承担该课程教学任务，若课程为必修、公共课或覆盖学生较多，需要核查备份教师和教学资料交接机制。")
+    if "title_incomplete" in reasons:
+        explain.append("团队中存在职称缺失，当前不宜直接判断职称梯队，应先补齐人事主数据。")
+    if "no_senior_title" in reasons:
+        explain.append("已知职称成员中未见教授/副教授，建议结合课程性质核查高职称教师指导或课程负责人安排。")
+    return ok({
+        "targetType": "facultyResourceCourse",
+        "targetId": course_id,
+        "targetName": row.get("course_name") or course_id,
+        "scenario": "faculty_resource_course",
+        "riskLevel": risk,
+        "riskLabel": RISK_LABEL[risk],
+        "riskTone": TONE[risk],
+        "source": "ai_sample" if risk in {"critical", "warning"} else "rule",
+        "sourceLabel": "AI增强研判样本" if risk in {"critical", "warning"} else "规则研判兜底",
+        "generatedBy": "offline_llm_curated_sample" if risk in {"critical", "warning"} else "deterministic_rule_engine",
+        "generatedAt": _now(),
+        "summary": summary,
+        "confidence": "中高",
+        "profile": {"college": row.get("organization_id"), "major": row.get("category") or row.get("nature"), "semester": semester},
+        "evidence": [
+            {"label": "实际授课教师", "value": f"{teacher_count} 人", "detail": "当期教学任务关联教师", "tone": "danger" if teacher_count <= 1 else "success"},
+            {"label": "教学班/选课", "value": f"{raw.get('lesson_count') or 0} 班 / {raw.get('enrolled') or 0} 人次", "detail": "基于 teaching_lesson 去重口径", "tone": "warning" if (raw.get("enrolled") or 0) >= 80 else "info"},
+            {"label": "职称已知", "value": f"{known} / {teacher_count}", "detail": f"缺失 {row.get('unknown_title_count') or 0} 人", "tone": "warning" if row.get("unknown_title_count") else "success"},
+            {"label": "教授/副教授", "value": f"{senior} 人", "detail": "已知成员中的高级职称线索", "tone": "warning" if known > 0 and senior == 0 else "info"},
+            {"label": "命中原因", "value": f"{len(reasons)} 项", "detail": reason_text, "tone": "danger" if "single_teacher" in reasons else "warning" if reasons else "success"},
+        ],
+        "reasons": explain or ["当前未发现明显课程团队保障风险，可作为常规观察对象。"],
+        "suggestions": [
+            {"role": "二级学院", "priority": "high" if risk == "critical" else "medium", "action": "确认课程团队与备份教师", "detail": "核查课程负责人、备份教师、教学资料和青年教师培养安排，避免高影响单点。"},
+            {"role": "教务处", "priority": "medium", "action": "纳入重点课程保障清单", "detail": "对覆盖学生较多、必修或公共课程，建议纳入教学运行保障台账。"},
+            {"role": "人事/数据治理", "priority": "high" if "title_incomplete" in reasons else "medium", "action": "补齐职称与组织归属", "detail": "职称缺失课程需先完成教师主数据治理，再判断职称结构风险。"},
+        ],
+        "nextActions": [
+            "查看成员列表，确认是否存在未关联到系统的实际课程团队成员。",
+            "若为单教师承担，确认下一学期是否已有备份教师或团队共建安排。",
+            "若无高级职称，结合课程性质判断是否需要高职称教师指导或课程负责人调整。",
+        ],
+        "focusItems": {"members": members},
+        "limitations": [
+            "当前没有教师年龄数据，因此不判断年龄断层。",
+            "单学期单教师承担不等同于长期人才危机，需要结合连续学期和学院确认信息。",
+        ],
+    })

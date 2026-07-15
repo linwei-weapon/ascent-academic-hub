@@ -75,3 +75,17 @@ export function getTeacherLoadTeacherAIInsight(teacherId: string, semester?: str
   const qs = params.toString()
   return http.get<any>(`/admin/ai/insight/operation/teacher-load/teacher/${encodeURIComponent(teacherId)}${qs ? `?${qs}` : ''}`)
 }
+
+export function getFacultyResourceAIInsight(semester?: string) {
+  const params = new URLSearchParams()
+  if (semester) params.set('semester', semester)
+  const qs = params.toString()
+  return http.get<any>(`/admin/ai/insight/faculty-resource-risk${qs ? `?${qs}` : ''}`)
+}
+
+export function getFacultyCourseAIInsight(courseId: string, semester?: string) {
+  const params = new URLSearchParams()
+  if (semester) params.set('semester', semester)
+  const qs = params.toString()
+  return http.get<any>(`/admin/ai/insight/faculty-resource-risk/course/${encodeURIComponent(courseId)}${qs ? `?${qs}` : ''}`)
+}
