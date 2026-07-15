@@ -7,8 +7,16 @@
     @update:model-value="emit('update:modelValue', $event)"
   >
     <div v-if="loading" class="ai-loading">
+      <el-alert
+        type="info"
+        :closable="false"
+        show-icon
+        title="正在生成AI辅助研判"
+        description="系统正在汇总成绩、预警、培养方案、教学任务等证据，并组织结论、原因和建议动作。"
+      />
       <el-skeleton :rows="8" animated />
     </div>
+
     <div v-else-if="insight" class="ai-body">
       <div class="ai-hero">
         <div>
@@ -20,7 +28,7 @@
           </div>
         </div>
         <el-tag :type="tagType(insight.riskTone || insight.riskLevel)" effect="light">
-          {{ insight.riskLabel || insight.riskLevel }}
+          {{ insight.riskLabel || insight.riskLevel || 'AI研判' }}
         </el-tag>
       </div>
 
@@ -28,7 +36,7 @@
         <div class="ai-summary-label">AI研判结论</div>
         <p>{{ insight.summary }}</p>
         <div class="ai-source">
-          <span>{{ insight.sourceLabel || '规则研判' }}</span>
+          <span>{{ sourceLabel }}</span>
           <span>证据充分度：{{ insight.confidence || '中' }}</span>
         </div>
       </div>
@@ -74,6 +82,17 @@
         </ol>
       </section>
 
+      <section class="ai-section trace-section">
+        <h4>研判追溯</h4>
+        <el-descriptions :column="1" border size="small">
+          <el-descriptions-item label="数据来源">{{ trace.dataSources }}</el-descriptions-item>
+          <el-descriptions-item label="计算逻辑">{{ trace.calculationLogic }}</el-descriptions-item>
+          <el-descriptions-item label="命中规则">{{ trace.rules }}</el-descriptions-item>
+          <el-descriptions-item label="公式/口径">{{ trace.formula }}</el-descriptions-item>
+          <el-descriptions-item label="使用边界">{{ trace.boundary }}</el-descriptions-item>
+        </el-descriptions>
+      </section>
+
       <el-alert
         v-if="insight.limitations?.length"
         class="ai-limit"
@@ -84,12 +103,15 @@
         :description="insight.limitations.join('；')"
       />
     </div>
+
     <el-empty v-else description="暂无AI研判内容" :image-size="90" />
   </el-drawer>
 </template>
 
 <script setup lang="ts">
-defineProps<{
+import { computed } from 'vue'
+
+const props = defineProps<{
   modelValue: boolean
   insight?: any
   loading?: boolean
@@ -97,6 +119,51 @@ defineProps<{
 }>()
 
 const emit = defineEmits<{(e: 'update:modelValue', value: boolean): void}>()
+
+const sourceLabel = computed(() => normalizeSourceLabel(props.insight?.sourceLabel || '规则研判'))
+
+const trace = computed(() => {
+  const t = props.insight?.traceability || {}
+  return {
+    dataSources: listText(t.dataSources) || inferDataSources(props.insight),
+    calculationLogic: t.calculationLogic || '根据当前对象的关键证据、命中原因和管理建议生成AI辅助研判。',
+    rules: listText(t.rules) || inferRules(props.insight),
+    formula: t.formula || '综合风险等级、关键证据数量、影响范围和管理优先级形成结论。',
+    boundary: t.boundary || (props.insight?.limitations || ['仅用于管理核查和决策辅助，不替代正式审批或业务结论。']).join('；'),
+  }
+})
+
+function listText(value: any) {
+  return Array.isArray(value) ? value.join('；') : (value || '')
+}
+
+function normalizeSourceLabel(label: string) {
+  return String(label || '')
+    .replace('AI增强研判样本', 'AI辅助研判')
+    .replace('AI增强管理简报样本', 'AI辅助管理简报')
+    .replace('AI增强决策模拟样本', 'AI辅助决策模拟')
+    .replace('AI增强', 'AI辅助')
+    .replace('样本', '')
+}
+
+function inferDataSources(insight: any) {
+  const scenario = insight?.scenario || ''
+  if (scenario.includes('graduation')) return '培养方案完成证据、成绩记录、课程供给、课程替代关系'
+  if (scenario.includes('faculty')) return '教学任务、课程团队、教师职称主数据'
+  if (scenario.includes('teacher_load')) return '教师教学任务、学时、教学班、学生覆盖人次'
+  if (scenario.includes('classroom')) return '实际教室占用、楼宇、时段、活动类型'
+  if (scenario.includes('schedule')) return '调停课记录、原因文本、教师与教学班信息'
+  if (scenario.includes('alert') || scenario.includes('student')) return '学生成绩、预警记录、学业轨迹、课程记录'
+  return '当前页面已接入的业务数据与统计证据'
+}
+
+function inferRules(insight: any) {
+  const parts = []
+  if (insight?.riskLabel) parts.push(`风险等级：${insight.riskLabel}`)
+  if (insight?.evidence?.length) parts.push(`关键证据 ${insight.evidence.length} 项`)
+  if (insight?.reasons?.length) parts.push(`命中原因 ${insight.reasons.length} 项`)
+  return parts.join('；') || '按当前对象证据完整度、影响范围和管理优先级生成'
+}
 
 function tagType(t: string) {
   return t === 'danger' || t === 'critical' ? 'danger' : t === 'warning' ? 'warning' : t === 'success' || t === 'low' ? 'success' : 'info'
@@ -114,6 +181,7 @@ function shortTime(v: string) {
 
 <style scoped>
 .ai-loading { padding: 4px 2px; }
+.ai-loading .el-alert { margin-bottom: 12px; }
 .ai-body { color: var(--sa-text); }
 .ai-hero {
   display: flex;
@@ -168,5 +236,7 @@ function shortTime(v: string) {
 .suggestion-head b { font-size: 13px; color: #1e293b; }
 .suggestion-action { margin-top: 6px; font-size: 13px; font-weight: 600; color: #4f46e5; }
 .suggestion-item p { margin: 4px 0 0; font-size: 12px; color: #64748b; line-height: 1.6; }
+.trace-section :deep(.el-descriptions__label) { width: 86px; color: #64748b; }
+.trace-section :deep(.el-descriptions__content) { color: #475569; font-size: 12px; line-height: 1.65; }
 .ai-limit { margin-top: 14px; }
 </style>

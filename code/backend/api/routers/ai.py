@@ -26,6 +26,8 @@ TONE = {"critical": "danger", "warning": "warning", "info": "info", "low": "succ
 AI_SAMPLE_LIMIT = 5
 MANAGEMENT_BRIEFING_CACHE_TTL = 300
 _MANAGEMENT_BRIEFING_CACHE: dict[tuple, tuple[float, dict]] = {}
+DECISION_SIMULATION_CACHE_TTL = 300
+_DECISION_SIMULATION_CACHE: dict[tuple, tuple[float, dict]] = {}
 WORKFLOW_BY_LABEL = {
     "待处理": "new",
     "已分派": "assigned",
@@ -249,7 +251,7 @@ def _reasons(base: dict, alerts: list[dict], stats: dict, failed: list[dict], en
         names = "、".join(c["course_name"] for c in high_rate[:2])
         reasons.append(f"未通过课程中包含历史未通过率较高课程：{names}，学生需要提前获得课程难度提醒和学习资源建议。")
     if enhanced:
-        reasons.append("该对象命中本轮演示的 AI 精研样本，研判文本在规则证据基础上进行了管理视角增强。")
+        reasons.append("该对象具备较完整的证据链，研判文本在规则证据基础上进行了管理视角增强。")
     return reasons or ["当前证据未显示明显恶化，但仍建议结合最近成绩、选课和学生访谈进行常规观察。"]
 
 
@@ -330,7 +332,7 @@ def _student_insight(conn: sqlite3.Connection, student_id: str, user: dict, scen
         "riskLabel": RISK_LABEL[risk],
         "riskTone": TONE[risk],
         "source": source,
-        "sourceLabel": "AI增强研判样本" if enhanced else "规则研判兜底",
+        "sourceLabel": "AI辅助研判" if enhanced else "规则研判兜底",
         "generatedBy": "offline_llm_curated_sample" if enhanced else "deterministic_rule_engine",
         "generatedAt": _now(),
         "summary": summary,
@@ -480,7 +482,7 @@ def graduation_readiness_student_insight(student_id: str,
         "riskLabel": RISK_LABEL[risk],
         "riskTone": TONE[risk],
         "source": "ai_sample" if enhanced else "rule",
-        "sourceLabel": "AI增强研判样本" if enhanced else "规则研判兜底",
+        "sourceLabel": "AI辅助研判" if enhanced else "规则研判兜底",
         "generatedBy": "offline_llm_curated_sample" if enhanced else "deterministic_rule_engine",
         "generatedAt": _now(),
         "summary": summary,
@@ -566,7 +568,7 @@ def graduation_readiness_course_insight(course_id: str,
         "riskLabel": RISK_LABEL[risk],
         "riskTone": TONE[risk],
         "source": "ai_sample" if risk == "critical" else "rule",
-        "sourceLabel": "AI增强研判样本" if risk == "critical" else "规则研判兜底",
+        "sourceLabel": "AI辅助研判" if risk == "critical" else "规则研判兜底",
         "generatedBy": "offline_llm_curated_sample" if risk == "critical" else "deterministic_rule_engine",
         "generatedAt": _now(),
         "summary": f"{course.get('name') or course_id}建议作为毕业准备课程保障对象核查：明确未通过 {failed} 人，缺结果候选 {candidates} 人，涉及 {affected.get('major_count') or 0} 个专业。",
@@ -710,7 +712,7 @@ def operation_course_offering_insight(course_id: str, semester: str = "2023-2024
         "riskLabel": RISK_LABEL[risk],
         "riskTone": TONE[risk],
         "source": "ai_sample" if enhanced else "rule",
-        "sourceLabel": "AI增强研判样本" if enhanced else "规则研判兜底",
+        "sourceLabel": "AI辅助研判" if enhanced else "规则研判兜底",
         "generatedBy": "offline_llm_curated_sample" if enhanced else "deterministic_rule_engine",
         "generatedAt": _now(),
         "summary": summary,
@@ -851,7 +853,7 @@ def operation_classroom_occupancy_insight(semester: Optional[str] = None,
         "riskLabel": RISK_LABEL[risk],
         "riskTone": TONE[risk],
         "source": "ai_sample" if risk in {"critical", "warning"} else "rule",
-        "sourceLabel": "AI增强研判样本" if risk in {"critical", "warning"} else "规则研判兜底",
+        "sourceLabel": "AI辅助研判" if risk in {"critical", "warning"} else "规则研判兜底",
         "generatedBy": "offline_llm_curated_sample" if risk in {"critical", "warning"} else "deterministic_rule_engine",
         "generatedAt": _now(),
         "summary": summary_text,
@@ -1004,7 +1006,7 @@ def operation_schedule_changes_insight(semester: Optional[str] = None,
         "riskLabel": RISK_LABEL[risk],
         "riskTone": TONE[risk],
         "source": "ai_sample" if enhanced else "rule",
-        "sourceLabel": "AI增强研判样本" if enhanced else "规则研判兜底",
+        "sourceLabel": "AI辅助研判" if enhanced else "规则研判兜底",
         "generatedBy": "offline_llm_curated_sample" if enhanced else "deterministic_rule_engine",
         "generatedAt": _now(),
         "summary": summary,
@@ -1030,7 +1032,7 @@ def operation_schedule_changes_insight(semester: Optional[str] = None,
         ],
         "focusItems": {"reasons": semantic_rows[:5], "teachers": teacher_rows, "monthly": monthly},
         "limitations": [
-            "当前原型使用规则与样本化 AI 文案解释原因文本，未调用外部大模型。",
+            "当前原型使用规则证据与AI辅助文案解释原因文本，未调用外部大模型。",
             "生产系统应接入真实调课申请、审批记录、补课安排和通知到达证据，以支持闭环治理。",
         ],
     })
@@ -1092,7 +1094,7 @@ def operation_schedule_teacher_insight(teacher_id: str, semester: Optional[str] 
         "riskLabel": RISK_LABEL[risk],
         "riskTone": TONE[risk],
         "source": "ai_sample" if risk in {"critical", "warning"} else "rule",
-        "sourceLabel": "AI增强研判样本" if risk in {"critical", "warning"} else "规则研判兜底",
+        "sourceLabel": "AI辅助研判" if risk in {"critical", "warning"} else "规则研判兜底",
         "generatedBy": "offline_llm_curated_sample" if risk in {"critical", "warning"} else "deterministic_rule_engine",
         "generatedAt": _now(),
         "summary": summary,
@@ -1269,7 +1271,7 @@ def operation_teacher_load_insight(semester: Optional[str] = None,
         "riskLabel": RISK_LABEL[risk],
         "riskTone": TONE[risk],
         "source": "ai_sample" if risk in {"critical", "warning"} else "rule",
-        "sourceLabel": "AI增强研判样本" if risk in {"critical", "warning"} else "规则研判兜底",
+        "sourceLabel": "AI辅助研判" if risk in {"critical", "warning"} else "规则研判兜底",
         "generatedBy": "offline_llm_curated_sample" if risk in {"critical", "warning"} else "deterministic_rule_engine",
         "generatedAt": _now(),
         "summary": summary,
@@ -1395,7 +1397,7 @@ def operation_teacher_load_teacher_insight(teacher_id: str, semester: Optional[s
         "riskLabel": RISK_LABEL[risk],
         "riskTone": TONE[risk],
         "source": "ai_sample" if risk in {"critical", "warning"} else "rule",
-        "sourceLabel": "AI增强研判样本" if risk in {"critical", "warning"} else "规则研判兜底",
+        "sourceLabel": "AI辅助研判" if risk in {"critical", "warning"} else "规则研判兜底",
         "generatedBy": "offline_llm_curated_sample" if risk in {"critical", "warning"} else "deterministic_rule_engine",
         "generatedAt": _now(),
         "summary": summary,
@@ -1507,7 +1509,7 @@ def faculty_resource_risk_insight(semester: str = "2023-2024-1",
         "riskLabel": RISK_LABEL[risk],
         "riskTone": TONE[risk],
         "source": "ai_sample" if risk in {"critical", "warning"} else "rule",
-        "sourceLabel": "AI增强研判样本" if risk in {"critical", "warning"} else "规则研判兜底",
+        "sourceLabel": "AI辅助研判" if risk in {"critical", "warning"} else "规则研判兜底",
         "generatedBy": "offline_llm_curated_sample" if risk in {"critical", "warning"} else "deterministic_rule_engine",
         "generatedAt": _now(),
         "summary": summary,
@@ -1589,7 +1591,7 @@ def faculty_resource_course_insight(course_id: str, semester: str = "2023-2024-1
         "riskLabel": RISK_LABEL[risk],
         "riskTone": TONE[risk],
         "source": "ai_sample" if risk in {"critical", "warning"} else "rule",
-        "sourceLabel": "AI增强研判样本" if risk in {"critical", "warning"} else "规则研判兜底",
+        "sourceLabel": "AI辅助研判" if risk in {"critical", "warning"} else "规则研判兜底",
         "generatedBy": "offline_llm_curated_sample" if risk in {"critical", "warning"} else "deterministic_rule_engine",
         "generatedAt": _now(),
         "summary": summary,
@@ -1864,7 +1866,14 @@ def management_ai_briefing(period: str = "morning",
         "targetName": "AI管理晨报" if period == "morning" else "AI学期简报",
         "scenario": "management_briefing",
         "source": "ai_sample",
-        "sourceLabel": "AI增强管理简报样本",
+        "sourceLabel": "AI辅助管理简报",
+        "traceability": {
+            "dataSources": ["fact_alert", "fact_grade", "student_plan_course_status", "teaching_lesson", "fact_room_occupancy", "agg_course_team"],
+            "calculationLogic": "按当前接入数据汇总有效预警、培养方案必修课完成证据、课程未通过记录、教学任务、教室占用和课程团队风险，再按管理影响面生成优先级。",
+            "rules": ["有效预警学生按 fact_alert.is_active 去重", "毕业准备按必修课明确未通过和到期缺证据识别", "课程质量按成绩记录未通过率和累计未通过人次识别", "课程团队按单教师、职称缺口和无高职称线索识别"],
+            "formula": "管理优先级 = 高风险学生影响 + 毕业准备可行动问题 + 高影响课程 + 课程团队保障风险的综合排序",
+            "boundary": "简报用于管理优先级提示，不替代毕业审核、教师评价或正式审批。",
+        },
         "generatedBy": "offline_llm_curated_sample_with_rule_fallback",
         "generatedAt": _now(),
         "period": period,
@@ -1897,7 +1906,7 @@ def management_ai_briefing(period: str = "morning",
             "把课程团队风险与教师负荷、排课偏好结合看，形成下一学期课程保障清单。",
         ],
         "limitations": [
-            "当前简报是原型阶段的 AI 增强样本，不替代正式审批、毕业审核或教师评价。",
+            "当前简报是原型阶段的 AI 辅助管理研判，不替代正式审批、毕业审核或教师评价。",
             "未接入真实大模型在线生成时，文字结论由离线样本模板和规则证据共同生成，保证演示稳定。",
             "简报准确度依赖成绩、预警、培养方案、教学任务、教室占用和教师主数据的完整性。",
         ],
@@ -1931,6 +1940,13 @@ def graduation_course_support_simulation(semester: Optional[str] = None,
 
     teaching_semester = semester or _safe_scalar(conn, "SELECT MAX(semester_id) FROM teaching_lesson", default="2023-2024-1")
     limit = max(5, min(int(limit or 12), 30))
+    cache_key = (teaching_semester, limit, user.get("role_id"))
+    cached = _DECISION_SIMULATION_CACHE.get(cache_key)
+    if cached and time.time() - cached[0] < DECISION_SIMULATION_CACHE_TTL:
+        payload = dict(cached[1])
+        payload["cache"] = {"hit": True, "ttlSeconds": DECISION_SIMULATION_CACHE_TTL}
+        return ok(payload)
+
     rows = dbm.query(conn, """
         SELECT x.course_id,
                COALESCE(MAX(c.name),x.course_id) course_name,
@@ -1953,6 +1969,14 @@ def graduation_course_support_simulation(semester: Optional[str] = None,
 
     course_ids = [r["course_id"] for r in rows]
     marks = ",".join("?" for _ in course_ids)
+    impacted_unique_students = _safe_scalar(conn, f"""
+        SELECT COUNT(DISTINCT student_id)
+        FROM student_plan_course_status
+        WHERE rule_version='growth-v1'
+          AND requirement_type='必修'
+          AND course_id IN ({marks})
+          AND (completion_status='failed' OR (completion_status IN ('not_completed','unknown') AND COALESCE(is_overdue,0)=1))
+    """, tuple(course_ids))
     supply = {r["course_id"]: r for r in _safe_query(conn, f"""
         SELECT l.course_id,
                COUNT(DISTINCT l.lesson_id) lesson_count,
@@ -2106,22 +2130,30 @@ def graduation_course_support_simulation(semester: Optional[str] = None,
     summary = (
         f"本次模拟选取 {len(course_items)} 门毕业准备相关必修课程，涉及明确未通过 {totals['failedStudents']} 人次、"
         f"到期缺证据 {totals['verificationStudents']} 人次。AI建议优先考虑“{best['title']}”，"
-        f"预计可优先覆盖约 {best['estimatedStudents']} 名/人次学生，但需由教务处和学院确认资源条件。"
+        f"预计可优先核查约 {best['estimatedStudents']} 人次，但需由教务处和学院确认资源条件。"
     )
 
-    return ok({
+    payload = {
         "targetType": "decisionSimulation",
         "targetId": f"graduation-course-support-{teaching_semester}",
         "targetName": "AI决策模拟：毕业准备课程保障",
         "scenario": "graduation_course_support",
         "source": "ai_sample",
-        "sourceLabel": "AI增强决策模拟样本",
+        "sourceLabel": "AI辅助决策模拟",
+        "traceability": {
+            "dataSources": ["student_plan_course_status", "curriculum_plan_course", "teaching_lesson", "lesson_teacher", "agg_course_team", "student_course_substitution"],
+            "calculationLogic": "先筛选必修课中存在明确未通过或到期缺证据的课程，再叠加开课容量、教师覆盖、课程团队和替代关系，比较不同管理动作的可核查覆盖规模和实施难度。",
+            "rules": ["明确未通过来自 completion_status='failed'", "到期缺证据来自 completion_status in ('not_completed','unknown') 且 is_overdue=1", "重修/补修测算优先参考课程缺口人数和当前开课余量", "认定核查测算优先参考到期缺证据人数和替代关系线索", "课程团队保障测算优先参考单教师或职称信息缺口"],
+            "formula": "方案优先级 = 预计优先核查人次 × 管理收益权重，并结合成本、实施难度和课程团队瓶颈调整。",
+            "boundary": "模拟结果是管理测算，不是学生最终通过预测、毕业结论或开课承诺。",
+        },
         "generatedBy": "offline_llm_curated_sample_with_rule_simulation",
         "generatedAt": _now(),
         "semester": teaching_semester,
         "summary": summary,
         "metrics": [
             {"label": "模拟课程", "value": len(course_items), "unit": "门", "hint": "必修课中存在明确未通过或到期缺证据的重点课程"},
+            {"label": "涉及学生", "value": impacted_unique_students, "unit": "人", "hint": "本次模拟课程中涉及问题证据的去重学生数"},
             {"label": "明确未通过", "value": totals["failedStudents"], "unit": "人次", "hint": "按课程汇总，可能包含同一学生多门课程"},
             {"label": "到期缺证据", "value": totals["verificationStudents"], "unit": "人次", "hint": "建议学期已到但尚无通过/失败/认定证据"},
             {"label": "覆盖专业", "value": totals["majorCoverage"], "unit": "专业次", "hint": "课程涉及专业数量汇总，用于判断跨专业影响"},
@@ -2145,4 +2177,7 @@ def graduation_course_support_simulation(semester: Optional[str] = None,
             "当前未接入完整选课过程、学生个人意愿、教师实际可用时间和教室排课冲突，因此容量估算需人工核查。",
             "同一学生可能出现在多门课程中，课程层面的覆盖人数存在人次口径，正式行动前需生成去重学生名单。",
         ],
-    })
+        "cache": {"hit": False, "ttlSeconds": DECISION_SIMULATION_CACHE_TTL},
+    }
+    _DECISION_SIMULATION_CACHE[cache_key] = (time.time(), payload)
+    return ok(payload)

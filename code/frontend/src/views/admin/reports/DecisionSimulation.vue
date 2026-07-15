@@ -15,10 +15,20 @@
       <el-button type="primary" :loading="loading" @click="load">重新模拟</el-button>
     </div>
 
+    <el-alert
+      v-if="loading"
+      class="loading-alert"
+      type="info"
+      :closable="false"
+      show-icon
+      title="正在进行AI决策模拟"
+      description="正在汇总必修课缺口、开课供给、课程替代和课程团队约束，测算不同管理动作的覆盖规模与实施边界。"
+    />
+
     <el-skeleton :loading="loading" animated :rows="8">
       <section class="hero-card">
         <div>
-          <span class="hero-label">{{ data.sourceLabel || 'AI增强决策模拟样本' }}</span>
+          <span class="hero-label">{{ sourceLabelText }}</span>
           <h3>{{ data.targetName }}</h3>
           <p>{{ data.summary }}</p>
         </div>
@@ -35,6 +45,15 @@
           <p>{{ m.hint }}</p>
         </div>
       </div>
+
+      <el-alert
+        class="scope-alert"
+        type="info"
+        :closable="false"
+        show-icon
+        title="口径说明"
+        description="“涉及学生”为去重学生数；“明确未通过、到期缺证据、预计优先核查”为课程人次，同一学生多门课程会重复计算。"
+      />
 
       <section class="sa-card">
         <div class="sa-card-title">AI推荐策略</div>
@@ -60,7 +79,7 @@
           <h3>{{ s.title }}</h3>
           <div class="impact">
             <b>{{ s.estimatedStudents }}</b>
-            <span>预计优先覆盖学生/人次</span>
+            <span>预计优先核查人次</span>
           </div>
           <p class="best-for">{{ s.bestFor }}</p>
           <p class="logic">{{ s.logic }}</p>
@@ -99,6 +118,17 @@
         </el-table>
       </section>
 
+      <section class="sa-card trace-card">
+        <div class="sa-card-title">AI模拟追溯</div>
+        <el-descriptions :column="1" border>
+          <el-descriptions-item label="数据来源">{{ listText(trace.dataSources) }}</el-descriptions-item>
+          <el-descriptions-item label="计算逻辑">{{ trace.calculationLogic || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="命中规则">{{ listText(trace.rules) }}</el-descriptions-item>
+          <el-descriptions-item label="公式/口径">{{ trace.formula || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="使用边界">{{ trace.boundary || '—' }}</el-descriptions-item>
+        </el-descriptions>
+      </section>
+
       <section class="sa-card">
         <div class="sa-card-title">落地动作与边界</div>
         <div class="two-cols">
@@ -119,11 +149,23 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { getGraduationCourseSupportSimulation } from '@/utils/ai'
 
 const loading = ref(false)
 const data = reactive<any>({})
+
+const sourceLabelText = computed(() => normalizeSourceLabel(data.sourceLabel || 'AI辅助决策模拟'))
+const trace = computed(() => data.traceability || {})
+
+function normalizeSourceLabel(label: string) {
+  return String(label || '').replace('AI增强', 'AI辅助').replace('样本', '')
+}
+
+function listText(value: any) {
+  if (Array.isArray(value)) return value.join('；')
+  return value || '—'
+}
 
 function priorityType(priority: string) {
   if (priority === 'high') return 'danger'
@@ -157,6 +199,10 @@ onMounted(load)
   justify-content: space-between;
   gap: 16px;
   align-items: flex-start;
+}
+
+.loading-alert {
+  margin: 12px 0;
 }
 
 .hero-card {
@@ -213,8 +259,12 @@ onMounted(load)
 
 .metric-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 12px;
+  margin-bottom: 14px;
+}
+
+.scope-alert {
   margin-bottom: 14px;
 }
 
@@ -351,6 +401,10 @@ onMounted(load)
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 14px;
+}
+
+.trace-card {
+  margin-bottom: 14px;
 }
 
 @media (max-width: 1100px) {

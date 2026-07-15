@@ -21,6 +21,16 @@
       </div>
     </div>
 
+    <el-alert
+      v-if="loading"
+      class="loading-alert"
+      type="info"
+      :closable="false"
+      show-icon
+      title="正在生成AI管理简报"
+      description="正在汇总预警、成绩、培养方案、教学任务、教室占用和课程团队数据，生成管理优先级与可追溯证据。"
+    />
+
     <el-skeleton :loading="loading" animated :rows="8">
       <section class="hero-card">
         <div class="ai-mark">AI</div>
@@ -29,7 +39,7 @@
           <h3>{{ data.headline }}</h3>
           <p>{{ data.summary }}</p>
           <div class="hero-meta">
-            <span>{{ data.sourceLabel }}</span>
+            <span>{{ sourceLabelText }}</span>
             <span>生成时间：{{ formatTime(data.generatedAt) }}</span>
             <span>成绩学期：{{ data.semester?.grade || '—' }}</span>
             <span>教学任务：{{ data.semester?.teaching || '—' }}</span>
@@ -97,6 +107,17 @@
         </div>
       </section>
 
+      <section class="sa-card trace-card">
+        <div class="sa-card-title">AI研判追溯</div>
+        <el-descriptions :column="1" border>
+          <el-descriptions-item label="数据来源">{{ listText(trace.dataSources) }}</el-descriptions-item>
+          <el-descriptions-item label="计算逻辑">{{ trace.calculationLogic || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="命中规则">{{ listText(trace.rules) }}</el-descriptions-item>
+          <el-descriptions-item label="公式/口径">{{ trace.formula || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="使用边界">{{ trace.boundary || '—' }}</el-descriptions-item>
+        </el-descriptions>
+      </section>
+
       <section class="sa-card">
         <div class="sa-card-title">建议下一步动作</div>
         <ol class="action-list">
@@ -116,7 +137,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { getManagementBriefing } from '@/utils/ai'
 
@@ -124,6 +145,18 @@ const router = useRouter()
 const loading = ref(false)
 const period = ref<'morning' | 'term'>('morning')
 const data = reactive<any>({})
+
+const sourceLabelText = computed(() => normalizeSourceLabel(data.sourceLabel || 'AI辅助管理简报'))
+const trace = computed(() => data.traceability || {})
+
+function normalizeSourceLabel(label: string) {
+  return String(label || '').replace('AI增强', 'AI辅助').replace('样本', '')
+}
+
+function listText(value: any) {
+  if (Array.isArray(value)) return value.join('；')
+  return value || '—'
+}
 
 function formatTime(value?: string) {
   if (!value) return '—'
@@ -161,6 +194,10 @@ onMounted(load)
   gap: 10px;
   align-items: center;
   padding-top: 12px;
+}
+
+.loading-alert {
+  margin: 12px 0;
 }
 
 .hero-card {
@@ -367,6 +404,10 @@ onMounted(load)
   color: #475569;
   font-size: 13px;
   line-height: 1.8;
+}
+
+.trace-card {
+  margin-bottom: 14px;
 }
 
 @media (max-width: 1100px) {
