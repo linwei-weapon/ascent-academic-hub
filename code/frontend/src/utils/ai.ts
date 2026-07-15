@@ -28,3 +28,10 @@ export function getGraduationStudentAIInsight(studentId: string) {
 export function getGraduationCourseAIInsight(courseId: string) {
   return http.get<any>(`/admin/ai/insight/graduation-readiness/course/${encodeURIComponent(courseId)}`)
 }
+
+export function getOperationCourseAIInsight(courseId: string, semester?: string) {
+  const params = new URLSearchParams()
+  if (semester) params.set('semester', semester)
+  const qs = params.toString()
+  return http.get<any>(`/admin/ai/insight/operation/course-offering/${encodeURIComponent(courseId)}${qs ? `?${qs}` : ''}`)
+}

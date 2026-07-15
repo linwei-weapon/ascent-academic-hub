@@ -1053,27 +1053,59 @@ def course_offerings(semester: str = "2023-2024-1", category: Optional[str] = No
                      sort: str = Query("scale", pattern="^(scale|attention)$"),
                      limit: int = Query(100, ge=1, le=500), offset: int = Query(0, ge=0),
                      conn: sqlite3.Connection = Depends(get_v2_db), user: dict = Depends(require_v2_all_reader)):
-    cond, params = ["a.semester_id=?"], [semester]
+    cond, params = ["r.semester_id=?"], [semester]
     if category:
         cond.append("c.category=?"); params.append(category)
     if keyword:
-        cond.append("(a.course_id LIKE ? OR c.name LIKE ?)")
+        cond.append("(r.course_id LIKE ? OR c.name LIKE ?)")
         term = f"%{keyword.strip()}%"; params.extend([term, term])
     where = " AND ".join(cond)
-    total = dbm.scalar(conn, f"SELECT COUNT(*) FROM agg_course_offering a LEFT JOIN dim_course c ON c.course_id=a.course_id WHERE {where}", tuple(params)) or 0
-    attention = """(CASE WHEN a.lesson_count>0 AND a.enrolled*1.0/a.lesson_count>=120 THEN 2
-        WHEN a.lesson_count>0 AND a.enrolled*1.0/a.lesson_count>=80 THEN 1 ELSE 0 END
-        + CASE WHEN a.teacher_count=1 AND a.lesson_count>=3 THEN 2 ELSE 0 END
-        + CASE WHEN a.lesson_count=1 AND a.enrolled>=80 THEN 2 ELSE 0 END)"""
-    order_by = f"{attention} DESC,a.enrolled DESC,a.lesson_count DESC" if sort == "attention" else "a.lesson_count DESC,a.enrolled DESC"
-    summary = dbm.query_one(conn, f"""SELECT COALESCE(SUM(a.lesson_count),0) lesson_count,
-        COALESCE(SUM(a.enrolled),0) enrolled,
+    base_cte = """
+        WITH raw AS (
+          SELECT l.semester_id,l.course_id,
+                 COUNT(DISTINCT l.lesson_id) lesson_count,
+                 SUM(COALESCE(l.enrolled,0)) enrolled,
+                 SUM(COALESCE(l.capacity,0)) capacity,
+                 SUM(COALESCE(l.total_hours,0)) total_hours
+          FROM teaching_lesson l
+          WHERE l.semester_id=?
+          GROUP BY l.semester_id,l.course_id
+        ),
+        teachers AS (
+          SELECT l.semester_id,l.course_id,COUNT(DISTINCT lt.staff_id) teacher_count
+          FROM teaching_lesson l
+          LEFT JOIN lesson_teacher lt ON lt.lesson_id=l.lesson_id
+          WHERE l.semester_id=?
+          GROUP BY l.semester_id,l.course_id
+        )
+    """
+    cte_params = [semester, semester]
+    total = dbm.scalar(conn, base_cte + f"""SELECT COUNT(*)
+        FROM raw r
+        LEFT JOIN teachers t ON t.semester_id=r.semester_id AND t.course_id=r.course_id
+        LEFT JOIN dim_course c ON c.course_id=r.course_id
+        WHERE {where}""", tuple(cte_params + params)) or 0
+    attention = """(CASE WHEN r.lesson_count>0 AND r.enrolled*1.0/r.lesson_count>=120 THEN 2
+        WHEN r.lesson_count>0 AND r.enrolled*1.0/r.lesson_count>=80 THEN 1 ELSE 0 END
+        + CASE WHEN COALESCE(t.teacher_count,0)=1 AND r.lesson_count>=3 THEN 2 ELSE 0 END
+        + CASE WHEN r.lesson_count=1 AND r.enrolled>=80 THEN 2 ELSE 0 END)"""
+    order_by = f"{attention} DESC,r.enrolled DESC,r.lesson_count DESC" if sort == "attention" else "r.lesson_count DESC,r.enrolled DESC"
+    summary = dbm.query_one(conn, base_cte + f"""SELECT COALESCE(SUM(r.lesson_count),0) lesson_count,
+        COALESCE(SUM(r.enrolled),0) enrolled,
         SUM(CASE WHEN {attention}>0 THEN 1 ELSE 0 END) attention_count
-        FROM agg_course_offering a LEFT JOIN dim_course c ON c.course_id=a.course_id WHERE {where}""", tuple(params))
-    rows = dbm.query(conn, f"""SELECT a.*,c.name course_name,c.category,c.nature,c.organization_id,
+        FROM raw r
+        LEFT JOIN teachers t ON t.semester_id=r.semester_id AND t.course_id=r.course_id
+        LEFT JOIN dim_course c ON c.course_id=r.course_id
+        WHERE {where}""", tuple(cte_params + params))
+    rows = dbm.query(conn, base_cte + f"""SELECT r.semester_id,r.course_id,r.lesson_count,
+        COALESCE(t.teacher_count,0) teacher_count,r.enrolled,r.capacity,r.total_hours,
+        'raw_dedup' source,c.name course_name,c.category,c.nature,c.organization_id,
         {attention} attention_score
-        FROM agg_course_offering a LEFT JOIN dim_course c ON c.course_id=a.course_id WHERE {where}
-        ORDER BY {order_by} LIMIT ? OFFSET ?""", tuple(params + [limit, offset]))
+        FROM raw r
+        LEFT JOIN teachers t ON t.semester_id=r.semester_id AND t.course_id=r.course_id
+        LEFT JOIN dim_course c ON c.course_id=r.course_id
+        WHERE {where}
+        ORDER BY {order_by} LIMIT ? OFFSET ?""", tuple(cte_params + params + [limit, offset]))
     return ok({"items": rows, "total": total, "semester": semester, "sort": sort, "summary": summary,
                "definition": {"attention": "大班额、单一教师覆盖多个教学班、单班集中供给的可核查提示；不是课程质量排名"}})
 

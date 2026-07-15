@@ -83,6 +83,7 @@
         <el-table-column prop="enrolled" label="选课人次" width="90" align="right" />
         <el-table-column prop="avgClassSize" label="平均班额" width="90" align="right" />
         <el-table-column label="优先核查原因" min-width="250"><template #default="{row}"><span v-if="row.attention.length">{{ row.attention.join('；') }}</span><span v-else class="sa-faint">规模较大，建议常规核查</span></template></el-table-column>
+        <el-table-column label="AI" width="88"><template #default="{row}"><el-button link type="primary" @click.stop="openOfferingAi(row)">AI研判</el-button></template></el-table-column>
       </el-table>
     </div>
 
@@ -149,9 +150,11 @@
         <el-table-column prop="teacher_count" label="教师" width="70" align="right" />
         <el-table-column prop="enrolled" label="选课人次" width="90" align="right" />
         <el-table-column label="平均班额" width="90" align="right"><template #default="{row}">{{ row.lesson_count ? Math.round(row.enrolled/row.lesson_count) : 0 }}</template></el-table-column>
+        <el-table-column label="AI" width="88"><template #default="{row}"><el-button link type="primary" @click="openOfferingAi(row)">AI研判</el-button></template></el-table-column>
       </el-table>
       <el-pagination v-model:current-page="offeringDrawer.page" :page-size="offeringDrawer.pageSize" :total="offeringDrawer.total" layout="total,prev,pager,next" style="justify-content:flex-end;margin-top:14px" @current-change="loadOfferingPage" />
     </el-drawer>
+    <AIInsightDrawer v-model="aiDrawerVisible" :insight="aiInsight" :loading="aiLoading" title="开课供给AI研判" />
   </div>
 </template>
 
@@ -166,6 +169,8 @@ import { COLLEGE_MAP } from '@/constants/colleges'
 import { getFilterMeta, type SemesterOpt } from '@/utils/meta'
 import { ElMessageBox } from 'element-plus'
 import { getV2TeachingSemester } from '@/utils/v2meta'
+import AIInsightDrawer from '@/components/AIInsightDrawer.vue'
+import { getOperationCourseAIInsight } from '@/utils/ai'
 const router = useRouter()
 const route = useRoute()
 
@@ -207,6 +212,9 @@ const auditVisible = ref(false)
 const qualityAudit = ref<any[]>([])
 const v2Offering = reactive<any>({ items: [], total: 0, semester: '' })
 const offeringDrawer = reactive<any>({ visible:false, loading:false, items:[], total:0, semester:'', keyword:'', page:1, pageSize:20 })
+const aiDrawerVisible = ref(false)
+const aiLoading = ref(false)
+const aiInsight = ref<any>(null)
 const decisionOfferings = computed(() => (v2Offering.items || []).map((row:any) => {
   const avgClassSize = row.lesson_count ? Math.round(row.enrolled / row.lesson_count) : 0
   const attention:string[] = []
@@ -240,6 +248,16 @@ async function openOfferingDrawer() {
   await loadOfferingPage()
 }
 async function searchOfferings() { offeringDrawer.page = 1; await loadOfferingPage() }
+async function openOfferingAi(row:any) {
+  const courseId = row.course_id || row.courseId
+  if (!courseId) return
+  const semester = row.semester_id || row.semester || offeringDrawer.semester || v2Offering.semester || fSemester.value
+  aiDrawerVisible.value = true
+  aiLoading.value = true
+  aiInsight.value = null
+  try { aiInsight.value = await getOperationCourseAIInsight(courseId, semester) }
+  finally { aiLoading.value = false }
+}
 const qualityStatusLabel = (status:string) => ({open:'待处理',reviewing:'复核中',closed:'已关闭'} as Record<string,string>)[status] || status
 const qualityStatusType = (status:string) => ({open:'danger',reviewing:'warning',closed:'success'} as Record<string,any>)[status] || 'info'
 async function showQualityAudit(row:any) {

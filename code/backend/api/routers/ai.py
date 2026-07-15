@@ -587,3 +587,156 @@ def graduation_readiness_course_insight(course_id: str,
         ],
         "limitations": ["当前未接入未来开课计划和重修班正式安排，课程保障建议需结合教务排课计划人工确认。"],
     })
+
+
+@router.get("/insight/operation/course-offering/{course_id}")
+def operation_course_offering_insight(course_id: str, semester: str = "2023-2024-1",
+                                      user: dict = Depends(get_current_user),
+                                      conn: sqlite3.Connection = Depends(get_v2_db)):
+    course = dbm.query_one(conn, """
+        SELECT course_id,name,category,nature,organization_id
+        FROM dim_course WHERE course_id=?
+    """, (course_id,)) or {"course_id": course_id, "name": course_id}
+    offering = dbm.query_one(conn, """
+        SELECT a.*,c.name course_name,c.category,c.nature,c.organization_id
+        FROM agg_course_offering a
+        LEFT JOIN dim_course c ON c.course_id=a.course_id
+        WHERE a.semester_id=? AND a.course_id=?
+    """, (semester, course_id))
+    if not offering:
+        offering = dbm.query_one(conn, """
+            SELECT ? semester_id,l.course_id,COUNT(DISTINCT l.lesson_id) lesson_count,
+                   COUNT(DISTINCT lt.staff_id) teacher_count,
+                   SUM(COALESCE(l.capacity,0)) capacity,
+                   SUM(COALESCE(l.enrolled,0)) enrolled,
+                   COALESCE(MAX(c.name),MAX(l.course_name),l.course_id) course_name,
+                   MAX(c.category) category,MAX(c.nature) nature,MAX(c.organization_id) organization_id
+            FROM teaching_lesson l
+            LEFT JOIN lesson_teacher lt ON lt.lesson_id=l.lesson_id
+            LEFT JOIN dim_course c ON c.course_id=l.course_id
+            WHERE l.semester_id=? AND l.course_id=?
+            GROUP BY l.course_id
+        """, (semester, semester, course_id))
+    if not offering:
+        raise ApiError("暂无该课程开课供给数据", code=404, status_code=404)
+
+    raw_metrics = dbm.query_one(conn, """
+        SELECT r.lesson_count,r.capacity,r.enrolled,COALESCE(t.teacher_count,0) teacher_count
+        FROM (
+          SELECT COUNT(DISTINCT lesson_id) lesson_count,
+                 SUM(COALESCE(capacity,0)) capacity,
+                 SUM(COALESCE(enrolled,0)) enrolled
+          FROM teaching_lesson
+          WHERE semester_id=? AND course_id=?
+        ) r
+        CROSS JOIN (
+          SELECT COUNT(DISTINCT lt.staff_id) teacher_count
+          FROM teaching_lesson l
+          LEFT JOIN lesson_teacher lt ON lt.lesson_id=l.lesson_id
+          WHERE l.semester_id=? AND l.course_id=?
+        ) t
+    """, (semester, course_id, semester, course_id))
+    if raw_metrics and raw_metrics.get("lesson_count"):
+        offering["lesson_count"] = raw_metrics.get("lesson_count") or 0
+        offering["teacher_count"] = raw_metrics.get("teacher_count") or 0
+        offering["capacity"] = raw_metrics.get("capacity") or 0
+        offering["enrolled"] = raw_metrics.get("enrolled") or 0
+
+    lesson_count = offering.get("lesson_count") or 0
+    teacher_count = offering.get("teacher_count") or 0
+    enrolled = offering.get("enrolled") or 0
+    capacity = offering.get("capacity") or 0
+    avg_size = round(enrolled / lesson_count, 1) if lesson_count else 0
+    fill_rate = round(enrolled / capacity * 100, 1) if capacity else None
+    schedule_cells = dbm.query(conn, """
+        SELECT m.weekday,
+               CASE WHEN m.period_start<=4 THEN '上午'
+                    WHEN m.period_start<=8 THEN '下午' ELSE '晚上' END day_part,
+               COUNT(DISTINCT m.meeting_id) meeting_count,
+               COUNT(DISTINCT l.lesson_id) lesson_count
+        FROM course_meeting m
+        JOIN teaching_lesson l ON l.lesson_id=m.lesson_id
+        WHERE l.semester_id=? AND l.course_id=?
+        GROUP BY m.weekday,CASE WHEN m.period_start<=4 THEN '上午'
+                    WHEN m.period_start<=8 THEN '下午' ELSE '晚上' END
+        ORDER BY meeting_count DESC
+    """, (semester, course_id))
+    meeting_total = sum((r.get("meeting_count") or 0) for r in schedule_cells)
+    top_cell = schedule_cells[0] if schedule_cells else {}
+    evening = sum((r.get("meeting_count") or 0) for r in schedule_cells if r.get("day_part") == "晚上")
+    evening_share = round(evening / meeting_total * 100, 1) if meeting_total else 0
+    teacher_rows = dbm.query(conn, """
+        SELECT COALESCE(s.display_name,lt.staff_id) teacher_name,lt.staff_id,
+               COUNT(DISTINCT l.lesson_id) lesson_count,
+               SUM(COALESCE(l.enrolled,0)) enrolled
+        FROM teaching_lesson l
+        LEFT JOIN lesson_teacher lt ON lt.lesson_id=l.lesson_id
+        LEFT JOIN dim_staff s ON s.staff_id=lt.staff_id
+        WHERE l.semester_id=? AND l.course_id=?
+        GROUP BY lt.staff_id,COALESCE(s.display_name,lt.staff_id)
+        ORDER BY lesson_count DESC,enrolled DESC
+        LIMIT 5
+    """, (semester, course_id))
+    top_teacher = teacher_rows[0] if teacher_rows else {}
+
+    attention: list[str] = []
+    if avg_size >= 120:
+        attention.append(f"平均班额 {avg_size} 人，已达到超大班核查区间")
+    elif avg_size >= 80:
+        attention.append(f"平均班额 {avg_size} 人，建议核查是否需要拆班或增加教学班")
+    if teacher_count <= 1 and lesson_count >= 3:
+        attention.append(f"{lesson_count} 个教学班主要由单一教师覆盖，需要核查教师连续授课和替补风险")
+    if lesson_count == 1 and enrolled >= 80:
+        attention.append("单班集中供给，若学生来源跨学院/跨专业，排课冲突和容量风险会被放大")
+    if evening_share >= 30:
+        attention.append(f"晚上时段占比 {evening_share}%，需要确认是否为课程特性或资源紧张导致")
+    risk = "critical" if avg_size >= 120 or (teacher_count <= 1 and lesson_count >= 3) or (lesson_count == 1 and enrolled >= 120) else "warning" if attention else "info"
+    enhanced = risk == "critical" or (avg_size >= 80 and teacher_count <= 2)
+    summary = (
+        f"{offering.get('course_name') or course.get('name') or course_id}在 {semester} 学期共有 {lesson_count} 个教学班、"
+        f"{teacher_count} 名教师、{enrolled} 人次选课，平均班额 {avg_size} 人。"
+        + ("建议作为本轮排课供给优化的优先核查课程。" if attention else "当前未发现明显供给压力，可作为常规观察对象。")
+    )
+    return ok({
+        "targetType": "operationCourseOffering",
+        "targetId": course_id,
+        "targetName": offering.get("course_name") or course.get("name") or course_id,
+        "scenario": "operation_course_offering",
+        "riskLevel": risk,
+        "riskLabel": RISK_LABEL[risk],
+        "riskTone": TONE[risk],
+        "source": "ai_sample" if enhanced else "rule",
+        "sourceLabel": "AI增强研判样本" if enhanced else "规则研判兜底",
+        "generatedBy": "offline_llm_curated_sample" if enhanced else "deterministic_rule_engine",
+        "generatedAt": _now(),
+        "summary": summary,
+        "confidence": "高" if lesson_count and meeting_total else "中",
+        "profile": {"college": offering.get("organization_id") or course.get("organization_id"),
+                    "major": offering.get("category") or course.get("category"),
+                    "semester": semester},
+        "evidence": [
+            {"label": "教学班", "value": f"{lesson_count} 个", "detail": "来自真实教学任务/开课聚合数据", "tone": "info"},
+            {"label": "平均班额", "value": f"{avg_size} 人", "detail": "选课人次 ÷ 教学班数", "tone": "danger" if avg_size >= 120 else "warning" if avg_size >= 80 else "success"},
+            {"label": "教师覆盖", "value": f"{teacher_count} 人", "detail": f"重点教师：{top_teacher.get('teacher_name') or '暂无'}", "tone": "danger" if teacher_count <= 1 and lesson_count >= 3 else "info"},
+            {"label": "容量使用", "value": f"{fill_rate}%" if fill_rate is not None else "待核验", "detail": f"容量 {capacity}；选课 {enrolled}", "tone": "warning" if fill_rate and fill_rate >= 95 else "info"},
+            {"label": "高频时段", "value": f"周{top_cell.get('weekday')} {top_cell.get('day_part')}" if top_cell else "暂无", "detail": f"晚上占比 {evening_share}%", "tone": "warning" if evening_share >= 30 else "info"},
+        ],
+        "reasons": attention or [
+            "当前课程供给规模、班额、教师覆盖和时段分布未触发明显风险阈值，建议纳入常规运行观察。",
+            "如果该课程属于体育、思政、数学、英语等重点公共课，仍建议结合学院需求和资源约束做专项核查。",
+        ],
+        "suggestions": [
+            {"role": "教务处", "priority": "high" if risk == "critical" else "medium", "action": "核查课程供给策略", "detail": "确认是否需要拆班、增开教学班、调整容量或提前协调跨学院公共课资源。"},
+            {"role": "二级学院", "priority": "medium", "action": "确认学生修读需求", "detail": "结合年级、专业和培养方案要求，判断该课程是否存在集中修读或补修需求。"},
+            {"role": "排课人员", "priority": "high" if evening_share >= 30 or avg_size >= 120 else "medium", "action": "优化时段与教师安排", "detail": "重点核查高频时段、晚上时段、单教师连续覆盖和教室容量是否会影响教学运行体验。"},
+        ],
+        "nextActions": [
+            "查看完整课程清单中同类课程的班额和教师覆盖情况，判断是否为个别课程异常。",
+            "对平均班额偏高课程，核查是否具备拆班、增加教师或调整容量的现实条件。",
+            "对单教师多班覆盖课程，提前准备替补教师或课程团队保障方案。",
+        ],
+        "limitations": [
+            "当前研判基于已接入教学任务、排课时段和教师覆盖数据，尚未纳入未来开课计划审批结果。",
+            "班额阈值用于管理核查提示，不直接评价课程质量或教师教学效果。",
+        ],
+    })
