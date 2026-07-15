@@ -5,6 +5,9 @@
         <h2 class="sa-page-title">学业预警监控</h2>
         <p class="sa-page-sub">数据来源：学校学籍、成绩数据与当前已激活规则计算结果 · 点击等级卡片筛选核查对象</p>
       </div>
+      <div class="alert-actions">
+        <el-button type="primary" plain @click="openGroupInsight">AI研判当前切片</el-button>
+      </div>
     </div>
 
     <div v-if="hasFilters" class="filter-feedback">
@@ -101,6 +104,7 @@
             <el-table-column prop="detail" label="触发数据链" min-width="180"><template #default="{row}"><span style="font-size:12px">{{ row.detail }}</span></template></el-table-column>
             <el-table-column prop="status" label="状态" width="76"><template #default="{row}"><el-tag :type="statusType(row.status)" size="small">{{ row.status }}</el-tag></template></el-table-column>
             <el-table-column prop="failSummary" label="挂科溯源摘要" width="160"><template #default="{row}"><el-tooltip :content="row.failSummary || ''" placement="top" :disabled="!row.failSummary" :show-after="300"><span class="fail-summary-cell">{{ row.failSummary || '-' }}</span></el-tooltip></template></el-table-column>
+            <el-table-column label="AI研判" width="88" fixed="right"><template #default="{row}"><el-button link type="primary" @click.stop="openStudentInsight(row)">AI研判</el-button></template></el-table-column>
             <el-table-column prop="time" label="时间" width="92" />
           </el-table>
           <el-pagination v-model:current-page="page" :page-size="15" :total="filteredList.length" layout="prev,next,total" size="small" style="margin-top:12px;justify-content:flex-end" />
@@ -114,6 +118,7 @@
         <div class="drawer-info">
           {{ student.code }} · {{ student.collegeName }} · {{ student.majorName }} · {{ student.className }}
           <el-button size="small" type="primary" text style="margin-left:8px" @click="router.push('/admin/student/' + student.code)">查看完整档案 →</el-button>
+          <el-button size="small" type="primary" text @click="openStudentInsight({ sid: student.code })">AI研判</el-button>
         </div>
 
         <el-row :gutter="8" style="margin-bottom:12px">
@@ -259,14 +264,17 @@
       </div>
       <div v-else class="sa-faint" style="font-size:12px;text-align:center;padding-top:40px">加载中…</div>
     </el-drawer>
+    <AIInsightDrawer v-model="aiDrawerVisible" :insight="aiInsight" :loading="aiLoading" title="AI研判" />
   </div>
 </template>
 
 <script setup lang="ts">
 import { reactive, onMounted, ref, computed, watch } from 'vue'
 import { http } from '@/utils/http';
+import { getAlertSummaryAIInsight, getStudentAIInsight } from '@/utils/ai';
 import KpiLabel from '@/components/KpiLabel.vue';
 import EChart from '@/components/EChart.vue';
+import AIInsightDrawer from '@/components/AIInsightDrawer.vue';
 import { exportCsv } from '@/utils/export';
 import { authStore } from '@/store/auth';
 
@@ -275,6 +283,7 @@ const workflow = ref({} as any); const followupContent = ref(''); const nextStat
 const savingWorkflow = ref(false); const currentEventId = ref<number | null>(null);
 const page = ref(1); const fCollege = ref(''); const fType = ref(''); const fLevel = ref(''); const fStatus = ref('');
 const activeFilter = ref('');
+const aiDrawerVisible = ref(false); const aiLoading = ref(false); const aiInsight = ref<any>(null);
 
 const levels = [
   { key: 'critical', label: '严重', color: '#E11D48', formula: '触发条件满足且等级=严重' },
@@ -429,6 +438,35 @@ async function showStudent(row: any) {
   }
 }
 
+async function openStudentInsight(row: any) {
+  const sid = row.sid || row.code || row.student_id;
+  if (!sid) return;
+  aiDrawerVisible.value = true;
+  aiLoading.value = true;
+  aiInsight.value = null;
+  try {
+    aiInsight.value = await getStudentAIInsight(sid, 'alert');
+  } finally {
+    aiLoading.value = false;
+  }
+}
+
+async function openGroupInsight() {
+  aiDrawerVisible.value = true;
+  aiLoading.value = true;
+  aiInsight.value = null;
+  try {
+    aiInsight.value = await getAlertSummaryAIInsight({
+      level: fLevel.value,
+      type: fType.value,
+      status: fStatus.value,
+      college: fCollege.value,
+    });
+  } finally {
+    aiLoading.value = false;
+  }
+}
+
 async function loadWorkflow(eventId: number) {
   const d = await http.get('/admin/alert-events/' + eventId);
   workflow.value = d || {};
@@ -478,6 +516,7 @@ function exportList() {
 
 <style scoped>
 .alert-kpi-row { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; margin-bottom: 16px; }
+.alert-actions { padding-top: 4px; white-space: nowrap; }
 .alert-kpi {
   background: #fff; border: 1.5px solid var(--sa-border); border-radius: 14px;
   padding: 14px 12px; text-align: center; cursor: pointer; transition: all .18s;
