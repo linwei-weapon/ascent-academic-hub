@@ -13,7 +13,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends
 
 from .. import db as dbm
-from ..deps import get_current_user, get_db, student_data_scope
+from ..deps import get_current_user, get_db, get_v2_db, student_data_scope
 from ..envelope import ApiError, ok
 
 router = APIRouter(prefix="/api/admin/ai", tags=["ai"])
@@ -32,6 +32,8 @@ WORKFLOW_BY_LABEL = {
     "已解决": "resolved",
     "已关闭": "closed",
 }
+V2_ALL_SCOPE_ROLES = {"school_leader", "dean", "dept_operation", "dept_research", "dept_practice", "quality_office"}
+V2_MAPPED_SCOPE_ROLES = {"college_dean", "college_secretary", "counselor", "dept_director"}
 
 
 def _now() -> str:
@@ -41,6 +43,46 @@ def _now() -> str:
 def _student_scope_sql(user: dict, conn: sqlite3.Connection, alias: str = "s") -> tuple[str, list]:
     frag, params = student_data_scope(user, conn, alias)
     return (f" AND {frag}" if frag else "", params)
+
+
+def _v2_student_scope(user: dict, conn: sqlite3.Connection, alias: str = "s") -> tuple[str, list]:
+    role = user.get("role_id")
+    if role in V2_ALL_SCOPE_ROLES:
+        return "", []
+    if role not in V2_MAPPED_SCOPE_ROLES:
+        raise ApiError("当前角色没有V2访问范围", code=403, status_code=403)
+    mappings = dbm.query(conn, "SELECT * FROM access_scope_mapping WHERE role_id=? AND mapping_status='mapped'", (role,))
+    if not mappings:
+        raise ApiError("V2数据范围未映射", code=403, status_code=403)
+    scope_type = mappings[0]["scope_type"]
+    if scope_type == "college":
+        values = [x["organization_id"] for x in mappings if x.get("organization_id")]
+        field = "organization_id"
+    elif scope_type == "major":
+        values = [x["major_code"] for x in mappings if x.get("major_code")]
+        field = "major_code"
+    elif scope_type == "class":
+        values = [x["class_code"] for x in mappings if x.get("class_code")]
+        field = "class_code"
+    else:
+        raise ApiError("不支持的V2数据范围类型", code=403, status_code=403)
+    if not values:
+        raise ApiError("V2数据范围为空", code=403, status_code=403)
+    return f"{alias}.{field} IN ({','.join('?' for _ in values)})", values
+
+
+def _v2_student_access(conn: sqlite3.Connection, student_id: str, user: dict) -> dict:
+    scope, params = _v2_student_scope(user, conn, "s")
+    row = dbm.query_one(conn, f"""
+        SELECT s.student_id,s.display_name,s.entry_grade,s.organization_id,s.major_code,
+               s.major_name,s.class_code,p.plan_name,p.version
+        FROM dim_student s
+        LEFT JOIN curriculum_plan p ON p.plan_id=s.plan_id
+        WHERE s.student_id=?{(' AND ' + scope) if scope else ''}
+    """, tuple([student_id] + params))
+    if not row:
+        raise ApiError("学生不存在或无权访问", code=404, status_code=404)
+    return row
 
 
 def _gpa_history(conn: sqlite3.Connection, student_id: str) -> list[dict]:
@@ -391,4 +433,157 @@ def alert_summary(level: Optional[str] = None, type: Optional[str] = None,
         ],
         "focusItems": top,
         "limitations": ["当前统计基于已接入预警和成绩数据，未包含心理、出勤等暂未接入数据。"],
+    })
+
+
+@router.get("/insight/graduation-readiness/student/{student_id}")
+def graduation_readiness_student_insight(student_id: str,
+                                         user: dict = Depends(get_current_user),
+                                         conn: sqlite3.Connection = Depends(get_v2_db)):
+    student = _v2_student_access(conn, student_id, user)
+    rows = dbm.query(conn, """
+        SELECT x.course_id,COALESCE(c.name,x.course_id) course_name,x.suggested_term,
+               x.completion_status,x.effective_score,pc.credits required_credits,
+               (SELECT COUNT(DISTINCT l.lesson_id) FROM teaching_lesson l WHERE l.course_id=x.course_id) lesson_count,
+               (SELECT COUNT(DISTINCT lt.staff_id) FROM teaching_lesson l
+                  LEFT JOIN lesson_teacher lt ON lt.lesson_id=l.lesson_id WHERE l.course_id=x.course_id) teacher_count,
+               (SELECT COUNT(DISTINCT scs.substitution_id) FROM student_course_substitution scs
+                  WHERE scs.student_id=x.student_id AND scs.original_course_id=x.course_id) substitution_count
+        FROM student_plan_course_status x
+        LEFT JOIN dim_course c ON c.course_id=x.course_id
+        LEFT JOIN curriculum_plan_course pc ON pc.plan_course_id=x.plan_course_id
+        WHERE x.student_id=? AND x.rule_version='growth-v1' AND x.requirement_type='必修'
+          AND (x.completion_status='failed' OR (x.completion_status IN ('not_completed','unknown') AND x.is_overdue=1))
+        ORDER BY CASE WHEN x.completion_status='failed' THEN 0 ELSE 1 END,x.suggested_term,x.course_id
+    """, (student_id,))
+    failed = [r for r in rows if r["completion_status"] == "failed"]
+    candidates = [r for r in rows if r["completion_status"] != "failed"]
+    no_offering = [r for r in rows if not r["lesson_count"]]
+    risk = "critical" if failed else "warning" if candidates else "low"
+    enhanced = len(failed) >= 2 or (failed and no_offering)
+    top_names = "、".join(r["course_name"] for r in rows[:3]) or "暂无明确课程缺口"
+    summary = (
+        f"{student['display_name']}当前毕业准备核查重点为：{top_names}。"
+        f"其中明确未通过 {len(failed)} 门，到期缺结果候选 {len(candidates)} 门。"
+        "建议先核查必修未通过课程的重修、补考、替代认定和近期教学班供给。"
+    )
+    return ok({
+        "targetType": "graduationStudent",
+        "targetId": student_id,
+        "targetName": student["display_name"],
+        "scenario": "graduation_readiness",
+        "riskLevel": risk,
+        "riskLabel": RISK_LABEL[risk],
+        "riskTone": TONE[risk],
+        "source": "ai_sample" if enhanced else "rule",
+        "sourceLabel": "AI增强研判样本" if enhanced else "规则研判兜底",
+        "generatedBy": "offline_llm_curated_sample" if enhanced else "deterministic_rule_engine",
+        "generatedAt": _now(),
+        "summary": summary,
+        "confidence": "高" if rows else "中",
+        "profile": {"college": student.get("organization_id"), "major": student.get("major_name"),
+                    "className": student.get("class_code"), "grade": student.get("entry_grade")},
+        "evidence": [
+            {"label": "明确未通过", "value": f"{len(failed)} 门", "detail": "已发布成绩中存在必修课未通过记录", "tone": "danger" if failed else "success"},
+            {"label": "缺结果候选", "value": f"{len(candidates)} 门", "detail": "到建议学期仍缺完成证据，需先核验选课与认定", "tone": "warning" if candidates else "success"},
+            {"label": "无开课证据", "value": f"{len(no_offering)} 门", "detail": "历史教学任务中暂未发现该课程教学班", "tone": "danger" if no_offering else "info"},
+            {"label": "培养方案", "value": student.get("plan_name") or "未绑定", "detail": student.get("version") or "当前学生绑定方案", "tone": "info"},
+        ],
+        "reasons": [
+            "毕业准备核查关注的是学生是否存在必修课程完成证据缺口，不直接等同毕业审核结论。",
+            "明确未通过课程可优先进入重修、补考、替代认定和课程保障核查。",
+            "缺结果候选必须先核验选课、免修认定、课程替代和个人方案适用范围，不能直接认定学生缺修。",
+        ],
+        "suggestions": [
+            {"role": "学院", "priority": "high" if failed else "medium", "action": "确认学生课程缺口清单", "detail": "逐门核查必修未通过课程是否有近期补修、重修或替代认定路径。"},
+            {"role": "教务处", "priority": "high" if no_offering else "medium", "action": "核查课程供给和保障资源", "detail": "对无开课证据或影响学生较多的课程，确认下学期开课计划、教师容量和教学班资源。"},
+            {"role": "辅导员/班主任", "priority": "medium", "action": "提醒学生制定毕业准备计划", "detail": "让学生明确优先处理哪些必修课程，避免毕业审核前集中暴露问题。"},
+        ],
+        "nextActions": [
+            "查看核查证据弹窗中的明确未通过课程和缺结果候选课程。",
+            "对无开课证据课程进入课程保障证据核查。",
+            "必要时把学生加入学院毕业准备重点跟踪名单。",
+        ],
+        "limitations": ["本研判仅用于毕业准备管理核查，不替代学校正式毕业资格审核。"],
+    })
+
+
+@router.get("/insight/graduation-readiness/course/{course_id}")
+def graduation_readiness_course_insight(course_id: str,
+                                        user: dict = Depends(get_current_user),
+                                        conn: sqlite3.Connection = Depends(get_v2_db)):
+    scope, scope_params = _v2_student_scope(user, conn, "s")
+    scope_sql = f" AND {scope}" if scope else ""
+    course = dbm.query_one(conn, "SELECT course_id,name,category,nature,organization_id FROM dim_course WHERE course_id=?", (course_id,)) or {"course_id": course_id, "name": course_id}
+    affected = dbm.query_one(conn, f"""
+        SELECT COUNT(DISTINCT CASE WHEN x.requirement_type='必修' AND x.completion_status='failed' THEN x.student_id END) failed_students,
+               COUNT(DISTINCT CASE WHEN x.requirement_type='必修' AND x.completion_status IN ('not_completed','unknown') AND x.is_overdue=1 THEN x.student_id END) candidate_students,
+               COUNT(DISTINCT s.major_code) major_count
+        FROM student_plan_course_status x
+        JOIN dim_student s ON s.student_id=x.student_id
+        WHERE x.course_id=? AND x.rule_version='growth-v1'{scope_sql}
+    """, tuple([course_id] + scope_params)) or {}
+    supply = dbm.query_one(conn, """
+        SELECT COUNT(DISTINCT l.lesson_id) lesson_count,
+               COUNT(DISTINCT lt.staff_id) teacher_count,
+               SUM(COALESCE(l.capacity,0)) capacity,
+               SUM(COALESCE(l.enrolled,0)) enrolled,
+               GROUP_CONCAT(DISTINCT l.semester_id) semesters
+        FROM teaching_lesson l
+        LEFT JOIN lesson_teacher lt ON lt.lesson_id=l.lesson_id
+        WHERE l.course_id=?
+    """, (course_id,)) or {}
+    substitutions = dbm.scalar(conn, """
+        SELECT COUNT(DISTINCT substitution_id) FROM student_course_substitution
+        WHERE original_course_id=? OR substitute_course_id=?
+    """, (course_id, course_id)) or 0
+    failed = affected.get("failed_students") or 0
+    candidates = affected.get("candidate_students") or 0
+    lesson_count = supply.get("lesson_count") or 0
+    teacher_count = supply.get("teacher_count") or 0
+    risk = "critical" if failed >= 10 or not lesson_count else "warning" if failed or candidates else "info"
+    reasons = []
+    if failed:
+        reasons.append(f"该课程当前关联 {failed} 名明确未通过学生，是毕业准备核查中的可行动问题。")
+    if candidates:
+        reasons.append(f"另有 {candidates} 名学生属于缺结果候选，需要先核验选课、认定或方案适用范围。")
+    if not lesson_count:
+        reasons.append("当前历史教学任务中未发现教学班证据，需优先确认是否存在课程代码映射、替代课程或未来开课计划。")
+    elif teacher_count <= 1:
+        reasons.append("历史教学证据中教师覆盖较少，若下期开重修或补修班，需要提前确认师资容量。")
+    if substitutions:
+        reasons.append(f"已发现 {substitutions} 条课程替代关系，可作为学生个体核查时的重要证据。")
+    return ok({
+        "targetType": "graduationCourse",
+        "targetId": course_id,
+        "targetName": course.get("name") or course_id,
+        "scenario": "graduation_course_supply",
+        "riskLevel": risk,
+        "riskLabel": RISK_LABEL[risk],
+        "riskTone": TONE[risk],
+        "source": "ai_sample" if risk == "critical" else "rule",
+        "sourceLabel": "AI增强研判样本" if risk == "critical" else "规则研判兜底",
+        "generatedBy": "offline_llm_curated_sample" if risk == "critical" else "deterministic_rule_engine",
+        "generatedAt": _now(),
+        "summary": f"{course.get('name') or course_id}建议作为毕业准备课程保障对象核查：明确未通过 {failed} 人，缺结果候选 {candidates} 人，涉及 {affected.get('major_count') or 0} 个专业。",
+        "confidence": "高" if failed or candidates else "中",
+        "profile": {"college": course.get("organization_id"), "major": f"{affected.get('major_count') or 0} 个专业"},
+        "evidence": [
+            {"label": "明确未通过学生", "value": f"{failed} 人", "detail": "可优先进入重修/补考/替代路径核查", "tone": "danger" if failed else "success"},
+            {"label": "缺结果候选", "value": f"{candidates} 人", "detail": "需先核验选课与认定数据", "tone": "warning" if candidates else "success"},
+            {"label": "历史教学班", "value": f"{lesson_count} 个", "detail": f"教师 {teacher_count} 人；容量 {supply.get('capacity') or 0}", "tone": "danger" if not lesson_count else "info"},
+            {"label": "替代关系", "value": f"{substitutions} 条", "detail": "可用于学生个体课程替代核查", "tone": "info"},
+        ],
+        "reasons": reasons or ["当前未显示明显课程保障风险，可作为常规观察对象。"],
+        "suggestions": [
+            {"role": "教务处", "priority": "high" if risk == "critical" else "medium", "action": "确认课程供给策略", "detail": "结合下学期开课计划、教师容量和重修资源，判断是否需要保障该课程。"},
+            {"role": "二级学院", "priority": "high" if failed else "medium", "action": "核查受影响学生名单", "detail": "区分明确未通过和缺结果候选，避免把数据候选直接作为学生问题处理。"},
+            {"role": "排课/教学运行人员", "priority": "medium", "action": "评估补修班或替代资源", "detail": "若受影响学生集中且教师容量不足，应提前准备课程资源方案。"},
+        ],
+        "nextActions": [
+            "打开课程保障证据，查看历史教学班、教师、容量和替代关系。",
+            "查看受影响学生名单，优先处理明确未通过学生。",
+            "如无开课证据，核查课程代码映射和培养方案课程替代规则。",
+        ],
+        "limitations": ["当前未接入未来开课计划和重修班正式安排，课程保障建议需结合教务排课计划人工确认。"],
     })

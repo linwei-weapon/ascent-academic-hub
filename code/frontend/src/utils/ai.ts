@@ -20,3 +20,11 @@ export function getAlertSummaryAIInsight(query: AIInsightQuery = {}) {
   const qs = params.toString()
   return http.get<any>(`/admin/ai/insight/alert-summary${qs ? `?${qs}` : ''}`)
 }
+
+export function getGraduationStudentAIInsight(studentId: string) {
+  return http.get<any>(`/admin/ai/insight/graduation-readiness/student/${encodeURIComponent(studentId)}`)
+}
+
+export function getGraduationCourseAIInsight(courseId: string) {
+  return http.get<any>(`/admin/ai/insight/graduation-readiness/course/${encodeURIComponent(courseId)}`)
+}
