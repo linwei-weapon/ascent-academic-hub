@@ -86,8 +86,11 @@
             <span v-else class="sa-faint">—</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="100" fixed="right" align="center">
-          <template #default="{row}"><el-button size="small" type="primary" plain @click.stop="openReview(row)">详情</el-button></template>
+        <el-table-column label="操作" width="160" fixed="right" align="center">
+          <template #default="{row}">
+            <el-button size="small" type="primary" plain @click.stop="openReview(row)">详情</el-button>
+            <el-button size="small" type="primary" text @click.stop="openStudentInsight(row)">AI研判</el-button>
+          </template>
         </el-table-column>
       </el-table>
 
@@ -116,9 +119,13 @@
             <el-table :data="review.alertHistory || []" size="small"><el-table-column prop="time" label="时间" width="150" /><el-table-column prop="level" label="等级" width="76" /><el-table-column prop="type" label="预警类型" width="130" /><el-table-column prop="changeType" label="与上次相比" width="100" /><el-table-column prop="workflowStatusLabel" label="处置状态" width="100" /><el-table-column prop="detail" label="触发证据" min-width="210" show-overflow-tooltip /></el-table>
           </el-tab-pane>
         </el-tabs>
-        <div class="drawer-actions"><el-button type="primary" @click="goStudent({sid:review.code})">打开完整学生档案</el-button></div>
+        <div class="drawer-actions">
+          <el-button type="primary" plain @click="openStudentInsight({ sid: review.code })">AI研判</el-button>
+          <el-button type="primary" @click="goStudent({sid:review.code})">打开完整学生档案</el-button>
+        </div>
       </div>
     </el-drawer>
+    <AIInsightDrawer v-model="aiDrawerVisible" :insight="aiInsight" :loading="aiLoading" title="AI学业研判" />
   </div>
 </template>
 
@@ -126,8 +133,10 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { http } from '@/utils/http'
+import { getStudentAIInsight } from '@/utils/ai'
 import { getFilterMeta, type SemesterOpt, type MajorOpt, type ClassOpt } from '@/utils/meta'
 import KpiCard from '@/components/KpiCard.vue'
+import AIInsightDrawer from '@/components/AIInsightDrawer.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -169,6 +178,9 @@ const reviewVisible = ref(false)
 const reviewLoading = ref(false)
 const reviewTab = ref('semester')
 const review = ref<any>({})
+const aiDrawerVisible = ref(false)
+const aiLoading = ref(false)
+const aiInsight = ref<any>(null)
 
 // ── 筛选器选项 ──
 const semesters = ref<SemesterOpt[]>([])
@@ -269,6 +281,18 @@ async function openReview(row: any) {
   reviewVisible.value = true; reviewLoading.value = true; reviewTab.value = 'semester'; review.value = { name: row.name, code: row.sid }
   try { const d = await http.get<any>(`/admin/student/${encodeURIComponent(row.sid)}`); if (d) review.value = d }
   finally { reviewLoading.value = false }
+}
+async function openStudentInsight(row: any) {
+  const sid = row.sid || row.code || row.student_id
+  if (!sid) return
+  aiDrawerVisible.value = true
+  aiLoading.value = true
+  aiInsight.value = null
+  try {
+    aiInsight.value = await getStudentAIInsight(sid, 'student_list')
+  } finally {
+    aiLoading.value = false
+  }
 }
 function search() { page.value = 1; loadPage(1) }
 function reset() {

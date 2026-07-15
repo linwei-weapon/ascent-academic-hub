@@ -25,6 +25,9 @@
 
     <template v-else>
     <h2 class="sa-page-title">{{ data.name || '加载中…' }} · 学生学业档案</h2>
+    <div class="ai-profile-action">
+      <el-button type="primary" plain @click="openStudentInsight">AI学业研判</el-button>
+    </div>
     <div class="info-bar">
       <span>学号：{{ data.code || '—' }}</span><el-divider direction="vertical" />
       <span>{{ data.collegeName || '—' }}</span><el-divider direction="vertical" />
@@ -211,15 +214,18 @@
       </div>
     </div>
     </template>
+    <AIInsightDrawer v-model="aiDrawerVisible" :insight="aiInsight" :loading="aiLoading" title="AI学业研判" />
   </div>
 </template>
 
 <script setup lang="ts">
 import { reactive, ref, onMounted, computed } from 'vue'
 import { http } from '@/utils/http'
+import { getStudentAIInsight } from '@/utils/ai'
 import { useRoute, useRouter } from 'vue-router'
 import KpiCard from '@/components/KpiCard.vue'
 import EChart from '@/components/EChart.vue'
+import AIInsightDrawer from '@/components/AIInsightDrawer.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -259,6 +265,9 @@ const candidateCourses = reactive<any>({ items: [], total: 0 })
 const advice = reactive<any>({ cards: [], audiences: [], generated_by: '', wording: '' })
 const adviceAudience = ref('student')
 const timelineFilter = ref('all')
+const aiDrawerVisible = ref(false)
+const aiLoading = ref(false)
+const aiInsight = ref<any>(null)
 const interventionTimeline = computed(() => [
   ...(data.interventionHistory || []).map((x:any) => ({...x,key:`followup-${x.event_id}-${x.created_at}`,timestamp:x.created_at,title:x.action_type,content:x.content,nextActionAt:x.next_action_at})),
   ...(data.alertStatusHistory || []).map((x:any) => ({...x,key:`status-${x.event_id}-${x.changed_at}`,timestamp:x.changed_at,title:`状态更新：${x.fromStatusLabel || '首次记录'} → ${x.toStatusLabel}`,content:x.reason})),
@@ -347,6 +356,19 @@ function timelineDetail(event: any) {
   return ''
 }
 
+async function openStudentInsight() {
+  const sid = String(route.params.id || data.code || '')
+  if (!sid) return
+  aiDrawerVisible.value = true
+  aiLoading.value = true
+  aiInsight.value = null
+  try {
+    aiInsight.value = await getStudentAIInsight(sid, 'student_profile')
+  } finally {
+    aiLoading.value = false
+  }
+}
+
 function tagType(level: string) { return level === '严重' ? 'danger' : level === '警告' ? 'warning' : 'info' }
 function kpiTone(label: string, value: any): 'primary'|'teal'|'danger'|'amber' {
   const v = String(value || '')
@@ -388,6 +410,7 @@ const gpaOption = computed(() => {
 
 <style scoped>
 .info-bar { font-size: 12px; color: var(--sa-muted); margin: 8px 0 16px; }
+.ai-profile-action { display:flex; justify-content:flex-end; margin:-6px 0 14px; }
 .alert-row { padding: 6px 0; border-bottom: 1px solid var(--sa-border); }
 .alert-row:last-child { border-bottom: none; }
 .alert-head { display:flex; justify-content:space-between; align-items:center; gap:8px; font-size:12px; }
