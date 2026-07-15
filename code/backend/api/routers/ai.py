@@ -13,7 +13,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends
 
 from .. import db as dbm
-from ..deps import get_current_user, get_db, get_v2_db, student_data_scope
+from ..deps import college_data_scope, get_current_user, get_db, get_v2_db, student_data_scope
 from ..envelope import ApiError, ok
 
 router = APIRouter(prefix="/api/admin/ai", tags=["ai"])
@@ -876,4 +876,245 @@ def operation_classroom_occupancy_insight(semester: Optional[str] = None,
             "当前结果基于已接入的实际教室占用记录，不等同于全校正式教室空闲率。",
             "分母使用已观察教室和实际采集日期，生产系统应接入正式可用教室清单、座位数和占用审批全量数据。",
         ],
+    })
+
+
+def _schedule_reason_ai_category(reason: str) -> dict:
+    text = (reason or "").strip()
+    rules = [
+        ("公派/会议/培训", ["会议", "培训", "出差", "公派", "外出", "公务"], "warning"),
+        ("教师个人或健康", ["病", "身体", "家庭", "个人", "请假"], "warning"),
+        ("考试/竞赛/活动冲突", ["考试", "竞赛", "活动", "讲座", "答辩"], "info"),
+        ("教学安排调整", ["教学计划", "计划", "节假日", "调休", "补课", "实践", "实验", "实习", "课程安排", "进度"], "info"),
+        ("场地/设备/资源", ["教室", "场地", "设备", "容量", "停电", "网络"], "danger"),
+        ("课程冲突调整", ["课程冲突", "冲突"], "warning"),
+    ]
+    for category, keywords, tone in rules:
+        for keyword in keywords:
+            if keyword in text:
+                return {"category": category, "matchedKeyword": keyword, "tone": tone}
+    return {"category": "其他待核验", "matchedKeyword": "", "tone": "info"}
+
+
+def _schedule_scope(college: Optional[str], user: dict, conn: sqlite3.Connection, alias: str = "s") -> tuple[str, list]:
+    conds: list[str] = []
+    params: list = []
+    col_scope, col_params = college_data_scope(user, conn)
+    if col_scope:
+        conds.append(f"{alias}." + col_scope)
+        params.extend(col_params)
+    if college:
+        conds.append(f"{alias}.college_id=?")
+        params.append(college)
+    return " AND ".join(conds), params
+
+
+@router.get("/insight/operation/schedule-changes")
+def operation_schedule_changes_insight(semester: Optional[str] = None,
+                                       college: Optional[str] = None,
+                                       user: dict = Depends(get_current_user),
+                                       conn: sqlite3.Connection = Depends(get_db)):
+    sem = semester or dbm.scalar(conn, "SELECT MAX(semester_id) FROM fact_schedule_change")
+    scope_sql, scope_params = _schedule_scope(college, user, conn, "s")
+    conds = ["s.semester_id=?"]
+    params: list = [sem]
+    if scope_sql:
+        conds.append(scope_sql)
+        params.extend(scope_params)
+    where = " AND ".join(conds)
+    total = dbm.scalar(conn, f"SELECT COUNT(*) FROM fact_schedule_change s WHERE {where}", tuple(params)) or 0
+    if not total:
+        raise ApiError("暂无调停课数据", code=404, status_code=404)
+    stats = dbm.query_one(conn, f"""
+        SELECT COUNT(*) total,
+               COUNT(CASE WHEN s.kind='调课' THEN 1 END) change_count,
+               COUNT(CASE WHEN s.kind='停课' THEN 1 END) stop_count,
+               COALESCE(SUM(s.affected),0) affected,
+               AVG(s.auto_approved) auto_approved,
+               AVG(s.review_days) avg_review_days
+        FROM fact_schedule_change s WHERE {where}
+    """, tuple(params)) or {}
+    raw_reasons = dbm.query(conn, f"""
+        SELECT s.reason,COUNT(*) count
+        FROM fact_schedule_change s
+        WHERE {where}
+        GROUP BY s.reason
+        ORDER BY count DESC
+        LIMIT 12
+    """, tuple(params))
+    semantic: dict[str, dict] = {}
+    for row in raw_reasons:
+        classified = _schedule_reason_ai_category(row.get("reason") or "")
+        item = semantic.setdefault(classified["category"], {"name": classified["category"], "count": 0, "tone": classified["tone"], "rawReasons": []})
+        item["count"] += row["count"]
+        item["rawReasons"].append({"text": row.get("reason") or "未填写", "count": row["count"], "matchedKeyword": classified["matchedKeyword"]})
+    semantic_rows = sorted(semantic.values(), key=lambda x: -x["count"])
+    top_semantic = semantic_rows[0] if semantic_rows else {}
+    monthly = dbm.query(conn, f"""
+        SELECT s.month,COUNT(*) count,COALESCE(SUM(s.affected),0) affected
+        FROM fact_schedule_change s
+        WHERE {where}
+        GROUP BY s.month
+        ORDER BY count DESC
+    """, tuple(params))
+    top_month = monthly[0] if monthly else {}
+    teacher_rows = dbm.query(conn, f"""
+        SELECT s.teacher_id,COALESCE(t.name,s.teacher_id) teacher_name,COALESCE(t.dept,'') dept,
+               COUNT(*) count,COALESCE(SUM(s.affected),0) affected
+        FROM fact_schedule_change s
+        LEFT JOIN dim_teacher t ON t.teacher_id=s.teacher_id
+        WHERE {where}
+        GROUP BY s.teacher_id,COALESCE(t.name,s.teacher_id),COALESCE(t.dept,'')
+        ORDER BY count DESC,affected DESC
+        LIMIT 5
+    """, tuple(params))
+    college_name = dbm.scalar(conn, "SELECT name FROM dim_college WHERE college_id=?", (college,)) if college else None
+    change_count = stats.get("change_count") or 0
+    stop_count = stats.get("stop_count") or 0
+    affected = stats.get("affected") or 0
+    stop_share = round(stop_count * 100 / total, 1) if total else 0
+    auto_rate = round((stats.get("auto_approved") or 0) * 100, 1)
+    risk = "critical" if stop_share >= 25 or affected >= 3000 or (teacher_rows and teacher_rows[0]["count"] >= 8) else "warning" if total >= 50 or stop_count or (top_semantic.get("count") or 0) >= total * 0.35 else "info"
+    enhanced = risk in {"critical", "warning"}
+    target_name = f"{college_name}调停课" if college_name else "当前调停课切片"
+    summary = (
+        f"{target_name}在 {sem} 学期共有 {total} 条调停课记录，其中调课 {change_count} 次、停课 {stop_count} 次，"
+        f"影响 {affected} 人次。主要原因集中在“{top_semantic.get('name') or '暂无'}”，建议优先核查高频教师、集中月份和停课占比。"
+    )
+    reasons = [
+        f"停课占比为 {stop_share}%，停课通常比调课更需要关注教学进度补偿和学生通知到达。",
+        f"院系自动审核占比约 {auto_rate}%，可用于判断是否存在大量短时长、低风险调课。",
+    ]
+    if top_semantic:
+        reasons.append(f"原因文本经语义归类后，“{top_semantic['name']}”占 {top_semantic['count']} 条，是本切片最主要的管理解释线索。")
+    if top_month:
+        reasons.append(f"调停课最集中月份为 {top_month['month']} 月，共 {top_month['count']} 条，建议结合考试周、实践周或大型活动安排核查。")
+    if teacher_rows:
+        reasons.append(f"最高频教师为 {teacher_rows[0]['teacher_name']}，本学期 {teacher_rows[0]['count']} 条记录，建议进入教师维度核查原因是否集中。")
+    return ok({
+        "targetType": "operationScheduleChanges",
+        "targetId": college or "current-schedule-change-filter",
+        "targetName": target_name,
+        "scenario": "operation_schedule_changes",
+        "riskLevel": risk,
+        "riskLabel": RISK_LABEL[risk],
+        "riskTone": TONE[risk],
+        "source": "ai_sample" if enhanced else "rule",
+        "sourceLabel": "AI增强研判样本" if enhanced else "规则研判兜底",
+        "generatedBy": "offline_llm_curated_sample" if enhanced else "deterministic_rule_engine",
+        "generatedAt": _now(),
+        "summary": summary,
+        "confidence": "中高" if raw_reasons else "中",
+        "profile": {"college": college_name or "全校/当前权限", "major": "调停课治理", "semester": sem},
+        "evidence": [
+            {"label": "调停课记录", "value": f"{total} 条", "detail": f"调课 {change_count}；停课 {stop_count}", "tone": "warning" if total >= 50 else "info"},
+            {"label": "影响学生", "value": f"{affected} 人次", "detail": "调停课教学班关联学生人次", "tone": "danger" if affected >= 3000 else "warning" if affected else "info"},
+            {"label": "主要原因", "value": top_semantic.get("name") or "暂无", "detail": f"{top_semantic.get('count') or 0} 条记录", "tone": top_semantic.get("tone") or "info"},
+            {"label": "高峰月份", "value": f"{top_month.get('month')}月" if top_month else "暂无", "detail": f"{top_month.get('count') or 0} 条记录", "tone": "warning" if top_month else "info"},
+            {"label": "自动审核", "value": f"{auto_rate}%", "detail": "院系自动审核占比", "tone": "success" if auto_rate >= 70 else "info"},
+        ],
+        "reasons": reasons,
+        "suggestions": [
+            {"role": "教务处", "priority": "high" if risk == "critical" else "medium", "action": "核查调停课集中原因", "detail": "优先看停课占比、影响学生人次和高峰月份，判断是否需要优化审核规则或教学运行安排。"},
+            {"role": "二级学院", "priority": "high" if teacher_rows and teacher_rows[0]["count"] >= 8 else "medium", "action": "跟进高频教师和课程", "detail": "对高频教师逐条核查原始原因文本，区分正常公务冲突、健康因素、教学安排问题和资源问题。"},
+            {"role": "排课人员", "priority": "medium", "action": "调整冲突高发时段", "detail": "结合月份趋势和原因分类，提前规避会议培训、考试活动、场地设备等冲突集中期。"},
+        ],
+        "nextActions": [
+            "打开教师调课 TOP10 中前 3 名教师的 AI 研判，确认原因是否高度集中。",
+            "核查停课记录是否已有补课安排或学生通知证据。",
+            "按月份查看集中波峰是否与考试、实践、会议培训或大型活动相关。",
+        ],
+        "focusItems": {"reasons": semantic_rows[:5], "teachers": teacher_rows, "monthly": monthly},
+        "limitations": [
+            "当前原型使用规则与样本化 AI 文案解释原因文本，未调用外部大模型。",
+            "生产系统应接入真实调课申请、审批记录、补课安排和通知到达证据，以支持闭环治理。",
+        ],
+    })
+
+
+@router.get("/insight/operation/schedule-changes/teacher/{teacher_id}")
+def operation_schedule_teacher_insight(teacher_id: str, semester: Optional[str] = None,
+                                       user: dict = Depends(get_current_user),
+                                       conn: sqlite3.Connection = Depends(get_db)):
+    sem = semester or dbm.scalar(conn, "SELECT MAX(semester_id) FROM fact_schedule_change")
+    scope_sql, scope_params = _schedule_scope(None, user, conn, "s")
+    conds = ["s.semester_id=?", "s.teacher_id=?"]
+    params: list = [sem, teacher_id]
+    if scope_sql:
+        conds.append(scope_sql)
+        params.extend(scope_params)
+    where = " AND ".join(conds)
+    teacher = dbm.query_one(conn, "SELECT teacher_id,name,dept,title FROM dim_teacher WHERE teacher_id=?", (teacher_id,)) or {"teacher_id": teacher_id, "name": teacher_id}
+    stats = dbm.query_one(conn, f"""
+        SELECT COUNT(*) total,COUNT(CASE WHEN s.kind='停课' THEN 1 END) stop_count,
+               COALESCE(SUM(s.affected),0) affected,AVG(s.review_days) avg_review_days
+        FROM fact_schedule_change s WHERE {where}
+    """, tuple(params)) or {}
+    total = stats.get("total") or 0
+    if not total:
+        raise ApiError("暂无该教师调停课数据或无权访问", code=404, status_code=404)
+    reasons_raw = dbm.query(conn, f"""
+        SELECT s.reason,COUNT(*) count,COALESCE(SUM(s.affected),0) affected
+        FROM fact_schedule_change s
+        WHERE {where}
+        GROUP BY s.reason
+        ORDER BY count DESC,affected DESC
+    """, tuple(params))
+    reason_items = []
+    for row in reasons_raw:
+        classified = _schedule_reason_ai_category(row.get("reason") or "")
+        reason_items.append({**row, "semanticCategory": classified["category"], "tone": classified["tone"], "matchedKeyword": classified["matchedKeyword"]})
+    top = reason_items[0] if reason_items else {}
+    months = dbm.query(conn, f"""
+        SELECT s.month,COUNT(*) count
+        FROM fact_schedule_change s
+        WHERE {where}
+        GROUP BY s.month
+        ORDER BY count DESC
+    """, tuple(params))
+    stop_count = stats.get("stop_count") or 0
+    affected = stats.get("affected") or 0
+    risk = "critical" if total >= 8 or stop_count >= 3 or affected >= 800 else "warning" if total >= 3 or stop_count else "info"
+    summary = (
+        f"{teacher.get('name') or teacher_id}在 {sem} 学期共有 {total} 条调停课记录，停课 {stop_count} 条，"
+        f"影响 {affected} 人次。主要原因归类为“{top.get('semanticCategory') or '暂无'}”，建议核查是否属于可提前规避的安排冲突。"
+    )
+    return ok({
+        "targetType": "operationScheduleTeacher",
+        "targetId": teacher_id,
+        "targetName": teacher.get("name") or teacher_id,
+        "scenario": "operation_schedule_teacher",
+        "riskLevel": risk,
+        "riskLabel": RISK_LABEL[risk],
+        "riskTone": TONE[risk],
+        "source": "ai_sample" if risk in {"critical", "warning"} else "rule",
+        "sourceLabel": "AI增强研判样本" if risk in {"critical", "warning"} else "规则研判兜底",
+        "generatedBy": "offline_llm_curated_sample" if risk in {"critical", "warning"} else "deterministic_rule_engine",
+        "generatedAt": _now(),
+        "summary": summary,
+        "confidence": "中高",
+        "profile": {"college": teacher.get("dept"), "major": teacher.get("title"), "semester": sem},
+        "evidence": [
+            {"label": "调停课记录", "value": f"{total} 条", "detail": f"停课 {stop_count} 条", "tone": "danger" if total >= 8 else "warning" if total >= 3 else "info"},
+            {"label": "影响学生", "value": f"{affected} 人次", "detail": "该教师调停课关联教学班学生人次", "tone": "danger" if affected >= 800 else "warning" if affected else "info"},
+            {"label": "主要原因", "value": top.get("semanticCategory") or "暂无", "detail": top.get("reason") or "无原始原因", "tone": top.get("tone") or "info"},
+            {"label": "集中月份", "value": f"{months[0]['month']}月" if months else "暂无", "detail": f"{months[0]['count']} 条记录" if months else "无月份分布", "tone": "warning" if months and months[0]["count"] >= 3 else "info"},
+        ],
+        "reasons": [
+            "教师维度研判用于判断调停课是否集中在少数教师、少数原因或少数月份，避免只看全校总量。",
+            f"该教师最高频原始原因是“{top.get('reason') or '暂无'}”，系统将其归类为“{top.get('semanticCategory') or '暂无'}”。",
+            "如果原因集中在会议培训、公务外出或场地资源，应考虑提前排课避让；如果集中在个人健康，应以支持和替补安排为主。",
+        ],
+        "suggestions": [
+            {"role": "二级学院", "priority": "high" if risk == "critical" else "medium", "action": "与教师确认高频原因", "detail": "核查是否存在可提前预判的会议培训、实践安排、健康因素或课程资源冲突。"},
+            {"role": "教务处", "priority": "medium", "action": "优化审核与补课证据", "detail": "对停课和影响学生较多的记录，确认补课安排、审批依据和学生通知是否完整。"},
+            {"role": "排课人员", "priority": "medium", "action": "下一轮排课规避冲突", "detail": "将高频月份和原因作为下一轮排课优化输入，减少同类调课重复发生。"},
+        ],
+        "nextActions": [
+            "查看教师教学档案，结合课程团队和教师负荷判断是否存在替补资源不足。",
+            "抽查原始调课申请文本，确认语义分类是否准确。",
+            "若停课较多，补充核查补课安排和学生通知记录。",
+        ],
+        "focusItems": {"reasons": reason_items[:8], "months": months},
+        "limitations": ["教师调停课频次不直接等同于教学质量问题，应结合原始原因、审批依据和补课安排综合判断。"],
     })

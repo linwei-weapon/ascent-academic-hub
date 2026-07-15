@@ -22,6 +22,9 @@
     <div class="sa-kpi-row">
       <KpiCard v-for="k in kpis" :key="k.label" :label="k.label" :value="k.value" :hint="k.formula" :tone="kpiTone(k.label)" />
     </div>
+    <div class="ai-toolbar">
+      <el-button size="small" type="primary" plain @click="openScheduleAi()">AI研判当前视图</el-button>
+    </div>
 
     <el-row :gutter="16" style="margin-bottom:16px">
       <el-col :span="12">
@@ -31,6 +34,7 @@
             <el-table-column prop="name" label="学院" width="130"><template #default="{row}"><span class="link">{{ row.name }}</span></template></el-table-column>
             <el-table-column prop="totalLessons" label="教学班数" width="84" align="right" />
             <el-table-column prop="changeCount" label="调课次数" width="84" align="right" />
+            <el-table-column label="AI" width="88"><template #default="{row}"><el-button link type="primary" @click.stop="openScheduleAi(row)">AI研判</el-button></template></el-table-column>
             <el-table-column label="调课率" min-width="150"><template #default="{row}">
               <div style="display:flex;align-items:center;gap:8px">
                 <el-progress :percentage="Math.min(row.pct*20,100)" :show-text="false" :stroke-width="8" :color="row.pct>4?'#E11D48':'#D97706'" style="flex:1" />
@@ -53,6 +57,7 @@
             <el-table-column prop="name" label="教师" width="80"><template #default="{row}"><span class="link">{{ row.name }}</span></template></el-table-column>
             <el-table-column prop="dept" label="学院" width="120" />
             <el-table-column prop="count" label="次数" width="60" align="right" />
+            <el-table-column label="AI" width="88"><template #default="{row}"><el-button link type="primary" @click.stop="openTeacherAi(row)">AI研判</el-button></template></el-table-column>
             <el-table-column prop="reason" label="主要原因" min-width="110" />
           </el-table>
         </div>
@@ -73,8 +78,12 @@
         <el-table-column prop="semanticCategory" label="语义分类" width="150" />
         <el-table-column prop="count" label="次数" width="80" align="right" />
       </el-table>
-      <el-button type="primary" plain style="margin-top:14px" @click="goTeacher(selectedTeacher)">查看教师教学档案</el-button>
+      <div class="drawer-actions">
+        <el-button type="primary" plain @click="openTeacherAi(selectedTeacher)">AI研判该教师</el-button>
+        <el-button type="primary" plain @click="goTeacher(selectedTeacher)">查看教师教学档案</el-button>
+      </div>
     </el-drawer>
+    <AIInsightDrawer v-model="aiDrawerVisible" :insight="aiInsight" :loading="aiLoading" title="调课治理AI研判" />
   </div>
 </template>
 
@@ -87,6 +96,8 @@ import KpiCard from '@/components/KpiCard.vue'
 import EChart from '@/components/EChart.vue'
 import { COLLEGE_MAP } from '@/constants/colleges'
 import { getFilterMeta, type SemesterOpt } from '@/utils/meta'
+import AIInsightDrawer from '@/components/AIInsightDrawer.vue'
+import { getScheduleChangesAIInsight, getScheduleTeacherAIInsight } from '@/utils/ai'
 const router = useRouter(); const route = useRoute()
 const collegeFilter = ref<{id:string;name:string}|null>(null)
 const collegeMap = COLLEGE_MAP
@@ -106,7 +117,32 @@ const data = reactive<any>({
 })
 const teacherDrawer = ref(false)
 const selectedTeacher = ref<any>({})
+const aiDrawerVisible = ref(false)
+const aiLoading = ref(false)
+const aiInsight = ref<any>(null)
 function inspectTeacher(row:any) { selectedTeacher.value = row; teacherDrawer.value = true }
+
+async function openScheduleAi(row?: any) {
+  aiDrawerVisible.value = true
+  aiLoading.value = true
+  aiInsight.value = null
+  try {
+    aiInsight.value = await getScheduleChangesAIInsight({
+      semester: fSemester.value,
+      college: row?.id || (route.query.college as string) || undefined,
+    })
+  } finally { aiLoading.value = false }
+}
+
+async function openTeacherAi(row: any) {
+  const teacherId = row?.id || row?.teacher_id || row?.teacherId
+  if (!teacherId) return
+  aiDrawerVisible.value = true
+  aiLoading.value = true
+  aiInsight.value = null
+  try { aiInsight.value = await getScheduleTeacherAIInsight(teacherId, fSemester.value) }
+  finally { aiLoading.value = false }
+}
 
 async function load() {
   const cid = route.query.college as string
@@ -160,6 +196,7 @@ const monthlyOption = computed(() => {
 
 <style scoped>
 .sa-head-row { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 14px; }
+.ai-toolbar { display:flex; justify-content:flex-end; margin:-4px 0 12px; }
 .filter-banner { background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 10px; padding: 8px 14px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: var(--sa-primary); }
 .link { color: var(--sa-primary); cursor: pointer; font-weight: 500; }
 .link:hover { text-decoration: underline; }
@@ -169,4 +206,5 @@ const monthlyOption = computed(() => {
 .teacher-summary { display:grid; grid-template-columns:auto 1fr auto 1fr; align-items:end; gap:5px 8px; padding:14px 0; }
 .teacher-summary b { color:#1e3a5f; font-size:24px; }
 .teacher-summary span { color:#64748b; font-size:12px; padding-bottom:3px; }
+.drawer-actions { display:flex; gap:8px; margin-top:14px; }
 </style>

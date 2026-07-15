@@ -44,3 +44,18 @@ export function getClassroomOccupancyAIInsight(query: { semester?: string; build
   const qs = params.toString()
   return http.get<any>(`/admin/ai/insight/operation/classroom-occupancy${qs ? `?${qs}` : ''}`)
 }
+
+export function getScheduleChangesAIInsight(query: { semester?: string; college?: string } = {}) {
+  const params = new URLSearchParams()
+  if (query.semester) params.set('semester', query.semester)
+  if (query.college) params.set('college', query.college)
+  const qs = params.toString()
+  return http.get<any>(`/admin/ai/insight/operation/schedule-changes${qs ? `?${qs}` : ''}`)
+}
+
+export function getScheduleTeacherAIInsight(teacherId: string, semester?: string) {
+  const params = new URLSearchParams()
+  if (semester) params.set('semester', semester)
+  const qs = params.toString()
+  return http.get<any>(`/admin/ai/insight/operation/schedule-changes/teacher/${encodeURIComponent(teacherId)}${qs ? `?${qs}` : ''}`)
+}
