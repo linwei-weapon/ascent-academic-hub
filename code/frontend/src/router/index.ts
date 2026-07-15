@@ -55,6 +55,7 @@ export const router = createRouter({
         { path: 'reports/course-quality', component: () => import('@/views/admin/reports/CourseQuality.vue') },
         { path: 'reports/faculty-resource-risk', component: () => import('@/views/admin/reports/FacultyResourceRisk.vue') },
         { path: 'reports/schedule-strategy', component: () => import('@/views/admin/reports/ScheduleStrategy.vue') },
+        { path: 'reports/management-briefing', component: () => import('@/views/admin/reports/ManagementBriefing.vue') },
 
         // ====== 系统管理（账号 / 菜单 / 角色） ======
         { path: 'system/accounts', component: () => import('@/views/admin/system/Accounts.vue') },

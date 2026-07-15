@@ -89,3 +89,11 @@ export function getFacultyCourseAIInsight(courseId: string, semester?: string) {
   const qs = params.toString()
   return http.get<any>(`/admin/ai/insight/faculty-resource-risk/course/${encodeURIComponent(courseId)}${qs ? `?${qs}` : ''}`)
 }
+
+export function getManagementBriefing(query: { period?: 'morning' | 'term'; semester?: string } = {}) {
+  const params = new URLSearchParams()
+  if (query.period) params.set('period', query.period)
+  if (query.semester) params.set('semester', query.semester)
+  const qs = params.toString()
+  return http.get<any>(`/admin/ai/briefing/management${qs ? `?${qs}` : ''}`)
+}
