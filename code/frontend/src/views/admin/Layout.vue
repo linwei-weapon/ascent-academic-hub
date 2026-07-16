@@ -5,7 +5,7 @@
       <el-menu
         :default-active="activeMenu"
         :default-openeds="openMenus"
-        router
+        @select="navigateMenu"
         class="sa-menu"
         background-color="transparent"
         text-color="#475569"
@@ -50,11 +50,12 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { SwitchButton } from '@element-plus/icons-vue'
 import { authStore, visibleMenus, logout, type AuthMenu } from '@/store/auth'
 
 const route = useRoute()
+const router = useRouter()
 
 // 菜单树：按 parent_id 分组
 interface MenuNode extends AuthMenu {
@@ -98,6 +99,9 @@ const refreshKey = ref(0)
 
 function onLogout() {
   logout()
+}
+function navigateMenu(path: string) {
+  if (path && path !== route.path) void router.push(path)
 }
 </script>
 

@@ -128,10 +128,14 @@ def management_overview(college: Optional[str] = None, semester: Optional[str] =
         row["known_title_teachers"] = sum(bool(str(teacher_meta.get(x, {}).get("title") or "").strip()) for x in member_ids)
         row["senior_title_teachers"] = sum("教授" in str(teacher_meta.get(x, {}).get("title") or "") for x in member_ids)
         reasons = []
-        if row["teacher_count"] == 1: reasons.append("当前学期仅1名实际授课教师")
-        if row["teacher_count"] <= 2 and row["lesson_count"] >= 3: reasons.append(f"{row['lesson_count']}个教学班仅由{row['teacher_count']}名教师覆盖")
-        if row["enrolled"] >= 100 and row["teacher_count"] == 1: reasons.append(f"单一教师覆盖{row['enrolled']}人次")
-        if row["known_title_teachers"] < row["teacher_count"]: reasons.append("团队职称证据不完整")
+        # 单人承担一门课很常见，不单独形成核查任务。
+        if row["teacher_count"] == 1 and row["enrolled"] >= 100:
+            reasons.append(f"覆盖{row['enrolled']}人次且仅1名教师：核实下学期备份教师与停开课替代安排")
+        elif row["teacher_count"] <= 2 and row["lesson_count"] >= 3:
+            reasons.append(f"{row['lesson_count']}个教学班由{row['teacher_count']}名教师集中承担：核实任务容量与临时替补安排")
+        missing_titles = row["teacher_count"] - row["known_title_teachers"]
+        if missing_titles > 0:
+            reasons.append(f"{missing_titles}名团队成员职称缺失：先补齐教师主数据后再判断职称结构")
         row["attention_reasons"] = reasons
         row["priority"] = "高" if row["teacher_count"] == 1 and row["enrolled"] >= 100 else ("中" if reasons else "常规")
     risk_courses = sorted([x for x in course_rows if x["attention_reasons"]],

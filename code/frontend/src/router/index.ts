@@ -74,6 +74,18 @@ export const router = createRouter({
   ]
 })
 
+// 部署新前端后，已打开的旧页面可能仍引用上一版本分片。
+// 此时菜单路由已变化，但页面组件无法加载；自动刷新一次恢复到当前新版本。
+router.onError((error) => {
+  const message = String(error?.message || error)
+  if (!/Failed to fetch dynamically imported module|Importing a module script failed|error loading dynamically imported module/i.test(message)) return
+  const key = 'sa_chunk_reload'
+  const lastReload = Number(sessionStorage.getItem(key) || 0)
+  if (Date.now() - lastReload < 10000) return
+  sessionStorage.setItem(key, String(Date.now()))
+  location.reload()
+})
+
 /** 子路径 → 所属一级菜单 path（与 Layout 高亮一致），用于菜单级准入判断 */
 function menuKeyOf(p: string): string {
   if (p.startsWith('/admin/alert/')) return '/admin/alert'

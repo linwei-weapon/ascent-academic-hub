@@ -104,6 +104,8 @@
       :size="drawerWidth"
       :destroy-on-close="false"
       :close-on-click-modal="false"
+      :modal="false"
+      modal-class="faculty-nonblocking-overlay"
       @closed="afterDrawerClosed"
     >
       <template #header>
@@ -193,19 +195,42 @@
         </template>
       </div>
     </el-drawer>
+    <el-drawer v-model="teacherDrawer.visible" :title="`${teacherDrawer.data.name || '教师'} · 本科教学档案`" size="720px" append-to-body :modal="false" modal-class="faculty-nonblocking-overlay">
+      <div v-loading="teacherDrawer.loading">
+        <el-alert type="info" :closable="false" show-icon title="档案仅在当前师资核查中展开" description="关闭后继续查看原学院或课程团队，不跳转到其他业务模块。" />
+        <el-descriptions class="teacher-profile-summary" :column="2" border>
+          <el-descriptions-item label="职工号">{{ teacherDrawer.data.code || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="职称">{{ teacherDrawer.data.title || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="所属单位" :span="2">{{ teacherDrawer.data.deptName || '—' }}</el-descriptions-item>
+        </el-descriptions>
+        <div class="sa-kpi-row teacher-profile-kpis"><KpiCard v-for="k in teacherProfileKpis" :key="k.label" :label="k.label" :value="k.value" :hint="k.formula" tone="primary" /></div>
+        <section class="drawer-section">
+          <div class="section-head"><div><h3>本学期教学班</h3><p>用于核对当期任务覆盖，不评价教师教学质量。</p></div></div>
+          <el-table :data="teacherDrawer.data.currentCourses || []" size="small" max-height="300" empty-text="当前学期暂无教学班">
+            <el-table-column prop="courseName" label="课程" min-width="150"/><el-table-column prop="className" label="教学班" min-width="150"/>
+            <el-table-column prop="students" label="学生数" width="80" align="right"/><el-table-column prop="hours" label="学时" width="70" align="right"/>
+          </el-table>
+        </section>
+        <section class="drawer-section teacher-history">
+          <div class="section-head"><div><h3>近年授课证据</h3><p>用于判断课程经验和可替补范围。</p></div></div>
+          <el-table :data="teacherDrawer.data.teachingHistory || []" size="small" max-height="300" empty-text="暂无历史记录">
+            <el-table-column prop="semester" label="学期" width="120"/><el-table-column prop="courseName" label="课程" min-width="160"/>
+            <el-table-column prop="students" label="修读人数" width="90" align="right"/><el-table-column prop="passRate" label="通过率" width="80" align="right"/>
+          </el-table>
+        </section>
+      </div>
+    </el-drawer>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
-import { useRouter } from 'vue-router'
 import { http } from '@/utils/http'
 import { getFilterMeta, type SemesterOpt } from '@/utils/meta'
 import { COLLEGE_MAP } from '@/constants/colleges'
 import KpiCard from '@/components/KpiCard.vue'
 import KpiLabel from '@/components/KpiLabel.vue'
 
-const router = useRouter()
 const semester = ref('')
 const semesters = ref<SemesterOpt[]>([])
 const pageLoading = ref(false)
@@ -217,6 +242,7 @@ const selectedCollege = ref<{ id: string; name: string } | null>(null)
 const selectedCourse = ref<{ id: string; name: string } | null>(null)
 const collegeDetail = ref<any>(null)
 const courseDetail = ref<any>(null)
+const teacherDrawer = reactive<any>({visible:false,loading:false,data:{kpis:[],currentCourses:[],teachingHistory:[]}})
 const data = reactive<any>({ summary: {}, colleges: [], risk_courses: [], teachers: [] })
 const definition = reactive<any>({})
 const collegeCache = new Map<string, any>()
@@ -236,6 +262,8 @@ const drawerWidth = computed(() => window.innerWidth >= 1600 ? '74%' : window.in
 const drawerTitle = computed(() => drawerMode.value === 'course' ? `${selectedCourse.value?.name || '课程'} · 团队保障证据` : `${selectedCollege.value?.name || '学院'} · 师资保障核查`)
 const drawerSubtitle = computed(() => drawerMode.value === 'course' ? `${semester.value}学期 · 在当前抽屉内返回学院核查，不重新加载学院数据` : `${semester.value}学期 · 关闭抽屉即可回到原全校概览`)
 const collegeTopTeachers = computed(() => (collegeDetail.value?.teachers || []).slice(0, 5))
+const teacherProfileKpis = computed(() => (teacherDrawer.data.kpis || []).filter((x:any) =>
+  ['本学期授课门数','教学班记录','本学期总学时','近期平均成绩'].includes(x.label)))
 
 const schoolKpis = computed(() => [
   { label: '本科教学活跃教师', value: fmt(data.summary.active_teachers, ' 人'), sub: `覆盖 ${data.summary.courses || 0} 门课程`, hint: definition.active_teachers || '', tone: 'primary' as const },
@@ -348,8 +376,14 @@ function afterDrawerClosed() {
   drawerLoading.value = false
 }
 
-function goTeacher(row: any) { router.push('/admin/faculty/' + row.teacher_id) }
-function goTeacherFromMember(row: any) { router.push('/admin/faculty/' + row.staff_id) }
+async function openTeacherProfile(teacherId: string, name = '') {
+  teacherDrawer.visible=true; teacherDrawer.loading=true
+  teacherDrawer.data={name,kpis:[],currentCourses:[],teachingHistory:[]}
+  try { teacherDrawer.data=await http.get(`/admin/faculty/${encodeURIComponent(teacherId)}?semester=${encodeURIComponent(semester.value)}`) }
+  finally { teacherDrawer.loading=false }
+}
+function goTeacher(row: any) { void openTeacherProfile(row.teacher_id, row.teacher_name) }
+function goTeacherFromMember(row: any) { void openTeacherProfile(row.staff_id, row.display_name) }
 
 async function changeSemester() {
   drawerVisible.value = false
@@ -368,5 +402,9 @@ onBeforeUnmount(cancelPrefetch)
 </script>
 
 <style scoped>
-.head{display:flex;justify-content:space-between;align-items:flex-start;gap:18px}.semester{width:190px}.kpi-summary{margin-top:14px}.management-summary{display:flex;align-items:center;gap:14px;margin-bottom:14px;padding:12px 16px;border:1px solid #c7d2fe;border-radius:12px;background:#eef2ff;color:#475569;font-size:13px;line-height:1.6}.management-summary b{color:#312e81;font-size:15px}.summary-mark{flex:none;padding:4px 9px;border-radius:999px;background:#4f46e5;color:#fff;font-size:12px}.overview-grid{display:grid;grid-template-columns:minmax(0,2fr) minmax(300px,.82fr);gap:14px;align-items:start;margin-bottom:14px}.college-card,.focus-card{min-width:0}.section-head{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:12px}.section-head h3{margin:0 0 5px;font-size:16px;color:#0f172a}.section-head p{margin:0;color:#64748b;font-size:12px;line-height:1.5}.college-search{width:190px}:deep(.college-row){cursor:pointer}:deep(.college-row:hover .college-link){text-decoration:underline}.college-link{color:#4338ca;font-weight:600}.focus-list{display:flex;flex-direction:column;gap:8px}.focus-item{position:relative;display:grid;grid-template-columns:1fr auto;gap:4px 8px;width:100%;padding:11px;border:1px solid #e2e8f0;border-radius:10px;background:#fff;text-align:left;cursor:pointer}.focus-item:hover{border-color:#a5b4fc;background:#f8faff}.focus-name{overflow:hidden;color:#0f172a;font-weight:600;text-overflow:ellipsis;white-space:nowrap}.focus-college,.focus-reason{color:#64748b;font-size:11px}.focus-item .el-tag{grid-column:2;grid-row:1/3;align-self:center}.focus-note{margin-top:14px;padding:12px;border-radius:10px;background:#f8fafc;color:#475569;font-size:12px}.focus-note p{margin:5px 0 0;line-height:1.6}.explain p{margin:5px 0;color:#475569;font-size:13px;line-height:1.7}.drawer-heading{display:flex;align-items:flex-start;gap:12px}.drawer-heading h2{margin:0;color:#0f172a;font-size:20px}.drawer-heading p{margin:5px 0 0;color:#64748b;font-size:12px}.drawer-body{min-height:520px}.drawer-kpis{margin:14px 0}.drawer-grid{display:grid;grid-template-columns:minmax(0,2.3fr) minmax(260px,.8fr);gap:14px;align-items:start}.drawer-section{padding:15px;border:1px solid #e2e8f0;border-radius:12px;background:#fff}.teacher-item{position:relative;padding:11px 0;border-bottom:1px solid #eef2f7}.teacher-item:last-child{border-bottom:0}.teacher-item div{display:flex;justify-content:space-between;gap:8px}.teacher-item span,.teacher-item p{color:#64748b;font-size:11px}.teacher-item p{margin:5px 0}.teacher-item strong{color:#0f172a}.teacher-item .el-button{float:right}.more-teachers{margin-top:8px}.teacher-compact{display:flex;justify-content:space-between;padding:6px 0;color:#475569;font-size:12px}.course-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px;align-items:start}@media(max-width:1250px){.overview-grid{grid-template-columns:1fr}.drawer-grid,.course-grid{grid-template-columns:1fr}}
+.head{display:flex;justify-content:space-between;align-items:flex-start;gap:18px}.semester{width:190px}.kpi-summary{margin-top:14px}.management-summary{display:flex;align-items:center;gap:14px;margin-bottom:14px;padding:12px 16px;border:1px solid #c7d2fe;border-radius:12px;background:#eef2ff;color:#475569;font-size:13px;line-height:1.6}.management-summary b{color:#312e81;font-size:15px}.summary-mark{flex:none;padding:4px 9px;border-radius:999px;background:#4f46e5;color:#fff;font-size:12px}.overview-grid{display:grid;grid-template-columns:minmax(0,2fr) minmax(300px,.82fr);gap:14px;align-items:start;margin-bottom:14px}.college-card,.focus-card{min-width:0}.section-head{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:12px}.section-head h3{margin:0 0 5px;font-size:16px;color:#0f172a}.section-head p{margin:0;color:#64748b;font-size:12px;line-height:1.5}.college-search{width:190px}:deep(.college-row){cursor:pointer}:deep(.college-row:hover .college-link){text-decoration:underline}.college-link{color:#4338ca;font-weight:600}.focus-list{display:flex;flex-direction:column;gap:8px}.focus-item{position:relative;display:grid;grid-template-columns:1fr auto;gap:4px 8px;width:100%;padding:11px;border:1px solid #e2e8f0;border-radius:10px;background:#fff;text-align:left;cursor:pointer}.focus-item:hover{border-color:#a5b4fc;background:#f8faff}.focus-name{overflow:hidden;color:#0f172a;font-weight:600;text-overflow:ellipsis;white-space:nowrap}.focus-college,.focus-reason{color:#64748b;font-size:11px}.focus-item .el-tag{grid-column:2;grid-row:1/3;align-self:center}.focus-note{margin-top:14px;padding:12px;border-radius:10px;background:#f8fafc;color:#475569;font-size:12px}.focus-note p{margin:5px 0 0;line-height:1.6}.explain p{margin:5px 0;color:#475569;font-size:13px;line-height:1.7}.drawer-heading{display:flex;align-items:flex-start;gap:12px}.drawer-heading h2{margin:0;color:#0f172a;font-size:20px}.drawer-heading p{margin:5px 0 0;color:#64748b;font-size:12px}.drawer-body{min-height:520px}.drawer-kpis{margin:14px 0}.drawer-grid{display:grid;grid-template-columns:minmax(0,2.3fr) minmax(260px,.8fr);gap:14px;align-items:start}.drawer-section{padding:15px;border:1px solid #e2e8f0;border-radius:12px;background:#fff}.teacher-item{position:relative;padding:11px 0;border-bottom:1px solid #eef2f7}.teacher-item:last-child{border-bottom:0}.teacher-item div{display:flex;justify-content:space-between;gap:8px}.teacher-item span,.teacher-item p{color:#64748b;font-size:11px}.teacher-item p{margin:5px 0}.teacher-item strong{color:#0f172a}.teacher-item .el-button{float:right}.more-teachers{margin-top:8px}.teacher-compact{display:flex;justify-content:space-between;padding:6px 0;color:#475569;font-size:12px}.course-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px;align-items:start}.teacher-profile-summary{margin:14px 0}.teacher-profile-kpis{margin-bottom:14px}.teacher-history{margin-top:14px}@media(max-width:1250px){.overview-grid{grid-template-columns:1fr}.drawer-grid,.course-grid{grid-template-columns:1fr}}
+</style>
+<style>
+.faculty-nonblocking-overlay { pointer-events:none !important; }
+.faculty-nonblocking-overlay .el-drawer { pointer-events:auto; }
 </style>
