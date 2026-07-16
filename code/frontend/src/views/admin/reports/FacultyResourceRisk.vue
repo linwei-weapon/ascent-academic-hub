@@ -34,7 +34,7 @@
 
       <div class="ai-toolbar">
         <el-button type="primary" plain @click="openTopicAi">
-          AI研判本专题
+          生成本轮师资保障重点
         </el-button>
       </div>
 
@@ -68,9 +68,12 @@
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="110" fixed="right">
+          <el-table-column label="管理关注" width="105">
+            <template #default="{ row }"><el-tag size="small" :type="courseAttentionLevel(row).type">{{ courseAttentionLevel(row).label }}</el-tag></template>
+          </el-table-column>
+          <el-table-column label="操作" width="90" fixed="right">
             <template #default="{ row }">
-              <el-button link type="primary" @click="openCourseAi(row)">AI研判</el-button>
+              <el-button link type="primary" @click="openCourseReview(row)">核查</el-button>
             </template>
           </el-table-column>
         </el-table>
@@ -84,6 +87,30 @@
         </p>
       </section>
     </el-skeleton>
+
+    <el-drawer v-model="courseReviewVisible" :title="`${selectedCourse.course_name || '课程'}｜课程团队核查`" size="720px">
+      <el-alert type="info" :closable="false" show-icon title="单学期单教师承担不等于师资风险">
+        <template #default>先确认是否为合班、课程负责人或系统只关联了主讲教师。只有单教师同时覆盖多班或大规模学生，才进入 AI 重点；职称缺失首先按主数据问题核验。</template>
+      </el-alert>
+      <el-descriptions :column="3" border style="margin:14px 0">
+        <el-descriptions-item label="实际授课教师">{{ selectedCourse.teacher_count || 0 }} 人</el-descriptions-item>
+        <el-descriptions-item label="教学班">{{ selectedCourse.lesson_count || 0 }} 个</el-descriptions-item>
+        <el-descriptions-item label="选课人次">{{ selectedCourse.enrolled || 0 }}</el-descriptions-item>
+        <el-descriptions-item label="职称已知">{{ selectedCourse.known_title_count || 0 }} / {{ selectedCourse.teacher_count || 0 }}</el-descriptions-item>
+        <el-descriptions-item label="教授/副教授">{{ selectedCourse.professor_count || 0 }} / {{ selectedCourse.associate_professor_count || 0 }}</el-descriptions-item>
+        <el-descriptions-item label="管理关注"><el-tag :type="courseAttentionLevel(selectedCourse).type">{{ courseAttentionLevel(selectedCourse).label }}</el-tag></el-descriptions-item>
+      </el-descriptions>
+      <div class="review-reasons">
+        <b>需要人工确认的事实</b>
+        <ul><li v-for="item in selectedCourse.attention_reasons || []" :key="item">{{ reason[item] || item }}</li></ul>
+        <p v-if="(selectedCourse.attention_reasons || []).includes('single_teacher')">请先确认系统关联是否完整，以及是否已有实际课程团队、备份教师和教学资料交接机制。</p>
+        <p v-if="(selectedCourse.attention_reasons || []).includes('title_incomplete')">职称信息补齐前，不输出职称梯队风险结论。</p>
+      </div>
+      <div class="review-actions">
+        <span v-if="!facultyCourseNeedsAi(selectedCourse)" class="sa-faint">当前只需结构核查或数据核验，不生成逐课程 AI 评价。</span>
+        <el-button v-else type="primary" plain @click="openCourseAi(selectedCourse)">查看 AI 师资保障研判</el-button>
+      </div>
+    </el-drawer>
 
     <AIInsightDrawer
       v-model="aiDrawerVisible"
@@ -107,6 +134,8 @@ const loading = ref(true)
 const aiDrawerVisible = ref(false)
 const aiLoading = ref(false)
 const aiInsight = ref<any>(null)
+const courseReviewVisible = ref(false)
+const selectedCourse = ref<any>({})
 
 const data = reactive<any>({
   semester: '',
@@ -122,6 +151,22 @@ const reason: Record<string, string> = {
 }
 
 const currentSemester = computed(() => data.semester || '2023-2024-1')
+
+function facultyCourseNeedsAi(row: any) {
+  const reasons = row?.attention_reasons || []
+  const single = reasons.includes('single_teacher')
+  const lessons = Number(row?.lesson_count || 0)
+  const enrolled = Number(row?.enrolled || 0)
+  return single && (enrolled >= 300 || (lessons >= 3 && enrolled >= 100))
+}
+
+function courseAttentionLevel(row: any): { label: string; type: 'danger' | 'warning' | 'info' } {
+  const reasons = row?.attention_reasons || []
+  if (facultyCourseNeedsAi(row)) return { label: 'AI重点', type: 'danger' }
+  if (reasons.includes('title_incomplete')) return { label: '数据核验', type: 'warning' }
+  if (reasons.length) return { label: '结构核查', type: 'warning' }
+  return { label: '常规', type: 'info' }
+}
 
 const kpis = computed(() => [
   {
@@ -176,6 +221,11 @@ async function openTopicAi() {
   } finally {
     aiLoading.value = false
   }
+}
+
+function openCourseReview(row: any) {
+  selectedCourse.value = row
+  courseReviewVisible.value = true
 }
 
 async function openCourseAi(row: any) {
@@ -250,6 +300,12 @@ onMounted(loadData)
   color: #475569;
   line-height: 1.8;
 }
+
+.review-reasons { padding:14px; border:1px solid #e2e8f0; border-radius:10px; background:#f8fafc; color:#475569; font-size:13px; line-height:1.8; }
+.review-reasons ul { margin:8px 0; padding-left:20px; }
+.review-reasons p { margin:8px 0 0; }
+.review-actions { display:flex; align-items:center; justify-content:flex-end; margin-top:16px; }
+.review-actions .sa-faint { margin-right:auto; }
 
 @media (max-width: 1100px) {
   .kpis {

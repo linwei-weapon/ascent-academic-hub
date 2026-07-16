@@ -65,16 +65,16 @@ const topics = [
   {
     key: 'ai-briefing',
     index: 'AI',
-    title: 'AI管理晨报 / 学期简报',
+    title: 'AI管理要情',
     status: 'AI增强',
     tone: 'ai',
-    value: '把预警、成绩、培养方案、开课任务、教室占用和课程团队数据自动组织成管理层最该先看的事项、证据和下一步动作。',
+    value: '对比管理快照，只报告新增、升级、变化或退出重点的事项，并给出管理层本轮最该先处理的Top3。',
     questions: [
       '今天教务处最应该先看哪三件事？',
       '哪些问题需要学院、课程团队、辅导员共同处理？',
       '数据背后的管理动作是什么，而不只是排名是什么？',
     ],
-    actions: [{ label: '生成简报', path: '/admin/reports/management-briefing', primary: true }],
+    actions: [{ label: '查看管理要情', path: '/admin/reports/management-briefing', primary: true }],
     boundary: '当前为原型阶段 AI 增强样本，保证演示稳定；生产系统可按学校授权接入真实大模型。',
   },
   {

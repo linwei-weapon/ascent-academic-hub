@@ -56,6 +56,15 @@
       共 <b class="tnum">{{ total }}</b> 名学生<span v-if="avgGpa !== null">，平均 GPA <b class="tnum" :style="{color: avgGpa >= 3.0 ? '#16A34A' : '#DC2626'}">{{ avgGpa }}</b></span>
     </div>
 
+    <el-alert class="ai-focus-alert" type="info" :closable="false" show-icon>
+      <template #title>
+        当前页识别出 <b>{{ currentPageAiFocus.length }}</b> 名 AI 重点学生
+      </template>
+      <template #default>
+        AI 只用于解释“低 GPA、较多挂科与严重预警同时出现”的复合风险，不对每名学生逐一生成评价。请先打开“详情”核查学期变化、挂科和历史预警，达到介入条件时再查看 AI 研判。
+      </template>
+    </el-alert>
+
     <!-- 学生表格 -->
     <div class="sa-card student-table-card">
       <div class="sa-card-title list-title"><span>学生明细</span><span class="extra">点击姓名或“详情”在当前页面核查，筛选条件不会丢失</span></div>
@@ -86,10 +95,14 @@
             <span v-else class="sa-faint">—</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="160" fixed="right" align="center">
+        <el-table-column label="管理关注" width="105" align="center">
+          <template #default="{row}">
+            <el-tag size="small" :type="studentAttention(row).type">{{ studentAttention(row).label }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="88" fixed="right" align="center">
           <template #default="{row}">
             <el-button size="small" type="primary" plain @click.stop="openReview(row)">详情</el-button>
-            <el-button size="small" type="primary" text @click.stop="openStudentInsight(row)">AI研判</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -120,7 +133,8 @@
           </el-tab-pane>
         </el-tabs>
         <div class="drawer-actions">
-          <el-button type="primary" plain @click="openStudentInsight({ sid: review.code })">AI研判</el-button>
+          <span v-if="!selectedStudentNeedsAi" class="no-ai-note">当前证据未达到复合风险 AI 介入条件，建议按常规画像核查。</span>
+          <el-button v-else type="primary" plain @click="openStudentInsight({ sid: review.code })">查看 AI 管理研判</el-button>
           <el-button type="primary" @click="goStudent({sid:review.code})">打开完整学生档案</el-button>
         </div>
       </div>
@@ -178,6 +192,7 @@ const reviewVisible = ref(false)
 const reviewLoading = ref(false)
 const reviewTab = ref('semester')
 const review = ref<any>({})
+const selectedStudentRow = ref<any>(null)
 const aiDrawerVisible = ref(false)
 const aiLoading = ref(false)
 const aiInsight = ref<any>(null)
@@ -196,6 +211,8 @@ const majorOptions = computed(() => fCollege.value
 const classOptions = computed(() => fMajor.value
   ? classes.value.filter(c => c.major === fMajor.value)
   : classes.value)
+const currentPageAiFocus = computed(() => students.value.filter(row => studentAttention(row).level === 'ai'))
+const selectedStudentNeedsAi = computed(() => selectedStudentRow.value && studentAttention(selectedStudentRow.value).level === 'ai')
 
 // ── 页面标题 ──
 const pageTitle = computed(() => {
@@ -278,6 +295,7 @@ async function loadPage(p: number) {
 
 // ── 操作 ──
 async function openReview(row: any) {
+  selectedStudentRow.value = row
   reviewVisible.value = true; reviewLoading.value = true; reviewTab.value = 'semester'; review.value = { name: row.name, code: row.sid }
   try { const d = await http.get<any>(`/admin/student/${encodeURIComponent(row.sid)}`); if (d) review.value = d }
   finally { reviewLoading.value = false }
@@ -346,6 +364,19 @@ function alertTagType(level: string): string {
   if (level.includes('警告')) return 'warning'
   return 'info'
 }
+function studentAttention(row: any): { level: 'ai' | 'verify' | 'routine'; label: string; type: 'danger' | 'warning' | 'info' } {
+  const level = String(row?.alertLevel || '')
+  const failCount = Number(row?.failCount || 0)
+  const gpa = row?.gpa == null ? null : Number(row.gpa)
+  const severeComposite = level.includes('严重') && (failCount >= 2 || (gpa != null && gpa < 2.0))
+  if (severeComposite || failCount >= 3 || (gpa != null && gpa < 1.8 && failCount > 0)) {
+    return { level: 'ai', label: 'AI重点', type: 'danger' }
+  }
+  if ((level.includes('警告') || level.includes('严重')) && (failCount > 0 || (gpa != null && gpa < 2.3))) {
+    return { level: 'verify', label: '需核查', type: 'warning' }
+  }
+  return { level: 'routine', label: '常规查看', type: 'info' }
+}
 function reviewTone(label:string,value:any):'primary'|'teal'|'danger'|'amber'{if(label.includes('预警'))return String(value).includes('正常')?'teal':'danger';if(label.includes('GPA'))return Number(value)>=3?'teal':Number(value)<2?'danger':'amber';return'primary'}
 function deltaText(rows:any[],index:number,key:string){if(index===0)return'—';const d=Number(rows[index]?.[key]||0)-Number(rows[index-1]?.[key]||0);return`${d>0?'+':''}${Math.round(d*100)/100}`}
 </script>
@@ -363,4 +394,6 @@ function deltaText(rows:any[],index:number,key:string){if(index===0)return'—';
 .review-kpis { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; }
 .review-tabs { margin-top:14px; }
 .drawer-actions { display:flex; justify-content:flex-end; margin-top:16px; }
+.ai-focus-alert { margin-bottom:12px; }
+.no-ai-note { margin-right:auto; color:#64748b; font-size:13px; line-height:32px; }
 </style>

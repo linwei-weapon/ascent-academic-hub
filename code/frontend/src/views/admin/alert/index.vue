@@ -5,15 +5,27 @@
         <h2 class="sa-page-title">学业预警监控</h2>
         <p class="sa-page-sub">数据来源：学校学籍、成绩数据与当前已激活规则计算结果 · 点击等级卡片筛选核查对象</p>
       </div>
-      <div class="alert-actions">
-        <el-button type="primary" plain :disabled="pageLoading" @click="openGroupInsight">AI研判当前筛选范围</el-button>
-      </div>
     </div>
 
     <div v-if="hasFilters" class="filter-feedback">
       <div><b>当前查看：</b>{{ activeFilterText }}<span>，匹配 {{ filteredList.length }} 条预警</span></div>
       <el-button link type="primary" @click="clearFilters">清除全部筛选</el-button>
     </div>
+
+    <section class="ai-focus-callout" :class="{ empty: !aiFocusCandidates.length }">
+      <div class="ai-focus-mark">AI</div>
+      <div class="ai-focus-copy">
+        <b v-if="aiFocusCandidates.length">从 {{ aiCandidateStudents.length }} 名介入候选中，收敛本轮优先核查 {{ aiFocusCandidates.length }} 名</b>
+        <b v-else>当前范围暂未发现需要AI优先介入的对象</b>
+        <span v-if="aiFocusCandidates.length">
+          仅纳入未解决的严重预警，并叠加多门未通过或明显GPA下降等可行动证据；再按风险强度和课程问题规模取本轮 Top30。
+        </span>
+        <span v-else>普通预警仍可通过列表和学生详情查看，AI只在达到管理介入条件时出现。</span>
+      </div>
+      <el-button v-if="aiFocusCandidates.length" type="primary" plain :disabled="pageLoading" @click="openGroupInsight">
+        查看AI管理研判
+      </el-button>
+    </section>
 
     <!-- KPI 行（点击联动筛选） -->
     <div class="alert-kpi-row">
@@ -37,11 +49,11 @@
       </div>
     </div>
 
-    <!-- 重点关注 -->
-    <div class="sa-card" style="margin-bottom:16px" v-if="focusStudents.length">
-      <div class="sa-card-title">重点关注 <span class="extra">严重 + 未处理 · 共 {{ focusStudents.length }} 人需立即关注</span></div>
+    <!-- 当前范围优先对象：只呈现达到AI管理介入阈值的少量对象 -->
+    <div class="sa-card" style="margin-bottom:16px" v-if="aiFocusCandidates.length">
+      <div class="sa-card-title">当前优先核查对象 <span class="extra">展示 Top4 · 完整范围 {{ aiFocusCandidates.length }} 人</span></div>
       <div class="focus-grid">
-        <div v-for="f in focusStudents.slice(0,4)" :key="f.sid" class="focus-card" @click="showStudent(f)">
+        <div v-for="f in aiFocusCandidates.slice(0,4)" :key="f.sid" class="focus-card" @click="showStudent(f)">
           <div class="focus-name">{{ f.name }} <span class="sa-faint" style="font-weight:400">{{ f.class }}</span></div>
           <div class="focus-type">{{ f.type }} · {{ f.detail }}</div>
           <div class="sa-faint" style="font-size:11px;margin-top:2px">{{ f.college }} · 触发：{{ f.time }}</div>
@@ -104,7 +116,7 @@
             <el-table-column prop="detail" label="触发数据链" min-width="180"><template #default="{row}"><span style="font-size:12px">{{ row.detail }}</span></template></el-table-column>
             <el-table-column prop="status" label="状态" width="76"><template #default="{row}"><el-tag :type="statusType(row.status)" size="small">{{ row.status }}</el-tag></template></el-table-column>
             <el-table-column prop="failSummary" label="挂科溯源摘要" width="160"><template #default="{row}"><el-tooltip :content="row.failSummary || ''" placement="top" :disabled="!row.failSummary" :show-after="300"><span class="fail-summary-cell">{{ row.failSummary || '-' }}</span></el-tooltip></template></el-table-column>
-            <el-table-column label="AI研判" width="88" fixed="right"><template #default="{row}"><el-button link type="primary" @click.stop="openStudentInsight(row)">AI研判</el-button></template></el-table-column>
+            <el-table-column label="管理关注" width="90" fixed="right"><template #default="{row}"><el-tag v-if="isAIFocus(row)" type="danger" effect="plain" size="small">AI重点</el-tag><span v-else class="normal-view">常规查看</span></template></el-table-column>
             <el-table-column prop="time" label="时间" width="92" />
           </el-table>
           <el-pagination v-model:current-page="page" :page-size="15" :total="filteredList.length" layout="prev,next,total" size="small" style="margin-top:12px;justify-content:flex-end" />
@@ -118,7 +130,8 @@
         <div class="drawer-info">
           {{ student.code }} · {{ student.collegeName }} · {{ student.majorName }} · {{ student.className }}
           <el-button size="small" type="primary" text style="margin-left:8px" @click="router.push('/admin/student/' + student.code)">查看完整档案 →</el-button>
-          <el-button size="small" type="primary" text @click="openStudentInsight({ sid: student.code })">AI研判</el-button>
+          <el-button v-if="selectedNeedsAI" size="small" type="primary" text @click="openStudentInsight({ sid: student.code })">查看AI管理研判</el-button>
+          <el-tag v-else size="small" type="info" effect="plain">当前无需AI介入</el-tag>
         </div>
 
         <el-row :gutter="8" style="margin-bottom:12px">
@@ -264,7 +277,7 @@
       </div>
       <div v-else class="sa-faint" style="font-size:12px;text-align:center;padding-top:40px">加载中…</div>
     </el-drawer>
-    <AIInsightDrawer v-model="aiDrawerVisible" :insight="aiInsight" :loading="aiLoading" title="AI研判" />
+    <AIInsightDrawer v-model="aiDrawerVisible" :insight="aiInsight" :loading="aiLoading" title="AI管理研判" @focus-item-click="openStudentFromFocus" />
   </div>
 </template>
 
@@ -282,6 +295,7 @@ import { useRoute } from 'vue-router';
 const route = useRoute();
 
 const drawerVisible = ref(false); const student = ref({} as any);
+const selectedAlertRow = ref<any>(null);
 const workflow = ref({} as any); const followupContent = ref(''); const nextStatus = ref('');
 const savingWorkflow = ref(false); const currentEventId = ref<number | null>(null);
 const page = ref(1); const fCollege = ref(''); const fType = ref(''); const fLevel = ref(''); const fStatus = ref('');
@@ -312,9 +326,34 @@ const data = reactive({
 const filterColleges = computed(() => [...new Set(data.list.map((x: any) => x.college).filter(Boolean))]);
 const filterTypes = computed(() => [...new Set(data.list.map((x: any) => x.type).filter(Boolean))]);
 
-const focusStudents = computed(() =>
-  data.list.filter((x: any) => x.level === '严重' && (x.status === '未处理' || !x.status))
-);
+function alertEvidence(row: any) {
+  const text = `${row.type || ''} ${row.detail || ''} ${row.failSummary || ''}`;
+  const failedMatch = text.match(/(?:未通过课程|尚未通过课程|挂科)\s*(\d+)\s*门/);
+  const declineMatch = text.match(/(?:降|下降)\s*([0-9.]+)/);
+  return {
+    failedCourses: failedMatch ? Number(failedMatch[1]) : 0,
+    gpaDecline: declineMatch ? Number(declineMatch[1]) : 0,
+  };
+}
+
+function aiPriorityScore(row: any) {
+  if (['已解决', '已关闭'].includes(row.status)) return 0;
+  const evidence = alertEvidence(row);
+  let score = row.level === '严重' ? 100 : row.level === '警告' ? 45 : 0;
+  score += Math.min(evidence.failedCourses, 5) * 12;
+  score += Math.min(evidence.gpaDecline, 1.5) * 35;
+  if (row.status === '未处理' || row.status === '待处理' || !row.status) score += 15;
+  if (String(row.type || '').includes('未解决')) score += 15;
+  return score;
+}
+
+function meetsAICandidate(row: any) {
+  if (['已解决', '已关闭'].includes(row.status) || row.level !== '严重') return false;
+  const evidence = alertEvidence(row);
+  return evidence.failedCourses >= 3
+    || evidence.gpaDecline >= 0.8
+    || String(row.type || '').includes('复合');
+}
 
 const failScores = computed(() => (student.value.scores || []).filter((s: any) => !s.passed));
 
@@ -330,6 +369,19 @@ const filteredList = computed(() => {
   }
   return arr;
 });
+const aiCandidateStudents = computed(() => {
+  const best = new Map<string, any>();
+  for (const row of filteredList.value) {
+    if (!meetsAICandidate(row)) continue;
+    const current = best.get(row.sid);
+    if (!current || aiPriorityScore(row) > aiPriorityScore(current)) best.set(row.sid, row);
+  }
+  return [...best.values()].sort((a, b) => aiPriorityScore(b) - aiPriorityScore(a));
+});
+const aiFocusCandidates = computed(() => aiCandidateStudents.value.slice(0, 30));
+const aiFocusIds = computed(() => new Set(aiFocusCandidates.value.map((row: any) => row.sid)));
+function isAIFocus(row: any) { return aiFocusIds.value.has(row.sid); }
+const selectedNeedsAI = computed(() => Boolean(selectedAlertRow.value && isAIFocus(selectedAlertRow.value)));
 const hasFilters = computed(() => Boolean(activeFilter.value || fCollege.value || fType.value || fLevel.value || fStatus.value));
 const activeFilterText = computed(() => {
   const parts:string[] = [];
@@ -445,6 +497,7 @@ onMounted(async () => {
 
 async function showStudent(row: any) {
   drawerVisible.value = true;
+  selectedAlertRow.value = row;
   student.value = {};
   workflow.value = {}; currentEventId.value = row.eventId || null;
   followupContent.value = ''; nextStatus.value = '';
@@ -485,6 +538,13 @@ async function openGroupInsight() {
   } finally {
     aiLoading.value = false;
   }
+}
+
+function openStudentFromFocus(item: any) {
+  const sid = item.student_id || item.sid || item.code;
+  if (!sid) return;
+  aiDrawerVisible.value = false;
+  openStudentInsight({ sid });
 }
 
 async function loadWorkflow(eventId: number) {
@@ -536,7 +596,14 @@ function exportList() {
 
 <style scoped>
 .alert-kpi-row { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; margin-bottom: 16px; }
-.alert-actions { padding-top: 4px; white-space: nowrap; }
+.ai-focus-callout { display:flex; align-items:center; gap:12px; margin:0 0 16px; padding:13px 14px; border:1px solid #c7d2fe; border-radius:12px; background:linear-gradient(135deg,#f8f7ff,#f8fafc); }
+.ai-focus-callout.empty { border-color:#e2e8f0; background:#f8fafc; }
+.ai-focus-mark { display:flex; align-items:center; justify-content:center; flex:none; width:34px; height:34px; border-radius:10px; background:#4f46e5; color:#fff; font-size:12px; font-weight:700; }
+.ai-focus-callout.empty .ai-focus-mark { background:#94a3b8; }
+.ai-focus-copy { flex:1; min-width:0; }
+.ai-focus-copy b { display:block; color:#1e293b; font-size:13px; }
+.ai-focus-copy span { display:block; margin-top:4px; color:#64748b; font-size:11px; line-height:1.55; }
+.normal-view { color:#94a3b8; font-size:11px; }
 .alert-kpi {
   background: #fff; border: 1.5px solid var(--sa-border); border-radius: 14px;
   padding: 14px 12px; text-align: center; cursor: pointer; transition: all .18s;

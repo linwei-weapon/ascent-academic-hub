@@ -10,7 +10,7 @@
     <div v-if="collegeFilter" class="filter-banner"><span>当前学院：<b>{{ collegeFilter.name }}</b></span><el-button size="small" type="primary" text @click="clearCollegeFilter">返回全校</el-button></div>
 
     <div class="sa-kpi-row"><KpiCard v-for="k in kpis" :key="k.label" :label="k.label" :value="k.value" :hint="k.formula" :tone="tone(k.label)" /></div>
-    <div class="ai-toolbar"><el-button size="small" type="primary" plain @click="openLoadAi()">AI研判当前视图</el-button></div>
+    <div class="ai-toolbar"><el-button size="small" type="primary" plain @click="openLoadAi()">生成当前负荷重点</el-button></div>
 
     <el-row :gutter="16" style="margin-bottom:16px">
       <el-col :span="12"><div class="sa-card">
@@ -29,7 +29,8 @@
           <el-table-column prop="rank" label="#" width="42" align="center" />
           <el-table-column label="教师" min-width="130"><template #default="{row}"><span class="link" @click="openReview(row)">{{ row.name }}</span><div class="sa-faint meta">{{ row.title }} · {{ row.dept }}</div></template></el-table-column>
           <el-table-column prop="hours" label="总学时" width="68" align="right" /><el-table-column prop="lessons" label="教学班" width="68" align="right" />
-          <el-table-column label="操作" width="118"><template #default="{row}"><el-button text type="primary" size="small" @click="openReview(row)">核查</el-button><el-button text type="primary" size="small" @click="openTeacherAi(row)">AI</el-button></template></el-table-column>
+          <el-table-column label="管理关注" width="100"><template #default="{row}"><el-tag size="small" :type="teacherNeedsAi(row)?'danger':'warning'">{{teacherNeedsAi(row)?'AI重点':'需核查'}}</el-tag></template></el-table-column>
+          <el-table-column label="操作" width="78"><template #default="{row}"><el-button text type="primary" size="small" @click="openReview(row)">核查</el-button></template></el-table-column>
         </el-table>
       </div></el-col>
     </el-row>
@@ -39,7 +40,7 @@
       <el-table :data="data.deptLoad" size="small" @row-click="goCollege" row-class-name="row-clickable">
         <el-table-column prop="dept" label="学院" min-width="170"><template #default="{row}"><span class="link">{{ row.dept }}</span></template></el-table-column>
         <el-table-column prop="teacherCount" label="授课教师" width="90" align="right" /><el-table-column prop="avgHours" label="人均学时" width="90" align="right" /><el-table-column prop="avgCourses" label="人均课程" width="90" align="right" />
-        <el-table-column label="AI" width="88"><template #default="{row}"><el-button link type="primary" @click.stop="openLoadAi(row)">AI研判</el-button></template></el-table-column>
+        <el-table-column label="管理关注" width="100"><template #default="{row,$index}"><el-tag size="small" :type="$index<3?'danger':row.loadLevel>60?'warning':'info'">{{$index<3?'优先核查':row.loadLevel>60?'需关注':'常规'}}</el-tag></template></el-table-column>
         <el-table-column label="相对负荷水平" min-width="220"><template #default="{row}"><el-progress :percentage="row.loadLevel" :stroke-width="10" :color="row.loadLevel>80?'#E11D48':row.loadLevel>60?'#D97706':'#0D9488'" /></template></el-table-column>
       </el-table>
     </div>
@@ -54,7 +55,7 @@
       <el-table :data="selected.courseBreakdown || []" size="small">
         <el-table-column prop="courseName" label="课程" min-width="190" show-overflow-tooltip /><el-table-column prop="hours" label="学时" width="70" align="right" /><el-table-column prop="lessons" label="教学班" width="75" align="right" /><el-table-column prop="studentVisits" label="学生人次" width="86" align="right" /><el-table-column prop="avgClassSize" label="平均班额" width="82" align="right" />
       </el-table>
-      <div class="actions"><el-button type="primary" plain @click="openTeacherAi(selected)">AI研判该教师</el-button><el-button type="primary" @click="goTeacher(selected)">查看教师完整档案</el-button></div>
+      <div class="actions"><span v-if="!teacherNeedsAi(selected)" class="sa-faint">当前不在本轮前三名 AI 重点，先核查课程构成即可。</span><el-button v-else type="primary" plain @click="openTeacherAi(selected)">查看 AI 负荷研判</el-button><el-button type="primary" @click="goTeacher(selected)">查看教师完整档案</el-button></div>
     </el-drawer>
     <AIInsightDrawer v-model="aiDrawerVisible" :insight="aiInsight" :loading="aiLoading" title="教师负荷AI研判" />
   </div>
@@ -82,6 +83,7 @@ async function load(){ const p=new URLSearchParams(); if(collegeFilter.value)p.s
 function clearCollegeFilter(){router.replace({query:{}})}
 function goCollege(row:any){router.push({query:{college:row.id}})}
 function openReview(row:any){selected.value=row;drawer.value=true}
+function teacherNeedsAi(row:any){return Number(row?.rank||999)<=3}
 function goTeacher(row:any){router.push({path:'/admin/faculty/'+row.id,query:fSemester.value?{semester:fSemester.value}:{}})}
 async function openLoadAi(row?:any){aiDrawerVisible.value=true;aiLoading.value=true;aiInsight.value=null;try{aiInsight.value=await getTeacherLoadAIInsight({semester:fSemester.value,college:row?.id || collegeFilter.value?.id,title:fTitle.value||undefined})}finally{aiLoading.value=false}}
 async function openTeacherAi(row:any){const id=row?.id||row?.teacher_id||row?.teacherId;if(!id)return;aiDrawerVisible.value=true;aiLoading.value=true;aiInsight.value=null;try{aiInsight.value=await getTeacherLoadTeacherAIInsight(id,fSemester.value)}finally{aiLoading.value=false}}
@@ -91,5 +93,5 @@ onMounted(async()=>{const meta=await getFilterMeta();semesters.value=meta.semest
 </script>
 
 <style scoped>
-.sa-head-row,.filters,.filter-banner,.actions{display:flex}.sa-head-row,.filter-banner{justify-content:space-between;align-items:center}.sa-head-row{margin-bottom:14px}.filters{gap:8px}.filter-banner{background:#eef2ff;border:1px solid #c7d2fe;border-radius:10px;padding:8px 14px;margin-bottom:12px;font-size:12px;color:var(--sa-primary)}.ai-toolbar{display:flex;justify-content:flex-end;margin:-4px 0 12px}.link{color:var(--sa-primary);cursor:pointer;font-weight:500}.link:hover{text-decoration:underline}.meta{font-size:11px;margin-top:2px}.actions{justify-content:flex-end;gap:8px;margin-top:16px}:deep(.row-clickable){cursor:pointer}:deep(.row-clickable:hover){background:#eef2ff!important}
+.sa-head-row,.filters,.filter-banner,.actions{display:flex}.sa-head-row,.filter-banner{justify-content:space-between;align-items:center}.sa-head-row{margin-bottom:14px}.filters{gap:8px}.filter-banner{background:#eef2ff;border:1px solid #c7d2fe;border-radius:10px;padding:8px 14px;margin-bottom:12px;font-size:12px;color:var(--sa-primary)}.ai-toolbar{display:flex;justify-content:flex-end;margin:-4px 0 12px}.link{color:var(--sa-primary);cursor:pointer;font-weight:500}.link:hover{text-decoration:underline}.meta{font-size:11px;margin-top:2px}.actions{align-items:center;justify-content:flex-end;gap:8px;margin-top:16px}.actions .sa-faint{margin-right:auto}:deep(.row-clickable){cursor:pointer}:deep(.row-clickable:hover){background:#eef2ff!important}
 </style>

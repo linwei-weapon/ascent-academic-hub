@@ -105,6 +105,7 @@ export function getGraduationCourseSupportSimulation(query: {
   classCapacity?: number
   availableTeachers?: number
   priorityFocus?: 'balanced' | 'failed' | 'verification'
+  problemType?: 'graduation' | 'course_support' | 'faculty_assurance'
 } = {}) {
   const params = new URLSearchParams()
   if (query.semester) params.set('semester', query.semester)
@@ -113,6 +114,7 @@ export function getGraduationCourseSupportSimulation(query: {
   if (query.classCapacity !== undefined) params.set('class_capacity', String(query.classCapacity))
   if (query.availableTeachers !== undefined) params.set('available_teachers', String(query.availableTeachers))
   if (query.priorityFocus) params.set('priority_focus', query.priorityFocus)
+  if (query.problemType) params.set('problem_type', query.problemType)
   const qs = params.toString()
   return http.get<any>(`/admin/ai/simulation/graduation-course-support${qs ? `?${qs}` : ''}`)
 }

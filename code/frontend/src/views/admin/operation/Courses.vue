@@ -69,7 +69,7 @@
 
     <el-alert type="success" :closable="false" show-icon style="margin-bottom:12px"
       title="V2 真实教学任务证据"
-      :description="`已关联 ${v2Offering.total} 门课程的真实教学任务；首页只显示需要优先核查的10门课程，完整清单可分页查询。`" />
+      :description="`已关联 ${v2Offering.total} 门课程的真实教学任务；首页显示需优先核查的10门，其中仅管理排序前3门进入AI重点，完整清单可分页查询。`" />
     <div class="sa-card" style="margin-bottom:16px">
       <div class="sa-card-title">
         <span>开课保障关注 TOP10 <span class="extra">按大班额、单一教师多班覆盖和单班集中供给排序，不是课程质量排名</span></span>
@@ -82,8 +82,9 @@
         <el-table-column prop="teacher_count" label="教师数" width="80" align="right" />
         <el-table-column prop="enrolled" label="选课人次" width="90" align="right" />
         <el-table-column prop="avgClassSize" label="平均班额" width="90" align="right" />
+        <el-table-column label="管理关注" width="95"><template #default="{row}"><el-tag size="small" :type="offeringAttentionLevel(row).type">{{ offeringAttentionLevel(row).label }}</el-tag></template></el-table-column>
         <el-table-column label="优先核查原因" min-width="250"><template #default="{row}"><span v-if="row.attention.length">{{ row.attention.join('；') }}</span><span v-else class="sa-faint">规模较大，建议常规核查</span></template></el-table-column>
-        <el-table-column label="AI" width="88"><template #default="{row}"><el-button link type="primary" @click.stop="openOfferingAi(row)">AI研判</el-button></template></el-table-column>
+        <el-table-column label="操作" width="88"><template #default="{row}"><el-button link type="primary" @click.stop="openOfferingReview(row)">核查</el-button></template></el-table-column>
       </el-table>
     </div>
 
@@ -150,9 +151,32 @@
         <el-table-column prop="teacher_count" label="教师" width="70" align="right" />
         <el-table-column prop="enrolled" label="选课人次" width="90" align="right" />
         <el-table-column label="平均班额" width="90" align="right"><template #default="{row}">{{ row.lesson_count ? Math.round(row.enrolled/row.lesson_count) : 0 }}</template></el-table-column>
-        <el-table-column label="AI" width="88"><template #default="{row}"><el-button link type="primary" @click="openOfferingAi(row)">AI研判</el-button></template></el-table-column>
+        <el-table-column label="管理关注" width="95"><template #default="{row}"><el-tag size="small" :type="offeringAttentionLevel(row).type">{{ offeringAttentionLevel(row).label }}</el-tag></template></el-table-column>
+        <el-table-column label="操作" width="88"><template #default="{row}"><el-button link type="primary" @click="openOfferingReview(row)">详情</el-button></template></el-table-column>
       </el-table>
       <el-pagination v-model:current-page="offeringDrawer.page" :page-size="offeringDrawer.pageSize" :total="offeringDrawer.total" layout="total,prev,pager,next" style="justify-content:flex-end;margin-top:14px" @current-change="loadOfferingPage" />
+    </el-drawer>
+    <el-drawer v-model="offeringReviewVisible" :title="`${selectedOffering.course_name || '课程'}｜开课保障核查`" size="720px">
+      <el-alert type="info" :closable="false" show-icon title="先核查运行证据，再决定是否需要 AI">
+        <template #default>大班额、单班集中或单一教师多班覆盖只是运行核查线索，不直接代表课程质量问题。只有命中复合线索或平均班额达到高影响阈值，才开放 AI 管理研判。</template>
+      </el-alert>
+      <el-descriptions :column="3" border style="margin:14px 0">
+        <el-descriptions-item label="课程代码">{{ selectedOffering.course_id || '—' }}</el-descriptions-item>
+        <el-descriptions-item label="教学班">{{ selectedOffering.lesson_count || 0 }} 个</el-descriptions-item>
+        <el-descriptions-item label="授课教师">{{ selectedOffering.teacher_count || 0 }} 人</el-descriptions-item>
+        <el-descriptions-item label="选课人次">{{ selectedOffering.enrolled || 0 }}</el-descriptions-item>
+        <el-descriptions-item label="平均班额">{{ selectedOffering.avgClassSize || 0 }} 人</el-descriptions-item>
+        <el-descriptions-item label="管理关注"><el-tag :type="offeringAttentionLevel(selectedOffering).type">{{ offeringAttentionLevel(selectedOffering).label }}</el-tag></el-descriptions-item>
+      </el-descriptions>
+      <div class="review-reasons">
+        <b>本次核查线索</b>
+        <ul v-if="selectedOffering.attention?.length"><li v-for="item in selectedOffering.attention" :key="item">{{ item }}</li></ul>
+        <p v-else>当前未命中明确运行异常线索，按常规开课供给查看即可。</p>
+      </div>
+      <div class="review-actions">
+        <span v-if="!offeringNeedsAi(selectedOffering)" class="sa-faint">当前未达到复合风险 AI 介入条件。</span>
+        <el-button v-else type="primary" plain @click="openOfferingAi(selectedOffering)">查看 AI 开课保障研判</el-button>
+      </div>
     </el-drawer>
     <AIInsightDrawer v-model="aiDrawerVisible" :insight="aiInsight" :loading="aiLoading" title="开课供给AI研判" />
   </div>
@@ -212,10 +236,12 @@ const auditVisible = ref(false)
 const qualityAudit = ref<any[]>([])
 const v2Offering = reactive<any>({ items: [], total: 0, semester: '' })
 const offeringDrawer = reactive<any>({ visible:false, loading:false, items:[], total:0, semester:'', keyword:'', page:1, pageSize:20 })
+const offeringReviewVisible = ref(false)
+const selectedOffering = ref<any>({})
 const aiDrawerVisible = ref(false)
 const aiLoading = ref(false)
 const aiInsight = ref<any>(null)
-const decisionOfferings = computed(() => (v2Offering.items || []).map((row:any) => {
+function offeringWithAttention(row:any) {
   const avgClassSize = row.lesson_count ? Math.round(row.enrolled / row.lesson_count) : 0
   const attention:string[] = []
   if (avgClassSize >= 120) attention.push('平均班额≥120，核查是否拆班')
@@ -223,7 +249,20 @@ const decisionOfferings = computed(() => (v2Offering.items || []).map((row:any) 
   if (row.teacher_count === 1 && row.lesson_count >= 3) attention.push('多班次由单一教师覆盖')
   if (row.lesson_count === 1 && row.enrolled >= 80) attention.push('单班集中供给')
   return { ...row, avgClassSize, attention }
-}).sort((a:any,b:any) => b.attention.length-a.attention.length || b.enrolled-a.enrolled))
+}
+function offeringNeedsAi(row:any) {
+  return row?.aiPriority === true
+}
+function offeringAttentionLevel(row:any):{label:string;type:'danger'|'warning'|'info'} {
+  const normalized = row?.attention ? row : offeringWithAttention(row || {})
+  if (offeringNeedsAi(normalized)) return { label:'AI重点', type:'danger' }
+  if ((normalized.attention || []).length) return { label:'需核查', type:'warning' }
+  return { label:'常规', type:'info' }
+}
+const decisionOfferings = computed(() => (v2Offering.items || [])
+  .map(offeringWithAttention)
+  .sort((a:any,b:any) => b.attention.length-a.attention.length || b.enrolled-a.enrolled)
+  .map((row:any,index:number) => ({ ...row, aiPriority:index < 3 })))
 const realKpis = computed(() => {
   const lessons = v2Offering.summary?.lesson_count || 0
   const enrolled = v2Offering.summary?.enrolled || 0
@@ -248,6 +287,10 @@ async function openOfferingDrawer() {
   await loadOfferingPage()
 }
 async function searchOfferings() { offeringDrawer.page = 1; await loadOfferingPage() }
+function openOfferingReview(row:any) {
+  selectedOffering.value = offeringWithAttention(row)
+  offeringReviewVisible.value = true
+}
 async function openOfferingAi(row:any) {
   const courseId = row.course_id || row.courseId
   if (!courseId) return
@@ -373,4 +416,9 @@ const trendOption = computed(() => {
 .management-note { margin:10px 0 0; padding-top:10px; border-top:1px solid var(--sa-border); color:#64748B; font-size:12px; line-height:1.7; }
 .drawer-toolbar { display:flex; align-items:center; gap:8px; margin-bottom:12px; }
 .drawer-toolbar span { margin-left:auto; color:#64748b; font-size:12px; }
+.review-reasons { padding:14px; border:1px solid #e2e8f0; border-radius:10px; background:#f8fafc; color:#475569; font-size:13px; line-height:1.8; }
+.review-reasons ul { margin:8px 0 0; padding-left:20px; }
+.review-reasons p { margin:8px 0 0; }
+.review-actions { display:flex; align-items:center; justify-content:flex-end; margin-top:16px; }
+.review-actions .sa-faint { margin-right:auto; }
 </style>

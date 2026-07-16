@@ -26,7 +26,7 @@
       <KpiCard v-for="k in kpis" :key="k.label" :label="k.label" :value="k.value" :sub="k.sub" :hint="k.hint" :tone="k.tone" />
     </div>
     <div class="ai-toolbar">
-      <el-button size="small" type="primary" plain @click="openClassroomAi()">AI研判当前视图</el-button>
+      <el-button size="small" type="primary" plain @click="openClassroomAi()">生成当前资源重点</el-button>
     </div>
 
     <el-row :gutter="16" class="section-row">
@@ -62,8 +62,9 @@
             <el-progress :percentage="row.observedLoadPct" :stroke-width="9" :color="loadColor(row.observedLoadPct)" />
           </template>
         </el-table-column>
-        <el-table-column label="AI" width="88">
-          <template #default="{ row }"><el-button link type="primary" @click="openClassroomAi(row)">AI研判</el-button></template>
+        <el-table-column label="管理关注" width="100"><template #default="{row}"><el-tag size="small" :type="buildingAttention(row).type">{{ buildingAttention(row).label }}</el-tag></template></el-table-column>
+        <el-table-column label="操作" width="80">
+          <template #default="{ row }"><el-button link type="primary" @click="openBuildingReview(row)">核查</el-button></template>
         </el-table-column>
       </el-table>
     </div>
@@ -71,6 +72,11 @@
     <el-alert v-if="data.summary.overlapRecords || data.summary.pendingMappingRecords" class="quality" type="warning" :closable="false" show-icon
       :title="`待核查：${fmt(data.summary.overlapRecords)} 条时段重叠，${fmt(data.summary.pendingMappingRecords)} 条楼宇待映射`"
       description="这些记录已作为源数据核查线索保留，没有参与自动删除或主观修正。" />
+    <el-drawer v-model="buildingDrawerVisible" :title="`${selectedBuilding.name || '楼宇'}｜实际占用核查`" size="680px">
+      <el-alert type="info" :closable="false" show-icon title="观测负荷只用于定位占用集中，不等于正式利用率" />
+      <el-descriptions :column="3" border style="margin:14px 0"><el-descriptions-item label="已观测教室">{{ selectedBuilding.observedRooms || 0 }}</el-descriptions-item><el-descriptions-item label="采集日期">{{ selectedBuilding.observedDates || 0 }}</el-descriptions-item><el-descriptions-item label="占用记录">{{ selectedBuilding.occupancyRecords || 0 }}</el-descriptions-item><el-descriptions-item label="占用教室日节次">{{ selectedBuilding.occupiedRoomSlots || 0 }}</el-descriptions-item><el-descriptions-item label="观测负荷">{{ selectedBuilding.observedLoadPct || 0 }}%</el-descriptions-item><el-descriptions-item label="管理关注"><el-tag :type="buildingAttention(selectedBuilding).type">{{ buildingAttention(selectedBuilding).label }}</el-tag></el-descriptions-item></el-descriptions>
+      <div class="review-actions"><span v-if="!buildingNeedsAi(selectedBuilding)" class="sa-faint">当前仅需常规核查或数据映射，不生成楼宇 AI 评价。</span><el-button v-else type="primary" plain @click="openClassroomAi(selectedBuilding)">查看 AI 资源研判</el-button></div>
+    </el-drawer>
     <AIInsightDrawer v-model="aiDrawerVisible" :insight="aiInsight" :loading="aiLoading" title="教室资源AI研判" />
   </div>
 </template>
@@ -95,6 +101,8 @@ const data = reactive<any>({ summary: {}, heatmap: [], buildings: [], activityTy
 const aiDrawerVisible = ref(false)
 const aiLoading = ref(false)
 const aiInsight = ref<any>(null)
+const buildingDrawerVisible = ref(false)
+const selectedBuilding = ref<any>({})
 const weekdays: Record<number,string> = { 1:'周一', 2:'周二', 3:'周三', 4:'周四', 5:'周五', 6:'周六', 7:'周日' }
 const activityLabels: Record<string,string> = {
   course:'课程教学', exam:'考试考务', self_study:'自习使用', admission_review:'招生复试',
@@ -103,6 +111,9 @@ const activityLabels: Record<string,string> = {
 
 function fmt(value: number) { return Number(value || 0).toLocaleString('zh-CN') }
 function loadColor(value: number) { return value >= 50 ? '#DC2626' : value >= 30 ? '#D97706' : '#0D9488' }
+function buildingNeedsAi(row:any) { return row?.name !== '待映射' && Number(row?.observedLoadPct || 0) >= 45 && Number(row?.occupancyRecords || 0) >= 100 }
+function buildingAttention(row:any):{label:string;type:'danger'|'warning'|'info'} { if(row?.name==='待映射')return{label:'数据核验',type:'warning'};if(buildingNeedsAi(row))return{label:'AI重点',type:'danger'};if(Number(row?.observedLoadPct||0)>=30)return{label:'需核查',type:'warning'};return{label:'常规',type:'info'} }
+function openBuildingReview(row:any) { selectedBuilding.value=row; buildingDrawerVisible.value=true }
 
 const kpis = computed(() => {
   const s = data.summary || {}
@@ -176,5 +187,5 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.sa-head-row{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;margin-bottom:14px}.filters{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end}.evening-switch{height:32px;display:flex;align-items:center;gap:8px;padding:0 10px;border:1px solid #dcdfe6;border-radius:4px;color:#475569;font-size:13px}.boundary{margin-bottom:14px}.ai-toolbar{display:flex;justify-content:flex-end;margin:-4px 0 12px}.section-row{margin-bottom:16px}.full-height{height:100%;box-sizing:border-box}.chart-note{font-size:12px;color:#64748b;margin:4px 0 8px}.quality{margin-top:14px}
+.sa-head-row{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;margin-bottom:14px}.filters{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end}.evening-switch{height:32px;display:flex;align-items:center;gap:8px;padding:0 10px;border:1px solid #dcdfe6;border-radius:4px;color:#475569;font-size:13px}.boundary{margin-bottom:14px}.ai-toolbar{display:flex;justify-content:flex-end;margin:-4px 0 12px}.section-row{margin-bottom:16px}.full-height{height:100%;box-sizing:border-box}.chart-note{font-size:12px;color:#64748b;margin:4px 0 8px}.quality{margin-top:14px}.review-actions{display:flex;align-items:center;justify-content:flex-end;margin-top:16px}.review-actions .sa-faint{margin-right:auto}
 </style>
