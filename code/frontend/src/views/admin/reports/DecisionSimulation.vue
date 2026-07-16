@@ -12,8 +12,34 @@
           基于培养方案完成证据、必修课未通过、开课供给、课程替代和课程团队情况，对重修资源、认定核查和课程团队保障进行方案比较。
         </p>
       </div>
-      <el-button type="primary" :loading="loading" @click="load">重新模拟</el-button>
+      <el-button type="primary" :loading="loading" @click="load">按当前约束测算</el-button>
     </div>
+
+    <section class="simulation-controls sa-card">
+      <div class="control-title">
+        <div>
+          <b>资源约束与管理侧重点</b>
+          <span>调整后重新测算各方案覆盖规模、剩余缺口和实施优先级</span>
+        </div>
+        <el-tag type="info" effect="plain">测算参数，不写入业务数据</el-tag>
+      </div>
+      <div class="control-grid">
+        <label><span>可新增班级</span><el-input-number v-model="params.addedClasses" :min="0" :max="20" /></label>
+        <label><span>单班计划容量</span><el-input-number v-model="params.classCapacity" :min="15" :max="120" :step="5" /></label>
+        <label><span>可协调教师</span><el-input-number v-model="params.availableTeachers" :min="0" :max="20" /></label>
+        <label><span>本轮优先目标</span>
+          <el-select v-model="params.priorityFocus">
+            <el-option label="均衡处理" value="balanced" />
+            <el-option label="优先处理明确未通过" value="failed" />
+            <el-option label="优先核验缺证据" value="verification" />
+          </el-select>
+        </label>
+      </div>
+      <div class="control-foot">
+        当前最多可形成 <b>{{ Math.min(params.addedClasses, params.availableTeachers) }}</b> 个新增班，计划新增容量
+        <b>{{ Math.min(params.addedClasses, params.availableTeachers) * params.classCapacity }}</b> 人次。
+      </div>
+    </section>
 
     <el-alert
       v-if="loading"
@@ -43,7 +69,7 @@
           <span>{{ m.label }}</span>
           <b>{{ m.value }}<small>{{ m.unit }}</small></b>
           <p>{{ m.managementValue || m.hint }}</p>
-          <small v-if="m.source">来源：{{ m.source }}</small>
+          <small v-if="m.source">业务来源：{{ m.businessSource || businessSource(m.source) }}</small>
         </div>
       </div>
 
@@ -84,9 +110,13 @@
           </div>
           <p class="best-for">{{ s.bestFor }}</p>
           <p class="logic">{{ s.logic }}</p>
+          <div class="scenario-result">
+            <span>资源使用：{{ s.resourceUse || '—' }}</span>
+            <span>测算后剩余缺口：<b>{{ s.remainingGap ?? '—' }}</b> 人次</span>
+          </div>
           <div v-if="s.evidenceBasis?.length" class="basis-list">
             <div v-for="b in s.evidenceBasis" :key="b.source + b.usage" class="basis-item">
-              <span>依据来源：{{ b.source }}</span>
+              <span>依据来源：{{ businessSource(b.source) }}</span>
               <small>{{ b.usage }}</small>
             </div>
           </div>
@@ -98,6 +128,10 @@
 
       <section class="sa-card">
         <div class="sa-card-title">课程保障模拟清单</div>
+        <div v-if="data.scope" class="table-scope">
+          覆盖 {{ data.scope.uniqueStudents }} 名去重学生、{{ data.scope.uniqueMajors }} 个去重专业；
+          课程—专业关系共 {{ data.scope.courseMajorRelations }} 专业次。
+        </div>
         <el-table :data="data.courses || []" stripe>
           <el-table-column prop="courseName" label="课程" min-width="180" />
           <el-table-column prop="module" label="模块" min-width="130" />
@@ -127,14 +161,24 @@
 
       <section class="sa-card trace-card">
         <div class="sa-card-title">AI模拟追溯</div>
-        <el-descriptions :column="1" border>
-          <el-descriptions-item label="数据来源">{{ listText(trace.dataSources) }}</el-descriptions-item>
-          <el-descriptions-item label="计算逻辑">{{ trace.calculationLogic || '—' }}</el-descriptions-item>
-          <el-descriptions-item label="命中规则">{{ listText(trace.rules) }}</el-descriptions-item>
-          <el-descriptions-item label="公式/口径">{{ trace.formula || '—' }}</el-descriptions-item>
-          <el-descriptions-item label="使用边界">{{ trace.boundary || '—' }}</el-descriptions-item>
-          <el-descriptions-item label="解释来源">{{ explanationSourceText }}</el-descriptions-item>
-        </el-descriptions>
+        <div class="trace-overview">
+          <div><span>业务数据</span><b>{{ trace.businessDataSources || businessSource(listText(trace.dataSources)) }}</b></div>
+          <div><span>规则与时点</span><b>{{ trace.ruleVersion || '—' }} · {{ formatTime(trace.asOfTime) }}</b></div>
+        </div>
+        <el-collapse class="trace-collapse">
+          <el-collapse-item name="technical-trace" title="查看完整计算口径与技术追溯">
+            <el-descriptions :column="1" border>
+              <el-descriptions-item label="技术来源">{{ listText(trace.dataSources) }}</el-descriptions-item>
+              <el-descriptions-item label="生成方式">{{ trace.generationMethod || sourceLabelText }}</el-descriptions-item>
+              <el-descriptions-item label="计算逻辑">{{ trace.calculationLogic || '—' }}</el-descriptions-item>
+              <el-descriptions-item label="命中规则">{{ listText(trace.rules) }}</el-descriptions-item>
+              <el-descriptions-item label="阈值说明">{{ listText(trace.thresholds) }}</el-descriptions-item>
+              <el-descriptions-item label="公式/口径">{{ trace.formula || '—' }}</el-descriptions-item>
+              <el-descriptions-item label="使用边界">{{ trace.boundary || '—' }}</el-descriptions-item>
+              <el-descriptions-item label="解释来源">{{ explanationSourceText }}</el-descriptions-item>
+            </el-descriptions>
+          </el-collapse-item>
+        </el-collapse>
       </section>
 
       <section class="sa-card">
@@ -162,6 +206,12 @@ import { getGraduationCourseSupportSimulation } from '@/utils/ai'
 
 const loading = ref(false)
 const data = reactive<any>({})
+const params = reactive({
+  addedClasses: 3,
+  classCapacity: 30,
+  availableTeachers: 3,
+  priorityFocus: 'balanced' as 'balanced' | 'failed' | 'verification',
+})
 
 const sourceLabelText = computed(() => normalizeSourceLabel(data.sourceLabel || 'AI辅助决策模拟'))
 const trace = computed(() => data.traceability || {})
@@ -172,12 +222,28 @@ const explanationSourceText = computed(() => {
 })
 
 function normalizeSourceLabel(label: string) {
+  if (label === '离线大模型研判样本') return label
   return String(label || '').replace('AI增强', 'AI辅助').replace('样本', '')
 }
 
 function listText(value: any) {
   if (Array.isArray(value)) return value.join('；')
   return value || '—'
+}
+
+const businessSourceMap: Record<string, string> = {
+  student_plan_course_status: '学生培养方案课程完成证据', curriculum_plan_course: '培养方案课程要求',
+  teaching_lesson: '教学任务与教学班', lesson_teacher: '教学班授课教师', agg_course_team: '课程团队结构汇总',
+  student_course_substitution: '课程替代与认定关系', dim_student: '学生学籍信息',
+}
+function businessSource(value: any) {
+  const raw = String(value || '')
+  const labels = Object.entries(businessSourceMap).filter(([key]) => raw.includes(key)).map(([, label]) => label)
+  return [...new Set(labels)].join('、') || raw || '当前页面业务数据'
+}
+function formatTime(value?: string) {
+  if (!value) return '—'
+  return String(value).replace('T', ' ').slice(0, 19)
 }
 
 function priorityType(priority: string) {
@@ -195,7 +261,7 @@ function priorityLabel(priority: string) {
 async function load() {
   loading.value = true
   try {
-    const result = await getGraduationCourseSupportSimulation({ limit: 12 })
+    const result = await getGraduationCourseSupportSimulation({ limit: 12, ...params })
     Object.keys(data).forEach((key) => delete data[key])
     Object.assign(data, result)
   } finally {
@@ -217,6 +283,26 @@ onMounted(load)
 .loading-alert {
   margin: 12px 0;
 }
+
+.simulation-controls { margin: 12px 0; }
+.trace-overview { display:grid; grid-template-columns:1.3fr 1fr; gap:10px; margin-bottom:8px; }
+.trace-overview > div { padding:10px 12px; border:1px solid #e2e8f0; border-radius:9px; background:#f8fafc; }
+.trace-overview span { display:block; color:#64748b; font-size:11px; }
+.trace-overview b { display:block; margin-top:4px; color:#334155; font-size:12px; line-height:1.55; }
+.trace-collapse { border-top:0; }
+.trace-collapse :deep(.el-collapse-item__header) { height:40px; color:#4f46e5; font-size:12px; font-weight:600; }
+.control-title { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; margin-bottom:12px; }
+.control-title b { display:block; color:#1e293b; font-size:14px; }
+.control-title span { display:block; margin-top:4px; color:#64748b; font-size:12px; }
+.control-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; }
+.control-grid label { display:grid; gap:6px; color:#64748b; font-size:12px; }
+.control-grid :deep(.el-input-number), .control-grid :deep(.el-select) { width:100%; }
+.control-foot { margin-top:10px; color:#64748b; font-size:12px; }
+.control-foot b { color:#4f46e5; }
+.scenario-result { display:grid; gap:4px; margin:8px 0; padding:8px 10px; border-radius:8px; background:#f8fafc; color:#64748b; font-size:11px; line-height:1.5; }
+.scenario-result b { color:#d97706; }
+.table-scope { margin:-2px 0 10px; color:#64748b; font-size:12px; }
+@media (max-width: 1100px) { .control-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
 
 .hero-card {
   display: flex;

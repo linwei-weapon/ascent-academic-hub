@@ -39,6 +39,7 @@
           <span>{{ sourceLabel }}</span>
           <span>证据充分度：{{ insight.confidence || '中' }}</span>
         </div>
+        <div v-if="modelTraceText" class="model-trace">{{ modelTraceText }}</div>
       </div>
 
       <section v-if="insight.evidence?.length" class="ai-section">
@@ -48,7 +49,7 @@
             <span>{{ item.label }}</span>
             <b>{{ item.value }}</b>
             <small>{{ item.detail }}</small>
-            <em v-if="item.source">来源：{{ item.source }}</em>
+            <em v-if="item.businessSource || item.source">业务来源：{{ item.businessSource || item.source }}</em>
             <em v-if="item.managementValue">管理意义：{{ item.managementValue }}</em>
           </div>
         </div>
@@ -93,14 +94,26 @@
 
       <section class="ai-section trace-section">
         <h4>研判追溯</h4>
-        <el-descriptions :column="1" border size="small">
-          <el-descriptions-item label="数据来源">{{ trace.dataSources }}</el-descriptions-item>
-          <el-descriptions-item label="计算逻辑">{{ trace.calculationLogic }}</el-descriptions-item>
-          <el-descriptions-item label="命中规则">{{ trace.rules }}</el-descriptions-item>
-          <el-descriptions-item label="公式/口径">{{ trace.formula }}</el-descriptions-item>
-          <el-descriptions-item label="使用边界">{{ trace.boundary }}</el-descriptions-item>
-          <el-descriptions-item label="解释来源">{{ explanationSourceText }}</el-descriptions-item>
-        </el-descriptions>
+        <div class="trace-overview">
+          <div><span>业务数据</span><b>{{ trace.businessDataSources }}</b></div>
+          <div><span>规则与时点</span><b>{{ trace.ruleVersion }} · {{ trace.asOfTime }}</b></div>
+        </div>
+        <el-collapse class="trace-collapse">
+          <el-collapse-item name="technical-trace" title="查看完整计算口径与技术追溯">
+            <el-descriptions :column="1" border size="small">
+              <el-descriptions-item label="技术来源">{{ trace.dataSources }}</el-descriptions-item>
+              <el-descriptions-item label="生成方式">{{ trace.generationMethod }}</el-descriptions-item>
+              <el-descriptions-item label="研判范围">{{ trace.scope }}</el-descriptions-item>
+              <el-descriptions-item label="计算逻辑">{{ trace.calculationLogic }}</el-descriptions-item>
+              <el-descriptions-item label="命中规则">{{ trace.rules }}</el-descriptions-item>
+              <el-descriptions-item label="阈值说明">{{ trace.thresholds }}</el-descriptions-item>
+              <el-descriptions-item label="公式/口径">{{ trace.formula }}</el-descriptions-item>
+              <el-descriptions-item label="充分度口径">{{ trace.confidenceBasis }}</el-descriptions-item>
+              <el-descriptions-item label="使用边界">{{ trace.boundary }}</el-descriptions-item>
+              <el-descriptions-item label="解释来源">{{ explanationSourceText }}</el-descriptions-item>
+            </el-descriptions>
+          </el-collapse-item>
+        </el-collapse>
       </section>
 
       <el-alert
@@ -131,6 +144,11 @@ const props = defineProps<{
 const emit = defineEmits<{(e: 'update:modelValue', value: boolean): void}>()
 
 const sourceLabel = computed(() => normalizeSourceLabel(props.insight?.sourceLabel || '规则研判'))
+const modelTraceText = computed(() => {
+  const model = props.insight?.modelTrace
+  if (!model) return ''
+  return `模型：${model.modelName || '未标注'} · 提示词：${model.promptVersion || '未标注'} · ${reviewLabel(model.reviewStatus)}`
+})
 
 const explanationSources = computed(() => {
   const sources = props.insight?.explanationSources || props.insight?.traceability?.explanationSources || []
@@ -145,10 +163,17 @@ const explanationSourceText = computed(() => {
 const trace = computed(() => {
   const t = props.insight?.traceability || {}
   return {
+    businessDataSources: t.businessDataSources || inferDataSources(props.insight),
     dataSources: listText(t.dataSources) || inferDataSources(props.insight),
+    generationMethod: t.generationMethod || '确定性规则引擎实时计算',
+    ruleVersion: t.ruleVersion || '—',
+    asOfTime: shortTime(t.asOfTime || props.insight?.generatedAt || ''),
+    scope: t.scope || props.insight?.targetName || '当前对象',
     calculationLogic: t.calculationLogic || '根据当前对象的关键证据、命中原因和管理建议生成AI辅助研判。',
     rules: listText(t.rules) || inferRules(props.insight),
+    thresholds: listText(t.thresholds) || '—',
     formula: t.formula || '综合风险等级、关键证据数量、影响范围和管理优先级形成结论。',
+    confidenceBasis: t.confidenceBasis || '原型阶段定性证据充分度，不代表风险概率。',
     boundary: t.boundary || (props.insight?.limitations || ['仅用于管理核查和决策辅助，不替代正式审批或业务结论。']).join('；'),
   }
 })
@@ -158,12 +183,17 @@ function listText(value: any) {
 }
 
 function normalizeSourceLabel(label: string) {
+  if (label === '离线大模型研判样本') return label
   return String(label || '')
     .replace('AI增强研判样本', 'AI辅助研判')
     .replace('AI增强管理简报样本', 'AI辅助管理简报')
     .replace('AI增强决策模拟样本', 'AI辅助决策模拟')
     .replace('AI增强', 'AI辅助')
     .replace('样本', '')
+}
+
+function reviewLabel(status?: string) {
+  return status === 'prototype_curated' ? '原型审校样本' : (status || '待审核')
 }
 
 function inferDataSources(insight: any) {
@@ -226,6 +256,7 @@ function shortTime(v: string) {
 .ai-summary-label { font-size: 12px; color: #4f46e5; font-weight: 700; margin-bottom: 6px; }
 .ai-summary p { margin: 0; font-size: 13px; line-height: 1.8; color: #334155; }
 .ai-source { display: flex; justify-content: space-between; gap: 10px; margin-top: 9px; color: #94a3b8; font-size: 11px; }
+.model-trace { margin-top: 6px; color: #64748b; font-size: 11px; line-height: 1.5; }
 .ai-section { margin: 16px 0; }
 .ai-section h4 { margin: 0 0 9px; font-size: 14px; color: #1e293b; }
 .evidence-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
@@ -264,5 +295,11 @@ function shortTime(v: string) {
 .suggestion-item p { margin: 4px 0 0; font-size: 12px; color: #64748b; line-height: 1.6; }
 .trace-section :deep(.el-descriptions__label) { width: 86px; color: #64748b; }
 .trace-section :deep(.el-descriptions__content) { color: #475569; font-size: 12px; line-height: 1.65; }
+.trace-overview { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:7px; }
+.trace-overview > div { padding:9px 10px; border:1px solid #e2e8f0; border-radius:8px; background:#f8fafc; }
+.trace-overview span { display:block; color:#64748b; font-size:11px; }
+.trace-overview b { display:block; margin-top:4px; color:#334155; font-size:12px; line-height:1.55; }
+.trace-collapse { border-top:0; }
+.trace-collapse :deep(.el-collapse-item__header) { height:38px; color:#4f46e5; font-size:12px; font-weight:600; }
 .ai-limit { margin-top: 14px; }
 </style>

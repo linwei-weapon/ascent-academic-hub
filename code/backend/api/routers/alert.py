@@ -125,7 +125,9 @@ def alerts(level: Optional[str] = None, type: Optional[str] = None,
             "workflowStatus": r["workflow_status"], "eventId": r["event_id"],
             "assignee": r["assignee"] or "—", "lastFollowupAt": r["last_followup_at"],
             "time": r["time"],
-            "gpaHistory": _gpa_history(conn, r["sid"]), "alerts": [], "scores": [],
+            # 列表页不展示 GPA 轨迹；学生抽屉会通过详情接口按需获取。
+            # 避免对数千条预警逐条执行 GPA 查询造成首次加载阻塞。
+            "gpaHistory": [], "alerts": [], "scores": [],
         })
 
     monthlyTrend = [{"month": r["m"], "count": r["n"]} for r in dbm.query(

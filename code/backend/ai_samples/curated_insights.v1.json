@@ -1,0 +1,121 @@
+{
+  "schemaVersion": "1.0",
+  "description": "原型演示使用的离线大模型研判样本。仅在目标对象与证据指纹同时匹配时使用；其他对象回退到确定性规则。",
+  "samples": [
+    {
+      "id": "student-20230400045-alert-v1",
+      "match": {"targetType": "student", "targetId": "20230400045"},
+        "evidenceFingerprint": {"当前有效预警": "1 条", "未通过课程": "6 门", "累计成绩GPA": "2.38", "已获学分": "83.0"},
+      "evidenceSnapshot": {"学生": "徐文雪", "学院": "理学院", "专业": "应用化学", "近两学期未解决课程": "3门", "累计未通过课程": "6门", "必修未通过": "3门", "累计成绩GPA": "2.38", "相邻学期GPA变化": "-0.50", "未通过学分": "12.0"},
+      "model": {"provider": "OpenAI", "modelName": "GPT-5.6", "mode": "offline_curated"},
+      "promptVersion": "student-risk-management-v1.0",
+      "generatedAt": "2026-07-16T04:00:00+08:00",
+      "reviewStatus": "prototype_curated",
+      "reviewedBy": "学生学业分析与预警平台原型团队",
+      "output": {
+        "summary": "该生同时存在持续课程未通过与相邻学期GPA下降，当前风险重点不是单次成绩波动，而是3门必修课程缺口可能继续影响后续选课与毕业准备。建议学院先核对课程先修关系、近期重修供给和替代认定路径，再由辅导员围绕学习投入与受挫状态开展一次有明确复核时间的沟通。",
+        "confidence": "中高",
+        "reasons": [
+          "当前有1条严重预警，触发依据为近2学期仍有3门不同课程尚未通过，说明问题具有持续性。",
+          "累计未通过6门课程，其中3门为必修课；必修缺口比单纯累计挂科数更直接影响后续课程路径和毕业准备。",
+          "相邻学期GPA下降0.50，建议结合当学期课程负荷和关键课程成绩核实下降原因。",
+          "现有重点课程历史未通过率为9.9%，未达到高难度课程提醒阈值，不应仅凭该比例判断课程异常。"
+        ],
+        "suggestions": [
+          {"role": "辅导员", "priority": "high", "action": "完成一次有复核时间的学业沟通", "detail": "确认学习投入、课程受挫和重修计划，将学校授权业务流程中的沟通结果同步呈现在学生档案。"},
+          {"role": "班主任/导师", "priority": "high", "action": "核对必修课程先修链", "detail": "识别3门必修缺口是否阻断后续课程，并给出下一学期选课先后顺序。"},
+          {"role": "学院", "priority": "high", "action": "确认课程保障资源", "detail": "核对近期教学班、重修班和课程替代认定路径，形成可执行的课程处理清单。"}
+        ],
+        "nextActions": [
+          "查看学生档案中的成绩趋势、历史预警和已同步干预记录。",
+          "逐门核对3门必修缺口的下学期开课、重修班、先修关系和替代认定资源。",
+          "在学校授权的预警业务流程中记录沟通结果并约定下一次复核时间。"
+        ]
+      }
+    },
+    {
+      "id": "classroom-occupancy-school-v1",
+      "match": {"scenario": "operation_classroom_occupancy", "targetId": "all-buildings"},
+      "evidenceFingerprint": {"实际占用记录": "49911 条", "已观察教室": "172 间", "最高楼宇负荷": "32.0%", "晚间占用": "13853 条", "待核查记录": "2567 条"},
+      "model": {"provider": "OpenAI", "modelName": "GPT-5.6", "mode": "offline_curated"},
+      "promptVersion": "classroom-resource-management-v1.0",
+      "generatedAt": "2026-07-16T04:02:00+08:00",
+      "reviewStatus": "prototype_curated",
+      "reviewedBy": "学生学业分析与预警平台原型团队",
+      "output": {
+        "summary": "当前已形成49,911条实际占用观察，覆盖172间教室，能够支撑楼宇与时段分布分析；但最高楼宇负荷32.0%不能直接解释为学校教室利用率，因为尚缺正式可用教室总量和完整可排时段分母。建议先核验2,567条待核查记录，再比较晚间占用是否集中在少数楼宇，为下一轮排课错峰提供依据。",
+        "confidence": "中高"
+      }
+    },
+    {
+      "id": "schedule-change-school-v1",
+      "match": {"scenario": "operation_schedule_changes", "targetId": "current-schedule-change-filter"},
+      "evidenceFingerprint": {"调停课记录": "386 条", "影响学生": "4267 人次", "主要原因": "教学安排调整", "高峰月份": "4月", "自动审核": "16.3%"},
+      "model": {"provider": "OpenAI", "modelName": "GPT-5.6", "mode": "offline_curated"},
+      "promptVersion": "schedule-change-governance-v1.0",
+      "generatedAt": "2026-07-16T04:04:00+08:00",
+      "reviewStatus": "prototype_curated",
+      "reviewedBy": "学生学业分析与预警平台原型团队",
+      "output": {
+        "summary": "当前386条调停课记录影响4,267学生人次，主要原因集中在教学安排调整，4月为高峰。管理上应先结合校历、考试周和集中实践判断月份波动，再核查高频课程与教师是否存在可在新一轮排课中提前消解的时间冲突；频次仅作为运行核查线索，不直接归因教师责任。",
+        "confidence": "中高"
+      }
+    },
+    {
+      "id": "teacher-load-school-v1",
+      "match": {"scenario": "operation_teacher_load", "targetId": "current-teacher-load-filter"},
+      "evidenceFingerprint": {"授课教师": "388 人", "人均学时": "178.4", "高负荷对象": "89 人", "最高负荷教师": "刘洪涛", "已排除异常": "9 人"},
+      "model": {"provider": "OpenAI", "modelName": "GPT-5.6", "mode": "offline_curated"},
+      "promptVersion": "teacher-load-assurance-v1.0",
+      "generatedAt": "2026-07-16T04:06:00+08:00",
+      "reviewStatus": "prototype_curated",
+      "reviewedBy": "学生学业分析与预警平台原型团队",
+      "output": {
+        "summary": "当前388名授课教师人均178.4学时，89人进入高负荷核查范围。建议先确认合班、重复教学任务和跨学院承担是否已正确归并，再把高负荷教师与单教师课程团队叠加分析；只有同时存在高负荷和课程单点的对象，才应优先进入下一学期任务分担与备份教师核查。",
+        "confidence": "中高"
+      }
+    },
+    {
+      "id": "faculty-resource-school-v1",
+      "match": {"scenario": "faculty_resource_risk", "targetId": "faculty-resource-risk"},
+        "evidenceFingerprint": {"真实团队课程": "740 门", "候选核查课程": "725 门", "高影响单点": "66 门", "单一教师承担": "495 门", "职称信息不完整": "572 门", "重点覆盖人次": "15209 人次"},
+      "model": {"provider": "OpenAI", "modelName": "GPT-5.6", "mode": "offline_curated"},
+      "promptVersion": "course-team-assurance-v1.0",
+      "generatedAt": "2026-07-16T04:08:00+08:00",
+      "reviewStatus": "prototype_curated",
+      "reviewedBy": "学生学业分析与预警平台原型团队",
+      "output": {
+          "summary": "740门课程中有725门命中至少一项宽口径核查条件，但按统一口径收敛后，仅66门属于当期单教师且累计选课不少于100人次的高影响单点。管理上不应要求学院同时核查725门课程，应先确认这66门课程的备份教师与开课连续性，再补齐职称主数据后复算团队梯队风险。",
+        "confidence": "中高"
+      }
+    },
+    {
+      "id": "management-morning-school-v1",
+      "match": {"scenario": "management_briefing", "period": "morning"},
+        "evidenceFingerprint": {"有效预警学生": "3603", "毕业需处理学生": "144", "高影响挂科课程": "6", "高影响团队课程": "66", "教室占用记录": "49911"},
+      "model": {"provider": "OpenAI", "modelName": "GPT-5.6", "mode": "offline_curated"},
+      "promptVersion": "academic-management-morning-brief-v1.0",
+      "generatedAt": "2026-07-16T04:10:00+08:00",
+      "reviewStatus": "prototype_curated",
+      "reviewedBy": "学生学业分析与预警平台原型团队",
+      "output": {
+        "headline": "今天先确认高风险学生是否被学院看见，再核查毕业准备中的明确必修缺口。",
+        "summary": "当前有效预警覆盖3,603名学生，毕业准备中有144名学生存在必修课明确未通过证据。课程团队候选池规模偏大，建议先完成职称主数据核验，再识别真正的高影响单点课程。管理晨报用于安排今天的核查顺序，不替代正式审批和毕业审核。"
+      }
+    },
+    {
+      "id": "graduation-course-support-simulation-v1",
+      "match": {"scenario": "graduation_course_support"},
+      "evidenceFingerprint": {"模拟课程": "12", "涉及学生": "2319", "明确未通过": "130", "到期缺证据": "13367", "覆盖专业": "39"},
+      "model": {"provider": "OpenAI", "modelName": "GPT-5.6", "mode": "offline_curated"},
+      "promptVersion": "graduation-course-support-simulation-v1.0",
+      "generatedAt": "2026-07-16T04:12:00+08:00",
+      "reviewStatus": "prototype_curated",
+      "reviewedBy": "学生学业分析与预警平台原型团队",
+      "output": {
+        "summary": "本次测算聚焦12门毕业准备相关必修课程，涉及2,319名去重学生。13,367个到期缺证据课程人次远高于130个明确未通过人次，因此第一轮不宜直接按缺口规模开设重修班，应先集中核查替代认定、转专业课程映射和成绩回写；核验后再根据剩余明确未通过人数测算重修班容量。",
+        "confidence": "中高"
+      }
+    }
+  ]
+}

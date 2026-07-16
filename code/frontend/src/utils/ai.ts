@@ -98,10 +98,21 @@ export function getManagementBriefing(query: { period?: 'morning' | 'term'; seme
   return http.get<any>(`/admin/ai/briefing/management${qs ? `?${qs}` : ''}`)
 }
 
-export function getGraduationCourseSupportSimulation(query: { semester?: string; limit?: number } = {}) {
+export function getGraduationCourseSupportSimulation(query: {
+  semester?: string
+  limit?: number
+  addedClasses?: number
+  classCapacity?: number
+  availableTeachers?: number
+  priorityFocus?: 'balanced' | 'failed' | 'verification'
+} = {}) {
   const params = new URLSearchParams()
   if (query.semester) params.set('semester', query.semester)
   if (query.limit) params.set('limit', String(query.limit))
+  if (query.addedClasses !== undefined) params.set('added_classes', String(query.addedClasses))
+  if (query.classCapacity !== undefined) params.set('class_capacity', String(query.classCapacity))
+  if (query.availableTeachers !== undefined) params.set('available_teachers', String(query.availableTeachers))
+  if (query.priorityFocus) params.set('priority_focus', query.priorityFocus)
   const qs = params.toString()
   return http.get<any>(`/admin/ai/simulation/graduation-course-support${qs ? `?${qs}` : ''}`)
 }

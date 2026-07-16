@@ -1,12 +1,12 @@
 <template>
-  <div>
+  <div v-loading="pageLoading" element-loading-text="正在加载学校预警数据…" :aria-busy="pageLoading">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
       <div>
         <h2 class="sa-page-title">学业预警监控</h2>
         <p class="sa-page-sub">数据来源：学校学籍、成绩数据与当前已激活规则计算结果 · 点击等级卡片筛选核查对象</p>
       </div>
       <div class="alert-actions">
-        <el-button type="primary" plain @click="openGroupInsight">AI研判当前切片</el-button>
+        <el-button type="primary" plain :disabled="pageLoading" @click="openGroupInsight">AI研判当前筛选范围</el-button>
       </div>
     </div>
 
@@ -277,6 +277,9 @@ import EChart from '@/components/EChart.vue';
 import AIInsightDrawer from '@/components/AIInsightDrawer.vue';
 import { exportCsv } from '@/utils/export';
 import { authStore } from '@/store/auth';
+import { useRoute } from 'vue-router';
+
+const route = useRoute();
 
 const drawerVisible = ref(false); const student = ref({} as any);
 const workflow = ref({} as any); const followupContent = ref(''); const nextStatus = ref('');
@@ -284,6 +287,7 @@ const savingWorkflow = ref(false); const currentEventId = ref<number | null>(nul
 const page = ref(1); const fCollege = ref(''); const fType = ref(''); const fLevel = ref(''); const fStatus = ref('');
 const activeFilter = ref('');
 const aiDrawerVisible = ref(false); const aiLoading = ref(false); const aiInsight = ref<any>(null);
+const pageLoading = ref(true);
 
 const levels = [
   { key: 'critical', label: '严重', color: '#E11D48', formula: '触发条件满足且等级=严重' },
@@ -419,8 +423,24 @@ watch([fCollege, fType, fLevel, fStatus], () => {
 });
 
 onMounted(async () => {
-  const d = await http.get('/admin/alerts');
-  if (d) Object.assign(data, d);
+  pageLoading.value = true;
+  try {
+    const d = await http.get('/admin/alerts');
+    if (d) Object.assign(data, d);
+    const level = String(route.query.level || '');
+    const status = String(route.query.status || '');
+    const college = String(route.query.college || '');
+    const type = String(route.query.type || '');
+    if (level) {
+      fLevel.value = level;
+      activeFilter.value = levels.find((item) => item.label === level)?.key || '';
+    }
+    if (status) fStatus.value = status;
+    if (college) fCollege.value = college;
+    if (type) fType.value = type;
+  } finally {
+    pageLoading.value = false;
+  }
 });
 
 async function showStudent(row: any) {

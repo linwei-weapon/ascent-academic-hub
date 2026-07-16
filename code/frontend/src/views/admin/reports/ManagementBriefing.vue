@@ -22,7 +22,7 @@
     </div>
 
     <el-alert
-      v-if="loading"
+      v-if="loading && !hasData"
       class="loading-alert"
       type="info"
       :closable="false"
@@ -30,8 +30,16 @@
       title="正在生成AI管理简报"
       description="正在汇总预警、成绩、培养方案、教学任务、教室占用和课程团队数据，生成管理优先级与可追溯证据。"
     />
+    <el-alert
+      v-else-if="loading"
+      class="loading-alert"
+      type="info"
+      :closable="false"
+      show-icon
+      title="正在更新简报，当前结果将保留到新结果完成"
+    />
 
-    <el-skeleton :loading="loading" animated :rows="8">
+    <el-skeleton :loading="loading && !hasData" animated :rows="8">
       <section class="hero-card">
         <div class="ai-mark">AI</div>
         <div class="hero-main">
@@ -47,12 +55,27 @@
         </div>
       </section>
 
+      <section v-if="data.periodPanel" class="period-panel sa-card">
+        <div class="period-panel-head">
+          <div><b>{{ data.periodPanel.title }}</b><span>{{ data.periodPanel.question }}</span></div>
+          <el-tag type="info" effect="plain">{{ period === 'morning' ? '当前快照' : '学期趋势' }}</el-tag>
+        </div>
+        <div class="period-item-grid">
+          <article v-for="item in data.periodPanel.items || []" :key="item.label">
+            <span>{{ item.label }}</span>
+            <b>{{ item.value }}</b>
+            <p>{{ item.managementValue }}</p>
+            <small v-if="item.source">业务来源：{{ businessSource(item.source) }}</small>
+          </article>
+        </div>
+      </section>
+
       <div class="metric-grid">
         <div v-for="m in data.metrics || []" :key="m.label" class="metric-card" :class="m.tone">
           <span>{{ m.label }}</span>
           <b>{{ m.value }}<small>{{ m.unit }}</small></b>
           <p>{{ m.managementValue || m.hint }}</p>
-          <small v-if="m.source">来源：{{ m.source }}</small>
+          <small v-if="m.source">业务来源：{{ m.businessSource || businessSource(m.source) }}</small>
         </div>
       </div>
 
@@ -74,12 +97,12 @@
           <el-table-column prop="why" label="为什么要看" min-width="280" />
           <el-table-column label="依据来源" min-width="180">
             <template #default="{ row }">
-              <span class="source-text">{{ row.source || listText(trace.dataSources) }}</span>
+              <span class="source-text">{{ row.businessSource || businessSource(row.source || listText(trace.dataSources)) }}</span>
             </template>
           </el-table-column>
           <el-table-column label="操作" width="130" fixed="right">
             <template #default="{ row }">
-              <el-button link type="primary" @click="go(row.route)">{{ row.action || '进入专题' }}</el-button>
+              <el-button link type="primary" @click="go(row.route, row.routeQuery)">{{ row.action || '进入专题' }}</el-button>
             </template>
           </el-table-column>
         </el-table>
@@ -97,7 +120,7 @@
             <div v-for="e in s.evidence || []" :key="e.label" class="evidence">
               <span>{{ e.label }}</span>
               <b>{{ e.value }}<small>{{ e.unit }}</small></b>
-              <em v-if="e.source">来源：{{ e.source }}</em>
+              <em v-if="e.source">业务来源：{{ e.businessSource || businessSource(e.source) }}</em>
             </div>
           </div>
         </section>
@@ -116,14 +139,24 @@
 
       <section class="sa-card trace-card">
         <div class="sa-card-title">AI研判追溯</div>
-        <el-descriptions :column="1" border>
-          <el-descriptions-item label="数据来源">{{ listText(trace.dataSources) }}</el-descriptions-item>
-          <el-descriptions-item label="计算逻辑">{{ trace.calculationLogic || '—' }}</el-descriptions-item>
-          <el-descriptions-item label="命中规则">{{ listText(trace.rules) }}</el-descriptions-item>
-          <el-descriptions-item label="公式/口径">{{ trace.formula || '—' }}</el-descriptions-item>
-          <el-descriptions-item label="使用边界">{{ trace.boundary || '—' }}</el-descriptions-item>
-          <el-descriptions-item label="解释来源">{{ explanationSourceText }}</el-descriptions-item>
-        </el-descriptions>
+        <div class="trace-overview">
+          <div><span>业务数据</span><b>{{ trace.businessDataSources || businessSource(listText(trace.dataSources)) }}</b></div>
+          <div><span>规则与时点</span><b>{{ trace.ruleVersion || '—' }} · {{ formatTime(trace.asOfTime) }}</b></div>
+        </div>
+        <el-collapse class="trace-collapse">
+          <el-collapse-item name="technical-trace" title="查看完整计算口径与技术追溯">
+            <el-descriptions :column="1" border>
+              <el-descriptions-item label="技术来源">{{ listText(trace.dataSources) }}</el-descriptions-item>
+              <el-descriptions-item label="生成方式">{{ trace.generationMethod || sourceLabelText }}</el-descriptions-item>
+              <el-descriptions-item label="计算逻辑">{{ trace.calculationLogic || '—' }}</el-descriptions-item>
+              <el-descriptions-item label="命中规则">{{ listText(trace.rules) }}</el-descriptions-item>
+              <el-descriptions-item label="阈值说明">{{ listText(trace.thresholds) }}</el-descriptions-item>
+              <el-descriptions-item label="公式/口径">{{ trace.formula || '—' }}</el-descriptions-item>
+              <el-descriptions-item label="使用边界">{{ trace.boundary || '—' }}</el-descriptions-item>
+              <el-descriptions-item label="解释来源">{{ explanationSourceText }}</el-descriptions-item>
+            </el-descriptions>
+          </el-collapse-item>
+        </el-collapse>
       </section>
 
       <section class="sa-card">
@@ -153,6 +186,7 @@ const router = useRouter()
 const loading = ref(false)
 const period = ref<'morning' | 'term'>('morning')
 const data = reactive<any>({})
+const hasData = computed(() => Boolean(data.targetName))
 
 const sourceLabelText = computed(() => normalizeSourceLabel(data.sourceLabel || 'AI辅助管理简报'))
 const trace = computed(() => data.traceability || {})
@@ -163,6 +197,7 @@ const explanationSourceText = computed(() => {
 })
 
 function normalizeSourceLabel(label: string) {
+  if (label === '离线大模型研判样本') return label
   return String(label || '').replace('AI增强', 'AI辅助').replace('样本', '')
 }
 
@@ -171,13 +206,23 @@ function listText(value: any) {
   return value || '—'
 }
 
+const businessSourceMap: Record<string, string> = {
+  fact_alert: '学业预警记录', fact_grade: '学生成绩明细', student_plan_course_status: '学生培养方案课程完成证据',
+  teaching_lesson: '教学任务与教学班', fact_room_occupancy: '实际教室占用记录', agg_course_team: '课程团队结构汇总',
+}
+function businessSource(value: any) {
+  const raw = String(value || '')
+  const labels = Object.entries(businessSourceMap).filter(([key]) => raw.includes(key)).map(([, label]) => label)
+  return [...new Set(labels)].join('、') || raw || '当前页面业务数据'
+}
+
 function formatTime(value?: string) {
   if (!value) return '—'
   return value.replace('T', ' ').slice(0, 19)
 }
 
-function go(path?: string) {
-  if (path) router.push(path)
+function go(path?: string, query?: Record<string, string>) {
+  if (path) router.push({ path, query: query || {} })
 }
 
 async function load() {
@@ -212,6 +257,23 @@ onMounted(load)
 .loading-alert {
   margin: 12px 0;
 }
+.trace-overview { display:grid; grid-template-columns:1.3fr 1fr; gap:10px; margin-bottom:8px; }
+.trace-overview > div { padding:10px 12px; border:1px solid #e2e8f0; border-radius:9px; background:#f8fafc; }
+.trace-overview span { display:block; color:#64748b; font-size:11px; }
+.trace-overview b { display:block; margin-top:4px; color:#334155; font-size:12px; line-height:1.55; }
+.trace-collapse { border-top:0; }
+.trace-collapse :deep(.el-collapse-item__header) { height:40px; color:#4f46e5; font-size:12px; font-weight:600; }
+.period-panel { margin: 0 0 14px; }
+.period-panel-head { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; margin-bottom:12px; }
+.period-panel-head b { display:block; color:#1e293b; font-size:14px; }
+.period-panel-head span { display:block; margin-top:4px; color:#64748b; font-size:12px; }
+.period-item-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; }
+.period-item-grid article { padding:11px 12px; border:1px solid #e2e8f0; border-radius:10px; background:#f8fafc; }
+.period-item-grid article > span { display:block; color:#64748b; font-size:11px; }
+.period-item-grid article > b { display:block; margin-top:5px; color:#1e293b; font-size:14px; line-height:1.45; }
+.period-item-grid p { margin:5px 0 0; color:#64748b; font-size:11px; line-height:1.55; }
+.period-item-grid small { display:block; margin-top:5px; color:#94a3b8; font-size:10px; }
+@media (max-width: 1100px) { .period-item-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
 
 .hero-card {
   display: flex;
