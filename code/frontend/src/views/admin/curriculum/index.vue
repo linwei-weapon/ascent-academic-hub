@@ -1,11 +1,13 @@
 <template>
-  <div v-loading="loading">
+  <div v-loading="loading" element-loading-text="正在加载培养方案与学生执行证据，请稍候…" element-loading-background="rgba(248,250,252,.82)">
     <div class="sa-head-row">
       <div>
         <h2 class="sa-page-title">培养质量分析</h2>
         <p class="sa-page-sub">基于真实培养方案与学生课程记录，核查方案结构、学分要求和学生执行情况</p>
       </div>
-      <div class="plan-filters">
+      <div v-if="activeTab !== 'overview'" class="plan-filter-area">
+        <div class="filter-scope-label">方案查看条件 <span>仅作用于“培养方案详情”和“学业进度监控”</span></div>
+        <div class="plan-filters">
         <el-select v-model="college" placeholder="学院" clearable filterable @change="resetCollege">
           <el-option v-for="x in colleges" :key="x" :label="x" :value="x" />
         </el-select>
@@ -18,11 +20,13 @@
         <el-select v-model="selectedMajor" placeholder="培养方案" filterable style="width:260px" @change="loadPlan">
           <el-option v-for="x in availablePlans" :key="x.planId" :label="`${x.planName} · ${x.coverageLabel}`" :value="x.planId" />
         </el-select>
+        </div>
       </div>
     </div>
 
     <el-tabs v-model="activeTab">
       <el-tab-pane label="培养质量管理总览" name="overview">
+        <el-alert type="success" :closable="false" show-icon title="当前是全校管理总览" description="以下卡片和表格按当前账号的全部授权学生计算，不受培养方案查看条件影响。" style="margin-bottom:10px" />
         <el-alert type="info" :closable="false" show-icon :title="overview.definition.boundary" style="margin-bottom:14px" />
         <div class="sa-kpi-row">
           <KpiCard label="有效培养方案" :value="`${overview.summary.activePlans || 0}个`" hint="当前V2已接入并可查询的培养方案数" tone="primary" />
@@ -38,10 +42,10 @@
           <el-table :data="overview.colleges" size="small" stripe>
             <el-table-column prop="collegeName" label="学院" min-width="180" />
             <el-table-column prop="students" label="覆盖学生" width="100" align="right" />
-            <el-table-column prop="actionRequired" label="明确需处理" width="110" align="right" />
-            <el-table-column prop="verification" label="到期待核验" width="110" align="right" />
-            <el-table-column prop="withoutPlan" label="未绑定已接入方案" width="140" align="right" />
-            <el-table-column label="操作" width="70"><template #default="{row}"><el-button link type="primary" @click="openStudents({college_name:row.collegeName},row.collegeName)">学生</el-button></template></el-table-column>
+            <el-table-column label="明确需处理" width="110" align="right"><template #default="{row}"><el-button link type="danger" :disabled="!row.actionRequired" @click="openStudents({college_name:row.collegeName,status:'明确需处理'},`${row.collegeName}｜明确需处理`)">{{row.actionRequired}}</el-button></template></el-table-column>
+            <el-table-column label="到期待核验" width="110" align="right"><template #default="{row}"><el-button link type="warning" :disabled="!row.verification" @click="openStudents({college_name:row.collegeName,status:'到期待核验'},`${row.collegeName}｜到期待核验`)">{{row.verification}}</el-button></template></el-table-column>
+            <el-table-column label="未绑定已接入方案" width="150" align="right"><template #default="{row}"><el-button link type="warning" :disabled="!row.withoutPlan" @click="openStudents({college_name:row.collegeName,status:'未绑定已接入方案'},`${row.collegeName}｜未绑定方案`)">{{row.withoutPlan}}</el-button></template></el-table-column>
+            <el-table-column label="操作" width="85"><template #default="{row}"><el-button link type="primary" @click="openStudents({college_name:row.collegeName},`${row.collegeName}｜全部`)">全部学生</el-button></template></el-table-column>
           </el-table>
         </div>
         <el-row :gutter="16" style="margin-top:16px">
@@ -399,7 +403,10 @@ onMounted(async () => {
 
 <style scoped>
 .sa-head-row { display:block; margin-bottom:14px; }
-.plan-filters { display:flex; gap:8px; flex-wrap:nowrap; align-items:center; width:100%; margin-top:12px; }
+.plan-filter-area { width:100%; margin-top:12px; padding:10px 12px; border:1px solid #dbeafe; border-radius:9px; background:#f8fbff; }
+.filter-scope-label { margin-bottom:8px; color:#334155; font-size:12px; font-weight:600; }
+.filter-scope-label span { margin-left:8px; color:#64748b; font-weight:400; }
+.plan-filters { display:flex; gap:8px; flex-wrap:nowrap; align-items:center; width:100%; }
 .plan-filters .el-select { width:180px; flex:0 0 180px; }
 .plan-filters .el-select:last-child { width:300px !important; flex:1 1 300px; }
 @media (max-width:900px) { .plan-filters { overflow-x:auto; padding-bottom:4px; } }

@@ -1,5 +1,5 @@
 <template>
-  <div v-loading="loading">
+  <div v-loading="loading" element-loading-text="正在汇总实际教室占用记录，请稍候…" element-loading-background="rgba(248,250,252,.82)">
     <div class="sa-head-row">
       <div>
         <h2 class="sa-page-title">实际教室占用分析</h2>
@@ -129,7 +129,7 @@ const heatOption = computed(() => {
     tooltip:{formatter:(p:any)=>`${weekdays[days[p.data[0]]]} 第${periods[p.data[1]]}节<br/>观测负荷：<b>${p.data[2]}%</b><br/>占用教室日数：${p.data[3]}`},
     xAxis:{type:'category',data:days.map(d=>weekdays[d]),splitArea:{show:true}},
     yAxis:{type:'category',data:periods.map(p=>`第${p}节`),splitArea:{show:true}},
-    visualMap:{type:'piecewise',selectedMode:false,orient:'horizontal',left:'center',bottom:0,itemWidth:18,itemHeight:10,textStyle:{color:'#64748b'},
+    visualMap:{type:'piecewise',dimension:2,selectedMode:false,orient:'horizontal',left:'center',bottom:0,itemWidth:18,itemHeight:10,textStyle:{color:'#64748b'},
       pieces:[{lt:15,label:'低 <15%',color:'#BFDBFE'},{gte:15,lt:30,label:'中低 15—30%',color:'#86D9C6'},{gte:30,lt:45,label:'中高 30—45%',color:'#FBBF24'},{gte:45,label:'高 ≥45%',color:'#DC2626'}]},
     series:[{type:'heatmap',data:cells,label:{show:true,color:'#334155',fontWeight:600,formatter:(p:any)=>p.data[2] ? `${p.data[2]}%` : ''},itemStyle:{borderColor:'#fff',borderWidth:2}}],
   }

@@ -188,6 +188,18 @@ def curriculum_management_students(college_name: Optional[str] = None, major_cod
                                    conn: sqlite3.Connection = Depends(get_v2_db),
                                    user: dict = Depends(require_v2_reader)):
     scope, scope_params = _student_scope(user, conn, "s")
+    if status == "未绑定已接入方案":
+        no_plan_cond, no_plan_params = ["NULLIF(TRIM(COALESCE(s.plan_id,'')),'') IS NULL"], []
+        if scope: no_plan_cond.append(scope); no_plan_params.extend(scope_params)
+        if college_name: no_plan_cond.append("COALESCE(o.name,s.organization_id,'未映射学院')=?"); no_plan_params.append(college_name)
+        if major_code: no_plan_cond.append("s.major_code=?"); no_plan_params.append(major_code)
+        rows = dbm.query(conn, f"""SELECT s.student_id studentId,s.display_name name,s.entry_grade grade,
+          COALESCE(o.name,s.organization_id,'未映射学院') collegeName,s.major_code majorCode,s.major_name majorName,
+          0 evidenceCourses,0 failedRequired,0 verificationRequired,'未绑定已接入方案' evidenceStatus
+          FROM dim_student s LEFT JOIN dim_organization o ON o.organization_id=s.organization_id
+          WHERE {' AND '.join(no_plan_cond)} ORDER BY s.entry_grade DESC,s.student_id LIMIT ?""", tuple(no_plan_params + [limit]))
+        return ok({"items": rows, "total": len(rows),
+          "definition": "名单中学生当前未绑定已接入培养方案；需先核对年级、专业与方案适用关系，不直接认定为学生异常。"})
     cond, params = ["x.rule_version='growth-v1'"], []
     if scope: cond.append(scope); params.extend(scope_params)
     if college_name: cond.append("COALESCE(o.name,s.organization_id,'未映射学院')=?"); params.append(college_name)
@@ -205,7 +217,11 @@ def curriculum_management_students(college_name: Optional[str] = None, major_cod
     items = []
     for row in rows:
         row["evidenceStatus"] = "明确需处理" if row["failedRequired"] else ("到期待核验" if row["verificationRequired"] else "未发现到期问题")
-        if not status or row["evidenceStatus"] == status:
+        matches = (not status
+          or (status == "明确需处理" and row["failedRequired"] > 0)
+          or (status == "到期待核验" and row["verificationRequired"] > 0)
+          or row["evidenceStatus"] == status)
+        if matches:
             items.append(row)
     return ok({"items": items, "total": len(items),
       "definition": "名单与管理总览使用同一套方案课程状态；到期待核验不等同漏选，需结合选课记录确认。"})

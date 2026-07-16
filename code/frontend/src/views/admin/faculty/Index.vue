@@ -1,5 +1,5 @@
 <template>
-  <div v-loading="pageLoading">
+  <div v-loading="pageLoading" element-loading-text="正在计算师资任务与课程团队指标，请稍候…" element-loading-background="rgba(248,250,252,.82)">
     <div class="head">
       <div>
         <h2 class="sa-page-title">本科教学师资保障分析</h2>
