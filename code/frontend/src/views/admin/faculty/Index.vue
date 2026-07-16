@@ -25,8 +25,8 @@
     <div class="management-summary">
       <div class="summary-mark">本学期核查重点</div>
       <div>
-        全校共有 <b>{{ data.summary.high_impact_courses || 0 }}</b> 门高影响单点课程，涉及
-        <b>{{ affectedCollegeCount }}</b> 个学院；建议优先核实下一学期仍有较大开课规模、但当前仅由一名教师覆盖的课程。
+        全校共有 <b>{{ data.summary.high_impact_courses || 0 }}</b> 门高集中承担课程，涉及
+        <b>{{ affectedCollegeCount }}</b> 个学院；建议先核实教学任务拆分和工作量是否准确，再判断是否需要调整师资安排。
       </div>
     </div>
 
@@ -56,13 +56,13 @@
           <el-table-column prop="enrolled" label="选课人次" width="95" align="right" />
           <el-table-column prop="single_teacher_courses" label="单点课程" width="90" align="right" />
           <el-table-column prop="high_impact_courses" width="125" align="center">
-            <template #header><KpiLabel label="高影响单点" formula="当前学期仅1名实际授课教师，且累计选课人次不少于100的课程；100人为原型核查阈值。" /></template>
+            <template #header><KpiLabel label="高集中承担" :formula="definition.high_impact_courses" /></template>
             <template #default="{ row }"><el-tag :type="row.high_impact_courses ? 'danger' : 'success'">{{ row.high_impact_courses }}</el-tag></template>
           </el-table-column>
           <el-table-column label="保障状态" width="100" align="center">
             <template #default="{ row }">
               <el-tag :type="row.high_impact_courses ? 'danger' : row.single_teacher_courses ? 'warning' : 'success'" effect="plain">
-                {{ row.high_impact_courses ? '优先核查' : row.single_teacher_courses ? '常规核查' : '相对稳定' }}
+                {{ row.high_impact_courses ? '优先核验' : '常规观察' }}
               </el-tag>
             </template>
           </el-table-column>
@@ -268,7 +268,7 @@ const teacherProfileKpis = computed(() => (teacherDrawer.data.kpis || []).filter
 const schoolKpis = computed(() => [
   { label: '本科教学活跃教师', value: fmt(data.summary.active_teachers, ' 人'), sub: `覆盖 ${data.summary.courses || 0} 门课程`, hint: definition.active_teachers || '', tone: 'primary' as const },
   { label: '单一教师覆盖课程', value: fmt(data.summary.single_teacher_courses, ' 门'), sub: '当前学期仅1名实际授课教师', hint: definition.single_teacher_courses || '', tone: 'amber' as const },
-  { label: '高影响单点课程', value: fmt(data.summary.high_impact_courses, ' 门'), sub: `涉及 ${affectedCollegeCount.value} 个学院`, hint: definition.high_impact_courses || '', tone: 'danger' as const },
+  { label: '高集中承担课程', value: fmt(data.summary.high_impact_courses, ' 门'), sub: `涉及 ${affectedCollegeCount.value} 个学院`, hint: definition.high_impact_courses || '', tone: 'danger' as const },
   { label: '教授本科教学参与率', value: fmt(data.summary.professor_participation_rate, '%'), sub: `${data.summary.professor_active || 0} / ${data.summary.professor_total || 0} 人`, hint: definition.professor_participation || '', tone: 'teal' as const },
   { label: '前10%主讲教师任务占比', value: fmt(data.summary.top10_load_share, '%'), sub: '按主讲字段覆盖选课人次计算', hint: definition.load_share || '', tone: 'plain' as const },
 ])
@@ -278,7 +278,7 @@ const collegeKpis = computed(() => {
   return [
     { label: '实际授课教师', value: fmt(summary.active_teachers, ' 人'), sub: `覆盖 ${summary.courses || 0} 门课程`, hint: definition.active_teachers || '', tone: 'primary' as const },
     { label: '单点承担课程', value: fmt(summary.single_teacher_courses, ' 门'), sub: '当前学期仅1名实际授课教师', hint: definition.single_teacher_courses || '', tone: 'amber' as const },
-    { label: '高影响单点课程', value: fmt(summary.high_impact_courses, ' 门'), sub: '单一教师且选课人次≥100', hint: definition.high_impact_courses || '', tone: 'danger' as const },
+    { label: '高集中承担课程', value: fmt(summary.high_impact_courses, ' 门'), sub: '人均班数与人次同时进入高集中区间', hint: definition.high_impact_courses || '', tone: 'danger' as const },
     { label: '教授参与率', value: fmt(summary.professor_participation_rate, '%'), sub: `${summary.professor_active || 0} / ${summary.professor_total || 0} 人`, hint: definition.professor_participation || '', tone: 'teal' as const },
     { label: '前10%主讲任务占比', value: fmt(summary.top10_load_share, '%'), sub: '仅表示任务集中程度', hint: definition.load_share || '', tone: 'plain' as const },
   ]

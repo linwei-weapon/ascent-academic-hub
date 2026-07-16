@@ -127,17 +127,27 @@ def management_overview(college: Optional[str] = None, semester: Optional[str] =
         row["teacher_count"] = len(member_ids)
         row["known_title_teachers"] = sum(bool(str(teacher_meta.get(x, {}).get("title") or "").strip()) for x in member_ids)
         row["senior_title_teachers"] = sum("教授" in str(teacher_meta.get(x, {}).get("title") or "") for x in member_ids)
+        row["lessons_per_teacher"] = round(row["lesson_count"] / row["teacher_count"], 1) if row["teacher_count"] else 0
+        row["enrolled_per_teacher"] = round((row["enrolled"] or 0) / row["teacher_count"], 1) if row["teacher_count"] else 0
+
+    def p90(values):
+        ordered = sorted(values)
+        return ordered[min(len(ordered) - 1, int(len(ordered) * 0.9))] if ordered else 0
+
+    lesson_cutoff = max(6, p90([x["lessons_per_teacher"] for x in course_rows]))
+    enrolled_cutoff = max(200, p90([x["enrolled_per_teacher"] for x in course_rows]))
+    for row in course_rows:
         reasons = []
-        # 单人承担一门课很常见，不单独形成核查任务。
-        if row["teacher_count"] == 1 and row["enrolled"] >= 100:
-            reasons.append(f"覆盖{row['enrolled']}人次且仅1名教师：核实下学期备份教师与停开课替代安排")
-        elif row["teacher_count"] <= 2 and row["lesson_count"] >= 3:
-            reasons.append(f"{row['lesson_count']}个教学班由{row['teacher_count']}名教师集中承担：核实任务容量与临时替补安排")
+        # 单人承担一门课很常见；只在人均班数和人均覆盖人次同时进入当期高集中区间时核验。
+        concentrated = row["lessons_per_teacher"] >= lesson_cutoff and row["enrolled_per_teacher"] >= enrolled_cutoff
+        if concentrated:
+            reasons.append(f"人均承担{row['lessons_per_teacher']:g}个教学班、覆盖{row['enrolled_per_teacher']:g}人次，同时进入当期高集中区间：先核实教学任务拆分和工作量是否准确")
         missing_titles = row["teacher_count"] - row["known_title_teachers"]
         if missing_titles > 0:
             reasons.append(f"{missing_titles}名团队成员职称缺失：先补齐教师主数据后再判断职称结构")
         row["attention_reasons"] = reasons
-        row["priority"] = "高" if row["teacher_count"] == 1 and row["enrolled"] >= 100 else ("中" if reasons else "常规")
+        row["high_concentration"] = concentrated
+        row["priority"] = "高" if concentrated else ("数据核验" if reasons else "常规")
     risk_courses = sorted([x for x in course_rows if x["attention_reasons"]],
                           key=lambda x: (x["priority"] != "高", x["priority"] != "中", -x["enrolled"]))[:30]
     teacher_params: list = [sem]
@@ -159,7 +169,7 @@ def management_overview(college: Optional[str] = None, semester: Optional[str] =
           "lessons": 0, "enrolled": 0, "single_teacher_courses": 0, "high_impact_courses": 0})
         bucket["courses"] += 1; bucket["lessons"] += row["lesson_count"]; bucket["enrolled"] += row["enrolled"] or 0
         bucket["single_teacher_courses"] += int(row["teacher_count"] == 1)
-        bucket["high_impact_courses"] += int(row["teacher_count"] == 1 and row["enrolled"] >= 100)
+        bucket["high_impact_courses"] += int(row["high_concentration"])
     for row in colleges_map.values():
         row["college_id"] = college_ids_by_name.get(clean_dept(row["college_name"]))
     college_rows = sorted([row for row in colleges_map.values() if row["college_id"]],
@@ -174,7 +184,7 @@ def management_overview(college: Optional[str] = None, semester: Optional[str] =
     top_load = sum(x["enrolled"] or 0 for x in teacher_rows[:max(1, round(len(teacher_rows)*0.1))])
     summary = {"active_teachers": len(active_ids), "courses": len(course_rows),
       "single_teacher_courses": sum(x["teacher_count"] == 1 for x in course_rows),
-      "high_impact_courses": sum(x["teacher_count"] == 1 and x["enrolled"] >= 100 for x in course_rows),
+      "high_impact_courses": sum(x["high_concentration"] for x in course_rows),
       "professor_total": len(professor_ids), "professor_active": professor_active,
       "professor_participation_rate": round(professor_active*100/len(professor_ids),1) if professor_ids else None,
       "title_completeness_rate": round(title_known*100/len(active_ids),1) if active_ids else 0,
@@ -183,7 +193,7 @@ def management_overview(college: Optional[str] = None, semester: Optional[str] =
       "risk_courses": risk_courses, "teachers": teachers,
       "definition": {"active_teachers": "当前筛选学期至少承担1个本科教学班的去重教师数。",
         "single_teacher_courses": "当前学期教学任务只关联1名实际授课教师的去重课程数；只表示当期单点承担。",
-        "high_impact_courses": "单一教师覆盖且选课人次不少于100的课程数；100人为原型核查阈值，不是学校定额。",
+        "high_impact_courses": f"课程团队人均教学班数不低于{lesson_cutoff:g}且人均覆盖人次不低于{enrolled_cutoff:g}的课程数；阈值取当期分布前10%并设最低值，用于核验任务拆分与工作量，不直接认定师资风险。",
         "professor_participation": "当前教师主数据中职称含教授且承担本科教学任务的人数÷教授人数；缺岗位状态，需人工核验分母。",
         "title_completeness": "实际授课教师中职称字段非空人数÷实际授课教师人数。",
         "load_share": "按主讲教师字段覆盖选课人次排序，前10%教师的覆盖人次占比；联合授课因缺少工作量分配比例暂不拆分，仅表示任务集中度。",

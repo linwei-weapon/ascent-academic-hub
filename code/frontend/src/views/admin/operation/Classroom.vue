@@ -33,7 +33,7 @@
       <el-col :span="15">
         <div class="sa-card full-height">
           <div class="sa-card-title">实际占用时序热力图 <KpiLabel label="" formula="单元格=该星期与节次发生占用的教室日数÷已观测教室数×该星期实际采集天数" /></div>
-          <div class="chart-note">用于寻找集中占用时段；拖动下方色带只改变突出范围，不隐藏单元格数字。</div>
+          <div class="chart-note">按观测负荷固定分级：蓝色&lt;15%、绿色15%—30%、黄色30%—45%、红色≥45%；颜色仅用于定位尖峰时段。</div>
           <EChart v-if="data.heatmap.length" :option="heatOption" :height="360" />
           <el-empty v-else description="当前条件下暂无实际占用记录" :image-size="72" />
         </div>
@@ -129,8 +129,8 @@ const heatOption = computed(() => {
     tooltip:{formatter:(p:any)=>`${weekdays[days[p.data[0]]]} 第${periods[p.data[1]]}节<br/>观测负荷：<b>${p.data[2]}%</b><br/>占用教室日数：${p.data[3]}`},
     xAxis:{type:'category',data:days.map(d=>weekdays[d]),splitArea:{show:true}},
     yAxis:{type:'category',data:periods.map(p=>`第${p}节`),splitArea:{show:true}},
-    visualMap:{min:0,max:Math.max(10,...cells.map(x=>x[2])),calculable:true,orient:'horizontal',left:'center',bottom:0,
-      text:['高负荷','低负荷'],textStyle:{color:'#64748b'},inRange:{color:['#EFF6FF','#93C5FD','#FBBF24','#DC2626']},outOfRange:{color:'#F8FAFC',opacity:1}},
+    visualMap:{type:'piecewise',selectedMode:false,orient:'horizontal',left:'center',bottom:0,itemWidth:18,itemHeight:10,textStyle:{color:'#64748b'},
+      pieces:[{lt:15,label:'低 <15%',color:'#BFDBFE'},{gte:15,lt:30,label:'中低 15—30%',color:'#86D9C6'},{gte:30,lt:45,label:'中高 30—45%',color:'#FBBF24'},{gte:45,label:'高 ≥45%',color:'#DC2626'}]},
     series:[{type:'heatmap',data:cells,label:{show:true,color:'#334155',fontWeight:600,formatter:(p:any)=>p.data[2] ? `${p.data[2]}%` : ''},itemStyle:{borderColor:'#fff',borderWidth:2}}],
   }
 })

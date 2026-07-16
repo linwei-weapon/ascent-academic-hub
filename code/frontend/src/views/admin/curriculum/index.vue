@@ -114,25 +114,31 @@
             </el-table>
           </div>
 
-          <div v-for="(mod, mi) in plan.modules" :key="mi" class="sa-card" style="margin-bottom:14px">
-            <div class="sa-card-title" style="justify-content:space-between;display:flex">
-              <span>{{ mod.name }}</span>
-              <el-tag type="info" size="small">{{ mod.subModules[0]?.courses?.length || 0 }}门 · 记录学分 {{ mod.credits }}</el-tag>
-            </div>
-            <div v-for="sm in mod.subModules" :key="sm.name">
-              <el-table :data="sm.courses" size="small">
-                <el-table-column prop="code" label="课程代码" width="130" />
-                <el-table-column prop="name" label="课程名称" min-width="200">
-                  <template #default="{row}"><span :style="{fontWeight:row.name.includes('★')?'700':'400'}">{{ row.name }}</span></template>
-                </el-table-column>
-                <el-table-column prop="credits" label="学分" width="64" align="right"><template #default="{row}"><span class="tnum">{{ row.credits }}</span></template></el-table-column>
-                <el-table-column prop="hours" label="学时" width="64" align="right"><template #default="{row}"><span class="tnum">{{ row.hours }}</span></template></el-table-column>
-                <el-table-column prop="term" label="学期" width="64" align="center">
-                  <template #default="{row}"><el-tag size="small" :type="row.term<=4?'success':row.term<=6?'warning':'info'">{{ row.term||'-' }}</el-tag></template>
-                </el-table-column>
-                <el-table-column prop="dept" label="开课院系" width="150" />
-              </el-table>
-            </div>
+          <div class="sa-card module-course-card" style="margin-bottom:16px" v-if="plan.modules.length">
+            <div class="sa-card-title">课程模块与课程明细 <span class="extra">默认显示汇总，点击模块后展开课程</span></div>
+            <el-collapse class="module-collapse">
+              <el-collapse-item v-for="(mod, mi) in plan.modules" :key="mi" :name="String(mi)">
+                <template #title>
+                  <div class="module-collapse-title">
+                    <b>{{ mod.name }}</b>
+                    <span>{{ moduleCourseCount(mod) }}门 · 记录学分 {{ mod.credits }}</span>
+                  </div>
+                </template>
+                <div v-for="sm in mod.subModules" :key="sm.name" class="module-course-table">
+                  <div v-if="mod.subModules.length > 1" class="submodule-name">{{ sm.name }}</div>
+                  <el-table :data="sm.courses" size="small" max-height="420">
+                    <el-table-column prop="code" label="课程代码" width="130" />
+                    <el-table-column prop="name" label="课程名称" min-width="200">
+                      <template #default="{row}"><span :style="{fontWeight:row.name.includes('★')?'700':'400'}">{{ row.name }}</span></template>
+                    </el-table-column>
+                    <el-table-column prop="credits" label="学分" width="64" align="right"><template #default="{row}"><span class="tnum">{{ row.credits }}</span></template></el-table-column>
+                    <el-table-column prop="hours" label="学时" width="64" align="right"><template #default="{row}"><span class="tnum">{{ row.hours }}</span></template></el-table-column>
+                    <el-table-column prop="term" label="学期" width="64" align="center"><template #default="{row}"><el-tag size="small" :type="row.term<=4?'success':row.term<=6?'warning':'info'">{{ row.term||'-' }}</el-tag></template></el-table-column>
+                    <el-table-column prop="dept" label="开课院系" width="150" />
+                  </el-table>
+                </div>
+              </el-collapse-item>
+            </el-collapse>
           </div>
 
           <div class="sa-card plan-text-card" style="margin-bottom:16px" v-if="plan.graduationRequirements.length">
@@ -326,6 +332,7 @@ const moduleSummary = computed(() => (plan.modules || []).map((m: any) => {
     coreCount: courses.filter((c: any) => String(c.name).includes('★')).length,
   }
 }))
+function moduleCourseCount(mod:any) { return (mod.subModules || []).reduce((sum:number, sm:any) => sum + (sm.courses || []).length, 0) }
 
 const MOD_COLORS = ['#4F46E5', '#0D9488', '#D97706', '#6366F1', '#0EA5E9', '#94A3B8', '#A855F7', '#E11D48']
 const creditDist = computed(() => (plan.modules || []).filter((m: any) => (m.credits || 0) > 0))
@@ -404,4 +411,10 @@ onMounted(async () => {
 .student-evidence-summary { margin:14px 0 18px; }
 .evidence-title { margin:20px 0 10px; color:#1e293b; }
 .evidence-title small { margin-left:8px; color:#64748b; font-weight:400; }
+.module-collapse { border-top:0; }
+.module-collapse-title { display:flex; justify-content:space-between; align-items:center; width:100%; padding-right:14px; }
+.module-collapse-title b { color:#334155; font-size:13px; }
+.module-collapse-title span { color:#64748b; font-size:12px; font-variant-numeric:tabular-nums; }
+.module-course-table + .module-course-table { margin-top:12px; }
+.submodule-name { margin:0 0 6px; color:#475569; font-size:12px; font-weight:600; }
 </style>
