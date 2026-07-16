@@ -3,7 +3,7 @@
     <div class="sa-head-row">
       <div>
         <h2 class="sa-page-title">培养质量分析</h2>
-        <p class="sa-page-sub">基于真实培养方案原文和计划课程，查看方案结构、毕业要求与执行证据边界</p>
+        <p class="sa-page-sub">基于真实培养方案与学生课程记录，核查方案结构、学分要求和学生执行情况</p>
       </div>
       <div class="plan-filters">
         <el-select v-model="college" placeholder="学院" clearable filterable @change="resetCollege">
@@ -135,13 +135,17 @@
             </div>
           </div>
 
-          <!-- 毕业要求文本（原独立Tab内容，合并到此处） -->
-          <div class="sa-card" style="margin-bottom:16px" v-if="plan.graduationRequirements.length">
-            <div class="sa-card-title">毕业生应获得的知识和能力</div>
-            <div v-for="(r,i) in plan.graduationRequirements" :key="i" class="grad-row">
-              <el-tag size="small" type="primary">{{ i+1 }}</el-tag>
-              <span>{{ r }}</span>
-            </div>
+          <div class="sa-card plan-text-card" style="margin-bottom:16px" v-if="plan.graduationRequirements.length">
+            <div class="sa-card-title">毕业要求说明 <span class="extra">方案文本，不作为学生达成度结论</span></div>
+            <el-alert type="info" :closable="false" show-icon title="当前仅展示培养方案原文"
+              description="待学校提供‘毕业要求指标点—支撑课程—评价环节—实际结果’结构化数据后，才能计算达成度。当前不用课程平均分或通过率替代。" />
+            <el-collapse class="requirement-collapse">
+              <el-collapse-item :title="`查看方案原文（${plan.graduationRequirements.length}条）`" name="requirements">
+                <div v-for="(r,i) in plan.graduationRequirements" :key="i" class="grad-row">
+                  <el-tag size="small" type="info">{{ i+1 }}</el-tag><span>{{ r }}</span>
+                </div>
+              </el-collapse-item>
+            </el-collapse>
           </div>
           <div class="sa-card" v-if="plan.degreeRequirement">
             <div class="sa-card-title">学位授予条件</div>
@@ -154,10 +158,6 @@
             <div style="font-size:11px;color:#94A3B8;margin-top:4px">可切换方案查看其课程表与原文覆盖状态</div>
           </template>
         </el-empty>
-      </el-tab-pane>
-
-      <el-tab-pane label="毕业要求与执行证据" name="gradReqs">
-        <GraduateRequirementsView v-if="activeTab === 'gradReqs'" :major-id="selectedMajor" />
       </el-tab-pane>
 
       <!-- Tab 4: 学业进度监控 -->
@@ -174,9 +174,35 @@
         <el-table-column prop="failedRequired" label="明确未通过必修" width="120" align="right" />
         <el-table-column prop="verificationRequired" label="到期待核验" width="100" align="right" />
         <el-table-column label="状态" width="110"><template #default="{row}"><el-tag size="small" :type="row.evidenceStatus==='明确需处理'?'danger':row.evidenceStatus==='到期待核验'?'warning':'success'">{{row.evidenceStatus}}</el-tag></template></el-table-column>
-        <el-table-column label="操作" width="70"><template #default="{row}"><el-button link type="primary" @click="studentProfile(row)">档案</el-button></template></el-table-column>
+        <el-table-column label="操作" width="90"><template #default="{row}"><el-button link type="primary" @click="studentProfile(row)">执行详情</el-button></template></el-table-column>
       </el-table>
     </el-dialog>
+    <el-drawer v-model="studentEvidence.visible" :title="`${studentEvidence.data.student?.display_name || ''}｜培养方案执行详情`" size="760px" append-to-body>
+      <div v-loading="studentEvidence.loading">
+        <el-alert type="warning" :closable="false" show-icon title="这是方案执行核查，不是学生综合档案" :description="studentEvidence.data.boundary" />
+        <el-descriptions class="student-evidence-summary" :column="2" border>
+          <el-descriptions-item label="学号">{{ studentEvidence.data.student?.student_id || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="年级">{{ studentEvidence.data.student?.entry_grade || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="专业">{{ studentEvidence.data.student?.major_name || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="培养方案">{{ studentEvidence.data.student?.plan_name || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="明确未通过">{{ studentEvidence.data.summary?.failed_courses || 0 }} 门</el-descriptions-item>
+          <el-descriptions-item label="到期缺结果候选">{{ studentEvidence.data.summary?.candidate_courses || 0 }} 门</el-descriptions-item>
+          <el-descriptions-item label="无历史开课证据">{{ studentEvidence.data.summary?.courses_without_offering || 0 }} 门</el-descriptions-item>
+          <el-descriptions-item label="有课程替代证据">{{ studentEvidence.data.summary?.courses_with_substitution || 0 }} 门</el-descriptions-item>
+        </el-descriptions>
+        <h4 class="evidence-title">明确未通过必修课程 <small>可直接进入重修与课程保障核查</small></h4>
+        <el-table :data="studentEvidence.data.failed_courses || []" size="small" empty-text="当前没有明确未通过必修课程">
+          <el-table-column prop="course_name" label="课程" min-width="150" /><el-table-column prop="effective_score" label="成绩" width="65" />
+          <el-table-column prop="lesson_count" label="历史教学班" width="95" /><el-table-column prop="substitution_count" label="替代证据" width="85" />
+          <el-table-column prop="reason" label="核查原因与动作" min-width="260" />
+        </el-table>
+        <h4 class="evidence-title">到期缺结果记录候选 <small>必须先核验选课、免修与认定数据</small></h4>
+        <el-table :data="studentEvidence.data.candidate_courses || []" size="small" max-height="280" empty-text="当前没有到期缺结果候选">
+          <el-table-column prop="course_name" label="课程" min-width="150" /><el-table-column prop="suggested_term" label="建议学期" width="80" />
+          <el-table-column prop="lesson_count" label="历史教学班" width="95" /><el-table-column prop="reason" label="核查原因与动作" min-width="280" />
+        </el-table>
+      </div>
+    </el-drawer>
     <el-dialog v-model="majorDialog.visible" :title="`${majorDialog.data.majorName || ''}｜专业方案执行画像`" width="1080px">
       <el-alert type="info" :closable="false" :title="majorDialog.data.boundary" style="margin-bottom:12px" />
       <div class="sa-kpi-row">
@@ -205,13 +231,10 @@
 <script setup lang="ts">
 import { http } from '@/utils/http'
 import { ref, reactive, computed, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
 import KpiLabel from '@/components/KpiLabel.vue'
 import KpiCard from '@/components/KpiCard.vue'
 import EChart from '@/components/EChart.vue'
-import GraduateRequirementsView from './GraduateRequirements.vue'
 import ProgressView from './Progress.vue'
-const router = useRouter()
 
 const allPlans = ref<any[]>([])
 const college = ref('')
@@ -222,6 +245,7 @@ const activeTab = ref('overview')
 const loading = ref(false)
 const overview = reactive<any>({ summary:{}, colleges:[], majors:[], bottleneckCourses:[], definition:{ boundary:'' } })
 const studentDialog = reactive<any>({visible:false,loading:false,title:'',items:[],definition:''})
+const studentEvidence = reactive<any>({visible:false,loading:false,data:{student:{},summary:{},failed_courses:[],candidate_courses:[],boundary:''}})
 const majorDialog = reactive<any>({visible:false,loading:false,data:{summary:{},plans:[],courses:[]}})
 const supplyDialog = reactive<any>({visible:false,loading:false,data:{course:{},affected:{},offerings:[],substitutions:[],boundary:''}})
 async function openMajor(row:any) {
@@ -243,8 +267,11 @@ async function openStudents(params:Record<string,string>, title:string) {
     Object.assign(studentDialog,{items:data.items||[],definition:data.definition||''})
   } finally { studentDialog.loading=false }
 }
-function studentProfile(row:any) {
-  router.push({path:'/admin/student/'+row.studentId,query:{returnTo:'/admin/curriculum',returnLabel:'培养质量管理总览'}})
+async function studentProfile(row:any) {
+  studentEvidence.visible=true; studentEvidence.loading=true
+  studentEvidence.data={student:{display_name:row.name,student_id:row.studentId},summary:{},failed_courses:[],candidate_courses:[],boundary:''}
+  try { studentEvidence.data=await http.get('/v2/topics/graduation-readiness/student/'+encodeURIComponent(row.studentId)) }
+  finally { studentEvidence.loading=false }
 }
 
 const colleges = computed(() => [...new Set(allPlans.value.map(x => x.collegeName))].sort())
@@ -371,4 +398,10 @@ onMounted(async () => {
 @media (max-width:900px) { .plan-filters { overflow-x:auto; padding-bottom:4px; } }
 .grad-row { padding: 8px 0; border-bottom: 1px solid var(--sa-border); font-size: 13px; display: flex; gap: 8px; align-items: flex-start; color: #334155; }
 .grad-row:last-child { border-bottom: none; }
+.plan-text-card :deep(.el-alert) { margin-bottom: 8px; }
+.requirement-collapse { border-top:0; }
+.requirement-collapse :deep(.el-collapse-item__header) { color:#475569; font-size:13px; }
+.student-evidence-summary { margin:14px 0 18px; }
+.evidence-title { margin:20px 0 10px; color:#1e293b; }
+.evidence-title small { margin-left:8px; color:#64748b; font-weight:400; }
 </style>
