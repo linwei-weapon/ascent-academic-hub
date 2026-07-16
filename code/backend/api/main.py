@@ -1,9 +1,12 @@
 """FastAPI 应用入口。
 启动：PYTHONIOENCODING=utf-8 python -X utf8 -m uvicorn backend.api.main:app --reload --port 8000
 """
+from pathlib import Path
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from .envelope import ApiError, fail, ok
 from . import settings
@@ -57,3 +60,9 @@ app.include_router(meta.router)
 app.include_router(ai.router)
 app.include_router(teacher.router)  # V1.1新增：任课教师视图
 app.include_router(v2.router)       # V2真实数据验证接口（只读）
+
+# 生产构建由同一个后台服务托管，避免原型运行依赖 Vite 开发服务器。
+# 前端使用 Hash 路由，因此根目录与静态资源可直接交由 StaticFiles 提供。
+frontend_dist = Path(__file__).resolve().parents[2] / "frontend" / "dist"
+if (frontend_dist / "index.html").is_file():
+    app.mount("/", StaticFiles(directory=str(frontend_dist), html=True), name="frontend")
