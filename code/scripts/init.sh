@@ -18,9 +18,12 @@ if ! PYTHONIOENCODING=utf-8 python -X utf8 -m backend.etl.run_etl; then
   exit 1
 fi
 
-echo "[2/2] 同步菜单 / 预警规则迁移（幂等，可重复执行）..."
+echo "[2/2] 同步菜单、规则、统一权限和系统管理迁移（幂等，可重复执行）..."
 PYTHONIOENCODING=utf-8 python -X utf8 scripts/migrate_menu.py
 PYTHONIOENCODING=utf-8 python -X utf8 scripts/migrate_alert_rules.py
+PYTHONIOENCODING=utf-8 python -X utf8 scripts/migrate_permission_context.py
+PYTHONIOENCODING=utf-8 python -X utf8 scripts/migrate_staff_relationships.py
+PYTHONIOENCODING=utf-8 python -X utf8 scripts/migrate_system_management.py
 
 echo
 echo "[OK] 分析库已生成: code/backend/db/analytics.sqlite"

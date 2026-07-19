@@ -26,7 +26,7 @@ FRONT=$!
 trap 'echo; echo "正在停止..."; kill $BACK $FRONT 2>/dev/null || true' INT TERM
 echo
 echo "后端健康检查: http://localhost:8000/api/health"
-echo "前端访问地址: http://localhost:3006/   登录: admin / admin123"
+echo "前端访问地址: http://localhost:3006/   登录: dean / Demo@2026"
 echo "数据核对:     python -X utf8 scripts/e2e_check.py"
 echo "Ctrl-C 结束。"
 wait

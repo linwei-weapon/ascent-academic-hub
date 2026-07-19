@@ -129,7 +129,7 @@ ROLE_MENU = {
 }
 
 DEMO_PASSWORD = "Demo@2026"
-ADMIN_PASSWORD = "admin123"  # 管理员 admin 专用登录密码
+ADMIN_PASSWORD = DEMO_PASSWORD  # 原型演示账号统一使用满足当前强度要求的密码
 
 
 def hash_password(pw: str) -> str:

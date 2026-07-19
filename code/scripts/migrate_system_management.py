@@ -17,8 +17,28 @@ from backend.api.routers.admin_rbac import AUTH_IDENTITY_DDL
 from backend.api.routers.ai_experts import _ensure_tables
 from backend.api.routers.settings import _ensure_kpi_config
 from backend.api.routers.system_management import _ensure_system_tables
+from backend.api.security import verify_password
 from backend.etl import config
+from backend.etl.seed import DEMO_PASSWORD, hash_password
 from scripts.migrate_menu import migrate as migrate_menu
+
+
+def harden_legacy_demo_admin(conn: sqlite3.Connection) -> int:
+    """仅迁移仍使用历史弱口令的演示 admin，不覆盖学校自行修改的密码。"""
+    if not conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='sys_user'"
+    ).fetchone():
+        return 0
+    row = conn.execute(
+        "SELECT password_hash FROM sys_user WHERE username='admin'"
+    ).fetchone()
+    if not row or not verify_password("admin123", row["password_hash"]):
+        return 0
+    conn.execute(
+        "UPDATE sys_user SET password_hash=? WHERE username='admin'",
+        (hash_password(DEMO_PASSWORD),),
+    )
+    return 1
 
 
 def migrate(conn: sqlite3.Connection) -> dict:
@@ -27,6 +47,7 @@ def migrate(conn: sqlite3.Connection) -> dict:
     _ensure_tables(conn)
     _ensure_kpi_config(conn)
     _ensure_system_tables(conn)
+    hardened_admin = harden_legacy_demo_admin(conn)
 
     schemes = conn.execute("""
         SELECT scheme_id,expert_id FROM sys_ai_analysis_scheme
@@ -64,6 +85,7 @@ def migrate(conn: sqlite3.Connection) -> dict:
         "registeredKpis": conn.execute(
             "SELECT COUNT(*) FROM sys_kpi_config"
         ).fetchone()[0],
+        "hardenedLegacyAdmin": hardened_admin,
     }
 
 

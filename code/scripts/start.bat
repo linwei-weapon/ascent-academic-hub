@@ -28,7 +28,7 @@ start "学业平台-前端:3006" cmd /k "cd /d %ROOT%\frontend && pnpm dev"
 echo.
 echo 已在两个新窗口分别启动后端与前端。
 echo   后端健康检查: http://localhost:8000/api/health
-echo   前端访问地址: http://localhost:3006/   登录: admin / admin123
+echo   前端访问地址: http://localhost:3006/   登录: dean / Demo@2026
 echo.
 echo 数据核对（需后端已起）: python -X utf8 scripts\e2e_check.py
 pause

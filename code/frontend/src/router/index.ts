@@ -125,6 +125,22 @@ router.beforeEach(async (to) => {
       return { path: '/login', query: { redirect: to.fullPath } }
     }
   }
+  // 已登录但当前工作身份没有有效组织范围或人员关系时，统一进入拒绝页。
+  // 后端仍会返回空范围/403；这里补充明确的用户反馈，避免“页面有框架但数据全空”。
+  if (
+    to.path.startsWith('/admin')
+    && to.path !== '/admin/forbidden'
+    && authStore.user?.permissionContext?.authorized === false
+  ) {
+    return {
+      path: '/admin/forbidden',
+      query: {
+        from: to.fullPath,
+        reason: authStore.user.permissionContext.authorizationIssue || '当前工作身份没有有效数据范围',
+      },
+      replace: true,
+    }
+  }
   // 菜单级准入
   if (to.path === '/admin/forbidden') return true
   if (to.path.startsWith('/admin') && !isAllowed(to.path)) {

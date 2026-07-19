@@ -18,31 +18,33 @@
 分析库的数据分两类：
 
 ### A. 业务数据（从源库 ETL 派生）
-33 张表中的 `dim_*` / `fact_*` / `agg_*`，全部由 ETL 从 `datasource/构造数据/` 的 9 学期源库
+`dim_*` / `fact_*` / `agg_*` 由 ETL 从 `datasource/构造数据/` 的 9 学期源库
 抽取、清洗、派生、聚合而来。无需手工准备，跑 ETL 即生成。
 
 ### B. 系统初始化数据（seed.py 代码定义）
-`sys_*` 6 张表的内容是**写死在 `code/backend/etl/seed.py` 里的常量**，ETL 第⑧步写入：
+基础 `sys_*` 内容由 `code/backend/etl/seed.py` 初始化；工作身份、人员关系、指标、AI方案、
+审计和系统参数由后续幂等迁移补齐：
 
 **① 账号 sys_user（11 个）**
 - 10 个角色账号：用户名 = 角色 key，密码统一 `Demo@2026`。
-- 1 个管理员：`admin` / `admin123`（role=dean）。
-- 密码哈希：`pbkdf2_sha256$100000$<盐hex>$<dk hex>`（stdlib hashlib，10 万次迭代 + 16 字节随机盐）。
+- 1 个兼容管理员：`admin` / `Demo@2026`（role=dean）。
+- 密码哈希：`pbkdf2_sha256`，随机盐和当前安全迭代参数；历史弱密码会被迁移停用。
 
 **② 角色 sys_role（10 个）**
 school_leader / dean / dept_operation / dept_research / dept_practice / quality_office /
 college_dean / college_secretary / counselor / dept_director，各带 data_scope_type（all/college/major/class）。
 
-**③ 菜单 sys_menu（11 项）**+ **角色菜单 sys_role_menu**
-数据大屏 / 预警查看 / 教学运行分析 / 培养质量分析 / 师资结构分析 / 学生学业分析 / 报表中心 /
-账号管理 / 菜单管理 / 角色管理 / 系统设置。系统管理三页 + 系统设置仅 dean 可见。
+**③ 菜单 sys_menu＋角色菜单 sys_role_menu**
+最终结构为教学管理分析、AI管理决策、系统管理三个一级分组及16个二级入口；系统管理八个入口
+仅 dean 角色可见。
 
 **④ 预警规则 sys_alert_rule（5 条）**
 R1 GPA持续下降 / R2 挂科累积 / R3 学分缺口过大 / R4 核心课挂科 / R6 退学风险，全部阈值触发，
 params 存引擎实际消费的阈值（见 `01-需求说明.md` §4.1）。
 
-**⑤ 角色数据范围 sys_role_scope**
-给院级/系/辅导员角色绑定真实学院/专业/班级 id（演示用，接口暂未按此过滤）。
+**⑤ 统一数据权限**
+`sys_user_role`、`sys_user_staff`、`sys_user_scope` 和人员关系表承载账号级授权；旧
+`sys_role_scope` 仅作兼容。所有受保护接口已按当前工作身份过滤。
 
 > 改这些初始值：编辑 `seed.py`，并同步幂等迁移脚本更新已运行的库（见 §5）。
 

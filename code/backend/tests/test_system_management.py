@@ -7,8 +7,10 @@ from backend.api.routers.system_management import (
     PARAMETER_DEFAULTS,
     _validate_parameter,
 )
+from backend.etl.seed import DEMO_PASSWORD, hash_password
 from backend.permission_catalog import ACTION_CATALOG
-from scripts.migrate_system_management import migrate
+from backend.api.security import verify_password
+from scripts.migrate_system_management import harden_legacy_demo_admin, migrate
 
 
 def make_conn() -> sqlite3.Connection:
@@ -123,6 +125,37 @@ class SystemManagementTest(unittest.TestCase):
             group and name and description
             for group, name, description in ACTION_CATALOG.values()
         ))
+
+    def test_frontend_redirects_invalid_permission_context_to_forbidden(self):
+        root = __import__("pathlib").Path(__file__).resolve().parents[2]
+        router = (root / "frontend/src/router/index.ts").read_text(encoding="utf-8")
+        layout = (root / "frontend/src/views/admin/Layout.vue").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("permissionContext?.authorized === false", router)
+        self.assertIn("path: '/admin/forbidden'", router)
+        self.assertIn("return '未授权范围'", layout)
+
+    def test_legacy_admin_password_is_hardened_without_overwriting_new_password(self):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.execute("""
+            CREATE TABLE sys_user (
+                username TEXT PRIMARY KEY,
+                password_hash TEXT NOT NULL
+            )
+        """)
+        conn.execute(
+            "INSERT INTO sys_user VALUES('admin',?)",
+            (hash_password("admin123"),),
+        )
+        self.assertEqual(1, harden_legacy_demo_admin(conn))
+        current = conn.execute(
+            "SELECT password_hash FROM sys_user WHERE username='admin'"
+        ).fetchone()["password_hash"]
+        self.assertTrue(verify_password(DEMO_PASSWORD, current))
+        self.assertEqual(0, harden_legacy_demo_admin(conn))
+        conn.close()
 
 
 if __name__ == "__main__":

@@ -116,7 +116,9 @@ const refreshKey = ref(0)
 const switchingIdentity = ref(false)
 const identityOptions = computed(() => authStore.user?.identities || [])
 const scopeLabel = computed(() => {
-  const detail = authStore.user?.permissionContext?.detailScope as any
+  const permission = authStore.user?.permissionContext
+  if (permission?.authorized === false) return '未授权范围'
+  const detail = permission?.detailScope as any
   const type = detail?.type
   if (type === 'all') return '全校数据'
   const ids = detail?.sourceScopeIds || []
