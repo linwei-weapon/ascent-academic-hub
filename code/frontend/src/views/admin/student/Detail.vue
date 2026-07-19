@@ -18,7 +18,7 @@
         <div style="font-size:13px;color:#64748B">未找到该学生的学业档案</div>
         <div style="font-size:11px;color:#94A3B8;margin-top:6px;line-height:1.7">
           学号 <b>{{ route.params.id }}</b> 在教务数据中不存在或已失效。<br />
-          请从<span class="link" @click="$router.push('/admin/students/analysis')">学生学业分析</span>或学院/专业页面进入有效学生。
+          请从<span class="link" @click="$router.push('/admin/students/analysis')">学生成长与学业分析</span>或学院/专业页面进入有效学生。
         </div>
       </template>
     </el-empty>

@@ -2,13 +2,18 @@
   <div v-loading="pageLoading" element-loading-text="正在计算师资任务与课程团队指标，请稍候…" element-loading-background="rgba(248,250,252,.82)">
     <div class="head">
       <div>
-        <h2 class="sa-page-title">本科教学师资保障分析</h2>
+        <h2 class="sa-page-title">{{ pageTitle }}</h2>
         <p class="sa-page-sub">从全校发现师资保障重点，再在抽屉中连续核查学院和课程团队，核查过程不离开当前页面。</p>
       </div>
       <el-select v-model="semester" class="semester" placeholder="选择学期" @change="changeSemester">
         <el-option v-for="s in semesters" :key="s.value" :label="s.label" :value="s.value" />
       </el-select>
     </div>
+    <BusinessPageContext
+      :period="semester ? `统计学期：${semester}` : ''"
+      source="教学任务、课程、教师与学生选课数据"
+      :loading="pageLoading"
+    />
 
     <el-alert
       type="warning"
@@ -230,8 +235,11 @@ import { getFilterMeta, type SemesterOpt } from '@/utils/meta'
 import { COLLEGE_MAP } from '@/constants/colleges'
 import KpiCard from '@/components/KpiCard.vue'
 import KpiLabel from '@/components/KpiLabel.vue'
+import BusinessPageContext from '@/components/BusinessPageContext.vue'
+import { useBusinessPageTitle } from '@/utils/businessPage'
 
 const semester = ref('')
+const pageTitle = useBusinessPageTitle('/admin/faculty', '师资保障分析')
 const semesters = ref<SemesterOpt[]>([])
 const pageLoading = ref(false)
 const drawerLoading = ref(false)

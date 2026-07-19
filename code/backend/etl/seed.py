@@ -76,11 +76,12 @@ MENUS = [
 
 # ---- 角色→菜单可见性（优化后）----
 ROLE_MENU = {
-    # 数据大屏（9 角色，counselor 除外）
+    # 教学数据总览：管理角色看组织范围，辅导员/班主任/导师看关系授权范围
     "/admin/dashboard": [
         "school_leader", "dean", "dept_operation", "dept_research",
         "dept_practice", "quality_office", "college_dean",
-        "college_secretary", "dept_director",
+        "college_secretary", "dept_director", "counselor",
+        "class_adviser", "mentor",
     ],
     # 预警中心（6 角色）
     "/admin/alert": [

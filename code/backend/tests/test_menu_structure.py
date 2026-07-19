@@ -92,6 +92,10 @@ class MenuStructureTest(unittest.TestCase):
             ("counselor", "/admin/students/analysis"),
             {(row["role_id"], row["menu_id"]) for row in first_grant},
         )
+        self.assertIn(
+            ("counselor", "/admin/dashboard"),
+            {(row["role_id"], row["menu_id"]) for row in first_grant},
+        )
         conn.close()
 
     def test_login_contract_adds_only_needed_parent(self):

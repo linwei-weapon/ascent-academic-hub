@@ -1,7 +1,7 @@
 <template>
   <div>
     <el-breadcrumb separator="›">
-      <el-breadcrumb-item :to="{path:'/admin/dashboard',query:semLabel?{semester:semLabel}:{}}">数据大屏</el-breadcrumb-item>
+      <el-breadcrumb-item :to="{path:'/admin/dashboard',query:semLabel?{semester:semLabel}:{}}">教学数据总览</el-breadcrumb-item>
       <el-breadcrumb-item v-if="data.collegeId" :to="{path:'/admin/college/'+data.collegeId,query:semLabel?{semester:semLabel}:{}}">{{ data.college || '学院详情' }}</el-breadcrumb-item>
       <el-breadcrumb-item>{{ data.name || '专业详情' }}</el-breadcrumb-item>
     </el-breadcrumb>

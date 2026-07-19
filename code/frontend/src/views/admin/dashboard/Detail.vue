@@ -1,6 +1,6 @@
 <template>
   <div>
-    <el-breadcrumb separator="›"><el-breadcrumb-item :to="{path:'/admin/dashboard',query:{semester:fSemester}}">数据大屏</el-breadcrumb-item><el-breadcrumb-item>{{ data.name || '学院详情' }}</el-breadcrumb-item></el-breadcrumb>
+    <el-breadcrumb separator="›"><el-breadcrumb-item :to="{path:'/admin/dashboard',query:{semester:fSemester}}">教学数据总览</el-breadcrumb-item><el-breadcrumb-item>{{ data.name || '学院详情' }}</el-breadcrumb-item></el-breadcrumb>
     <div style="display:flex;justify-content:space-between;align-items:center">
       <div>
         <h2 class="sa-page-title" style="margin-top:14px;margin-bottom:0">{{ data.name || '加载中…' }} · 学院详情</h2>

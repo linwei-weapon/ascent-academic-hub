@@ -4,8 +4,8 @@
       <el-breadcrumb-item :to="{path:'/admin/system/accounts'}">账号管理</el-breadcrumb-item>
       <el-breadcrumb-item>指标配置</el-breadcrumb-item>
     </el-breadcrumb>
-    <h2 class="sa-page-title">仪表盘指标配置</h2>
-    <p class="sa-page-sub">控制已注册指标的显示与顺序；计算口径由后端实现并保持只读。</p>
+    <h2 class="sa-page-title">指标与口径管理</h2>
+    <p class="sa-page-sub">控制已注册指标的显示、顺序和提示阈值；计算口径由后端实现并保持只读。</p>
     <el-alert type="info" :closable="false" show-icon style="margin-bottom:12px"
       title="为保证数据可验证，页面不支持录入任意公式。新增指标需先完成后端计算、权限范围和测试。" />
     <div class="sa-card">
@@ -20,6 +20,12 @@
         </el-table-column>
         <el-table-column label="顺序" width="120">
           <template #default="{row}"><el-input-number v-model="row.sort_order" :min="0" :max="999" size="small" controls-position="right" /></template>
+        </el-table-column>
+        <el-table-column label="关注阈值" width="135">
+          <template #default="{row}"><el-input-number v-model="row.threshold_warn" :min="0" size="small" controls-position="right" /></template>
+        </el-table-column>
+        <el-table-column label="重点阈值" width="135">
+          <template #default="{row}"><el-input-number v-model="row.threshold_danger" :min="0" size="small" controls-position="right" /></template>
         </el-table-column>
         <el-table-column label="操作" width="100">
           <template #default="{row}"><el-button text type="primary" size="small" :loading="saving===row.kpi_id" @click="save(row)">保存</el-button></template>
@@ -52,6 +58,8 @@ async function save(row:any) {
     await http.put(`/admin/settings/kpi-config/${row.kpi_id}`, {
       enabled: row.enabled,
       sort_order: row.sort_order,
+      threshold_warn: row.threshold_warn,
+      threshold_danger: row.threshold_danger,
     })
     ElMessage.success('指标配置已保存，刷新仪表盘后生效')
     await load()

@@ -1,7 +1,7 @@
 <template>
   <div v-loading="pageLoading" element-loading-text="正在加载学校预警数据…" :aria-busy="pageLoading">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
-      <div>
+      <div v-if="!embedded">
         <h2 class="sa-page-title">学业预警监控</h2>
         <p class="sa-page-sub">数据来源：学校学籍、成绩数据与当前已激活规则计算结果 · 点击等级卡片筛选核查对象</p>
       </div>
@@ -293,6 +293,7 @@ import { authStore } from '@/store/auth';
 import { useRoute } from 'vue-router';
 
 const route = useRoute();
+withDefaults(defineProps<{ embedded?: boolean }>(), { embedded:false });
 
 const drawerVisible = ref(false); const student = ref({} as any);
 const selectedAlertRow = ref<any>(null);

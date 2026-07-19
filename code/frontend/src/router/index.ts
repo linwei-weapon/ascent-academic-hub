@@ -33,6 +33,7 @@ export const router = createRouter({
         { path: 'operation/schedule-changes', component: () => import('@/views/admin/operation/Index.vue') },
         { path: 'operation/teacher-load', component: () => import('@/views/admin/operation/Index.vue') },
         { path: 'operation/schedule-analysis', component: () => import('@/views/admin/operation/Index.vue') },
+        { path: 'operation/course-quality', component: () => import('@/views/admin/operation/Index.vue') },
 
         // ====== 培养质量分析 ======
         { path: 'curriculum', component: () => import('@/views/admin/curriculum/index.vue') },
@@ -49,13 +50,13 @@ export const router = createRouter({
         { path: 'students/analysis', component: () => import('@/views/admin/students/Analysis.vue') },
         { path: 'students/list', component: () => import('@/views/admin/students/List.vue') },
 
-        // ====== 报表中心 ======
+        // ====== AI管理决策（旧事实专题保留兼容重定向） ======
         { path: 'reports', redirect: '/admin/reports/management-briefing' },
-        { path: 'reports/early-setback', component: () => import('@/views/admin/reports/EarlySetback.vue') },
-        { path: 'reports/graduation-readiness', component: () => import('@/views/admin/reports/GraduationReadiness.vue') },
-        { path: 'reports/course-quality', component: () => import('@/views/admin/reports/CourseQuality.vue') },
-        { path: 'reports/faculty-resource-risk', component: () => import('@/views/admin/reports/FacultyResourceRisk.vue') },
-        { path: 'reports/schedule-strategy', component: () => import('@/views/admin/reports/ScheduleStrategy.vue') },
+        { path: 'reports/early-setback', redirect: '/admin/alert?tab=early-risk' },
+        { path: 'reports/graduation-readiness', redirect: '/admin/curriculum?tab=graduation-readiness' },
+        { path: 'reports/course-quality', redirect: '/admin/operation/course-quality' },
+        { path: 'reports/faculty-resource-risk', redirect: '/admin/faculty' },
+        { path: 'reports/schedule-strategy', redirect: '/admin/operation/schedule-analysis' },
         { path: 'reports/management-briefing', component: () => import('@/views/admin/reports/ManagementBriefing.vue') },
         { path: 'reports/decision-simulation', component: () => import('@/views/admin/reports/DecisionSimulation.vue') },
 

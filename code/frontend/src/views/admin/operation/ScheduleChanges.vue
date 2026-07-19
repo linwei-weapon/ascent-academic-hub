@@ -90,7 +90,7 @@
 
 <script setup lang="ts">
 import { http } from '@/utils/http'
-import { reactive, ref, computed, watch, onMounted } from 'vue'
+import { reactive, ref, computed, watch, onMounted, inject, type Ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import KpiLabel from '@/components/KpiLabel.vue'
 import KpiCard from '@/components/KpiCard.vue'
@@ -108,7 +108,7 @@ function clearCollegeFilter() { collegeFilter.value = null; router.replace({ que
 function goCollege(row: any) { router.push({ query: { college: row.id } }) }
 function goTeacher(row: any) { router.push({ path: '/admin/faculty/' + row.id, query: fSemester.value ? { semester: fSemester.value } : {} }) }
 
-const fSemester = ref('')
+const fSemester = inject<Ref<string>>('operationSemester', ref(''))
 const semesters = ref<SemesterOpt[]>([])
 const selectedSemesterLabel = computed(() => semesters.value.find(s => s.value === fSemester.value)?.label || '')
 
@@ -160,7 +160,7 @@ async function load() {
 onMounted(async () => {
   const meta = await getFilterMeta()
   semesters.value = meta.semesters.slice().reverse()
-  fSemester.value = meta.current
+  if (!fSemester.value) fSemester.value = meta.current
   await load()
 })
 

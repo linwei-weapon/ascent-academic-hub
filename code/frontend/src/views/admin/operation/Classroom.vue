@@ -82,7 +82,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, inject, onMounted, reactive, ref, type Ref } from 'vue'
 import { http } from '@/utils/http'
 import { getFilterMeta, type SemesterOpt } from '@/utils/meta'
 import EChart from '@/components/EChart.vue'
@@ -92,7 +92,7 @@ import AIInsightDrawer from '@/components/AIInsightDrawer.vue'
 import { getClassroomOccupancyAIInsight } from '@/utils/ai'
 
 const loading = ref(false)
-const fSemester = ref('')
+const fSemester = inject<Ref<string>>('operationSemester', ref(''))
 const fBuilding = ref('')
 const includeEvening = ref(true)
 const semesters = ref<SemesterOpt[]>([])
@@ -181,7 +181,7 @@ async function openClassroomAi(row?: any) {
 onMounted(async () => {
   const meta = await getFilterMeta()
   semesters.value = meta.semesters.slice().reverse()
-  fSemester.value = '2025-2026-2'
+  if (!fSemester.value) fSemester.value = meta.current
   await load()
 })
 </script>

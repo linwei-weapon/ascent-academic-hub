@@ -47,12 +47,14 @@ TARGET_MENUS = [
      "/admin/system/roles", "UserFilled", 302),
     ("/admin/system/menus", "/admin/system", "菜单管理",
      "/admin/system/menus", "Menu", 303),
+    ("/admin/system/permissions", "/admin/system", "数据权限",
+     "/admin/system/permissions", "Key", 304),
     ("/admin/system/kpis", "/admin/system", "指标与口径管理",
-     "/admin/system/kpis", "DataAnalysis", 304),
+     "/admin/system/kpis", "DataAnalysis", 305),
     ("/admin/system/audit", "/admin/system", "审计日志",
-     "/admin/system/audit", "Document", 305),
+     "/admin/system/audit", "Document", 306),
     ("/admin/settings", "/admin/system", "系统参数",
-     "/admin/settings", "Setting", 306),
+     "/admin/settings", "Setting", 307),
 ]
 
 PARENT_IDS = {row[0] for row in TARGET_MENUS if row[1] is None}
@@ -125,6 +127,10 @@ def migrate(conn: sqlite3.Connection) -> None:
     for leaf_id in LEAF_IDS:
         cur.execute("""INSERT OR IGNORE INTO sys_role_menu(role_id,menu_id)
                        VALUES(?,?)""", (ADMIN_ROLE, leaf_id))
+    # 关系型学生管理角色可进入同一教学数据总览，接口仍按带班/带生范围过滤。
+    for role_id in ("counselor", "class_adviser", "mentor"):
+        cur.execute("""INSERT OR IGNORE INTO sys_role_menu(role_id,menu_id)
+                       VALUES(?, '/admin/dashboard')""", (role_id,))
     for leaf_id in SYSTEM_LEAF_IDS:
         cur.execute("""DELETE FROM sys_role_menu
                        WHERE menu_id=? AND role_id<>?""",

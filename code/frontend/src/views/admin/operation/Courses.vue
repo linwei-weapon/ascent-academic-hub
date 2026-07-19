@@ -184,7 +184,7 @@
 
 <script setup lang="ts">
 import { http } from '@/utils/http'
-import { reactive, ref, computed, watch, onMounted } from 'vue'
+import { reactive, ref, computed, watch, onMounted, inject, type Ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import KpiLabel from '@/components/KpiLabel.vue'
 import KpiCard from '@/components/KpiCard.vue'
@@ -198,7 +198,7 @@ import { getOperationCourseAIInsight } from '@/utils/ai'
 const router = useRouter()
 const route = useRoute()
 
-const fSemester = ref('')
+const fSemester = inject<Ref<string>>('operationSemester', ref(''))
 const fYear = ref('')
 const fCampus = ref('')
 const fNature = ref('')
@@ -348,7 +348,7 @@ onMounted(async () => {
   categories.value = meta.categories || []
   sizeBuckets.value = meta.sizeBuckets || []
   years.value = (meta.years || []).slice().reverse()
-  fSemester.value = meta.current
+  if (!fSemester.value) fSemester.value = meta.current
   await load()
 })
 

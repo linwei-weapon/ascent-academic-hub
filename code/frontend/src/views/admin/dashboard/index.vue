@@ -1,17 +1,24 @@
 <template>
-  <div>
+  <div v-loading="pageLoading" element-loading-text="正在加载教学数据总览，请稍候…" element-loading-background="rgba(248,250,252,.82)">
     <div style="display:flex;justify-content:space-between;align-items:center">
       <div>
-        <h2 class="sa-page-title" style="margin-bottom:0">{{ isSchoolRole(role.role) ? '全校学业数据大屏' : (data.scope?.label || '当前角色授权范围') + ' · 数据概览' }}</h2>
+        <h2 class="sa-page-title" style="margin-bottom:0">{{ pageTitle }}</h2>
         <p class="sa-page-sub">
           数据来源：教务系统同步 · 统计学期：<b>{{ fSemester }}</b> ·
-          <span style="color:var(--sa-primary);font-weight:500">{{ isSchoolRole(role.role) ? '校级视角（全校数据）' : '受限视角（仅当前角色授权数据）' }}</span>
+          <span style="color:var(--sa-primary);font-weight:500">{{ data.scope?.restricted ? '受限视角（仅当前身份授权明细）' : '校级视角（全校数据）' }}</span>
         </p>
       </div>
-      <el-select v-model="fSemester" size="small" style="width:170px" placeholder="选择学期" @change="loadData">
+      <el-select v-model="fSemester" size="small" style="width:170px" placeholder="选择学期" @change="onSemesterChange">
         <el-option v-for="s in semesters" :key="s.value" :label="s.label" :value="s.value" />
       </el-select>
     </div>
+    <BusinessPageContext
+      :period="fSemester ? `统计学期：${fSemester}` : ''"
+      source="教务系统学籍、成绩与预警计算结果"
+      :loading="pageLoading"
+      :error="loadError"
+      :updated-at="updatedAt"
+    />
 
     <el-alert v-if="data.evidence?.limitation" type="warning" :closable="false" show-icon style="margin:12px 0"
       title="证据说明：毕业率和学位授予率为合成业务数据"
@@ -66,6 +73,42 @@
       <div style="margin-top:8px;text-align:right">
         <el-button size="small" @click="goStudents">查看{{ data.scope?.restricted ? '范围内' : '全校' }}学生画像 →</el-button>
       </div>
+    </div>
+
+    <div v-if="data.scope?.restricted && canCompareColleges" class="sa-card" style="margin-bottom:16px">
+      <div class="sa-card-title">
+        学院聚合对比
+        <span class="extra">可比较他院聚合指标；仅本学院允许进入明细</span>
+      </div>
+      <el-alert type="info" :closable="false" show-icon :title="comparison.definition.boundary" style="margin-bottom:10px" />
+      <el-table :data="comparison.items" stripe size="small" @row-click="goComparisonCollege">
+        <el-table-column prop="collegeName" label="学院" min-width="170">
+          <template #default="{row}">
+            <span :class="row.canDrillDown ? 'college-link' : ''">{{ row.collegeName }}</span>
+            <el-tag v-if="row.canDrillDown" size="small" effect="plain" style="margin-left:6px">本院</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="students" label="在籍学生" width="90" align="right" />
+        <el-table-column prop="weightedAverageScore" width="118" align="right">
+          <template #header><span>加权平均分 <KpiLabel label="" :formula="comparison.definition.weightedAverageScore" /></span></template>
+          <template #default="{row}">{{ row.weightedAverageScore ?? '—' }}</template>
+        </el-table-column>
+        <el-table-column prop="averageGpa" width="100" align="right">
+          <template #header><span>平均GPA <KpiLabel label="" :formula="comparison.definition.averageGpa" /></span></template>
+          <template #default="{row}">{{ row.averageGpa ?? '—' }}</template>
+        </el-table-column>
+        <el-table-column width="130" align="right">
+          <template #header><span>当前挂科学生率 <KpiLabel label="" :formula="comparison.definition.currentFailStudentRate" /></span></template>
+          <template #default="{row}">{{ row.currentFailStudentRate == null ? '—' : `${row.currentFailStudentRate}%` }}</template>
+        </el-table-column>
+        <el-table-column width="125" align="right">
+          <template #header><span>有效预警学生率 <KpiLabel label="" :formula="comparison.definition.activeAlertStudentRate" /></span></template>
+          <template #default="{row}">{{ row.activeAlertStudentRate == null ? '—' : `${row.activeAlertStudentRate}%` }}</template>
+        </el-table-column>
+        <el-table-column label="明细权限" width="95" align="center">
+          <template #default="{row}"><span :class="row.canDrillDown ? 'college-link' : 'sa-faint'">{{ row.canDrillDown ? '查看本院' : '仅可比较' }}</span></template>
+        </el-table-column>
+      </el-table>
     </div>
 
     <!-- GPA分布 (左1/2) + 挂科集中课程 TOP8 (右1/2) -->
@@ -142,14 +185,20 @@
 <script setup lang="ts">
 import { reactive, onMounted, ref, computed } from 'vue'
 import { http } from '@/utils/http';
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import KpiLabel from '@/components/KpiLabel.vue';
 import KpiCard from '@/components/KpiCard.vue';
 import EChart from '@/components/EChart.vue';
-import { roleStore as role, isSchoolRole } from '@/store/role';
+import BusinessPageContext from '@/components/BusinessPageContext.vue';
 import { getFilterMeta, type SemesterOpt } from '@/utils/meta';
+import { authStore } from '@/store/auth';
+import { useBusinessPageTitle } from '@/utils/businessPage';
+const pageTitle = useBusinessPageTitle('/admin/dashboard', '教学数据总览');
 const router = useRouter();
+const route = useRoute();
 const data = reactive<any>({ kpi:[], colleges:[], gpaDist:[], gpaDistByCollege:{}, scope:{ restricted:false,label:'全校' }, evidence:{} });
+const comparison = reactive<any>({ items:[], definition:{} });
+const canCompareColleges = computed(() => !!authStore.user?.permissionContext?.comparisonScope?.allowOtherOrganizations);
 
 // 学期筛选
 const semesters = ref<SemesterOpt[]>([]);
@@ -162,26 +211,50 @@ const gpaCollege = ref('all');
 const gpaDisplay = ref([] as any[]);
 const gpaTotal = ref(0);
 const failCourses = ref([] as any[]);
+const pageLoading = ref(false);
+const loadError = ref('');
+const updatedAt = ref('');
 
 // GPA 5 档色：不及格→优秀（玫红/琥珀/靛/靛蓝/青绿）
 const GPA_COLORS = ['#E11D48', '#D97706', '#6366F1', '#4F46E5', '#0D9488'];
 
 async function loadData() {
+  pageLoading.value = true;
+  loadError.value = '';
   const qs = fSemester.value ? `?semester=${fSemester.value}` : '';
-  const d = await http.get(`/admin/dashboard${qs}`);
-  if (!d) return;
-  Object.assign(data, d);
-  failCourses.value = d.failCourses || [];
-  if (gpaCollege.value !== 'all' && !data.gpaDistByCollege?.[gpaCollege.value]) gpaCollege.value = 'all';
-  loadGpa();
+  try {
+    const d = await http.get(`/admin/dashboard${qs}`);
+    if (!d) return;
+    Object.assign(data, d);
+    if (data.scope?.restricted && canCompareColleges.value) {
+      const compare = await http.get(`/admin/meta/college-comparison${qs}`);
+      Object.assign(comparison, compare || {});
+    } else {
+      comparison.items = [];
+    }
+    failCourses.value = d.failCourses || [];
+    if (gpaCollege.value !== 'all' && !data.gpaDistByCollege?.[gpaCollege.value]) gpaCollege.value = 'all';
+    loadGpa();
+    updatedAt.value = new Date().toLocaleTimeString('zh-CN', { hour:'2-digit', minute:'2-digit' });
+  } catch (error:any) {
+    loadError.value = error?.message || '数据加载失败，请稍后重试';
+  } finally {
+    pageLoading.value = false;
+  }
 }
 
 onMounted(async () => {
   const meta = await getFilterMeta();
   semesters.value = meta.semesters.slice().reverse();
-  fSemester.value = meta.current || semesters.value[0]?.value || '';
+  const requested = String(route.query.semester || '');
+  fSemester.value = semesters.value.some(item => item.value === requested)
+    ? requested : (meta.current || semesters.value[0]?.value || '');
   loadData();
 });
+function onSemesterChange() {
+  router.replace({ path:'/admin/dashboard', query:fSemester.value ? { semester:fSemester.value } : {} });
+  loadData();
+}
 
 function loadGpa() {
   const dist = gpaCollege.value === 'all'
@@ -214,8 +287,12 @@ function kpiTone(label: string): 'primary'|'teal'|'danger'|'amber' {
   return 'primary';
 }
 function goCollege(row: any) { router.push({ path:'/admin/college/' + row.id, query:{ semester:fSemester.value } }); }
+function goComparisonCollege(row:any) {
+  if (!row.canDrillDown) return;
+  router.push({ path:'/admin/college/' + row.collegeId, query:{ semester:fSemester.value } });
+}
 function goCourse(row: any) { router.push({ path:'/admin/course/' + row.id, query:{ semester:fSemester.value } }); }
-function goStudents() { router.push({ path:'/admin/students/list', query:{ semester:fSemester.value,returnTo:'/admin/dashboard',returnLabel:'返回数据大屏' } }); }
+function goStudents() { router.push({ path:'/admin/students/list', query:{ semester:fSemester.value,returnTo:'/admin/dashboard',returnLabel:'返回教学数据总览' } }); }
 </script>
 
 <style scoped>

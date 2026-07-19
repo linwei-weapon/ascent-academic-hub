@@ -43,7 +43,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, inject, onMounted, reactive, ref, type Ref } from 'vue'
 import { http } from '@/utils/http'
 import { getV2TeachingSemester } from '@/utils/v2meta'
 import KpiCard from '@/components/KpiCard.vue'
@@ -51,6 +51,7 @@ import KpiLabel from '@/components/KpiLabel.vue'
 import EChart from '@/components/EChart.vue'
 
 const groups=['体育课','思政课','数学类','英语类']; const activeGroup=ref('体育课'),drawer=ref(false),drawerGroup=ref('')
+const sharedSemester=inject<Ref<string>>('operationSemester',ref(''))
 const data=reactive<any>({semester:'',summary:{},cells:[],focus:[],focusSummary:[],focusCourses:[],definition:{meeting:'',focus:'',boundary:''}})
 const kpis=computed(()=>[
   {label:'教学班总数',value:`${data.summary.lessons||0}个`,hint:'真实教学任务中的教学班数量',tone:'primary'},
@@ -64,7 +65,7 @@ const groupCells=computed(()=>data.focus.filter((x:any)=>x.course_group===active
 const drawerCourses=computed(()=>data.focusCourses.filter((x:any)=>x.course_group===drawerGroup.value))
 function openGroup(group:string){drawerGroup.value=group;drawer.value=true}
 function heatOption(cells:any[]){const days=['周一','周二','周三','周四','周五','周六','周日'],parts=['上午','下午','晚上'];const points=cells.map(x=>[x.weekday-1,parts.indexOf(x.day_part),x.meeting_count]);const max=Math.max(1,...cells.map(x=>x.meeting_count));return{tooltip:{formatter:(p:any)=>`${days[p.data[0]]} ${parts[p.data[1]]}<br/>排课片段：<b>${p.data[2]}</b>`},grid:{left:58,right:25,top:10,bottom:45},xAxis:{type:'category',data:days},yAxis:{type:'category',data:parts},visualMap:{min:0,max,calculable:true,orient:'horizontal',left:'center',bottom:0,inRange:{color:['#EEF2FF','#93C5FD','#3B82F6','#1D4ED8']}},series:[{type:'heatmap',data:points,label:{show:true,formatter:(p:any)=>p.data[2]}}]}}
-onMounted(async()=>{const semester=await getV2TeachingSemester();if(!semester)return;const d=await http.get(`/v2/topics/schedule-strategy?semester=${encodeURIComponent(semester)}`);if(d)Object.assign(data,d)})
+onMounted(async()=>{const semester=sharedSemester.value||await getV2TeachingSemester();if(!semester)return;const d=await http.get(`/v2/topics/schedule-strategy?semester=${encodeURIComponent(semester)}`);if(d)Object.assign(data,d)})
 </script>
 
 <style scoped>

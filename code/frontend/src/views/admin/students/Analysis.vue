@@ -1,8 +1,8 @@
 <template>
-  <div>
+  <div v-loading="pageLoading" element-loading-text="正在加载学生成长与学业分析，请稍候…" element-loading-background="rgba(248,250,252,.82)">
     <div class="sa-head-row">
       <div>
-        <h2 class="sa-page-title">学生学业分析</h2>
+        <h2 class="sa-page-title">{{ pageTitle }}</h2>
         <p class="sa-page-sub">数据来源：成绩表(fact_grade) + 学籍表(dim_student) · 全年级统计分析</p>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">
@@ -32,6 +32,13 @@
         </el-select>
       </div>
     </div>
+    <BusinessPageContext
+      :period="studentPeriod"
+      source="学籍、成绩、培养方案与历史预警数据"
+      :loading="pageLoading"
+      :error="loadError"
+      :updated-at="updatedAt"
+    />
 
     <el-alert v-if="evidence.limitation" type="warning" :closable="false" show-icon style="margin-bottom:12px"
       title="证据说明：毕业率、学位授予率和部分专业学分要求包含模拟数据"
@@ -139,8 +146,15 @@ import { useRouter } from 'vue-router'
 import KpiLabel from '@/components/KpiLabel.vue'
 import KpiCard from '@/components/KpiCard.vue'
 import EChart from '@/components/EChart.vue'
+import BusinessPageContext from '@/components/BusinessPageContext.vue'
+import { useBusinessPageTitle } from '@/utils/businessPage'
 import { getFilterMeta, type SemesterOpt, type MajorOpt, type ClassOpt } from '@/utils/meta'
 const router = useRouter()
+const pageTitle = useBusinessPageTitle('/admin/students/analysis', '学生成长与学业分析')
+const pageLoading = ref(false)
+const loadError = ref('')
+const updatedAt = ref('')
+const studentPeriod = computed(() => fSemester.value ? `统计学期：${fSemester.value}` : fYear.value ? `统计学年：${fYear.value}` : '全部已接入学期')
 
 const fSemester = ref('')
 const fYear = ref('')
@@ -175,6 +189,8 @@ const data = reactive<any>({
 })
 function signed(value: number | null) { return value == null ? '—' : `${value > 0 ? '+' : ''}${value}` }
 async function load() {
+  pageLoading.value = true
+  loadError.value = ''
   const params = new URLSearchParams()
   if (fSemester.value) params.set('semester', fSemester.value)
   else if (fYear.value) params.set('year', fYear.value)
@@ -185,11 +201,22 @@ async function load() {
   if (fRetake.value) params.set('retake', fRetake.value)
   if (fRequired.value) params.set('required', fRequired.value)
   const qs = params.toString() ? `?${params.toString()}` : ''
-  const d = await http.get('/admin/students/analysis' + qs)
-  if (d) { studentKpis.value = d.studentKpis || []; evidence.value = d.evidence || {}; Object.assign(data, d) }
+  try {
+    const d = await http.get('/admin/students/analysis' + qs)
+    if (d) {
+      studentKpis.value = d.studentKpis || []
+      evidence.value = d.evidence || {}
+      Object.assign(data, d)
+      updatedAt.value = new Date().toLocaleTimeString('zh-CN', { hour:'2-digit', minute:'2-digit' })
+    }
+  } catch (error:any) {
+    loadError.value = error?.message || '数据加载失败，请稍后重试'
+  } finally {
+    pageLoading.value = false
+  }
 }
 
-function goCourse(row: any) { router.push({ path: '/admin/course/' + row.id, query: { ...(fSemester.value ? { semester: fSemester.value } : {}), returnTo:'/admin/students/analysis', returnLabel:'学生学业分析' } }) }
+function goCourse(row: any) { router.push({ path: '/admin/course/' + row.id, query: { ...(fSemester.value ? { semester: fSemester.value } : {}), returnTo:'/admin/students/analysis', returnLabel:'学生成长与学业分析' } }) }
 
 function drillQuery() {
   const query: Record<string, string> = {}

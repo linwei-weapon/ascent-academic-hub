@@ -62,7 +62,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, inject, onMounted, reactive, ref, watch, type Ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { http } from '@/utils/http'
 import KpiCard from '@/components/KpiCard.vue'
@@ -73,7 +73,7 @@ import AIInsightDrawer from '@/components/AIInsightDrawer.vue'
 import { getTeacherLoadAIInsight, getTeacherLoadTeacherAIInsight } from '@/utils/ai'
 
 const route=useRoute(), router=useRouter()
-const fSemester=ref(''), fTitle=ref(''), semesters=ref<SemesterOpt[]>([]), titles=ref<string[]>([])
+const fSemester=inject<Ref<string>>('operationSemester',ref('')), fTitle=ref(''), semesters=ref<SemesterOpt[]>([]), titles=ref<string[]>([])
 const kpis=ref<any[]>([]), drawer=ref(false), selected=ref<any>({})
 const aiDrawerVisible=ref(false), aiLoading=ref(false), aiInsight=ref<any>(null)
 const collegeFilter=computed(()=>{ const id=String(route.query.college||''); return COLLEGE_MAP[id]?{id,name:COLLEGE_MAP[id]}:null })
@@ -89,7 +89,7 @@ async function openLoadAi(row?:any){aiDrawerVisible.value=true;aiLoading.value=t
 async function openTeacherAi(row:any){const id=row?.id||row?.teacher_id||row?.teacherId;if(!id)return;aiDrawerVisible.value=true;aiLoading.value=true;aiInsight.value=null;try{aiInsight.value=await getTeacherLoadTeacherAIInsight(id,fSemester.value)}finally{aiLoading.value=false}}
 function tone(label:string):'primary'|'teal'|'danger'|'amber'{return label.includes('过载')?'amber':label.includes('授课率')?'teal':'primary'}
 watch(()=>route.query.college,load)
-onMounted(async()=>{const meta=await getFilterMeta();semesters.value=meta.semesters.slice().reverse();titles.value=meta.titles||[];fSemester.value=meta.current;await load()})
+onMounted(async()=>{const meta=await getFilterMeta();semesters.value=meta.semesters.slice().reverse();titles.value=meta.titles||[];if(!fSemester.value)fSemester.value=meta.current;await load()})
 </script>
 
 <style scoped>

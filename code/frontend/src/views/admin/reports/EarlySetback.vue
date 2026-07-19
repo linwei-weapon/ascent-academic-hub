@@ -1,6 +1,6 @@
 <template><div>
-  <el-breadcrumb separator="/" class="crumb"><el-breadcrumb-item to="/admin/reports">管理决策专题</el-breadcrumb-item><el-breadcrumb-item>学业风险与低年级受挫</el-breadcrumb-item></el-breadcrumb>
-  <h2 class="sa-page-title">学业风险与低年级受挫</h2><p class="sa-page-sub">从大一首次出现未通过记录开始，观察后续变化并定位需要优先核查的课程、专业和学生。</p>
+  <el-breadcrumb separator="/" class="crumb"><el-breadcrumb-item to="/admin/alert">学业预警监控</el-breadcrumb-item><el-breadcrumb-item>低年级风险观察</el-breadcrumb-item></el-breadcrumb>
+  <h2 class="sa-page-title">低年级风险观察</h2><p class="sa-page-sub">从大一首次出现未通过记录开始，观察后续变化并定位需要优先核查的课程、专业和学生。</p>
   <el-alert type="info" :closable="false" show-icon title="群体筛查不等于个人原因判断" :description="definition.boundary"/>
   <div class="filters"><el-select v-model="draftGrade" clearable placeholder="全部入学年级"><el-option v-for="x in grades" :key="x" :label="x+'级'" :value="x"/></el-select><el-button type="primary" :loading="loading" @click="applyFilter">应用筛选</el-button><el-button :disabled="loading" @click="reset">重置</el-button><span>筛选条件不会自动触发整页刷新</span></div>
   <el-skeleton :loading="initialLoading" animated :rows="4"><div class="kpis"><div v-for="x in kpis" :key="x.label" class="kpi"><span>{{x.label}} <el-tooltip :content="x.help"><i>?</i></el-tooltip></span><b>{{x.value}}</b><small>{{x.note}}</small></div></div></el-skeleton>

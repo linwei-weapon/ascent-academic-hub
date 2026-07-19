@@ -2,7 +2,7 @@
   <div>
     <el-breadcrumb separator="›">
       <el-breadcrumb-item v-if="route.query.returnTo" :to="String(route.query.returnTo)">{{ route.query.returnLabel || '返回来源' }}</el-breadcrumb-item>
-      <el-breadcrumb-item v-else :to="{path:'/admin/dashboard',query:semLabel?{semester:semLabel}:{}}">数据大屏</el-breadcrumb-item>
+      <el-breadcrumb-item v-else :to="{path:'/admin/dashboard',query:semLabel?{semester:semLabel}:{}}">教学数据总览</el-breadcrumb-item>
       <el-breadcrumb-item v-if="route.query.collegeId" :to="{path:'/admin/college/'+route.query.collegeId,query:semLabel?{semester:semLabel}:{}}">{{ route.query.collegeName || '学院详情' }}</el-breadcrumb-item>
       <el-breadcrumb-item v-if="route.query.majorId" :to="{path:'/admin/major/'+route.query.majorId,query:semLabel?{semester:semLabel}:{}}">{{ route.query.majorName || '专业详情' }}</el-breadcrumb-item>
       <el-breadcrumb-item>{{ data.name || '课程详情' }}</el-breadcrumb-item>

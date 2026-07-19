@@ -2,7 +2,7 @@
   <div v-loading="loading" element-loading-text="正在加载培养方案与学生执行证据，请稍候…" element-loading-background="rgba(248,250,252,.82)">
     <div class="sa-head-row">
       <div>
-        <h2 class="sa-page-title">培养质量分析</h2>
+        <h2 class="sa-page-title">{{ pageTitle }}</h2>
         <p class="sa-page-sub">基于真实培养方案与学生课程记录，核查方案结构、学分要求和学生执行情况</p>
       </div>
       <div v-if="activeTab !== 'overview'" class="plan-filter-area">
@@ -23,6 +23,11 @@
         </div>
       </div>
     </div>
+    <BusinessPageContext
+      source="培养方案、学籍、成绩、教学任务与课程替代数据"
+      :loading="loading"
+      :period="activeTab === 'overview' ? '当前授权范围总览' : selectedPlanPeriod"
+    />
 
     <el-tabs v-model="activeTab">
       <el-tab-pane label="培养质量管理总览" name="overview">
@@ -174,6 +179,9 @@
       <el-tab-pane label="学业进度监控" name="progress">
         <ProgressView v-if="activeTab === 'progress'" :major-id="selectedMajor" />
       </el-tab-pane>
+      <el-tab-pane label="毕业准备核查" name="graduation-readiness">
+        <div v-if="activeTab === 'graduation-readiness'" class="embedded-topic"><GraduationReadiness /></div>
+      </el-tab-pane>
     </el-tabs>
     <el-dialog v-model="studentDialog.visible" :title="`${studentDialog.title}｜方案执行学生名单`" width="980px">
       <el-alert type="info" :closable="false" :title="studentDialog.definition" style="margin-bottom:12px" />
@@ -240,18 +248,36 @@
 
 <script setup lang="ts">
 import { http } from '@/utils/http'
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import KpiLabel from '@/components/KpiLabel.vue'
 import KpiCard from '@/components/KpiCard.vue'
 import EChart from '@/components/EChart.vue'
+import BusinessPageContext from '@/components/BusinessPageContext.vue'
 import ProgressView from './Progress.vue'
+import GraduationReadiness from '../reports/GraduationReadiness.vue'
+import { useBusinessPageTitle } from '@/utils/businessPage'
 
+const route = useRoute()
+const router = useRouter()
+const pageTitle = useBusinessPageTitle('/admin/curriculum', '培养质量分析')
 const allPlans = ref<any[]>([])
 const college = ref('')
 const grade = ref<number | ''>('')
 const major = ref('')
 const selectedMajor = ref('')
-const activeTab = ref('overview')
+const curriculumTabs = new Set(['overview','plan','progress','graduation-readiness'])
+const activeTab = ref(curriculumTabs.has(String(route.query.tab)) ? String(route.query.tab) : 'overview')
+const selectedPlanPeriod = computed(() => {
+  const plan = allPlans.value.find((item:any) => item.planId === selectedMajor.value)
+  return plan ? `当前方案：${plan.planName}` : '尚未选择培养方案'
+})
+watch(activeTab, tab => {
+  const query = { ...route.query }
+  if (tab === 'overview') delete query.tab
+  else query.tab = tab
+  router.replace({ path:'/admin/curriculum', query })
+})
 const loading = ref(false)
 const overview = reactive<any>({ summary:{}, colleges:[], majors:[], bottleneckCourses:[], definition:{ boundary:'' } })
 const studentDialog = reactive<any>({visible:false,loading:false,title:'',items:[],definition:''})
@@ -416,6 +442,10 @@ onMounted(async () => {
 .requirement-collapse { border-top:0; }
 .requirement-collapse :deep(.el-collapse-item__header) { color:#475569; font-size:13px; }
 .student-evidence-summary { margin:14px 0 18px; }
+.embedded-topic :deep(.crumb),
+.embedded-topic :deep(.sa-page-title),
+.embedded-topic :deep(.sa-page-sub),
+.embedded-topic :deep(.el-breadcrumb) { display:none; }
 .evidence-title { margin:20px 0 10px; color:#1e293b; }
 .evidence-title small { margin-left:8px; color:#64748b; font-weight:400; }
 .module-collapse { border-top:0; }
