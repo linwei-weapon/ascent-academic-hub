@@ -11,11 +11,13 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .envelope import ApiError, fail, ok
-from . import settings
+from . import db as dbm, settings
 from .security import decode_token
+from .security_governance import write_audit
 from .routers import (auth, dashboard, alert, curriculum, reports,
                       operation, faculty, settings as settings_router, students,
-                      admin_rbac, meta, teacher, ai, ai_experts)
+                      admin_rbac, meta, teacher, ai, ai_experts,
+                      system_management)
 from .routers import v2
 
 app = FastAPI(title="高校学业BI · 平台管理端 API", version="0.3.0")
@@ -29,6 +31,23 @@ app.add_middleware(
 )
 
 access_logger = logging.getLogger("uvicorn.error")
+
+
+def _sensitive_read_event(method: str, path: str) -> tuple[str, str, str] | None:
+    """把高价值读取和AI运行写入业务审计，不记录查询参数和敏感正文。"""
+    if method == "GET" and path.startswith("/api/admin/student/"):
+        return "data.student.detail.read", "student", path.rsplit("/", 1)[-1]
+    if method == "GET" and path == "/api/admin/students/list":
+        return "data.student.list.read", "student_list", "authorized_scope"
+    if method == "GET" and path.endswith(".csv"):
+        return "data.export", "authorized_export", path.rsplit("/", 1)[-1]
+    if method == "POST" and path.startswith("/api/admin/ai/") and path.endswith("/interpret"):
+        return "ai.analysis.run", "ai_analysis", path
+    if method == "GET" and path.startswith("/api/admin/ai/") and (
+        "/briefing/" in path or "/simulation/" in path
+    ):
+        return "ai.analysis.run", "ai_analysis", path
+    return None
 
 
 @app.middleware("http")
@@ -57,6 +76,24 @@ async def permission_access_log(request: Request, call_next):
         username, identity or "-", request.method, request.url.path,
         response.status_code, (time.perf_counter() - started) * 1000,
     )
+    event = _sensitive_read_event(request.method, request.url.path)
+    if event and username != "anonymous" and response.status_code < 400:
+        try:
+            conn = dbm.get_conn_rw()
+            try:
+                write_audit(
+                    conn, username, event[0], event[1], event[2],
+                    client=request.client.host if request.client else None,
+                    detail={"identityId": identity or "-"},
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        except Exception:
+            access_logger.exception(
+                "security_audit_write_failed username=%s action=%s",
+                username, event[0],
+            )
     return response
 
 
@@ -93,6 +130,7 @@ app.include_router(admin_rbac.router)
 app.include_router(meta.router)
 app.include_router(ai.router)
 app.include_router(ai_experts.router)
+app.include_router(system_management.router)
 app.include_router(teacher.router)  # V1.1新增：任课教师视图
 app.include_router(v2.router)       # V2真实数据验证接口（只读）
 

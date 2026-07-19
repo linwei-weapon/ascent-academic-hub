@@ -14,7 +14,7 @@ import io
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .. import db as dbm
 from ..deps import get_db, get_db_rw, get_current_user, require_admin
@@ -1025,6 +1025,7 @@ class KpiConfigIn(BaseModel):
     color_rule: str | None = None
     threshold_warn: float | None = None
     threshold_danger: float | None = None
+    change_reason: str = Field(default="页面配置调整", min_length=2, max_length=300)
 
 
 KPI_CONFIG_DDL = """CREATE TABLE IF NOT EXISTS sys_kpi_config (
@@ -1032,32 +1033,104 @@ KPI_CONFIG_DDL = """CREATE TABLE IF NOT EXISTS sys_kpi_config (
     enabled INTEGER DEFAULT 1,sort_order INTEGER DEFAULT 0,calc_type TEXT,
     formula TEXT,unit TEXT,color_rule TEXT,threshold_warn REAL,
     threshold_danger REAL,scope_applicable TEXT DEFAULT 'all',
+    data_source TEXT,grain TEXT,update_cycle TEXT,version TEXT DEFAULT '1.0',
+    page_refs TEXT DEFAULT '[]',management_value TEXT,
     updated_at TEXT DEFAULT (datetime('now','localtime')))"""
 KPI_DEFAULTS = [
-    ("student_count", "在籍学生数", 1, "count", "count_all", "人"),
-    ("course_count", "本学期开课门数", 2, "count", "distinct_course", "门"),
-    ("teacher_count", "专任教师数", 3, "count", "count_all", "人"),
-    ("alert_count", "当前预警", 4, "count", "distinct_student", "人"),
-    ("current_fail_rate", "当前挂科率", 5, "rate", "fail_current", "%"),
-    ("history_fail_rate", "历史挂科经历率", 6, "rate", "fail_history", "%"),
-    ("grad_rate", "应届毕业率", 7, "rate", "grad_ontime", "%"),
-    ("degree_rate", "学位授予率", 8, "rate", "degree_all", "%"),
+    ("student_count", "在籍学生数", 1, "count", "在籍状态学生去重计数", "人",
+     "dim_student", "学生", "数据同步后", "1.0", ["/admin/dashboard"],
+     "判断管理覆盖规模并作为相关比例指标的基础分母。"),
+    ("course_count", "本学期开课门数", 2, "count", "当前学期课程编码去重计数", "门",
+     "fact_lesson / teaching_lesson", "课程×学期", "教学任务同步后", "1.0",
+     ["/admin/dashboard"], "反映当前教学供给覆盖面。"),
+    ("teacher_count", "专任教师数", 3, "count", "有效教师主数据去重计数", "人",
+     "dim_teacher / dim_staff", "教师", "教师主数据同步后", "1.0",
+     ["/admin/dashboard", "/admin/faculty"], "用于观察师资保障规模，不代表实际授课人数。"),
+    ("alert_count", "当前预警", 4, "count", "有效预警学生去重计数", "人",
+     "fact_alert / alert_event", "学生", "预警重算后", "1.0",
+     ["/admin/dashboard", "/admin/alert"], "提示当前需要优先核查的学生覆盖规模。"),
+    ("current_fail_rate", "当前挂科率", 5, "rate", "当前学期未通过成绩记录数÷有效成绩记录数", "%",
+     "fact_grade / grade_attempt", "成绩记录×学期", "成绩发布后", "1.0",
+     ["/admin/dashboard"], "观察本学期课程结果总体变化，不用于评价教师个人。"),
+    ("history_fail_rate", "历史挂科经历率", 6, "rate", "历史存在未通过记录学生数÷有成绩学生数", "%",
+     "fact_grade / grade_attempt", "学生", "成绩发布后", "1.0",
+     ["/admin/dashboard", "/admin/students/analysis"], "衡量学生群体既往学业受挫覆盖面。"),
+    ("grad_rate", "应届毕业率", 7, "rate", "按期毕业人数÷应届毕业生人数", "%",
+     "fact_graduation", "学生×毕业年度", "毕业数据同步后", "1.0",
+     ["/admin/dashboard"], "观察按期完成学业情况，正式结果以学校审核为准。"),
+    ("degree_rate", "学位授予率", 8, "rate", "获得学位人数÷毕业审核范围人数", "%",
+     "fact_graduation", "学生×毕业年度", "学位数据同步后", "1.0",
+     ["/admin/dashboard"], "观察学位获得总体情况，正式结果以学校学位审核为准。"),
 ]
+
+KPI_HISTORY_DDL = """
+CREATE TABLE IF NOT EXISTS sys_kpi_config_history (
+    history_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    kpi_id TEXT NOT NULL,
+    config_json TEXT NOT NULL,
+    change_reason TEXT NOT NULL,
+    changed_by TEXT NOT NULL,
+    changed_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_kpi_config_history
+ON sys_kpi_config_history(kpi_id,history_id);
+"""
 
 
 def _ensure_kpi_config(conn: sqlite3.Connection) -> None:
     dbm.execute(conn, KPI_CONFIG_DDL)
-    for kpi_id, label, order, calc_type, formula, unit in KPI_DEFAULTS:
+    conn.executescript(KPI_HISTORY_DDL)
+    columns = {
+        row["name"] for row in dbm.query(conn, "PRAGMA table_info(sys_kpi_config)")
+    }
+    for name, definition in {
+        "data_source": "TEXT",
+        "grain": "TEXT",
+        "update_cycle": "TEXT",
+        "version": "TEXT DEFAULT '1.0'",
+        "page_refs": "TEXT DEFAULT '[]'",
+        "management_value": "TEXT",
+    }.items():
+        if name not in columns:
+            dbm.execute(
+                conn, f"ALTER TABLE sys_kpi_config ADD COLUMN {name} {definition}"
+            )
+    for (kpi_id, label, order, calc_type, formula, unit, data_source,
+         grain, update_cycle, version, page_refs, management_value) in KPI_DEFAULTS:
         dbm.execute(conn, """INSERT OR IGNORE INTO sys_kpi_config
-            (kpi_id,module,label,enabled,sort_order,calc_type,formula,unit,scope_applicable)
-            VALUES (?,'dashboard',?,1,?,?,?,?, 'all')""",
-            (kpi_id, label, order, calc_type, formula, unit))
+            (kpi_id,module,label,enabled,sort_order,calc_type,formula,unit,
+             scope_applicable,data_source,grain,update_cycle,version,page_refs,
+             management_value)
+            VALUES (?,'dashboard',?,1,?,?,?,?, 'all',?,?,?,?,?,?)""",
+            (
+                kpi_id, label, order, calc_type, formula, unit, data_source,
+                grain, update_cycle, version,
+                json.dumps(page_refs, ensure_ascii=False), management_value,
+            ))
+        dbm.execute(conn, """UPDATE sys_kpi_config SET
+            label=?,
+            calc_type=?,
+            formula=?,
+            unit=?,
+            data_source=COALESCE(NULLIF(data_source,''),?),
+            grain=COALESCE(NULLIF(grain,''),?),
+            update_cycle=COALESCE(NULLIF(update_cycle,''),?),
+            version=COALESCE(NULLIF(version,''),?),
+            page_refs=CASE WHEN page_refs IS NULL OR page_refs='' OR page_refs='[]'
+                           THEN ? ELSE page_refs END,
+            management_value=COALESCE(NULLIF(management_value,''),?)
+            WHERE kpi_id=?""", (
+                label, calc_type, formula, unit,
+                data_source, grain, update_cycle, version,
+                json.dumps(page_refs, ensure_ascii=False), management_value,
+                kpi_id,
+            ))
 
 
 @router.get("/settings/kpi-config")
 def get_kpi_config(module: str = None,
                    conn: sqlite3.Connection = Depends(get_db_rw),
-                   user: dict = Depends(get_current_user)):
+                   user: dict = Depends(require_admin)):
     """获取 KPI 配置列表，可按模块过滤。"""
     _ensure_kpi_config(conn)
     if module:
@@ -1090,13 +1163,78 @@ def update_kpi_config(kpi_id: str, body: KpiConfigIn,
         if val is not None:
             fields.append(f"{col}=?"); params.append(val)
     if fields:
+        dbm.execute(conn, """
+            INSERT INTO sys_kpi_config_history(
+              kpi_id,config_json,change_reason,changed_by
+            ) VALUES(?,?,?,?)
+        """, (
+            kpi_id, json.dumps(dict(row), ensure_ascii=False, sort_keys=True),
+            body.change_reason.strip(), user["username"],
+        ))
         params.append(kpi_id)
         dbm.execute(conn, f"""UPDATE sys_kpi_config SET {','.join(fields)},
             updated_at=datetime('now','localtime') WHERE kpi_id=?""", params)
         from ..security_governance import write_audit
         write_audit(conn, user["username"], "settings.kpi.update", "kpi", kpi_id,
-                    detail={"fields": [f.split("=")[0] for f in fields]})
+                    detail={
+                        "fields": [f.split("=")[0] for f in fields],
+                        "changeReason": body.change_reason.strip(),
+                    })
     return ok(msg="KPI 配置已更新")
+
+
+@router.get("/settings/kpi-config/{kpi_id}/history")
+def get_kpi_config_history(kpi_id: str,
+                           _: dict = Depends(require_admin),
+                           conn: sqlite3.Connection = Depends(get_db_rw)):
+    _ensure_kpi_config(conn)
+    rows = dbm.query(conn, """
+        SELECT history_id,kpi_id,change_reason,changed_by,changed_at,config_json
+        FROM sys_kpi_config_history WHERE kpi_id=?
+        ORDER BY history_id DESC LIMIT 30
+    """, (kpi_id,))
+    for row in rows:
+        row["config"] = json.loads(row.pop("config_json") or "{}")
+    return ok(rows)
+
+
+@router.post("/settings/kpi-config/{kpi_id}/rollback/{history_id}")
+def rollback_kpi_config(kpi_id: str, history_id: int,
+                        user: dict = Depends(require_admin),
+                        conn: sqlite3.Connection = Depends(get_db_rw)):
+    _ensure_kpi_config(conn)
+    current = dbm.query_one(
+        conn, "SELECT * FROM sys_kpi_config WHERE kpi_id=?", (kpi_id,)
+    )
+    history = dbm.query_one(conn, """
+        SELECT * FROM sys_kpi_config_history
+        WHERE history_id=? AND kpi_id=?
+    """, (history_id, kpi_id))
+    if not current or not history:
+        raise ApiError("指标配置历史不存在", code=404, status_code=404)
+    target = json.loads(history["config_json"] or "{}")
+    allowed = (
+        "enabled", "sort_order", "color_rule",
+        "threshold_warn", "threshold_danger",
+    )
+    dbm.execute(conn, """
+        INSERT INTO sys_kpi_config_history(
+          kpi_id,config_json,change_reason,changed_by
+        ) VALUES(?,?,?,?)
+    """, (
+        kpi_id, json.dumps(dict(current), ensure_ascii=False, sort_keys=True),
+        f"回滚前备份，目标历史#{history_id}", user["username"],
+    ))
+    dbm.execute(conn, """UPDATE sys_kpi_config SET
+        enabled=?,sort_order=?,color_rule=?,threshold_warn=?,
+        threshold_danger=?,updated_at=datetime('now','localtime')
+        WHERE kpi_id=?""", tuple(target.get(key) for key in allowed) + (kpi_id,))
+    write_audit(
+        conn, user["username"], "settings.kpi.rollback", "kpi", kpi_id,
+        detail={"historyId": history_id},
+    )
+    return ok({"kpiId": kpi_id, "historyId": history_id},
+              msg="指标展示配置已回滚")
 
 
 @router.post("/settings/kpi-config")

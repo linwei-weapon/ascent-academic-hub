@@ -14,6 +14,7 @@ from .. import db as dbm
 from ..deps import get_db, get_db_rw, require_admin, student_data_scope
 from ..envelope import ok, ApiError
 from ..permission_context import build_permission_context, v2_student_scope
+from ...permission_catalog import ACTION_CATALOG
 from ..security import hash_password
 from ..security_governance import ensure_security_tables, write_audit
 
@@ -21,6 +22,26 @@ router = APIRouter(prefix="/api/admin/rbac", tags=["rbac"])
 
 VALID_STATUS = {"active", "disabled"}
 VALID_SCOPE_TYPES = {"all", "college", "major", "class", "teacher", "staff_relation"}
+AUTH_IDENTITY_DDL = """
+CREATE TABLE IF NOT EXISTS sys_auth_identity (
+    auth_identity_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL,
+    provider TEXT NOT NULL DEFAULT 'unified_identity',
+    subject_id TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    source TEXT NOT NULL DEFAULT 'manual',
+    updated_by TEXT,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+    UNIQUE(provider, subject_id),
+    UNIQUE(username, provider)
+);
+CREATE INDEX IF NOT EXISTS idx_auth_identity_username
+ON sys_auth_identity(username,status);
+"""
+
+
+def _ensure_auth_identity_table(conn: sqlite3.Connection) -> None:
+    conn.executescript(AUTH_IDENTITY_DDL)
 
 
 def _permission_tables_ready(conn: sqlite3.Connection) -> bool:
@@ -93,13 +114,35 @@ class ResetPwdIn(BaseModel):
     password: str = Field(min_length=12, max_length=128)
 
 
+class AuthIdentityIn(BaseModel):
+    provider: str = Field(default="unified_identity", min_length=2, max_length=80)
+    subject_id: str = Field(min_length=1, max_length=180)
+    status: str = "active"
+
+
 @router.get("/users")
 def list_users(_: dict = Depends(require_admin),
-               conn: sqlite3.Connection = Depends(get_db)):
+               conn: sqlite3.Connection = Depends(get_db_rw)):
+    _ensure_auth_identity_table(conn)
     rows = dbm.query(conn, """
         SELECT u.user_id, u.username, u.name, u.role_id, u.status,
-               r.name AS role_name
-        FROM sys_user u LEFT JOIN sys_role r ON u.role_id = r.role_id
+               r.name AS role_name,
+               COALESCE(identity_stats.identity_count,0) identity_count,
+               staff.staff_id,
+               auth.provider auth_provider,auth.subject_id auth_subject_id,
+               auth.status auth_status
+        FROM sys_user u
+        LEFT JOIN sys_role r ON u.role_id = r.role_id
+        LEFT JOIN (
+          SELECT username,COUNT(*) identity_count FROM sys_user_role
+          WHERE status='active' GROUP BY username
+        ) identity_stats ON identity_stats.username=u.username
+        LEFT JOIN (
+          SELECT username,MIN(staff_id) staff_id FROM sys_user_staff
+          WHERE status='active' GROUP BY username
+        ) staff ON staff.username=u.username
+        LEFT JOIN sys_auth_identity auth
+          ON auth.username=u.username AND auth.status='active'
         ORDER BY u.user_id""")
     return ok(rows)
 
@@ -202,6 +245,68 @@ def reset_pwd(user_id: int, body: ResetPwdIn, admin: dict = Depends(require_admi
                 (hash_password(pwd), user_id))
     write_audit(conn, admin["username"], "rbac.user.password_reset", "user", str(user_id))
     return ok(msg="密码已重置")
+
+
+@router.get("/users/{user_id}/auth-identity")
+def get_auth_identity(user_id: int, _: dict = Depends(require_admin),
+                      conn: sqlite3.Connection = Depends(get_db_rw)):
+    _ensure_auth_identity_table(conn)
+    user = dbm.query_one(
+        conn, "SELECT user_id,username,name FROM sys_user WHERE user_id=?",
+        (user_id,),
+    )
+    if not user:
+        raise ApiError("账号不存在", status_code=404)
+    mappings = dbm.query(conn, """
+        SELECT auth_identity_id,provider,subject_id,status,source,updated_by,updated_at
+        FROM sys_auth_identity WHERE username=? ORDER BY provider
+    """, (user["username"],))
+    return ok({**user, "mappings": mappings})
+
+
+@router.put("/users/{user_id}/auth-identity")
+def set_auth_identity(user_id: int, body: AuthIdentityIn,
+                      admin: dict = Depends(require_admin),
+                      conn: sqlite3.Connection = Depends(get_db_rw)):
+    _ensure_auth_identity_table(conn)
+    user = dbm.query_one(
+        conn, "SELECT user_id,username,name FROM sys_user WHERE user_id=?",
+        (user_id,),
+    )
+    if not user:
+        raise ApiError("账号不存在", status_code=404)
+    if body.status not in {"active", "inactive"}:
+        raise ApiError("统一身份映射状态无效", code=400, status_code=400)
+    subject_id = body.subject_id.strip()
+    conflict = dbm.query_one(conn, """
+        SELECT username FROM sys_auth_identity
+        WHERE provider=? AND subject_id=? AND username<>?
+    """, (body.provider, subject_id, user["username"]))
+    if conflict:
+        raise ApiError("该统一身份标识已绑定其他账号", code=409, status_code=409)
+    dbm.execute(conn, """
+        INSERT INTO sys_auth_identity(
+          username,provider,subject_id,status,source,updated_by,updated_at
+        ) VALUES(?,?,?,?, 'manual',?,datetime('now','localtime'))
+        ON CONFLICT(username,provider) DO UPDATE SET
+          subject_id=excluded.subject_id,status=excluded.status,
+          source='manual',updated_by=excluded.updated_by,updated_at=excluded.updated_at
+    """, (
+        user["username"], body.provider, subject_id, body.status,
+        admin["username"],
+    ))
+    write_audit(
+        conn, admin["username"], "rbac.user.auth_identity_update", "user",
+        str(user_id), detail={
+            "username": user["username"], "provider": body.provider,
+            "status": body.status,
+        },
+    )
+    mappings = dbm.query(conn, """
+        SELECT auth_identity_id,provider,subject_id,status,source,updated_by,updated_at
+        FROM sys_auth_identity WHERE username=? ORDER BY provider
+    """, (user["username"],))
+    return ok({**user, "mappings": mappings}, msg="统一身份映射已保存")
 
 
 # ============================ 角色 ============================
@@ -349,8 +454,10 @@ def _leaf_menu_ids(conn: sqlite3.Connection,
 def list_menus(_: dict = Depends(require_admin),
                conn: sqlite3.Connection = Depends(get_db)):
     rows = dbm.query(conn, """
-        SELECT menu_id, parent_id, title, path, icon, sort_order
-        FROM sys_menu ORDER BY sort_order, menu_id""")
+        SELECT m.menu_id, m.parent_id, m.title, m.path, m.icon, m.sort_order,
+               (SELECT COUNT(*) FROM sys_role_menu rm
+                WHERE rm.menu_id=m.menu_id) role_count
+        FROM sys_menu m ORDER BY m.sort_order, m.menu_id""")
     return ok(rows)
 
 
@@ -440,6 +547,163 @@ def set_role_menus(role_id: str, body: RoleMenusIn, admin: dict = Depends(requir
                 detail={"requestedMenuIds": list(dict.fromkeys(body.menu_ids)),
                         "leafMenuIds": leaf_ids})
     return ok(msg="菜单权限已保存")
+
+
+# ======================= 角色-动作权限 =======================
+class RoleActionsIn(BaseModel):
+    action_ids: list[str]
+
+
+class RolePermissionsIn(BaseModel):
+    menu_ids: list[str]
+    action_ids: list[str]
+
+
+@router.get("/actions")
+def list_actions(_: dict = Depends(require_admin)):
+    return ok([
+        {
+            "action_id": action_id,
+            "group": meta[0],
+            "name": meta[1],
+            "description": meta[2],
+        }
+        for action_id, meta in sorted(
+            ACTION_CATALOG.items(), key=lambda item: (item[1][0], item[1][1])
+        )
+    ])
+
+
+@router.get("/roles/{role_id}/actions")
+def get_role_actions(role_id: str, _: dict = Depends(require_admin),
+                     conn: sqlite3.Connection = Depends(get_db)):
+    if not dbm.query_one(conn, "SELECT 1 FROM sys_role WHERE role_id=?", (role_id,)):
+        raise ApiError("角色不存在", status_code=404)
+    rows = dbm.query(
+        conn,
+        "SELECT action_id FROM sys_role_action WHERE role_id=? ORDER BY action_id",
+        (role_id,),
+    )
+    return ok([row["action_id"] for row in rows])
+
+
+@router.put("/roles/{role_id}/actions")
+def set_role_actions(role_id: str, body: RoleActionsIn,
+                     admin: dict = Depends(require_admin),
+                     conn: sqlite3.Connection = Depends(get_db_rw)):
+    if not dbm.query_one(conn, "SELECT 1 FROM sys_role WHERE role_id=?", (role_id,)):
+        raise ApiError("角色不存在", status_code=404)
+    requested = list(dict.fromkeys(body.action_ids))
+    unknown = [action_id for action_id in requested if action_id not in ACTION_CATALOG]
+    if unknown:
+        raise ApiError(
+            f"动作权限不存在: {', '.join(unknown)}", code=400, status_code=400
+        )
+    if role_id == admin["role_id"] and "system.manage" not in requested:
+        raise ApiError(
+            "不能移除当前系统管理员角色的系统管理权限",
+            code=409,
+            status_code=409,
+        )
+    dbm.execute(conn, "DELETE FROM sys_role_action WHERE role_id=?", (role_id,))
+    for action_id in requested:
+        dbm.execute(
+            conn,
+            "INSERT INTO sys_role_action(role_id,action_id) VALUES(?,?)",
+            (role_id, action_id),
+        )
+    write_audit(
+        conn, admin["username"], "rbac.role.actions_update", "role", role_id,
+        detail={"actionIds": requested},
+    )
+    return ok(msg="动作权限已保存")
+
+
+@router.put("/roles/{role_id}/permissions")
+def set_role_permissions(role_id: str, body: RolePermissionsIn,
+                         admin: dict = Depends(require_admin),
+                         conn: sqlite3.Connection = Depends(get_db_rw)):
+    if not dbm.query_one(conn, "SELECT 1 FROM sys_role WHERE role_id=?", (role_id,)):
+        raise ApiError("角色不存在", status_code=404)
+    leaf_ids = _leaf_menu_ids(conn, body.menu_ids)
+    action_ids = list(dict.fromkeys(body.action_ids))
+    unknown = [action_id for action_id in action_ids if action_id not in ACTION_CATALOG]
+    if unknown:
+        raise ApiError(
+            f"动作权限不存在: {', '.join(unknown)}", code=400, status_code=400
+        )
+    if role_id == admin["role_id"] and "system.manage" not in action_ids:
+        raise ApiError(
+            "不能移除当前系统管理员角色的系统管理权限",
+            code=409,
+            status_code=409,
+        )
+    if role_id == admin["role_id"]:
+        system_menu_ids = {
+            row["menu_id"] for row in dbm.query(
+                conn, "SELECT menu_id FROM sys_menu WHERE parent_id='/admin/system'"
+            )
+        }
+        missing_system_menus = sorted(system_menu_ids - set(leaf_ids))
+        if missing_system_menus:
+            raise ApiError(
+                "不能移除当前系统管理员角色的系统管理菜单："
+                + "、".join(missing_system_menus),
+                code=409,
+                status_code=409,
+            )
+    dbm.execute(conn, "DELETE FROM sys_role_menu WHERE role_id=?", (role_id,))
+    for menu_id in leaf_ids:
+        dbm.execute(
+            conn, "INSERT INTO sys_role_menu(role_id,menu_id) VALUES(?,?)",
+            (role_id, menu_id),
+        )
+    dbm.execute(conn, "DELETE FROM sys_role_action WHERE role_id=?", (role_id,))
+    for action_id in action_ids:
+        dbm.execute(
+            conn, "INSERT INTO sys_role_action(role_id,action_id) VALUES(?,?)",
+            (role_id, action_id),
+        )
+    write_audit(
+        conn, admin["username"], "rbac.role.permissions_update", "role", role_id,
+        detail={"menuIds": leaf_ids, "actionIds": action_ids},
+    )
+    return ok({
+        "roleId": role_id, "menuIds": leaf_ids, "actionIds": action_ids
+    }, msg="角色功能权限已保存")
+
+
+@router.get("/roles/{role_id}/permission-preview")
+def preview_role_permissions(role_id: str, _: dict = Depends(require_admin),
+                             conn: sqlite3.Connection = Depends(get_db)):
+    role = dbm.query_one(
+        conn,
+        "SELECT role_id,name,data_scope_type FROM sys_role WHERE role_id=?",
+        (role_id,),
+    )
+    if not role:
+        raise ApiError("角色不存在", status_code=404)
+    menus = dbm.query(conn, """
+        SELECT m.menu_id,m.title,m.path,m.parent_id
+        FROM sys_role_menu rm JOIN sys_menu m ON m.menu_id=rm.menu_id
+        WHERE rm.role_id=? ORDER BY m.sort_order,m.menu_id
+    """, (role_id,))
+    actions = dbm.query(conn, """
+        SELECT action_id FROM sys_role_action
+        WHERE role_id=? ORDER BY action_id
+    """, (role_id,))
+    return ok({
+        "role": role,
+        "menus": menus,
+        "actions": [
+            {
+                "action_id": row["action_id"],
+                "name": ACTION_CATALOG.get(row["action_id"], ("", row["action_id"], ""))[1],
+            }
+            for row in actions
+        ],
+        "boundary": "菜单决定入口，动作决定可执行操作，数据范围仍由具体账号的当前工作身份计算。",
+    })
 
 
 # ======================= 统一数据权限 =======================
@@ -900,4 +1164,11 @@ def list_security_audit(action: str | None = None, page: int = 1, page_size: int
             row["detail"] = json.loads(row.pop("detail_json") or "{}")
         except Exception:
             row["detail"] = {}
-    return ok({"total": total, "page": page, "pageSize": page_size, "list": rows})
+    actions = dbm.query(conn, """
+        SELECT action,COUNT(*) count FROM sys_security_audit
+        GROUP BY action ORDER BY action
+    """)
+    return ok({
+        "total": total, "page": page, "pageSize": page_size,
+        "list": rows, "actions": actions,
+    })

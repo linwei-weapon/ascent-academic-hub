@@ -51,10 +51,12 @@ TARGET_MENUS = [
      "/admin/system/permissions", "Key", 304),
     ("/admin/system/kpis", "/admin/system", "指标与口径管理",
      "/admin/system/kpis", "DataAnalysis", 305),
+    ("/admin/system/schemes", "/admin/system", "分析方案管理",
+     "/admin/system/schemes", "Management", 306),
     ("/admin/system/audit", "/admin/system", "审计日志",
-     "/admin/system/audit", "Document", 306),
+     "/admin/system/audit", "Document", 307),
     ("/admin/settings", "/admin/system", "系统参数",
-     "/admin/settings", "Setting", 307),
+     "/admin/settings", "Setting", 308),
 ]
 
 PARENT_IDS = {row[0] for row in TARGET_MENUS if row[1] is None}

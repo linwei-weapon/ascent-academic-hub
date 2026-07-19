@@ -526,6 +526,22 @@ CREATE TABLE sys_role_action (
     PRIMARY KEY(role_id, action_id)
 );
 
+DROP TABLE IF EXISTS sys_auth_identity;
+CREATE TABLE sys_auth_identity (
+    auth_identity_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username         TEXT NOT NULL,
+    provider         TEXT NOT NULL DEFAULT 'unified_identity',
+    subject_id       TEXT NOT NULL,
+    status           TEXT NOT NULL DEFAULT 'active',
+    source           TEXT NOT NULL DEFAULT 'manual',
+    updated_by       TEXT,
+    updated_at       TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+    UNIQUE(provider,subject_id),
+    UNIQUE(username,provider)
+);
+CREATE INDEX idx_auth_identity_username
+ON sys_auth_identity(username,status);
+
 DROP TABLE IF EXISTS sys_menu;
 CREATE TABLE sys_menu (
     menu_id    TEXT PRIMARY KEY,
@@ -614,6 +630,14 @@ CREATE TABLE IF NOT EXISTS sys_ai_analysis_scheme (
 CREATE INDEX IF NOT EXISTS idx_ai_analysis_scheme_lookup
 ON sys_ai_analysis_scheme(expert_id,status,scheme_id);
 
+CREATE TABLE IF NOT EXISTS sys_ai_analysis_scheme_role (
+    scheme_id INTEGER NOT NULL,
+    role_id TEXT NOT NULL,
+    PRIMARY KEY(scheme_id,role_id)
+);
+CREATE INDEX IF NOT EXISTS idx_ai_analysis_scheme_role
+ON sys_ai_analysis_scheme_role(role_id,scheme_id);
+
 CREATE TABLE IF NOT EXISTS sys_kpi_config (
     kpi_id           TEXT PRIMARY KEY,
     module           TEXT NOT NULL,       -- 所属模块
@@ -627,8 +651,51 @@ CREATE TABLE IF NOT EXISTS sys_kpi_config (
     threshold_warn   REAL,                -- 警告阈值
     threshold_danger REAL,                -- 危险阈值
     scope_applicable TEXT DEFAULT 'all',  -- 适用数据范围
+    data_source      TEXT,                -- 计算数据表/视图
+    grain            TEXT,                -- 指标粒度
+    update_cycle     TEXT,                -- 更新时间
+    version          TEXT DEFAULT '1.0',  -- 指标定义版本
+    page_refs        TEXT DEFAULT '[]',   -- JSON 页面引用
+    management_value TEXT,                -- 管理意义
     updated_at       TEXT DEFAULT (datetime('now','localtime'))
 );
+
+CREATE TABLE IF NOT EXISTS sys_kpi_config_history (
+    history_id   INTEGER PRIMARY KEY AUTOINCREMENT,
+    kpi_id       TEXT NOT NULL,
+    config_json  TEXT NOT NULL,
+    change_reason TEXT NOT NULL,
+    changed_by   TEXT NOT NULL,
+    changed_at   TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_kpi_config_history
+ON sys_kpi_config_history(kpi_id,history_id);
+
+CREATE TABLE IF NOT EXISTS sys_system_parameter (
+    parameter_key TEXT PRIMARY KEY,
+    category      TEXT NOT NULL,
+    name          TEXT NOT NULL,
+    value_json    TEXT NOT NULL,
+    value_type    TEXT NOT NULL,
+    description   TEXT NOT NULL,
+    editable      INTEGER NOT NULL DEFAULT 1,
+    options_json  TEXT NOT NULL DEFAULT '[]',
+    updated_by    TEXT,
+    updated_at    TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+    version       INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS sys_system_parameter_history (
+    history_id    INTEGER PRIMARY KEY AUTOINCREMENT,
+    parameter_key TEXT NOT NULL,
+    value_json    TEXT NOT NULL,
+    version       INTEGER NOT NULL,
+    change_reason TEXT NOT NULL,
+    changed_by    TEXT NOT NULL,
+    changed_at    TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_system_parameter_history
+ON sys_system_parameter_history(parameter_key,history_id);
 
 -- ---------------------------------------------------------------------
 -- 索引（§4.5）

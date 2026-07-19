@@ -24,6 +24,7 @@
         </el-table-column>
         <el-table-column prop="path" label="路由路径" min-width="220" />
         <el-table-column prop="icon" label="图标" width="120" />
+        <el-table-column prop="role_count" label="授权角色" width="90" align="right" />
         <el-table-column prop="menu_id" label="菜单 ID" min-width="200" />
         <el-table-column label="操作" width="150">
           <template #default="{ row }">
@@ -85,7 +86,7 @@ import { http } from '@/utils/http'
 
 interface MenuRow {
   menu_id: string; parent_id: string | null; title: string
-  path: string; icon: string | null; sort_order: number; children?: MenuRow[]
+  path: string; icon: string | null; sort_order: number; role_count?: number; children?: MenuRow[]
 }
 
 const menus = ref<MenuRow[]>([])

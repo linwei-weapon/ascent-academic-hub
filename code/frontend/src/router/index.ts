@@ -67,9 +67,10 @@ export const router = createRouter({
         { path: 'system/permissions', component: () => import('@/views/admin/system/Permissions.vue') },
         { path: 'system/audit', component: () => import('@/views/admin/system/Audit.vue') },
         { path: 'system/kpis', component: () => import('@/views/admin/system/Kpis.vue') },
+        { path: 'system/schemes', component: () => import('@/views/admin/system/Schemes.vue') },
 
         // ====== 系统设置 ======
-        { path: 'settings', component: () => import('@/views/admin/settings/index.vue') },
+        { path: 'settings', component: () => import('@/views/admin/system/Parameters.vue') },
         { path: 'forbidden', component: () => import('@/views/admin/Forbidden.vue') },
       ]
     },

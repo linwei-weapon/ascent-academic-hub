@@ -349,10 +349,12 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
+import { useRoute } from 'vue-router'
 import { http } from '@/utils/http'
 
 type AnyRow = Record<string, any>
 
+const route = useRoute()
 const activeTab = ref('accounts')
 const keyword = ref('')
 const users = ref<AnyRow[]>([])
@@ -567,7 +569,13 @@ watch(activeTab, value => {
   if (value === 'relationships' && !relationships.value.length) void loadRelationships()
 })
 onMounted(async () => {
+  const routeUsername = typeof route.query.username === 'string' ? route.query.username.trim() : ''
+  if (routeUsername) keyword.value = routeUsername
   await Promise.all([loadUsers(), loadOptions()])
+  if (routeUsername) {
+    const matched = users.value.find(item => item.username === routeUsername)
+    if (matched) await openConfig(matched)
+  }
 })
 </script>
 

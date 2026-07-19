@@ -3,24 +3,33 @@
     <div class="sa-head-row">
       <div>
         <h2 class="sa-page-title">账号管理</h2>
-        <p class="sa-page-sub">数据来源：sys_user / sys_role（菜单级权限）</p>
+        <p class="sa-page-sub">管理平台账号状态和统一身份认证映射；角色、人员和数据范围在独立权限页面维护。</p>
       </div>
-      <div style="display:flex;gap:8px">
-        <el-button size="small" @click="$router.push('/admin/system/audit')">安全审计</el-button>
-        <el-button size="small" @click="$router.push('/admin/system/kpis')">指标配置</el-button>
-        <el-button type="primary" size="small" @click="openDialog()">+ 新建账号</el-button>
-      </div>
+      <el-button type="primary" size="small" @click="openDialog()">+ 新建账号</el-button>
     </div>
 
     <div class="sa-card">
       <el-table :data="users" size="small" v-loading="loading">
         <el-table-column prop="username" label="用户名" width="150" />
         <el-table-column prop="name" label="姓名" width="140" />
-        <el-table-column prop="role_name" label="角色" min-width="160">
+        <el-table-column label="统一身份认证" min-width="190">
+          <template #default="{ row }">
+            <div v-if="row.auth_subject_id">
+              <div>{{ providerLabel(row.auth_provider) }}</div>
+              <div class="sub-cell">{{ row.auth_subject_id }}</div>
+            </div>
+            <el-tag v-else size="small" type="warning" effect="plain">待绑定</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="staff_id" label="教职工号" width="130">
+          <template #default="{row}">{{ row.staff_id || '—' }}</template>
+        </el-table-column>
+        <el-table-column prop="role_name" label="默认角色" min-width="150">
           <template #default="{ row }">
             <el-tag size="small" effect="plain">{{ row.role_name || row.role_id }}</el-tag>
           </template>
         </el-table-column>
+        <el-table-column prop="identity_count" label="工作身份" width="90" align="right" />
         <el-table-column label="状态" width="100">
           <template #default="{ row }">
             <el-switch
@@ -29,8 +38,14 @@
             />
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="220">
+        <el-table-column label="操作" width="330" fixed="right">
           <template #default="{ row }">
+            <el-button size="small" text type="primary" @click="openAuthMapping(row)">统一身份</el-button>
+            <el-button
+              size="small"
+              text
+              @click="$router.push({ path: '/admin/system/permissions', query: { username: row.username } })"
+            >数据权限</el-button>
             <el-button size="small" text type="primary" @click="openDialog(row)">编辑</el-button>
             <el-button size="small" text type="warning" @click="resetPwd(row)">重置密码</el-button>
             <el-popconfirm title="确定删除该账号？" @confirm="remove(row)">
@@ -66,6 +81,29 @@
         <el-button size="small" type="primary" :loading="saving" @click="save">保存</el-button>
       </template>
     </el-dialog>
+
+    <el-drawer v-model="authVisible" size="520px" :title="`统一身份认证映射 · ${authUser?.name || authUser?.username || ''}`">
+      <el-alert type="info" :closable="false" show-icon
+        title="平台不维护统一身份认证密码，只保存学校认证主体标识与本地账号的映射关系。" />
+      <el-form label-width="110px" class="mapping-form">
+        <el-form-item label="本地账号"><b>{{ authUser?.username }}</b></el-form-item>
+        <el-form-item label="认证来源">
+          <el-select v-model="authForm.provider" style="width:100%">
+            <el-option label="学校统一身份认证" value="unified_identity" />
+            <el-option label="企业微信" value="wecom" />
+            <el-option label="学校小程序/APP" value="school_app" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="认证主体标识" required>
+          <el-input v-model="authForm.subject_id" placeholder="统一身份认证返回的稳定 subject / uid" />
+        </el-form-item>
+        <el-form-item label="映射状态"><el-switch v-model="authForm.active" /></el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="authVisible=false">取消</el-button>
+        <el-button type="primary" :loading="authSaving" @click="saveAuthMapping">保存映射</el-button>
+      </template>
+    </el-drawer>
   </div>
 </template>
 
@@ -77,6 +115,8 @@ import { http } from '@/utils/http'
 interface UserRow {
   user_id: number; username: string; name: string
   role_id: string; role_name: string; status: string
+  identity_count: number; staff_id?: string
+  auth_provider?: string; auth_subject_id?: string
 }
 interface RoleRow { role_id: string; name: string }
 
@@ -88,6 +128,10 @@ const dialogVisible = ref(false)
 const editing = ref(false)
 let editId = 0
 const form = reactive({ username: '', name: '', role_id: '', password: '', active: true })
+const authVisible = ref(false)
+const authSaving = ref(false)
+const authUser = ref<UserRow | null>(null)
+const authForm = reactive({ provider: 'unified_identity', subject_id: '', active: true })
 
 async function load() {
   loading.value = true
@@ -174,9 +218,44 @@ async function remove(row: any) {
   await load()
 }
 
+function providerLabel(provider:string) {
+  return ({unified_identity:'学校统一身份认证',wecom:'企业微信',school_app:'学校小程序/APP'} as any)[provider] || provider
+}
+
+async function openAuthMapping(row:UserRow) {
+  authUser.value = row
+  authVisible.value = true
+  const detail:any = await http.get(`/admin/rbac/users/${row.user_id}/auth-identity`)
+  const current = detail.mappings?.find((item:any) => item.status === 'active') || detail.mappings?.[0]
+  Object.assign(authForm, {
+    provider: current?.provider || 'unified_identity',
+    subject_id: current?.subject_id || row.staff_id || '',
+    active: current?.status !== 'inactive',
+  })
+}
+
+async function saveAuthMapping() {
+  if (!authUser.value || !authForm.subject_id.trim()) {
+    ElMessage.warning('请填写认证主体标识')
+    return
+  }
+  authSaving.value = true
+  try {
+    await http.put(`/admin/rbac/users/${authUser.value.user_id}/auth-identity`, {
+      provider:authForm.provider,
+      subject_id:authForm.subject_id.trim(),
+      status:authForm.active ? 'active' : 'inactive',
+    })
+    ElMessage.success('统一身份映射已保存')
+    authVisible.value = false
+    await load()
+  } finally { authSaving.value = false }
+}
+
 onMounted(load)
 </script>
 
 <style scoped>
 .sa-head-row { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 14px; }
+.sub-cell{margin-top:3px;color:#94a3b8;font-size:11px}.mapping-form{margin-top:18px}
 </style>

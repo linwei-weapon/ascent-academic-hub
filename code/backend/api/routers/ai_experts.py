@@ -61,6 +61,13 @@ CREATE TABLE IF NOT EXISTS sys_ai_analysis_scheme (
 );
 CREATE INDEX IF NOT EXISTS idx_ai_analysis_scheme_lookup
 ON sys_ai_analysis_scheme(expert_id,status,scheme_id);
+CREATE TABLE IF NOT EXISTS sys_ai_analysis_scheme_role (
+    scheme_id INTEGER NOT NULL,
+    role_id TEXT NOT NULL,
+    PRIMARY KEY(scheme_id,role_id)
+);
+CREATE INDEX IF NOT EXISTS idx_ai_analysis_scheme_role
+ON sys_ai_analysis_scheme_role(role_id,scheme_id);
 """
 
 
@@ -80,6 +87,7 @@ class ExpertInterpretIn(BaseModel):
 class AnalysisSchemeIn(BaseModel):
     name: str = Field(min_length=2, max_length=80)
     parameters: dict[str, Any] = Field(default_factory=dict)
+    roleIds: list[str] = Field(default_factory=list)
     changeReason: str = Field(default="基于研判会话保存", min_length=2, max_length=300)
 
 
@@ -402,6 +410,19 @@ def list_analysis_schemes(expert_id: str,
     for row in rows:
         row["parameters"] = json.loads(row.pop("parameters_json") or "{}")
         row["scopePolicy"] = json.loads(row.pop("scope_policy_json") or "{}")
+        row["roleIds"] = [
+            item["role_id"] for item in dbm.query(
+                conn,
+                "SELECT role_id FROM sys_ai_analysis_scheme_role "
+                "WHERE scheme_id=? ORDER BY role_id",
+                (row["scheme_id"],),
+            )
+        ]
+    if not can_manage:
+        rows = [
+            row for row in rows
+            if not row["roleIds"] or user["role_id"] in row["roleIds"]
+        ]
     return ok(rows)
 
 
@@ -416,6 +437,17 @@ def create_analysis_scheme(expert_id: str, body: AnalysisSchemeIn,
     )
     if errors:
         raise ApiError("分析方案参数无效：" + "；".join(errors), code=400, status_code=400)
+    role_ids = list(dict.fromkeys(body.roleIds or effective["applicableRoles"]))
+    invalid_roles = [
+        role_id for role_id in role_ids
+        if role_id not in effective["applicableRoles"]
+    ]
+    if invalid_roles:
+        raise ApiError(
+            "分析方案适用角色超出专家范围：" + "、".join(invalid_roles),
+            code=400,
+            status_code=400,
+        )
     _ensure_tables(conn)
     now = _now()
     cursor = conn.execute("""
@@ -433,12 +465,18 @@ def create_analysis_scheme(expert_id: str, body: AnalysisSchemeIn,
         }, ensure_ascii=False, sort_keys=True),
         admin["username"], now,
     ))
+    for role_id in role_ids:
+        conn.execute("""
+            INSERT INTO sys_ai_analysis_scheme_role(scheme_id,role_id)
+            VALUES(?,?)
+        """, (cursor.lastrowid, role_id))
     write_audit(
         conn, admin["username"], "ai.analysis_scheme.create", "ai_analysis_scheme",
         str(cursor.lastrowid), detail={
             "expertId": expert_id,
             "expertVersion": version["version"],
             "changeReason": body.changeReason,
+            "roleIds": role_ids,
         },
     )
     return ok({
