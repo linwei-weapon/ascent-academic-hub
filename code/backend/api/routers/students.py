@@ -24,7 +24,11 @@ def analysis(semester: Optional[str] = None, grade: Optional[str] = None,
              required: Optional[str] = None, year: Optional[str] = None,
              user: dict = Depends(get_current_user),
              conn: sqlite3.Connection = Depends(get_db)):
-    cache_key = (user.get("username"), user.get("role_id"), semester, grade, college,
+    scope_fingerprint = (
+        (user.get("permission_context") or {}).get("scopeFingerprint")
+        or f"legacy:{user.get('username')}:{user.get('role_id')}"
+    )
+    cache_key = (scope_fingerprint, semester, grade, college,
                  major, class_id, retake, required, year)
     cached = _ANALYSIS_CACHE.get(cache_key)
     if cached and time.monotonic() - cached[0] < _ANALYSIS_CACHE_TTL:

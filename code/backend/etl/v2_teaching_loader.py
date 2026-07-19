@@ -85,8 +85,18 @@ def load_teaching(root: Path | None = None, db_path: Path | None = None) -> dict
             sid = _code(row.get("学号")); staff_id = _code(row.get("导师工号"))
             if not sid or not staff_id: continue
             conn.execute("INSERT INTO dim_staff(staff_id,display_name,organization_id,staff_type,title,status,source) VALUES(?,?,?,?,?,'active','real') ON CONFLICT(staff_id) DO UPDATE SET display_name=COALESCE(dim_staff.display_name,excluded.display_name),title=COALESCE(dim_staff.title,excluded.title)", (staff_id, _text(row.get("导师姓名")), _text(row.get("导师所属部门")), "mentor", _text(row.get("教师职称"))))
-            mentor_scopes.append((staff_id, sid, _text(row.get("导师类型")) or "mentor", _date(row.get("指导开始日期")) or "2024-03-11", _date(row.get("指导结束日期")), "real"))
-        conn.executemany("INSERT INTO staff_student_scope(staff_id,student_id,relation_type,valid_from,valid_to,source) VALUES(?,?,?,?,?,?) ON CONFLICT(staff_id,student_id,relation_type,valid_from) DO UPDATE SET valid_to=excluded.valid_to,source='real'", mentor_scopes)
+            mentor_scopes.append((staff_id, sid, _text(row.get("导师类型")) or "mentor",
+                                  _date(row.get("指导开始日期")) or "2024-03-11",
+                                  _date(row.get("指导结束日期")), "active", None,
+                                  "real", "学生导师库", None))
+        conn.executemany("""INSERT INTO staff_student_scope(
+            staff_id,student_id,relation_type,valid_from,valid_to,status,scope_ref,
+            source,source_system,source_updated_at
+          ) VALUES(?,?,?,?,?,?,?,?,?,?)
+          ON CONFLICT(staff_id,student_id,relation_type,valid_from) DO UPDATE SET
+            valid_to=excluded.valid_to,status=excluded.status,scope_ref=excluded.scope_ref,
+            source='real',source_system=excluded.source_system,
+            source_updated_at=excluded.source_updated_at""", mentor_scopes)
 
         adviser_scopes = []; placeholder_classes = 0
         for _, row in advisers.iterrows():
@@ -97,8 +107,21 @@ def load_teaching(root: Path | None = None, db_path: Path | None = None) -> dict
             if len(ids) != 1:
                 placeholder_classes += 1
                 conn.execute("INSERT INTO dim_staff(staff_id,display_name,organization_id,staff_type,title,status,source) VALUES(?,?,?,?,?,'active','real_partial') ON CONFLICT(staff_id) DO NOTHING", (staff_id, name, _text(row.get("所属院系")), "class_adviser", _text(row.get("职称"))))
-            adviser_scopes.extend((staff_id, sid, "class_adviser", "2022-09-01", None, "real") for (sid,) in conn.execute("SELECT student_id FROM dim_student WHERE class_code=?", (class_name,)))
-        conn.executemany("INSERT INTO staff_student_scope(staff_id,student_id,relation_type,valid_from,valid_to,source) VALUES(?,?,?,?,?,?) ON CONFLICT(staff_id,student_id,relation_type,valid_from) DO NOTHING", adviser_scopes)
+            adviser_scopes.extend(
+                (staff_id, sid, "class_adviser", "2022-09-01", None, "active",
+                 class_name, "real", "行政班班主任", None)
+                for (sid,) in conn.execute(
+                    "SELECT student_id FROM dim_student WHERE class_code=?", (class_name,)
+                )
+            )
+        conn.executemany("""INSERT INTO staff_student_scope(
+            staff_id,student_id,relation_type,valid_from,valid_to,status,scope_ref,
+            source,source_system,source_updated_at
+          ) VALUES(?,?,?,?,?,?,?,?,?,?)
+          ON CONFLICT(staff_id,student_id,relation_type,valid_from) DO UPDATE SET
+            valid_to=excluded.valid_to,status=excluded.status,scope_ref=excluded.scope_ref,
+            source='real',source_system=excluded.source_system,
+            source_updated_at=excluded.source_updated_at""", adviser_scopes)
 
         lessons = []; lesson_teachers = []; meetings = []; unparsed = 0
         for _, row in tasks.iterrows():

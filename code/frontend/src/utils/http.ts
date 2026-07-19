@@ -5,6 +5,7 @@
 import { ElMessage } from 'element-plus'
 
 const TOKEN_KEY = 'bi_token'
+const ACTIVE_IDENTITY_KEY = 'bi_active_identity'
 
 export function getToken(): string {
   return localStorage.getItem(TOKEN_KEY) || ''
@@ -14,6 +15,16 @@ export function setToken(t: string): void {
 }
 export function clearToken(): void {
   localStorage.removeItem(TOKEN_KEY)
+}
+export function getActiveIdentity(): string {
+  return localStorage.getItem(ACTIVE_IDENTITY_KEY) || ''
+}
+export function setActiveIdentity(identityId: string): void {
+  if (identityId) localStorage.setItem(ACTIVE_IDENTITY_KEY, identityId)
+  else localStorage.removeItem(ACTIVE_IDENTITY_KEY)
+}
+export function clearActiveIdentity(): void {
+  localStorage.removeItem(ACTIVE_IDENTITY_KEY)
 }
 
 interface Envelope<T> { code: number; msg: string; data: T }
@@ -30,6 +41,8 @@ async function request<T = any>(path: string, opts: RequestInit = {}, silent = f
   }
   const token = getToken()
   if (token) headers.Authorization = `Bearer ${token}`
+  const activeIdentity = getActiveIdentity()
+  if (token && activeIdentity) headers['X-Active-Identity'] = activeIdentity
 
   const res = await fetch(`/api${path}`, { ...opts, headers })
 

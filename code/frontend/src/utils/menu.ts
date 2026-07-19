@@ -45,7 +45,7 @@ export function homePathForUser(user: AuthUser | null, menus: AuthMenu[]): strin
   const allowed = new Set(leafMenus(menus).map(menu => menu.path))
   const preferred: string[] = []
   if (user?.username === 'admin') preferred.push('/admin/system/accounts')
-  if (user?.role === 'counselor' || user?.role === 'teacher') {
+  if (['counselor', 'teacher', 'class_adviser', 'mentor'].includes(user?.role || '')) {
     preferred.push('/admin/alert', '/admin/students/analysis')
   } else {
     preferred.push('/admin/dashboard')

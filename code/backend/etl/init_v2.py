@@ -59,6 +59,12 @@ MIGRATION_COLUMNS = {
         "raw_schedule": "TEXT",
     },
     "dim_student": {"major_name": "TEXT"},
+    "staff_student_scope": {
+        "status": "TEXT NOT NULL DEFAULT 'active'",
+        "scope_ref": "TEXT",
+        "source_system": "TEXT",
+        "source_updated_at": "TEXT",
+    },
 }
 
 

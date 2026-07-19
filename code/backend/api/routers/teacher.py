@@ -17,14 +17,14 @@ router = APIRouter(prefix="/api/teacher", tags=["teacher"])
 def teacher_alerts(conn: sqlite3.Connection = Depends(get_db),
                    user: dict = Depends(get_current_user)):
     """返回当前教师所授课堂中处于预警状态的学生列表。"""
-    # 从 sys_role_scope 获取 teacher_id
-    scope_row = dbm.query_one(conn, """
-        SELECT scope_id FROM sys_role_scope WHERE role_id=?
-    """, (user["role_id"],))
-    if not scope_row:
+    context = user.get("permission_context") or {}
+    detail = context.get("detailScope") or {}
+    teacher_ids = detail.get("teacherIds") or []
+    teacher_id = user.get("staff_id") or (
+        teacher_ids[0] if len(teacher_ids) == 1 else None
+    )
+    if not teacher_id:
         return ok({"students": [], "courses": []})
-
-    teacher_id = scope_row["scope_id"]
 
     # 获取该教师当前学期授课课程列表
     courses = []

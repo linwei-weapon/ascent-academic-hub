@@ -19,6 +19,9 @@ from fastapi import APIRouter, Depends
 from .. import db as dbm
 from ..deps import college_data_scope, get_current_user, get_db, get_v2_db, student_data_scope
 from ..envelope import ApiError, ok
+from ..permission_context import (
+    ALL_SCOPE_ROLES, SCOPED_ROLE_TYPES, v2_lesson_scope, v2_student_scope,
+)
 from ..util import clean_dept, normalize_title
 
 router = APIRouter(prefix="/api/admin/ai", tags=["ai"])
@@ -55,8 +58,18 @@ WORKFLOW_BY_LABEL = {
     "已解决": "resolved",
     "已关闭": "closed",
 }
-V2_ALL_SCOPE_ROLES = {"school_leader", "dean", "dept_operation", "dept_research", "dept_practice", "quality_office"}
-V2_MAPPED_SCOPE_ROLES = {"college_dean", "college_secretary", "counselor", "dept_director"}
+V2_ALL_SCOPE_ROLES = ALL_SCOPE_ROLES
+V2_MAPPED_SCOPE_ROLES = set(SCOPED_ROLE_TYPES)
+
+
+def _require_all_scope(user: dict, message: str) -> None:
+    context = user.get("permission_context") or {}
+    if context:
+        if (context.get("detailScope") or {}).get("type") != "all":
+            raise ApiError(message, code=403, status_code=403)
+        return
+    if user.get("role_id") not in V2_ALL_SCOPE_ROLES:
+        raise ApiError(message, code=403, status_code=403)
 
 DEFAULT_TRACEABILITY = {
     "dataSources": ["当前页面已接入的业务数据表"],
@@ -582,6 +595,9 @@ def _student_scope_sql(user: dict, conn: sqlite3.Connection, alias: str = "s") -
 
 
 def _v2_student_scope(user: dict, conn: sqlite3.Connection, alias: str = "s") -> tuple[str, list]:
+    context = user.get("permission_context")
+    if context:
+        return v2_student_scope(context, conn, alias)
     role = user.get("role_id")
     if role in V2_ALL_SCOPE_ROLES:
         return "", []
@@ -2126,8 +2142,7 @@ def _course_raw_offering(conn: sqlite3.Connection, semester: str, course_id: str
 def faculty_resource_risk_insight(semester: str = "2023-2024-1",
                                   user: dict = Depends(get_current_user),
                                   conn: sqlite3.Connection = Depends(get_v2_db)):
-    if user.get("role_id") not in V2_ALL_SCOPE_ROLES:
-        raise ApiError("当前角色没有V2全校师资专题访问范围", code=403, status_code=403)
+    _require_all_scope(user, "当前身份没有V2全校师资专题访问范围")
     rows = dbm.query(conn, f"""
         SELECT t.*,COALESCE(c.name,t.course_id) course_name,c.organization_id,
                COALESCE(o.lesson_count,0) lesson_count,COALESCE(o.enrolled,0) enrolled
@@ -2220,8 +2235,7 @@ def faculty_resource_risk_insight(semester: str = "2023-2024-1",
 def faculty_resource_course_insight(course_id: str, semester: str = "2023-2024-1",
                                     user: dict = Depends(get_current_user),
                                     conn: sqlite3.Connection = Depends(get_v2_db)):
-    if user.get("role_id") not in V2_ALL_SCOPE_ROLES:
-        raise ApiError("当前角色没有V2全校师资专题访问范围", code=403, status_code=403)
+    _require_all_scope(user, "当前身份没有V2全校师资专题访问范围")
     row = dbm.query_one(conn, """
         SELECT t.*,COALESCE(c.name,t.course_id) course_name,c.organization_id,c.category,c.nature
         FROM agg_course_team t
@@ -2430,6 +2444,41 @@ def _management_scope_context(user: dict, conn: sqlite3.Connection,
     empty V2 scope instead of silently falling back to school-wide data.
     """
     role_id = user.get("role_id") or ""
+    context = user.get("permission_context")
+    if context:
+        detail = context.get("detailScope") or {}
+        scope_type = detail.get("type") or "denied"
+        source_ids = detail.get("sourceScopeIds") or []
+        legacy_where, legacy_params = student_data_scope(user, conn, "s")
+        if scope_type == "all":
+            return {
+                "type": "all", "label": "全校",
+                "key": context.get("scopeFingerprint") or "all",
+                "legacyStudentWhere": "", "legacyStudentParams": [],
+                "v2StudentWhere": "", "v2StudentParams": [],
+                "v2LessonWhere": "", "v2LessonParams": [],
+            }
+        label = "、".join(source_ids) or "当前人员关系范围"
+        if scope_type == "college" and source_ids:
+            names = _safe_query(
+                conn,
+                f"SELECT name FROM dim_college WHERE college_id IN "
+                f"({','.join('?' * len(source_ids))}) ORDER BY name",
+                tuple(source_ids),
+            )
+            label = "、".join(row.get("name") or "" for row in names) or label
+        v2_where, v2_params = v2_student_scope(context, v2_conn, "s")
+        lesson_where, lesson_params = v2_lesson_scope(context, v2_conn, "tl")
+        return {
+            "type": scope_type, "label": label,
+            "key": context.get("scopeFingerprint") or f"{scope_type}:{label}",
+            "legacyStudentWhere": legacy_where or "1=0",
+            "legacyStudentParams": legacy_params,
+            "v2StudentWhere": v2_where or "1=0",
+            "v2StudentParams": v2_params,
+            "v2LessonWhere": lesson_where or "1=0",
+            "v2LessonParams": lesson_params,
+        }
     scope_type = _safe_scalar(
         conn, "SELECT data_scope_type FROM sys_role WHERE role_id=?", (role_id,), "all"
     ) or "all"
@@ -2493,7 +2542,10 @@ def _management_briefing_view(base: dict, period: str, user: dict, cache_hit: bo
     payload = json.loads(json.dumps(base, ensure_ascii=False))
     priorities = payload.get("priorities") or []
     ongoing = [_enrich_briefing_priority(item) for item in priorities[:3]]
-    history_key = (user.get("username") or user.get("role_id"), period,
+    history_key = (
+        (user.get("permission_context") or {}).get("scopeFingerprint")
+        or user.get("username") or user.get("role_id"),
+        period,
                    payload.get("semester", {}).get("grade"), payload.get("semester", {}).get("teaching"))
     previous = _MANAGEMENT_BRIEFING_HISTORY.get(history_key)
     events = _build_management_events(priorities, previous.get("priorities") if previous else None)
@@ -2585,7 +2637,7 @@ def management_ai_briefing(period: str = "morning",
     teaching_semester = semester or _safe_scalar(v2_conn, "SELECT MAX(semester_id) FROM teaching_lesson", default="2023-2024-1")
     scope = _management_scope_context(user, conn, v2_conn)
     # 本次更新与学期态势复用同一份重型跨库汇总，只在呈现层组织不同内容。
-    cache_key = (legacy_semester, teaching_semester, user.get("role_id"), scope["key"])
+    cache_key = (legacy_semester, teaching_semester, scope["key"])
     cached = _MANAGEMENT_BRIEFING_CACHE.get(cache_key)
     if cached and time.time() - cached[0] < MANAGEMENT_BRIEFING_CACHE_TTL:
         # 缓存始终保存规则汇总原稿。这里做深拷贝，避免首次返回时的样本匹配
@@ -2983,24 +3035,32 @@ def graduation_course_support_simulation(semester: Optional[str] = None,
     """
     student_scope, student_scope_params = _v2_student_scope(user, conn, "s")
     student_scope_and = f" AND {student_scope}" if student_scope else ""
-    scope_mappings = _safe_query(
-        conn,
-        "SELECT scope_type,organization_id,major_code,class_code FROM access_scope_mapping "
-        "WHERE role_id=? AND mapping_status='mapped'",
-        (user.get("role_id"),),
-    ) if user.get("role_id") not in V2_ALL_SCOPE_ROLES else []
-    scope_type = scope_mappings[0].get("scope_type") if scope_mappings else "all"
-    organization_ids = [row.get("organization_id") for row in scope_mappings if row.get("organization_id")]
-    if scope_type == "college" and organization_ids:
-        lesson_scope = f"l.organization_id IN ({','.join('?' * len(organization_ids))})"
-        lesson_scope_params = organization_ids
-    elif scope_type == "all":
-        lesson_scope, lesson_scope_params = "", []
+    context = user.get("permission_context")
+    if context:
+        scope_type = (context.get("detailScope") or {}).get("type") or "denied"
+        lesson_scope, lesson_scope_params = v2_lesson_scope(context, conn, "l")
+        scope_key = context.get("scopeFingerprint") or scope_type
     else:
-        # Major/class roles have a reliable student scope, but teaching_lesson does
-        # not expose a stable major/class key. Keep supply empty instead of using
-        # school-wide resources in a scoped decision.
-        lesson_scope, lesson_scope_params = "1=0", []
+        scope_mappings = _safe_query(
+            conn,
+            "SELECT scope_type,organization_id,major_code,class_code FROM access_scope_mapping "
+            "WHERE role_id=? AND mapping_status='mapped'",
+            (user.get("role_id"),),
+        ) if user.get("role_id") not in V2_ALL_SCOPE_ROLES else []
+        scope_type = scope_mappings[0].get("scope_type") if scope_mappings else "all"
+        organization_ids = [row.get("organization_id") for row in scope_mappings if row.get("organization_id")]
+        if scope_type == "college" and organization_ids:
+            lesson_scope = f"l.organization_id IN ({','.join('?' * len(organization_ids))})"
+            lesson_scope_params = organization_ids
+        elif scope_type == "all":
+            lesson_scope, lesson_scope_params = "", []
+        else:
+            # Major/class roles have a reliable student scope, but teaching_lesson
+            # does not expose a stable major/class key.
+            lesson_scope, lesson_scope_params = "1=0", []
+        scope_key = "all" if not student_scope else (
+            f"{scope_type}:{','.join(str(x) for x in student_scope_params)}"
+        )
     if not _table_exists(conn, "student_plan_course_status"):
         raise ApiError("暂无培养方案完成状态数据，无法进行毕业准备模拟", code=404, status_code=404)
 
@@ -3011,16 +3071,15 @@ def graduation_course_support_simulation(semester: Optional[str] = None,
     available_teachers = max(0, min(int(available_teachers or 0), 20))
     priority_focus = priority_focus if priority_focus in {"balanced", "failed", "verification"} else "balanced"
     problem_type = problem_type if problem_type in {"graduation", "course_support", "faculty_assurance"} else "graduation"
-    scope_key = "all" if not student_scope else f"{scope_type}:{','.join(str(x) for x in student_scope_params)}"
     cache_key = (teaching_semester, limit, added_classes, class_capacity, available_teachers,
-                 priority_focus, problem_type, user.get("role_id"), scope_key)
+                 priority_focus, problem_type, scope_key)
     cached = _DECISION_SIMULATION_CACHE.get(cache_key)
     if cached and time.time() - cached[0] < DECISION_SIMULATION_CACHE_TTL:
         payload = dict(cached[1])
         payload["cache"] = {"hit": True, "ttlSeconds": DECISION_SIMULATION_CACHE_TTL}
         return ai_ok(payload)
 
-    base_key = (teaching_semester, limit, user.get("role_id"), scope_key)
+    base_key = (teaching_semester, limit, scope_key)
     base_cached = _DECISION_SIMULATION_BASE_CACHE.get(base_key)
     if base_cached and time.time() - base_cached[0] < MANAGEMENT_BRIEFING_CACHE_TTL:
         base_data = json.loads(json.dumps(base_cached[1], ensure_ascii=False))

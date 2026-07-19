@@ -13,6 +13,8 @@ export type RoleType =
   | 'counselor'          // 辅导员
   | 'dept_director'      // 系主任/教研室主任
   | 'teacher'            // 任课教师 [V1.1新增]
+  | 'class_adviser'      // 班主任
+  | 'mentor'             // 学业导师
 
 /** 角色中文名映射 */
 export const ROLE_LABELS: Record<RoleType, string> = {
@@ -27,6 +29,8 @@ export const ROLE_LABELS: Record<RoleType, string> = {
   counselor:          '辅导员',
   dept_director:      '系主任',
   teacher:            '任课教师',
+  class_adviser:      '班主任',
+  mentor:             '学业导师',
 }
 
 /** 角色分组（用于快捷切换） */

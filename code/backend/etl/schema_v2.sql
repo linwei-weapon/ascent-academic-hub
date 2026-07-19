@@ -376,7 +376,11 @@ CREATE TABLE IF NOT EXISTS staff_student_scope (
     relation_type TEXT NOT NULL,
     valid_from TEXT NOT NULL,
     valid_to TEXT,
+    status TEXT NOT NULL DEFAULT 'active',
+    scope_ref TEXT,
     source TEXT NOT NULL DEFAULT 'real',
+    source_system TEXT,
+    source_updated_at TEXT,
     PRIMARY KEY(staff_id, student_id, relation_type, valid_from)
 );
 

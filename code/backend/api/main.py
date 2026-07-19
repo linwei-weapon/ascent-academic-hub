@@ -1,6 +1,8 @@
 """FastAPI 应用入口。
 启动：PYTHONIOENCODING=utf-8 python -X utf8 -m uvicorn backend.api.main:app --reload --port 8000
 """
+import logging
+import time
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -10,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .envelope import ApiError, fail, ok
 from . import settings
+from .security import decode_token
 from .routers import (auth, dashboard, alert, curriculum, reports,
                       operation, faculty, settings as settings_router, students,
                       admin_rbac, meta, teacher, ai)
@@ -22,8 +25,39 @@ app.add_middleware(
     allow_origins=settings.CORS_ORIGINS,
     allow_credentials=False,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type"],
+    allow_headers=["Authorization", "Content-Type", "X-Active-Identity"],
 )
+
+access_logger = logging.getLogger("uvicorn.error")
+
+
+@app.middleware("http")
+async def permission_access_log(request: Request, call_next):
+    """API访问日志显式记录账号与工作身份，不记录令牌和学生敏感数据。"""
+    started = time.perf_counter()
+    auth_header = request.headers.get("authorization", "")
+    payload = None
+    if auth_header.lower().startswith("bearer "):
+        payload = decode_token(auth_header.split(" ", 1)[1].strip())
+    username = (payload or {}).get("sub") or "anonymous"
+    identity = request.headers.get("x-active-identity")
+    if not identity and payload:
+        identity = f"UR:{username}:{payload.get('role') or 'unknown'}"
+    try:
+        response = await call_next(request)
+    except Exception:
+        access_logger.exception(
+            "api_access username=%s identity=%s method=%s path=%s status=500 duration_ms=%.1f",
+            username, identity or "-", request.method, request.url.path,
+            (time.perf_counter() - started) * 1000,
+        )
+        raise
+    access_logger.info(
+        "api_access username=%s identity=%s method=%s path=%s status=%s duration_ms=%.1f",
+        username, identity or "-", request.method, request.url.path,
+        response.status_code, (time.perf_counter() - started) * 1000,
+    )
+    return response
 
 
 @app.exception_handler(ApiError)

@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from .. import db as dbm
 from ..deps import get_db, get_db_rw, get_current_user, student_data_scope, college_data_scope
 from ..envelope import ok, ApiError
+from ..permission_context import has_action
 from ..util import normalize_title, clean_dept
 from ..settings import LATEST_REAL_SEMESTER, CURRENT_SEMESTER
 
@@ -22,7 +23,6 @@ _PALETTE = ["#2563EB", "#16A34A", "#EA580C", "#F59E0B", "#9333EA", "#60A5FA",
             "#DC2626", "#0891B2", "#65A30D"]
 # 单学期教学班 > 阈值 → 判为源库生成缺陷，统计时排除
 _TEACHER_CAP = 200
-_QUALITY_MANAGERS = {"dean", "dept_operation"}
 _CLASSROOM_OCCUPANCY_CACHE: dict[tuple, tuple[str, float, dict]] = {}
 _CLASSROOM_OCCUPANCY_CACHE_TTL = 900
 
@@ -89,7 +89,7 @@ def operation_data_quality(semester: Optional[str] = None, status: Optional[str]
         "affectedRows": sum(int(r["affected_rows"] or 0) for r in rows)},
         "policy": {"statisticalAction": "open/reviewing问题在教学运行统计中排除",
                    "recovery": "源数据修复并复核后可关闭问题并重新计算"},
-        "permissions": {"manage": user.get("role_id") in _QUALITY_MANAGERS}})
+        "permissions": {"manage": has_action(user, "operation.quality.manage")}})
 
 
 @router.get("/data-quality/{issue_id}/audit")
@@ -106,7 +106,7 @@ def operation_quality_audit(issue_id: str, user: dict = Depends(get_current_user
 def update_operation_quality_status(issue_id: str, body: QualityStatusIn,
                                     user: dict = Depends(get_current_user),
                                     conn: sqlite3.Connection = Depends(get_db_rw)):
-    if user.get("role_id") not in _QUALITY_MANAGERS:
+    if not has_action(user, "operation.quality.manage"):
         raise ApiError("仅教务处运行科或教务处处长可处置数据质量问题", code=403, status_code=403)
     issue = dbm.query_one(conn, "SELECT status FROM data_quality_issue WHERE issue_id=?", (issue_id,))
     if not issue:

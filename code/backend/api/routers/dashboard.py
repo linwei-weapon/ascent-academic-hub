@@ -172,7 +172,11 @@ def dashboard(semester: Optional[str] = None,
         })
     scope_label = "全校"
     if restricted:
-        if user.get("role_id") in {"college_dean", "college_secretary"} and len(rows) == 1:
+        if (
+            (user.get("permission_context") or {}).get("detailScope", {}).get("type")
+            == "college"
+            and len(rows) == 1
+        ):
             scope_label = rows[0]["name"]
         else:
             scope_label = "当前角色授权范围"

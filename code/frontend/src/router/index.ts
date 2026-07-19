@@ -63,6 +63,7 @@ export const router = createRouter({
         { path: 'system/accounts', component: () => import('@/views/admin/system/Accounts.vue') },
         { path: 'system/menus', component: () => import('@/views/admin/system/Menus.vue') },
         { path: 'system/roles', component: () => import('@/views/admin/system/Roles.vue') },
+        { path: 'system/permissions', component: () => import('@/views/admin/system/Permissions.vue') },
         { path: 'system/audit', component: () => import('@/views/admin/system/Audit.vue') },
         { path: 'system/kpis', component: () => import('@/views/admin/system/Kpis.vue') },
 

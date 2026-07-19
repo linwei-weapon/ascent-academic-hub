@@ -19,6 +19,7 @@ from pydantic import BaseModel
 from .. import db as dbm
 from ..deps import get_db, get_db_rw, get_current_user, require_admin
 from ..envelope import ok, ApiError
+from ..permission_context import has_action
 
 router = APIRouter(prefix="/api/admin", tags=["settings"])
 
@@ -826,7 +827,7 @@ class DiscoveredRuleAction(BaseModel):
 def trigger_discovery(user: dict = Depends(get_current_user),
                       conn: sqlite3.Connection = Depends(get_db)):
     """触发规则自发现分析，返回发现的规则数量。"""
-    if user.get("role_id") != "dean":
+    if not has_action(user, "rule.discovery.manage"):
         raise ApiError("当前角色无权运行规则自发现", code=403, status_code=403)
     from backend.etl.rule_discovery import run_and_save
     from ..settings import CURRENT_SEMESTER

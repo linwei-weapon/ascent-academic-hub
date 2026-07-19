@@ -8,6 +8,8 @@ import json
 import os
 import pandas as pd
 
+from backend.permission_catalog import ROLE_ACTIONS
+
 # ---- 5 条预警规则（全部阈值触发）----
 # params 中除 text 外的数值字段即引擎 alert_engine.py 实际消费的阈值；
 # 每条规则仅保留引擎真正读取的阈值，避免"参数存了但不生效"的错配。
@@ -42,6 +44,8 @@ ROLES = [
     ("counselor", "辅导员", "class"),
     ("dept_director", "系主任", "major"),
     ("teacher", "任课教师", "teacher"),  # V1.1新增
+    ("class_adviser", "班主任", "staff_relation"),
+    ("mentor", "学业导师", "staff_relation"),
 ]
 
 # ---- 菜单（三个一级分组；业务模块内部使用页内Tab，不形成三级导航）----
@@ -64,9 +68,10 @@ MENUS = [
     ("/admin/system/accounts", "账号管理", "User", 301, "/admin/system"),
     ("/admin/system/roles", "角色与功能权限", "UserFilled", 302, "/admin/system"),
     ("/admin/system/menus", "菜单管理", "Menu", 303, "/admin/system"),
-    ("/admin/system/kpis", "指标与口径管理", "DataAnalysis", 304, "/admin/system"),
-    ("/admin/system/audit", "审计日志", "Document", 305, "/admin/system"),
-    ("/admin/settings", "系统参数", "Setting", 306, "/admin/system"),
+    ("/admin/system/permissions", "数据权限", "Key", 304, "/admin/system"),
+    ("/admin/system/kpis", "指标与口径管理", "DataAnalysis", 305, "/admin/system"),
+    ("/admin/system/audit", "审计日志", "Document", 306, "/admin/system"),
+    ("/admin/settings", "系统参数", "Setting", 307, "/admin/system"),
 ]
 
 # ---- 角色→菜单可见性（优化后）----
@@ -81,6 +86,7 @@ ROLE_MENU = {
     "/admin/alert": [
         "school_leader", "dean", "dept_research",
         "college_dean", "college_secretary", "counselor", "teacher",
+        "class_adviser", "mentor",
     ],
     # 教学运行（模块内部以Tab组织）
     "/admin/operation/courses": [
@@ -98,7 +104,7 @@ ROLE_MENU = {
     # 学生成长与学业
     "/admin/students/analysis": [
         "dean", "college_dean", "college_secretary",
-        "counselor", "dept_director",
+        "counselor", "dept_director", "class_adviser", "mentor",
     ],
     # AI管理决策
     "/admin/reports/management-briefing": [
@@ -113,6 +119,7 @@ ROLE_MENU = {
     "/admin/system/accounts": ["dean"],
     "/admin/system/roles":    ["dean"],
     "/admin/system/menus":    ["dean"],
+    "/admin/system/permissions": ["dean"],
     "/admin/system/audit":    ["dean"],
     "/admin/system/kpis":     ["dean"],
     "/admin/settings": ["dean"],
@@ -200,6 +207,9 @@ def build_users_df() -> pd.DataFrame:
     """每角色 1 个演示账号，用户名=角色 key，统一演示密码。"""
     rows = []
     for k, n, _ in ROLES:
+        if k in {"class_adviser", "mentor"}:
+            # 真实人员关系未与统一身份账号绑定前，不创建无范围演示账号。
+            continue
         rows.append({"username": k, "password_hash": hash_password(DEMO_PASSWORD),
                      "name": n, "role_id": k, "status": "active"})
     # 额外管理员
@@ -235,6 +245,66 @@ def build_role_scope_df(dims: dict) -> pd.DataFrame:
     if teachers is not None and len(teachers):
         rows.append({"role_id": "teacher", "scope_id": teachers.iloc[0]["teacher_id"]})
     return pd.DataFrame(rows)
+
+
+def build_permission_tables(users: pd.DataFrame,
+                            role_scopes: pd.DataFrame) -> dict[str, pd.DataFrame]:
+    """为新建分析库生成与旧单角色账号等价的默认工作身份。"""
+    role_scope_types = {role_id: scope_type for role_id, _, scope_type in ROLES}
+    identities = []
+    scopes = []
+    staff = []
+    for _, user in users.iterrows():
+        username = user["username"]
+        role_id = user["role_id"]
+        identity_id = f"UR:{username}:{role_id}"
+        identities.append({
+            "user_role_id": identity_id,
+            "username": username,
+            "role_id": role_id,
+            "is_default": 1,
+            "valid_from": None,
+            "valid_to": None,
+            "status": "active",
+            "source": "seed",
+        })
+        scope_type = role_scope_types.get(role_id)
+        if scope_type and scope_type != "all":
+            role_rows = role_scopes[role_scopes["role_id"] == role_id]
+            for _, scope in role_rows.iterrows():
+                scope_id = scope["scope_id"]
+                scopes.append({
+                    "user_scope_id": f"US:{identity_id}:{scope_type}:{scope_id}",
+                    "user_role_id": identity_id,
+                    "scope_type": scope_type,
+                    "scope_id": scope_id,
+                    "valid_from": "1970-01-01",
+                    "valid_to": None,
+                    "status": "active",
+                    "source": "seed",
+                })
+                if scope_type == "teacher":
+                    staff.append({
+                        "username": username,
+                        "staff_id": scope_id,
+                        "valid_from": "1970-01-01",
+                        "valid_to": None,
+                        "status": "active",
+                        "source": "seed",
+                        "source_updated_at": None,
+                    })
+    actions = [
+        {"role_id": role_id, "action_id": action_id}
+        for role_id, action_ids in ROLE_ACTIONS.items()
+        if role_id in role_scope_types
+        for action_id in sorted(action_ids)
+    ]
+    return {
+        "sys_user_staff": pd.DataFrame(staff),
+        "sys_user_role": pd.DataFrame(identities),
+        "sys_user_scope": pd.DataFrame(scopes),
+        "sys_role_action": pd.DataFrame(actions),
+    }
 
 
 def build_sys_config_df() -> pd.DataFrame:
@@ -292,13 +362,17 @@ def build_kpi_config_df() -> pd.DataFrame:
 
 def build_sys_tables(dims: dict) -> dict:
     """汇总所有 sys_ 表（role_scope 需 dims）。"""
-    return {
+    users = build_users_df()
+    role_scopes = build_role_scope_df(dims)
+    tables = {
         "sys_alert_rule": build_rules_df(),
         "sys_role": build_roles_df(),
         "sys_menu": build_menus_df(),
         "sys_role_menu": build_role_menu_df(),
-        "sys_user": build_users_df(),
-        "sys_role_scope": build_role_scope_df(dims),
+        "sys_user": users,
+        "sys_role_scope": role_scopes,
         "sys_config": build_sys_config_df(),
         "sys_kpi_config": build_kpi_config_df(),
     }
+    tables.update(build_permission_tables(users, role_scopes))
+    return tables

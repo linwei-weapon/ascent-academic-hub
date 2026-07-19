@@ -3,7 +3,9 @@
  * 登录后同步 roleStore.role（供既有页面的角色视角判断复用）。
  */
 import { reactive, computed } from 'vue'
-import { http, setToken, clearToken, getToken } from '@/utils/http'
+import {
+  http, setToken, clearToken, getToken, setActiveIdentity, clearActiveIdentity,
+} from '@/utils/http'
 import { roleStore, type RoleType, setCollege, setMajorId, setManagedClasses } from '@/store/role'
 
 export interface AuthMenu {
@@ -20,6 +22,32 @@ export interface AuthUser {
   name: string
   role: string
   roleName: string
+  activeIdentityId?: string
+  identities?: Array<{
+    identityId: string
+    roleId: string
+    roleName: string
+    isDefault: boolean
+    validFrom?: string | null
+    validTo?: string | null
+    source?: string | null
+  }>
+  permissionContext?: {
+    userId: string
+    username: string
+    staffId?: string | null
+    activeIdentityId: string
+    activeRole: string
+    activeRoleName: string
+    authorized: boolean
+    authorizationIssue?: string | null
+    menuPermissions: string[]
+    actionPermissions: string[]
+    detailScope: Record<string, unknown>
+    comparisonScope: Record<string, unknown>
+    fieldPolicy: Record<string, unknown>
+    scopeFingerprint: string
+  }
   scope?: { collegeId?: string; collegeName?: string; majorId?: string; classIds?: string[] }
 }
 
@@ -37,6 +65,7 @@ export const isLoggedIn = computed(() => !!authStore.user)
 export const visibleMenus = computed(() => authStore.menus)
 
 function applyUser(user: AuthUser, menus: AuthMenu[]): void {
+  if (user.activeIdentityId) setActiveIdentity(user.activeIdentityId)
   authStore.user = user
   authStore.menus = [...menus].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
   // 同步既有角色视角（校级/院级判断、数据大屏标题等仍读 roleStore）
@@ -63,9 +92,18 @@ export async function fetchMe(): Promise<void> {
   applyUser(data, data.menus || [])
 }
 
+/** 切换当前工作身份；后端重新计算菜单、动作权限和数据范围。 */
+export async function switchIdentity(identityId: string): Promise<void> {
+  const data = await http.post<AuthUser & { menus: AuthMenu[] }>(
+    '/auth/switch-identity', { identityId },
+  )
+  applyUser(data, data.menus || [])
+}
+
 /** 登出：清 token + 状态，跳登录页 */
 export function logout(): void {
   clearToken()
+  clearActiveIdentity()
   authStore.user = null
   authStore.menus = []
   location.hash = '#/login'

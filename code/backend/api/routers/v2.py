@@ -10,15 +10,25 @@ from fastapi import APIRouter, Depends, Query
 from .. import db as dbm, settings
 from ..deps import get_current_user, get_v2_db
 from ..envelope import ApiError, ok
+from ..permission_context import (
+    ALL_SCOPE_ROLES, SCOPED_ROLE_TYPES, v2_student_scope,
+)
 
 router = APIRouter(prefix="/api/v2", tags=["v2"])
 
-V2_ALL_SCOPE_ROLES = {"school_leader", "dean", "dept_operation", "dept_research", "dept_practice", "quality_office"}
-V2_MAPPED_SCOPE_ROLES = {"college_dean", "college_secretary", "counselor", "dept_director"}
+V2_ALL_SCOPE_ROLES = ALL_SCOPE_ROLES
+V2_MAPPED_SCOPE_ROLES = set(SCOPED_ROLE_TYPES)
 _GRADUATION_TOPIC_CACHE: dict[tuple, tuple[float, float, dict]] = {}
 _GRADUATION_TOPIC_CACHE_TTL = 900
 _QUERY_CACHE: dict[tuple, tuple[float, float, dict]] = {}
 _QUERY_CACHE_TTL = 900
+
+
+def _permission_cache_key(user: dict) -> str:
+    context = user.get("permission_context") or {}
+    return context.get("scopeFingerprint") or (
+        f"legacy:{user.get('username')}:{user.get('role_id')}"
+    )
 
 
 def _query_cache_get(key: tuple) -> Optional[dict]:
@@ -39,6 +49,11 @@ def _query_cache_put(key: tuple, payload: dict) -> dict:
 
 def require_v2_reader(user: dict = Depends(get_current_user)) -> dict:
     """允许全校角色及已建立显式V2范围映射的角色。"""
+    context = user.get("permission_context")
+    if context:
+        if not context.get("authorized"):
+            raise ApiError("当前工作身份没有有效V2访问范围", code=403, status_code=403)
+        return user
     if user.get("role_id") not in V2_ALL_SCOPE_ROLES | V2_MAPPED_SCOPE_ROLES:
         raise ApiError("当前角色没有V2访问范围", code=403, status_code=403)
     return user
@@ -46,26 +61,61 @@ def require_v2_reader(user: dict = Depends(get_current_user)) -> dict:
 
 def require_v2_all_reader(user: dict = Depends(get_current_user)) -> dict:
     """课程、教师和空间全校聚合在范围过滤完成前仅开放全校角色。"""
+    context = user.get("permission_context")
+    if context:
+        if (context.get("detailScope") or {}).get("type") != "all":
+            raise ApiError("当前接口仅对全校范围身份开放", code=403, status_code=403)
+        return user
     if user.get("role_id") not in V2_ALL_SCOPE_ROLES:
         raise ApiError("当前接口仅对全校范围角色开放", code=403, status_code=403)
     return user
+
+
+def _assert_plan_access(plan_id: str, user: dict,
+                        conn: sqlite3.Connection) -> None:
+    scope, params = _student_scope(user, conn, "s")
+    if not scope:
+        return
+    row = dbm.query_one(conn, f"""
+        SELECT 1 FROM dim_student s
+        WHERE s.plan_id=? AND {scope} LIMIT 1
+    """, tuple([plan_id] + params))
+    if not row:
+        raise ApiError("培养方案不存在或无权访问", code=404, status_code=404)
+
+
+def _assert_course_access(course_id: str, user: dict,
+                          conn: sqlite3.Connection) -> None:
+    scope, params = _student_scope(user, conn, "s")
+    if not scope:
+        return
+    row = dbm.query_one(conn, f"""
+        SELECT 1 FROM student_plan_course_status x
+        JOIN dim_student s ON s.student_id=x.student_id
+        WHERE x.course_id=? AND {scope} LIMIT 1
+    """, tuple([course_id] + params))
+    if not row:
+        raise ApiError("课程不存在或不在当前明细范围", code=404, status_code=404)
 
 
 @router.get("/curriculum/options")
 def curriculum_options(conn: sqlite3.Connection = Depends(get_v2_db),
                        user: dict = Depends(require_v2_reader)):
     """真实方案选择项：学院、年级、专业、方案四级联动所需的轻量元数据。"""
-    cache_key = ("curriculum_options",)
+    scope, scope_params = _student_scope(user, conn, "s")
+    cache_key = ("curriculum_options", _permission_cache_key(user))
     cached = _query_cache_get(cache_key)
     if cached is not None:
         return ok(cached)
-    rows = dbm.query(conn, """
+    scope_and = f" AND {scope}" if scope else ""
+    visible_plan = "WHERE sc.plan_id IS NOT NULL" if scope else ""
+    rows = dbm.query(conn, f"""
         WITH student_counts AS (
           SELECT s.plan_id,COUNT(DISTINCT s.student_id) studentCount,
             MIN(COALESCE(o.organization_id,s.organization_id)) collegeId,
             MIN(COALESCE(o.name,s.organization_id,'未映射学院')) collegeName
           FROM dim_student s LEFT JOIN dim_organization o ON o.organization_id=s.organization_id
-          WHERE s.plan_id IS NOT NULL GROUP BY s.plan_id
+          WHERE s.plan_id IS NOT NULL {scope_and} GROUP BY s.plan_id
         ), course_counts AS (
           SELECT plan_id,COUNT(*) courseCount FROM curriculum_plan_course GROUP BY plan_id
         ), requirement_counts AS (
@@ -81,8 +131,9 @@ def curriculum_options(conn: sqlite3.Connection = Depends(get_v2_db),
         LEFT JOIN student_counts sc ON sc.plan_id=p.plan_id
         LEFT JOIN course_counts cc ON cc.plan_id=p.plan_id
         LEFT JOIN requirement_counts rc ON rc.plan_id=p.plan_id
+        {visible_plan}
         ORDER BY collegeName,p.grade DESC,p.major_name,p.plan_name
-    """)
+    """, tuple(scope_params))
     for row in rows:
         row["coverageStatus"] = "document_and_courses" if row["requirementCount"] and row["courseCount"] else (
             "courses_only" if row["courseCount"] else "metadata_only")
@@ -94,7 +145,7 @@ def curriculum_options(conn: sqlite3.Connection = Depends(get_v2_db),
 @router.get("/curriculum/management-overview")
 def curriculum_management_overview(conn: sqlite3.Connection = Depends(get_v2_db),
                                    user: dict = Depends(require_v2_reader)):
-    cache_key = ("curriculum_management_overview", user.get("username"), user.get("role_id"))
+    cache_key = ("curriculum_management_overview", _permission_cache_key(user))
     cached = _query_cache_get(cache_key)
     if cached is not None:
         return ok(cached)
@@ -115,18 +166,33 @@ def curriculum_management_overview(conn: sqlite3.Connection = Depends(get_v2_db)
     students = dbm.query(conn, f"""SELECT s.student_id,s.organization_id,s.major_code,s.major_name,s.plan_id,
       COALESCE(o.name,s.organization_id,'未映射学院') college_name
       FROM dim_student s LEFT JOIN dim_organization o ON o.organization_id=s.organization_id {student_where}""", tuple(scope_params))
+    visible_plan_ids = {x["plan_id"] for x in students if x.get("plan_id")}
+    if scope:
+        plans = [plan for plan in plans if plan["plan_id"] in visible_plan_ids]
     student_ids = {x["student_id"] for x in students}
     status_rows = dbm.query(conn, """SELECT x.student_id,
       SUM(CASE WHEN x.requirement_type='必修' AND x.completion_status='failed' THEN 1 ELSE 0 END) failed_required,
       SUM(CASE WHEN x.requirement_type='必修' AND x.completion_status IN ('not_completed','unknown') AND x.is_overdue=1 THEN 1 ELSE 0 END) verification_required
       FROM student_plan_course_status x WHERE x.rule_version='growth-v1' GROUP BY x.student_id""")
     status = {x["student_id"]: x for x in status_rows if x["student_id"] in student_ids}
-    no_offering = dbm.scalar(conn, """SELECT COUNT(DISTINCT pc.course_id) FROM curriculum_plan_course pc
-      LEFT JOIN teaching_lesson l ON l.course_id=pc.course_id WHERE l.lesson_id IS NULL""") or 0
-    single_teacher = dbm.scalar(conn, """SELECT COUNT(1) FROM (SELECT pc.course_id
-      FROM curriculum_plan_course pc LEFT JOIN teaching_lesson l ON l.course_id=pc.course_id
-      LEFT JOIN lesson_teacher lt ON lt.lesson_id=l.lesson_id GROUP BY pc.course_id
-      HAVING COUNT(DISTINCT lt.staff_id)=1)""") or 0
+    plan_filter = ""
+    plan_params: list = []
+    if scope:
+        if visible_plan_ids:
+            plan_filter = f" AND pc.plan_id IN ({','.join('?' * len(visible_plan_ids))})"
+            plan_params = sorted(visible_plan_ids)
+        else:
+            plan_filter = " AND 1=0"
+    no_offering = dbm.scalar(conn, f"""SELECT COUNT(DISTINCT pc.course_id)
+      FROM curriculum_plan_course pc
+      LEFT JOIN teaching_lesson l ON l.course_id=pc.course_id
+      WHERE l.lesson_id IS NULL {plan_filter}""", tuple(plan_params)) or 0
+    single_teacher = dbm.scalar(conn, f"""SELECT COUNT(1) FROM (
+      SELECT pc.course_id FROM curriculum_plan_course pc
+      LEFT JOIN teaching_lesson l ON l.course_id=pc.course_id
+      LEFT JOIN lesson_teacher lt ON lt.lesson_id=l.lesson_id
+      WHERE 1=1 {plan_filter} GROUP BY pc.course_id
+      HAVING COUNT(DISTINCT lt.staff_id)=1)""", tuple(plan_params)) or 0
     colleges = defaultdict(lambda: {"students": 0, "withoutPlan": 0, "actionRequired": 0, "verification": 0})
     majors = defaultdict(lambda: {"students": 0, "withoutPlan": 0, "actionRequired": 0, "verification": 0})
     for student in students:
@@ -149,14 +215,17 @@ def curriculum_management_overview(conn: sqlite3.Connection = Depends(get_v2_db)
                    "majorName": major_names.get(key[1], key[1]), **value}
                   for key, value in majors.items()]
     major_rows.sort(key=lambda x: (-x["actionRequired"], -x["verification"], -x["withoutPlan"]))
-    course_rows = dbm.query(conn, """SELECT x.course_id courseId,COALESCE(MAX(c.name),x.course_id) courseName,
+    course_scope = f" AND {scope}" if scope else ""
+    course_rows = dbm.query(conn, f"""SELECT x.course_id courseId,COALESCE(MAX(c.name),x.course_id) courseName,
       COUNT(DISTINCT CASE WHEN x.requirement_type='必修' AND x.completion_status='failed' THEN x.student_id END) actionRequiredStudents,
       COUNT(DISTINCT CASE WHEN x.requirement_type='必修' AND x.completion_status IN ('not_completed','unknown') AND x.is_overdue=1 THEN x.student_id END) verificationStudents,
       COUNT(DISTINCT s.major_code) affectedMajors
       FROM student_plan_course_status x JOIN dim_student s ON s.student_id=x.student_id
-      LEFT JOIN dim_course c ON c.course_id=x.course_id WHERE x.rule_version='growth-v1'
+      LEFT JOIN dim_course c ON c.course_id=x.course_id
+      WHERE x.rule_version='growth-v1' {course_scope}
       GROUP BY x.course_id HAVING actionRequiredStudents>0 OR verificationStudents>0
-      ORDER BY actionRequiredStudents DESC,verificationStudents DESC LIMIT 20""")
+      ORDER BY actionRequiredStudents DESC,verificationStudents DESC LIMIT 20""",
+      tuple(scope_params))
     summary = {
       "activePlans": len(plans),
       "completeStructurePlans": sum(bool(x["course_count"] and x["requirement_count"] and x["module_rule_count"]) for x in plans),
@@ -248,16 +317,19 @@ def curriculum_management_major(major_code: str, conn: sqlite3.Connection = Depe
           FROM curriculum_plan p LEFT JOIN curriculum_plan_course pc ON pc.plan_id=p.plan_id
           LEFT JOIN curriculum_plan_module_requirement mr ON mr.plan_id=p.plan_id
           WHERE p.plan_id IN ({ph}) GROUP BY p.plan_id""", tuple(plan_ids))
-    courses = dbm.query(conn, """SELECT x.course_id courseId,COALESCE(MAX(c.name),x.course_id) courseName,
+    course_scope = f" AND {scope}" if scope else ""
+    courses = dbm.query(conn, f"""SELECT x.course_id courseId,COALESCE(MAX(c.name),x.course_id) courseName,
       COUNT(DISTINCT CASE WHEN x.requirement_type='必修' AND x.completion_status='failed' THEN x.student_id END) actionRequiredStudents,
       COUNT(DISTINCT CASE WHEN x.requirement_type='必修' AND x.completion_status IN ('not_completed','unknown') AND x.is_overdue=1 THEN x.student_id END) verificationStudents,
       COUNT(DISTINCT l.lesson_id) lessonCount,COUNT(DISTINCT lt.staff_id) teacherCount
       FROM student_plan_course_status x JOIN dim_student s ON s.student_id=x.student_id
       LEFT JOIN dim_course c ON c.course_id=x.course_id LEFT JOIN teaching_lesson l ON l.course_id=x.course_id
       LEFT JOIN lesson_teacher lt ON lt.lesson_id=l.lesson_id
-      WHERE s.major_code=? AND x.rule_version='growth-v1' GROUP BY x.course_id
+      WHERE s.major_code=? AND x.rule_version='growth-v1' {course_scope}
+      GROUP BY x.course_id
       HAVING actionRequiredStudents>0 OR verificationStudents>0
-      ORDER BY actionRequiredStudents DESC,verificationStudents DESC LIMIT 20""", (major_code,))
+      ORDER BY actionRequiredStudents DESC,verificationStudents DESC LIMIT 20""",
+      tuple([major_code] + scope_params))
     summary = {"students": len(students), "plans": len(plans),
       "studentsWithoutPlan": sum(not x["plan_id"] for x in students),
       "actionRequiredStudents": sum((x["failed_required"] or 0)>0 for x in students),
@@ -272,6 +344,8 @@ def curriculum_management_major(major_code: str, conn: sqlite3.Connection = Depe
 @router.get("/curriculum/course-supply/{course_id}")
 def curriculum_course_supply(course_id: str, conn: sqlite3.Connection = Depends(get_v2_db),
                              user: dict = Depends(require_v2_reader)):
+    _assert_course_access(course_id, user, conn)
+    scope, scope_params = _student_scope(user, conn, "s")
     course = dbm.query_one(conn, "SELECT course_id courseId,name courseName,category,nature,organization_id organizationId FROM dim_course WHERE course_id=?", (course_id,))
     if not course: course = {"courseId": course_id, "courseName": course_id}
     offerings = dbm.query(conn, """SELECT l.semester_id semesterId,COUNT(DISTINCT l.lesson_id) lessonCount,
@@ -280,15 +354,22 @@ def curriculum_course_supply(course_id: str, conn: sqlite3.Connection = Depends(
       GROUP_CONCAT(DISTINCT l.student_grade) studentGrades,GROUP_CONCAT(DISTINCT l.schedule_text) schedules
       FROM teaching_lesson l LEFT JOIN lesson_teacher lt ON lt.lesson_id=l.lesson_id
       WHERE l.course_id=? GROUP BY l.semester_id ORDER BY l.semester_id DESC""", (course_id,))
-    substitutions = dbm.query(conn, """SELECT original_course_id originalCourseId,MAX(original_course_name) originalCourseName,
-      substitute_course_id substituteCourseId,MAX(substitute_course_name) substituteCourseName,
-      COUNT(DISTINCT student_id) studentCount,MAX(approval_status) approvalStatus
-      FROM student_course_substitution WHERE original_course_id=? OR substitute_course_id=?
-      GROUP BY original_course_id,substitute_course_id ORDER BY studentCount DESC""", (course_id, course_id))
-    affected = dbm.query_one(conn, """SELECT COUNT(DISTINCT CASE WHEN x.requirement_type='必修' AND x.completion_status='failed' THEN x.student_id END) actionRequiredStudents,
+    substitution_scope = f" AND {scope}" if scope else ""
+    substitutions = dbm.query(conn, f"""SELECT scs.original_course_id originalCourseId,MAX(scs.original_course_name) originalCourseName,
+      scs.substitute_course_id substituteCourseId,MAX(scs.substitute_course_name) substituteCourseName,
+      COUNT(DISTINCT scs.student_id) studentCount,MAX(scs.approval_status) approvalStatus
+      FROM student_course_substitution scs
+      JOIN dim_student s ON s.student_id=scs.student_id
+      WHERE (scs.original_course_id=? OR scs.substitute_course_id=?) {substitution_scope}
+      GROUP BY scs.original_course_id,scs.substitute_course_id
+      ORDER BY studentCount DESC""", tuple([course_id, course_id] + scope_params))
+    affected_scope = f" AND {scope}" if scope else ""
+    affected = dbm.query_one(conn, f"""SELECT COUNT(DISTINCT CASE WHEN x.requirement_type='必修' AND x.completion_status='failed' THEN x.student_id END) actionRequiredStudents,
       COUNT(DISTINCT CASE WHEN x.requirement_type='必修' AND x.completion_status IN ('not_completed','unknown') AND x.is_overdue=1 THEN x.student_id END) verificationStudents,
       COUNT(DISTINCT s.major_code) affectedMajors FROM student_plan_course_status x
-      JOIN dim_student s ON s.student_id=x.student_id WHERE x.course_id=? AND x.rule_version='growth-v1'""", (course_id,)) or {}
+      JOIN dim_student s ON s.student_id=x.student_id
+      WHERE x.course_id=? AND x.rule_version='growth-v1' {affected_scope}""",
+      tuple([course_id] + scope_params)) or {}
     return ok({"course": course, "affected": affected, "offerings": offerings, "substitutions": substitutions,
       "availability": {"hasOfferingEvidence": bool(offerings), "hasSubstitutionEvidence": bool(substitutions),
         "hasRetakeResourceEvidence": False, "hasFuturePlanEvidence": False},
@@ -335,6 +416,7 @@ def graduation_readiness_student(student_id: str, conn: sqlite3.Connection = Dep
 def curriculum_plan_detail(plan_id: str,
                            conn: sqlite3.Connection = Depends(get_v2_db),
                            user: dict = Depends(require_v2_reader)):
+    _assert_plan_access(plan_id, user, conn)
     plan = dbm.query_one(conn, """
         SELECT p.*,COUNT(DISTINCT pc.plan_course_id) courseCount,
                ROUND(SUM(DISTINCT CASE WHEN pc.plan_course_id IS NOT NULL THEN pc.credits ELSE 0 END),1) structuredCredits
@@ -401,6 +483,7 @@ def curriculum_progress(plan_id: str, limit: int = Query(200, ge=1, le=1000),
                         conn: sqlite3.Connection = Depends(get_v2_db),
                         user: dict = Depends(require_v2_reader)):
     """按同一状态明细汇总方案进度；不把待核验记录直接称为漏选。"""
+    _assert_plan_access(plan_id, user, conn)
     scope, scope_params = _student_scope(user, conn, "s")
     where = "x.plan_id=? AND x.rule_version='growth-v1'"
     params = [plan_id]
@@ -441,6 +524,9 @@ def curriculum_progress(plan_id: str, limit: int = Query(200, ge=1, le=1000),
 
 
 def _student_scope(user: dict, conn: sqlite3.Connection, alias: str = "s") -> tuple[str, list]:
+    context = user.get("permission_context")
+    if context:
+        return v2_student_scope(context, conn, alias)
     role = user.get("role_id")
     if role in V2_ALL_SCOPE_ROLES:
         return "", []
@@ -516,7 +602,7 @@ def early_setback_topic(organization_id: Optional[str] = None, major_code: Optio
                         limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0),
                         conn: sqlite3.Connection = Depends(get_v2_db), user: dict = Depends(require_v2_reader)):
     """大一首次挂科及后续恢复专题；只使用已发布、未作废且通过口径明确的成绩。"""
-    cache_key = ("early_setback", user.get("username"), user.get("role_id"),
+    cache_key = ("early_setback", _permission_cache_key(user),
                  organization_id, major_code, entry_grade, limit, offset)
     cached = _query_cache_get(cache_key)
     if cached is not None:
@@ -620,7 +706,7 @@ def graduation_readiness_topic(organization_id: Optional[str] = None, major_code
                                conn: sqlite3.Connection = Depends(get_v2_db), user: dict = Depends(require_v2_reader)):
     """培养方案完成证据与毕业准备度专题；准备度不是毕业审核结论。"""
     db_mtime = os.path.getmtime(settings.V2_DB_PATH)
-    cache_key = (user.get("username"), user.get("role_id"), organization_id, major_code, plan_id, readiness)
+    cache_key = (_permission_cache_key(user), organization_id, major_code, plan_id, readiness)
     cached = _GRADUATION_TOPIC_CACHE.get(cache_key)
     if cached and cached[0] == db_mtime and time.monotonic() - cached[1] < _GRADUATION_TOPIC_CACHE_TTL:
         cached_payload = dict(cached[2])

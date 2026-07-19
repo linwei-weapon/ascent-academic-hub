@@ -32,7 +32,27 @@
       <el-header class="topbar">
         <div class="topbar-right">
           <span class="user-name">{{ authStore.user?.name || authStore.user?.username }}</span>
-          <el-tag size="small" effect="plain" type="primary">{{ authStore.user?.roleName }}</el-tag>
+          <el-select
+            v-if="identityOptions.length > 1"
+            class="identity-select"
+            size="small"
+            :model-value="authStore.user?.activeIdentityId"
+            :loading="switchingIdentity"
+            @change="onIdentityChange"
+          >
+            <el-option
+              v-for="identity in identityOptions"
+              :key="identity.identityId"
+              :label="identity.roleName"
+              :value="identity.identityId"
+            />
+          </el-select>
+          <el-tag v-else size="small" effect="plain" type="primary">
+            {{ authStore.user?.roleName }}
+          </el-tag>
+          <el-tooltip :content="scopeDescription" placement="bottom">
+            <el-tag size="small" effect="plain" type="info">{{ scopeLabel }}</el-tag>
+          </el-tooltip>
           <el-popconfirm title="确定退出登录？" @confirm="onLogout">
             <template #reference>
               <el-button size="small" text :icon="SwitchButton">登出</el-button>
@@ -54,7 +74,9 @@
 import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { SwitchButton } from '@element-plus/icons-vue'
-import { authStore, visibleMenus, logout, type AuthMenu } from '@/store/auth'
+import {
+  authStore, visibleMenus, logout, switchIdentity, type AuthMenu,
+} from '@/store/auth'
 import { menuKeyOfPath } from '@/utils/menu'
 
 const route = useRoute()
@@ -91,9 +113,40 @@ const menuRenderKey = computed(() => (
   `${authStore.user?.username || 'guest'}:${authStore.user?.role || ''}:${activeParent.value}`
 ))
 const refreshKey = ref(0)
+const switchingIdentity = ref(false)
+const identityOptions = computed(() => authStore.user?.identities || [])
+const scopeLabel = computed(() => {
+  const detail = authStore.user?.permissionContext?.detailScope as any
+  const type = detail?.type
+  if (type === 'all') return '全校数据'
+  const ids = detail?.sourceScopeIds || []
+  if (type === 'college') return authStore.user?.scope?.collegeName || '本学院'
+  if (type === 'major') return '本专业'
+  if (type === 'class') return `${ids.length}个行政班`
+  if (type === 'staff_relation') return '所带学生'
+  if (type === 'teacher') return '所授学生'
+  return '范围待核验'
+})
+const scopeDescription = computed(() => {
+  const permission = authStore.user?.permissionContext
+  if (!permission?.authorized) return permission?.authorizationIssue || '当前身份没有有效范围'
+  return `当前工作身份：${permission.activeRoleName}；明细范围：${scopeLabel.value}`
+})
 
 function onLogout() {
   logout()
+}
+async function onIdentityChange(identityId: string) {
+  if (!identityId || identityId === authStore.user?.activeIdentityId) return
+  switchingIdentity.value = true
+  try {
+    await switchIdentity(identityId)
+    const home = authStore.menus.find(menu => menu.parent_id)?.path
+    if (home) await router.replace(home)
+    refreshKey.value += 1
+  } finally {
+    switchingIdentity.value = false
+  }
 }
 function navigateMenu(path: string) {
   if (path && path !== route.path) void router.push(path)
@@ -139,6 +192,7 @@ function navigateMenu(path: string) {
   font-weight: 600;
   color: var(--sa-text);
 }
+.identity-select { width: 150px; }
 .el-main {
   background: var(--sa-bg);
 }

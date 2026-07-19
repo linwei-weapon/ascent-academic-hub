@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 from .. import db as dbm
 from ..deps import get_db, get_db_rw, get_current_user
 from ..envelope import ok, ApiError
+from ..permission_context import build_permission_context, list_identities
 from ..security import verify_password, create_token, decode_token
 from ..security_governance import (client_key, login_is_limited, record_login,
                                    write_audit)
@@ -17,6 +18,10 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 class LoginIn(BaseModel):
     username: str = Field(min_length=1, max_length=80)
     password: str = Field(min_length=1, max_length=256)
+
+
+class SwitchIdentityIn(BaseModel):
+    identityId: str = Field(min_length=1, max_length=180)
 
 
 def _menus_for_role(conn: sqlite3.Connection, role_id: str) -> list[dict]:
@@ -45,18 +50,23 @@ def _menus_for_role(conn: sqlite3.Connection, role_id: str) -> list[dict]:
 
 
 def _user_payload(conn: sqlite3.Connection, user: dict) -> dict:
+    context = user.get("permission_context") or build_permission_context(conn, user)
+    active_role = context["activeRole"]
     role = dbm.query_one(conn, "SELECT role_id, name, data_scope_type FROM sys_role WHERE role_id=?",
-                         (user["role_id"],))
+                         (active_role,))
     payload = {
         "username": user["username"],
         "name": user["name"],
-        "role": user["role_id"],
-        "roleName": role["name"] if role else user["role_id"],
-        "menus": _menus_for_role(conn, user["role_id"]),
+        "role": active_role,
+        "roleName": role["name"] if role else active_role,
+        "activeIdentityId": context["activeIdentityId"],
+        "identities": list_identities(conn, user["username"]),
+        "permissionContext": context,
+        "menus": _menus_for_role(conn, active_role),
     }
-    # 附加数据范围（college/major/class），供前端切换视角
-    scopes = dbm.query(conn, "SELECT scope_id FROM sys_role_scope WHERE role_id=?", (user["role_id"],))
-    scope_ids = [s["scope_id"] for s in scopes]
+    # 保留既有scope契约，前端完成身份上下文迁移前继续可用。
+    detail_scope = context.get("detailScope") or {}
+    scope_ids = detail_scope.get("sourceScopeIds") or []
     if scope_ids:
         # 学院级：取第一个 scope_id 作为学院
         college = dbm.query_one(conn, "SELECT college_id, name FROM dim_college WHERE college_id=?",
@@ -98,7 +108,8 @@ def login(body: LoginIn, request: Request,
         raise ApiError("用户名或密码错误", code=401, status_code=401)
     record_login(conn, username, client, True)
     write_audit(conn, username, "auth.login", "user", username,
-                result="success", client=client, detail={"roleId": user["role_id"]})
+                    result="success", client=client, detail={"roleId": user["role_id"]})
+    user["permission_context"] = build_permission_context(conn, user)
     token = create_token(user["username"], user["role_id"])
     return ok({"token": token, "user": _user_payload(conn, user)})
 
@@ -106,6 +117,27 @@ def login(body: LoginIn, request: Request,
 @router.get("/me")
 def me(user: dict = Depends(get_current_user), conn: sqlite3.Connection = Depends(get_db)):
     return ok(_user_payload(conn, user))
+
+
+@router.post("/switch-identity")
+def switch_identity(body: SwitchIdentityIn, request: Request,
+                    user: dict = Depends(get_current_user),
+                    conn: sqlite3.Connection = Depends(get_db_rw)):
+    previous = user.get("permission_context") or {}
+    context = build_permission_context(conn, user, body.identityId)
+    switched_user = {**user, "role_id": context["activeRole"],
+                     "permission_context": context}
+    write_audit(
+        conn, user["username"], "auth.identity.switch", "user_identity",
+        body.identityId, client=client_key(request),
+        detail={
+            "fromIdentityId": previous.get("activeIdentityId"),
+            "toIdentityId": body.identityId,
+            "fromScopeFingerprint": previous.get("scopeFingerprint"),
+            "toScopeFingerprint": context.get("scopeFingerprint"),
+        },
+    )
+    return ok(_user_payload(conn, switched_user))
 
 
 @router.post("/logout")

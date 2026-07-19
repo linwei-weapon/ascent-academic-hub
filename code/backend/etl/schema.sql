@@ -476,6 +476,56 @@ CREATE TABLE sys_role_scope (
     PRIMARY KEY (role_id, scope_id)
 );
 
+DROP TABLE IF EXISTS sys_user_staff;
+CREATE TABLE sys_user_staff (
+    username          TEXT NOT NULL,
+    staff_id          TEXT NOT NULL,
+    valid_from        TEXT NOT NULL DEFAULT '1970-01-01',
+    valid_to          TEXT,
+    status            TEXT NOT NULL DEFAULT 'active',
+    source            TEXT NOT NULL DEFAULT 'manual',
+    source_updated_at TEXT,
+    PRIMARY KEY (username, staff_id, valid_from)
+);
+
+DROP TABLE IF EXISTS sys_user_role;
+CREATE TABLE sys_user_role (
+    user_role_id TEXT PRIMARY KEY,
+    username     TEXT NOT NULL,
+    role_id      TEXT NOT NULL,
+    is_default   INTEGER NOT NULL DEFAULT 0,
+    valid_from   TEXT,
+    valid_to     TEXT,
+    status       TEXT NOT NULL DEFAULT 'active',
+    source       TEXT NOT NULL DEFAULT 'legacy_migration'
+);
+CREATE UNIQUE INDEX idx_user_role_default
+    ON sys_user_role(username) WHERE is_default=1 AND status='active';
+CREATE INDEX idx_user_role_active
+    ON sys_user_role(username, status, valid_from, valid_to);
+
+DROP TABLE IF EXISTS sys_user_scope;
+CREATE TABLE sys_user_scope (
+    user_scope_id TEXT PRIMARY KEY,
+    user_role_id  TEXT NOT NULL,
+    scope_type    TEXT NOT NULL,
+    scope_id      TEXT NOT NULL,
+    valid_from    TEXT NOT NULL DEFAULT '1970-01-01',
+    valid_to      TEXT,
+    status        TEXT NOT NULL DEFAULT 'active',
+    source        TEXT NOT NULL DEFAULT 'legacy_migration',
+    UNIQUE(user_role_id, scope_type, scope_id, valid_from)
+);
+CREATE INDEX idx_user_scope_active
+    ON sys_user_scope(user_role_id, status, valid_from, valid_to);
+
+DROP TABLE IF EXISTS sys_role_action;
+CREATE TABLE sys_role_action (
+    role_id  TEXT NOT NULL,
+    action_id TEXT NOT NULL,
+    PRIMARY KEY(role_id, action_id)
+);
+
 DROP TABLE IF EXISTS sys_menu;
 CREATE TABLE sys_menu (
     menu_id    TEXT PRIMARY KEY,

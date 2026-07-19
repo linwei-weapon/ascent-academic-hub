@@ -9,9 +9,10 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from .. import db as dbm
-from ..deps import (ADMIN_ROLES, get_db, get_db_rw, get_current_user,
+from ..deps import (get_db, get_db_rw, get_current_user,
                     student_data_scope)
 from ..envelope import ok, ApiError
+from ..permission_context import has_action
 from ..settings import CURRENT_SEMESTER
 
 router = APIRouter(prefix="/api/admin", tags=["alert"])
@@ -168,7 +169,7 @@ def _event_for_user(conn: sqlite3.Connection, event_id: int, user: dict) -> dict
 
 
 def _require_event_operator(conn: sqlite3.Connection, event_id: int, user: dict) -> None:
-    if user.get("role_id") in ADMIN_ROLES:
+    if has_action(user, "alert.event.manage_all"):
         return
     assigned = dbm.scalar(conn, """SELECT 1 FROM alert_assignee
         WHERE event_id=? AND username=?""", (event_id, user["username"]))

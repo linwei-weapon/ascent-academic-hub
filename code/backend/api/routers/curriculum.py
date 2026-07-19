@@ -15,21 +15,26 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from .. import db as dbm
-from ..deps import get_db, get_db_rw, get_current_user
+from ..deps import get_db, get_db_rw, get_current_user, student_data_scope
 from ..envelope import ok, ApiError
+from ..permission_context import has_action
 
 router = APIRouter(prefix="/api/admin", tags=["curriculum"])
 
-_GOVERNANCE_PERMISSION = {
-    "edit": {"dean", "dept_research"},
-    "review": {"quality_office"},
-    "activate": {"school_leader"},
-    "audit": {"dean", "dept_research", "quality_office", "school_leader"},
-}
 
+def _assert_major_access(conn: sqlite3.Connection, major_id: str,
+                         user: dict) -> None:
+    scope, params = student_data_scope(user, conn, "s")
+    if not scope:
+        return
+    if not dbm.query_one(conn, f"""
+        SELECT 1 FROM dim_student s
+        WHERE s.major_id=? AND {scope} LIMIT 1
+    """, tuple([major_id] + params)):
+        raise ApiError("培养方案不存在或无权访问", code=404, status_code=404)
 
 def _require_governance(user: dict, action: str):
-    if user.get("role_id") not in _GOVERNANCE_PERMISSION[action]:
+    if not has_action(user, f"curriculum.governance.{action}"):
         raise ApiError("无权限执行培养方案规则治理操作", code=403, status_code=403)
 
 
@@ -158,6 +163,7 @@ def curriculum_plan(major: str, conn: sqlite3.Connection = Depends(get_db), user
     mid = _resolve_major(conn, major)
     if not mid:
         raise ApiError("暂无培养方案数据", code=404, status_code=404)
+    _assert_major_access(conn, mid, user)
     meta = _plan_meta(conn, mid)
     college = dbm.query_one(conn, """
         SELECT c.name FROM dim_major m LEFT JOIN dim_college c ON m.college_id=c.college_id
@@ -213,6 +219,8 @@ def course_objectives(major: str, conn: sqlite3.Connection = Depends(get_db), us
     mid = _resolve_major(conn, major)
     if not mid:
         raise ApiError("暂无培养方案数据", code=404, status_code=404)
+    _assert_major_access(conn, mid, user)
+    student_scope, student_scope_params = student_data_scope(user, conn, "s")
 
     # 获取该专业培养方案中所有课程及其所属模块
     meta = _plan_meta(conn, mid)
@@ -240,13 +248,15 @@ def course_objectives(major: str, conn: sqlite3.Connection = Depends(get_db), us
         course_ids = mod_courses[mod]
         placeholders = ",".join(["?"] * len(course_ids))
         # 该模块所有课程的修读学生成绩
+        scope_and = f" AND {student_scope}" if student_scope else ""
         stats = dbm.query_one(conn, f"""
-            SELECT AVG(score) as avg_score,
+            SELECT AVG(g.score) as avg_score,
                    COUNT(*) as total,
-                   SUM(CASE WHEN is_pass=1 THEN 1 ELSE 0 END) as pass_count
-            FROM fact_grade
-            WHERE course_id IN ({placeholders})
-              AND score IS NOT NULL""", course_ids)
+                   SUM(CASE WHEN g.is_pass=1 THEN 1 ELSE 0 END) as pass_count
+            FROM fact_grade g JOIN dim_student s ON s.student_id=g.student_id
+            WHERE g.course_id IN ({placeholders}) AND s.major_id=?
+              AND g.score IS NOT NULL{scope_and}""",
+            tuple(course_ids + [mid] + student_scope_params))
 
         avg_score = round(stats["avg_score"] or 0, 1)
         total = stats["total"] or 0
@@ -284,6 +294,8 @@ def graduate_requirements(major: str, conn: sqlite3.Connection = Depends(get_db)
     mid = _resolve_major(conn, major)
     if not mid:
         raise ApiError("暂无培养方案数据", code=404, status_code=404)
+    _assert_major_access(conn, mid, user)
+    student_scope, student_scope_params = student_data_scope(user, conn, "s")
 
     # 先获取课程目标达成度（复用上面的计算逻辑）
     meta = _plan_meta(conn, mid)
@@ -302,9 +314,13 @@ def graduate_requirements(major: str, conn: sqlite3.Connection = Depends(get_db)
 
     for mod, course_ids in mod_courses.items():
         placeholders = ",".join(["?"] * len(course_ids))
+        scope_and = f" AND {student_scope}" if student_scope else ""
         stats = dbm.query_one(conn, f"""
-            SELECT AVG(score) as avg_score
-            FROM fact_grade WHERE course_id IN ({placeholders}) AND score IS NOT NULL""", course_ids)
+            SELECT AVG(g.score) as avg_score
+            FROM fact_grade g JOIN dim_student s ON s.student_id=g.student_id
+            WHERE g.course_id IN ({placeholders}) AND s.major_id=?
+              AND g.score IS NOT NULL{scope_and}""",
+            tuple(course_ids + [mid] + student_scope_params))
         mod_achievement[mod] = round(stats["avg_score"] or 0, 1)
 
     req_names, support_matrix = _support_matrix(conn, mid, meta["grade"])
@@ -359,19 +375,23 @@ def curriculum_progress(major: str, student_id: str = None, compliance_status: s
     mid = _resolve_major(conn, major)
     if not mid:
         return ok({"planCourses": [], "progress": [], "message": "暂无培养方案数据"})
+    _assert_major_access(conn, mid, user)
     meta = _plan_meta(conn, mid)
     plan_courses = dbm.query(conn, """
         SELECT course_id, course_name, module, credits, term, is_core
         FROM fact_plan_course WHERE major_id=? AND CAST(grade AS TEXT)=CAST(? AS TEXT)
         ORDER BY term, course_id
     """, (mid, meta["grade"]))
-    stu_cond = " AND student_id = ?" if student_id else ""
-    stu_params = [mid] + ([student_id] if student_id else [])
+    stu_cond = " AND s.student_id = ?" if student_id else ""
+    student_scope, student_scope_params = student_data_scope(user, conn, "s")
+    scope_and = f" AND {student_scope}" if student_scope else ""
     students = dbm.query(conn, f"""
-        SELECT student_id, name, grade FROM dim_student
-        WHERE major_id = ? AND CAST(grade AS TEXT)=CAST(? AS TEXT){stu_cond}
-        ORDER BY grade DESC, student_id
-    """, [mid, meta["grade"]] + ([student_id] if student_id else []))
+        SELECT s.student_id,s.name,s.grade FROM dim_student s
+        WHERE s.major_id=? AND CAST(s.grade AS TEXT)=CAST(? AS TEXT)
+          {stu_cond}{scope_and}
+        ORDER BY s.grade DESC,s.student_id
+    """, tuple([mid, meta["grade"]] + ([student_id] if student_id else [])
+               + student_scope_params))
     progress = []
     rules = _module_rules(conn, mid, meta["grade"])
     required_plan = [pc for pc in plan_courses if rules.get(pc["module"], {}).get("course_nature") == "required"]
@@ -546,7 +566,13 @@ def curriculum_rule_changes(status: str = None, user: dict = Depends(get_current
     rows = dbm.query(conn, "SELECT * FROM curriculum_rule_change" + where + " ORDER BY change_id DESC", params)
     for row in rows:
         row["payload"] = json.loads(row.pop("payload_json"))
-    return ok({"list": rows, "permissions": {k: user["role_id"] in v for k, v in _GOVERNANCE_PERMISSION.items()}})
+    return ok({
+        "list": rows,
+        "permissions": {
+            action: has_action(user, f"curriculum.governance.{action}")
+            for action in ("edit", "review", "activate", "audit")
+        },
+    })
 
 
 @router.get("/curriculum/rule-changes/{change_id}")
