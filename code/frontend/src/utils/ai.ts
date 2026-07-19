@@ -98,6 +98,34 @@ export function getManagementBriefing(query: { period?: 'morning' | 'term'; seme
   return http.get<any>(`/admin/ai/briefing/management${qs ? `?${qs}` : ''}`)
 }
 
+export function getAIExpertCatalog() {
+  return http.get<any>('/admin/ai/experts')
+}
+
+export function getAIExpertRuntime(expertId: string, semester?: string) {
+  const params = new URLSearchParams()
+  if (semester) params.set('semester', semester)
+  const qs = params.toString()
+  return http.get<any>(`/admin/ai/experts/${encodeURIComponent(expertId)}/runtime${qs ? `?${qs}` : ''}`)
+}
+
+export function interpretAIExpertMessage(expertId: string, body: {
+  message: string
+  scopeFingerprint: string
+  currentParameters: Record<string, unknown>
+  semester?: string
+}) {
+  return http.post<any>(`/admin/ai/experts/${encodeURIComponent(expertId)}/interpret`, body)
+}
+
+export function saveAIAnalysisScheme(expertId: string, body: {
+  name: string
+  parameters: Record<string, unknown>
+  changeReason?: string
+}) {
+  return http.post<any>(`/admin/ai/experts/${encodeURIComponent(expertId)}/schemes`, body)
+}
+
 export function getGraduationCourseSupportSimulation(query: {
   semester?: string
   limit?: number
@@ -106,6 +134,10 @@ export function getGraduationCourseSupportSimulation(query: {
   availableTeachers?: number
   priorityFocus?: 'balanced' | 'failed' | 'verification'
   problemType?: 'graduation' | 'course_support' | 'faculty_assurance'
+  expertId?: string
+  supportCourseLimit?: number
+  significantChangePp?: number
+  minimumStudents?: number
 } = {}) {
   const params = new URLSearchParams()
   if (query.semester) params.set('semester', query.semester)
@@ -115,6 +147,10 @@ export function getGraduationCourseSupportSimulation(query: {
   if (query.availableTeachers !== undefined) params.set('available_teachers', String(query.availableTeachers))
   if (query.priorityFocus) params.set('priority_focus', query.priorityFocus)
   if (query.problemType) params.set('problem_type', query.problemType)
+  if (query.expertId) params.set('expert_id', query.expertId)
+  if (query.supportCourseLimit !== undefined) params.set('support_course_limit', String(query.supportCourseLimit))
+  if (query.significantChangePp !== undefined) params.set('significant_change_pp', String(query.significantChangePp))
+  if (query.minimumStudents !== undefined) params.set('minimum_students', String(query.minimumStudents))
   const qs = params.toString()
   return http.get<any>(`/admin/ai/simulation/graduation-course-support${qs ? `?${qs}` : ''}`)
 }

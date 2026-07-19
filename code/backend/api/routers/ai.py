@@ -22,6 +22,8 @@ from ..envelope import ApiError, ok
 from ..permission_context import (
     ALL_SCOPE_ROLES, SCOPED_ROLE_TYPES, v2_lesson_scope, v2_student_scope,
 )
+from .ai_experts import resolve_effective_expert
+from ...ai_experts import get_expert
 from ..util import clean_dept, normalize_title
 
 router = APIRouter(prefix="/api/admin/ai", tags=["ai"])
@@ -2382,6 +2384,7 @@ BRIEFING_ACTION_META = {
 
 def _briefing_priority_signature(item: dict) -> str:
     return json.dumps({
+        "rootKey": item.get("rootKey") or item.get("expertId") or item.get("theme"),
         "theme": item.get("theme"), "level": item.get("level"),
         "summary": item.get("summary"),
     }, ensure_ascii=False, sort_keys=True)
@@ -2397,6 +2400,8 @@ def _enrich_briefing_priority(item: dict) -> dict:
         "expectedResult": meta.get("expectedResult", "形成已核实的问题清单和后续处理依据"),
         "consequence": meta.get("consequence", "若不核查，可能造成管理优先级不清或问题延后暴露。"),
         "impactScope": item.get("summary"),
+        "rootKey": item.get("rootKey") or item.get("expertId") or item.get("theme"),
+        "whyNow": item.get("why") or "当前对象命中管理变化条件，需要先核查事实证据。",
         "signature": _briefing_priority_signature(item),
     })
     return enriched
@@ -2411,11 +2416,11 @@ def _build_management_events(current: list[dict], previous: Optional[list[dict]]
         } for item in current_rows[:3]]
 
     previous_rows = [_enrich_briefing_priority(item) for item in previous]
-    previous_map = {item["theme"]: item for item in previous_rows}
-    current_map = {item["theme"]: item for item in current_rows}
+    previous_map = {item["rootKey"]: item for item in previous_rows}
+    current_map = {item["rootKey"]: item for item in current_rows}
     events: list[dict] = []
     for item in current_rows:
-        old = previous_map.get(item["theme"])
+        old = previous_map.get(item["rootKey"])
         if old is None:
             events.append({**item, "changeType": "new", "changeLabel": "新增",
                            "changeSummary": "相较上次快照新增为管理关注事项。"})
@@ -2427,7 +2432,7 @@ def _build_management_events(current: list[dict], previous: Optional[list[dict]]
                            "changeLabel": "升级" if change_type == "upgraded" else "发生变化",
                            "changeSummary": f"上次：{old.get('summary')}；本次：{item.get('summary')}"})
     for item in previous_rows:
-        if item["theme"] not in current_map:
+        if item["rootKey"] not in current_map:
             events.append({**item, "changeType": "resolved", "changeLabel": "退出重点",
                            "level": "low", "changeSummary": "本次已不再进入管理重点，建议确认是否可以退出持续跟踪。",
                            "managementAction": "确认事项是否已具备退出跟踪的证据",
@@ -2778,6 +2783,9 @@ def management_ai_briefing(period: str = "morning",
             "routeQuery": {"tab": "graduation-readiness"},
             "action": "进入培养质量的毕业准备核查",
             "source": "student_plan_course_status.completion_status / requirement_type / is_overdue",
+            "expertId": "graduation-readiness",
+            "expertName": "毕业准备核查专家",
+            "reviewQuestion": "针对本次毕业准备变化，应先核验证据还是先组织课程保障？",
         })
     if top_fail_courses:
         top_course = top_fail_courses[0]
@@ -2791,6 +2799,9 @@ def management_ai_briefing(period: str = "morning",
             "routeQuery": {"courseId": top_course["course_id"]},
             "action": "查看教学运行的课程质量核查",
             "source": "fact_grade.course_id / is_pass / gpa",
+            "expertId": "high-impact-course-support",
+            "expertName": "高影响课程保障专家",
+            "reviewQuestion": "有限课程支持资源应优先投入哪些高影响课程？",
         })
     if faculty_attention:
         priorities.append({
@@ -2803,6 +2814,9 @@ def management_ai_briefing(period: str = "morning",
             "routeQuery": {"focus": "high-impact"},
             "action": "查看师资保障分析",
             "source": "agg_course_team.teacher_count / unknown_title_count / senior_title_count",
+            "expertId": "course-team-continuity",
+            "expertName": "课程团队连续性专家",
+            "reviewQuestion": "有限备份教师应优先保障哪些高影响单点课程？",
         })
     priorities.sort(key=lambda x: (0 if x["level"] == "high" else 1, x["rank"]))
     for i, item in enumerate(priorities, start=1):
@@ -2950,51 +2964,138 @@ def _decision_simulation_base_data(conn: sqlite3.Connection, teaching_semester: 
                                    limit: int, student_scope: str,
                                    student_scope_params: list,
                                    lesson_scope: str, lesson_scope_params: list,
-                                   scope_type: str) -> dict:
+                                   scope_type: str, expert_id: str,
+                                   persistent_fail_rate: float = 15,
+                                   significant_change_pp: float = 15,
+                                   single_teacher_students: int = 300,
+                                   multi_class_lessons: int = 3,
+                                   multi_class_students: int = 100) -> dict:
     """Load the parameter-independent decision evidence once per data scope."""
     student_scope_and = f" AND {student_scope}" if student_scope else ""
-    rows = dbm.query(conn, f"""
-        SELECT x.course_id,
-               COALESCE(MAX(c.name),x.course_id) course_name,
-               COALESCE(MAX(x.module),'') module,
-               COUNT(DISTINCT CASE WHEN x.completion_status='failed' THEN x.student_id END) failed_students,
-               COUNT(DISTINCT CASE WHEN x.completion_status IN ('not_completed','unknown') AND COALESCE(x.is_overdue,0)=1 THEN x.student_id END) verification_students,
-               COUNT(DISTINCT x.student_id) involved_students,
-               COUNT(DISTINCT s.major_code) major_count
-        FROM student_plan_course_status x
-        JOIN dim_student s ON s.student_id=x.student_id
-        LEFT JOIN dim_course c ON c.course_id=x.course_id
-        WHERE x.rule_version='growth-v1' AND x.requirement_type='必修'
-          {student_scope_and}
-        GROUP BY x.course_id
-        HAVING failed_students>0 OR verification_students>0
-        ORDER BY failed_students DESC, verification_students DESC, major_count DESC
-        LIMIT ?
-    """, tuple([*student_scope_params, limit]))
+    lesson_scope_and = f" AND {lesson_scope}" if lesson_scope else ""
+    evidence_kind = "graduation"
+    if expert_id == "high-impact-course-support":
+        evidence_kind = "course_quality"
+        rows = dbm.query(conn, f"""
+            WITH term AS (
+                SELECT g.course_id,g.semester_id,
+                       COALESCE(MAX(g.course_name),MAX(c.name),g.course_id) course_name,
+                       COUNT(*) attempts,
+                       SUM(CASE WHEN g.is_pass=0 THEN 1 ELSE 0 END) failures,
+                       COUNT(DISTINCT CASE WHEN g.is_pass=0 THEN g.student_id END) failed_students,
+                       SUM(CASE WHEN g.attempt_type='retake' THEN 1 ELSE 0 END) retake_attempts,
+                       ROUND(SUM(CASE WHEN g.is_pass=0 THEN 1.0 ELSE 0 END)*100.0/COUNT(*),1) fail_rate
+                FROM grade_attempt g
+                JOIN dim_student s ON s.student_id=g.student_id
+                LEFT JOIN dim_course c ON c.course_id=g.course_id
+                WHERE g.is_published=1 AND g.is_void=0 AND g.is_pass IS NOT NULL
+                  {student_scope_and}
+                GROUP BY g.course_id,g.semester_id
+                HAVING COUNT(*)>=30
+            )
+            SELECT course_id,MAX(course_name) course_name,'课程质量与教学运行' module,
+                   SUM(failed_students) failed_students,0 verification_students,
+                   SUM(failed_students) involved_students,0 major_count,
+                   COUNT(*) observed_terms,SUM(attempts) attempts,SUM(failures) failures,
+                   ROUND(SUM(failures)*100.0/NULLIF(SUM(attempts),0),1) fail_rate,
+                   ROUND(MAX(fail_rate)-MIN(fail_rate),1) volatility,
+                   SUM(retake_attempts) retake_attempts
+            FROM term GROUP BY course_id
+            HAVING failures>0
+            ORDER BY (CASE WHEN COUNT(*)>=2 AND MIN(fail_rate)>=? THEN 1 ELSE 0 END) DESC,
+                     failures DESC,fail_rate DESC
+            LIMIT ?
+        """, tuple([*student_scope_params, persistent_fail_rate, limit]))
+    elif expert_id == "course-team-continuity":
+        evidence_kind = "faculty_team"
+        rows = dbm.query(conn, f"""
+            SELECT t.course_id,COALESCE(c.name,t.course_id) course_name,
+                   '课程团队连续性' module,0 failed_students,0 verification_students,
+                   COALESCE(o.enrolled,0) involved_students,
+                   CASE WHEN c.organization_id IS NULL THEN 0 ELSE 1 END major_count,
+                   COALESCE(o.lesson_count,0) lesson_count,
+                   t.teacher_count,t.unknown_title_count,
+                   t.professor_count,t.associate_professor_count
+            FROM agg_course_team t
+            LEFT JOIN dim_course c ON c.course_id=t.course_id
+            LEFT JOIN agg_course_offering o
+              ON o.semester_id=t.semester_id AND o.course_id=t.course_id
+            WHERE t.semester_id=? AND t.teacher_count=1
+              AND (COALESCE(o.enrolled,0)>=?
+                   OR (COALESCE(o.lesson_count,0)>=? AND COALESCE(o.enrolled,0)>=?))
+              AND EXISTS (
+                  SELECT 1 FROM teaching_lesson l
+                  WHERE l.semester_id=t.semester_id AND l.course_id=t.course_id
+                  {lesson_scope_and}
+              )
+            ORDER BY COALESCE(o.enrolled,0) DESC,COALESCE(o.lesson_count,0) DESC
+            LIMIT ?
+        """, tuple([
+            teaching_semester, single_teacher_students,
+            multi_class_lessons, multi_class_students,
+            *lesson_scope_params, limit,
+        ]))
+    else:
+        rows = dbm.query(conn, f"""
+            SELECT x.course_id,
+                   COALESCE(MAX(c.name),x.course_id) course_name,
+                   COALESCE(MAX(x.module),'') module,
+                   COUNT(DISTINCT CASE WHEN x.completion_status='failed' THEN x.student_id END) failed_students,
+                   COUNT(DISTINCT CASE WHEN x.completion_status IN ('not_completed','unknown') AND COALESCE(x.is_overdue,0)=1 THEN x.student_id END) verification_students,
+                   COUNT(DISTINCT x.student_id) involved_students,
+                   COUNT(DISTINCT s.major_code) major_count
+            FROM student_plan_course_status x
+            JOIN dim_student s ON s.student_id=x.student_id
+            LEFT JOIN dim_course c ON c.course_id=x.course_id
+            WHERE x.rule_version='growth-v1' AND x.requirement_type='必修'
+              {student_scope_and}
+            GROUP BY x.course_id
+            HAVING failed_students>0 OR verification_students>0
+            ORDER BY failed_students DESC, verification_students DESC, major_count DESC
+            LIMIT ?
+        """, tuple([*student_scope_params, limit]))
     if not rows:
-        raise ApiError("暂无可模拟的毕业准备课程缺口", code=404, status_code=404)
+        raise ApiError("当前授权范围暂无符合该专家条件的候选课程", code=404, status_code=404)
 
     course_ids = [row["course_id"] for row in rows]
     marks = ",".join("?" for _ in course_ids)
-    impacted_unique_students = _safe_scalar(conn, f"""
-        SELECT COUNT(DISTINCT x.student_id)
-        FROM student_plan_course_status x
-        JOIN dim_student s ON s.student_id=x.student_id
-        WHERE x.rule_version='growth-v1' AND x.requirement_type='必修'
-          AND x.course_id IN ({marks})
-          AND (x.completion_status='failed' OR (x.completion_status IN ('not_completed','unknown') AND COALESCE(x.is_overdue,0)=1))
-          {student_scope_and}
-    """, tuple([*course_ids, *student_scope_params]))
-    impacted_unique_majors = _safe_scalar(conn, f"""
-        SELECT COUNT(DISTINCT s.major_code)
-        FROM student_plan_course_status x
-        JOIN dim_student s ON s.student_id=x.student_id
-        WHERE x.rule_version='growth-v1' AND x.requirement_type='必修'
-          AND x.course_id IN ({marks})
-          AND (x.completion_status='failed' OR (x.completion_status IN ('not_completed','unknown') AND COALESCE(x.is_overdue,0)=1))
-          {student_scope_and}
-    """, tuple([*course_ids, *student_scope_params]))
-    lesson_scope_and = f" AND {lesson_scope}" if lesson_scope else ""
+    if evidence_kind == "course_quality":
+        impacted_unique_students = _safe_scalar(conn, f"""
+            SELECT COUNT(DISTINCT g.student_id)
+            FROM grade_attempt g JOIN dim_student s ON s.student_id=g.student_id
+            WHERE g.course_id IN ({marks}) AND g.is_published=1 AND g.is_void=0
+              AND g.is_pass=0 {student_scope_and}
+        """, tuple([*course_ids, *student_scope_params]))
+        impacted_unique_majors = _safe_scalar(conn, f"""
+            SELECT COUNT(DISTINCT s.major_code)
+            FROM grade_attempt g JOIN dim_student s ON s.student_id=g.student_id
+            WHERE g.course_id IN ({marks}) AND g.is_published=1 AND g.is_void=0
+              AND g.is_pass=0 {student_scope_and}
+        """, tuple([*course_ids, *student_scope_params]))
+    elif evidence_kind == "faculty_team":
+        impacted_unique_students = sum(int(row.get("involved_students") or 0) for row in rows)
+        impacted_unique_majors = len({
+            row.get("major_count") for row in rows if row.get("major_count")
+        })
+    else:
+        impacted_unique_students = _safe_scalar(conn, f"""
+            SELECT COUNT(DISTINCT x.student_id)
+            FROM student_plan_course_status x
+            JOIN dim_student s ON s.student_id=x.student_id
+            WHERE x.rule_version='growth-v1' AND x.requirement_type='必修'
+              AND x.course_id IN ({marks})
+              AND (x.completion_status='failed' OR (x.completion_status IN ('not_completed','unknown') AND COALESCE(x.is_overdue,0)=1))
+              {student_scope_and}
+        """, tuple([*course_ids, *student_scope_params]))
+        impacted_unique_majors = _safe_scalar(conn, f"""
+            SELECT COUNT(DISTINCT s.major_code)
+            FROM student_plan_course_status x
+            JOIN dim_student s ON s.student_id=x.student_id
+            WHERE x.rule_version='growth-v1' AND x.requirement_type='必修'
+              AND x.course_id IN ({marks})
+              AND (x.completion_status='failed' OR (x.completion_status IN ('not_completed','unknown') AND COALESCE(x.is_overdue,0)=1))
+              {student_scope_and}
+        """, tuple([*course_ids, *student_scope_params]))
     supply = {row["course_id"]: row for row in _safe_query(conn, f"""
         SELECT l.course_id,COUNT(DISTINCT l.lesson_id) lesson_count,
                COUNT(DISTINCT lt.staff_id) teacher_count,
@@ -3017,24 +3118,56 @@ def _decision_simulation_base_data(conn: sqlite3.Connection, teaching_semester: 
     return {
         "rows": rows, "impactedUniqueStudents": impacted_unique_students,
         "impactedUniqueMajors": impacted_unique_majors, "supply": supply,
-        "teams": teams, "substitutions": substitutions,
+        "teams": teams, "substitutions": substitutions, "evidenceKind": evidence_kind,
+        "thresholds": {
+            "persistentFailRate": persistent_fail_rate,
+            "significantChangePp": significant_change_pp,
+            "singleTeacherStudents": single_teacher_students,
+            "multiClassLessons": multi_class_lessons,
+            "multiClassStudents": multi_class_students,
+        },
     }
 
 
 @router.get("/simulation/graduation-course-support")
 def graduation_course_support_simulation(semester: Optional[str] = None,
                                          limit: int = 12,
-                                         added_classes: int = 3,
-                                         class_capacity: int = 30,
-                                         available_teachers: int = 3,
-                                         priority_focus: str = "balanced",
+                                         added_classes: Optional[int] = None,
+                                         class_capacity: Optional[int] = None,
+                                         available_teachers: Optional[int] = None,
+                                         priority_focus: Optional[str] = None,
+                                         support_course_limit: Optional[int] = None,
+                                         significant_change_pp: Optional[float] = None,
+                                         minimum_students: Optional[int] = None,
                                          problem_type: str = "graduation",
+                                         expert_id: Optional[str] = None,
                                          user: dict = Depends(get_current_user),
-                                         conn: sqlite3.Connection = Depends(get_v2_db)):
+                                         conn: sqlite3.Connection = Depends(get_v2_db),
+                                         legacy_conn: sqlite3.Connection = Depends(get_db)):
     """AI 决策模拟：毕业准备课程保障与重修资源配置。
 
     输出的是管理测算，用于比较方案优先级，不作为毕业审核、开课审批或资源承诺。
     """
+    expert_by_problem = {
+        "graduation": "graduation-readiness",
+        "course_support": "high-impact-course-support",
+        "faculty_assurance": "course-team-continuity",
+    }
+    problem_by_expert = {value: key for key, value in expert_by_problem.items()}
+    selected_expert_id = expert_id or expert_by_problem.get(problem_type) or "graduation-readiness"
+    expert = get_expert(selected_expert_id)
+    if not expert or selected_expert_id not in problem_by_expert:
+        raise ApiError("当前模拟暂不支持该管理专家", code=400, status_code=400)
+    if user.get("role_id") not in expert["applicableRoles"]:
+        raise ApiError("当前工作身份不适用该管理专家", code=403, status_code=403)
+    effective_expert, expert_version = resolve_effective_expert(legacy_conn, expert)
+    problem_type = problem_by_expert[selected_expert_id]
+    defaults = {
+        key: spec.get("default")
+        for key, spec in (effective_expert.get("parameters") or {}).items()
+    }
+    thresholds = effective_expert.get("thresholds") or {}
+
     student_scope, student_scope_params = _v2_student_scope(user, conn, "s")
     student_scope_and = f" AND {student_scope}" if student_scope else ""
     context = user.get("permission_context")
@@ -3068,20 +3201,49 @@ def graduation_course_support_simulation(semester: Optional[str] = None,
 
     teaching_semester = semester or _safe_scalar(conn, "SELECT MAX(semester_id) FROM teaching_lesson", default="2023-2024-1")
     limit = max(5, min(int(limit or 12), 30))
-    added_classes = max(0, min(int(added_classes or 0), 20))
-    class_capacity = max(15, min(int(class_capacity or 30), 120))
-    available_teachers = max(0, min(int(available_teachers or 0), 20))
+    added_classes = max(0, min(int(
+        defaults.get("addedClasses", 3) if added_classes is None else added_classes
+    ), 20))
+    class_capacity = max(15, min(int(
+        defaults.get("classCapacity", 30) if class_capacity is None else class_capacity
+    ), 120))
+    available_teachers = max(0, min(int(
+        defaults.get("availableTeachers", 3) if available_teachers is None else available_teachers
+    ), 20))
+    priority_focus = priority_focus or defaults.get("priorityFocus") or "balanced"
     priority_focus = priority_focus if priority_focus in {"balanced", "failed", "verification"} else "balanced"
-    problem_type = problem_type if problem_type in {"graduation", "course_support", "faculty_assurance"} else "graduation"
+    if selected_expert_id == "high-impact-course-support":
+        support_course_limit = int(
+            defaults.get("supportCourseLimit", limit)
+            if support_course_limit is None else support_course_limit
+        )
+        limit = max(1, min(support_course_limit, 20))
+    significant_change_pp = float(
+        defaults.get("significantChangePp", thresholds.get("significantChangePp", 15))
+        if significant_change_pp is None else significant_change_pp
+    )
+    minimum_students = int(
+        defaults.get("minimumStudents", thresholds.get("singleTeacherHighStudents", 300))
+        if minimum_students is None else minimum_students
+    )
+    persistent_fail_rate = float(thresholds.get("persistentFailRate", 15))
+    multi_class_lessons = int(thresholds.get("multiClassMinimumLessons", 3))
+    multi_class_students = int(thresholds.get("multiClassMinimumStudents", 100))
     cache_key = (teaching_semester, limit, added_classes, class_capacity, available_teachers,
-                 priority_focus, problem_type, scope_key)
+                 priority_focus, significant_change_pp, minimum_students,
+                 selected_expert_id, expert_version["version"],
+                 user.get("role_id"), scope_key)
     cached = _DECISION_SIMULATION_CACHE.get(cache_key)
     if cached and time.time() - cached[0] < DECISION_SIMULATION_CACHE_TTL:
         payload = dict(cached[1])
         payload["cache"] = {"hit": True, "ttlSeconds": DECISION_SIMULATION_CACHE_TTL}
         return ai_ok(payload)
 
-    base_key = (teaching_semester, limit, scope_key)
+    base_key = (
+        teaching_semester, limit, selected_expert_id, expert_version["version"],
+        persistent_fail_rate, significant_change_pp, minimum_students,
+        multi_class_lessons, multi_class_students, scope_key,
+    )
     base_cached = _DECISION_SIMULATION_BASE_CACHE.get(base_key)
     if base_cached and time.time() - base_cached[0] < MANAGEMENT_BRIEFING_CACHE_TTL:
         base_data = json.loads(json.dumps(base_cached[1], ensure_ascii=False))
@@ -3089,7 +3251,9 @@ def graduation_course_support_simulation(semester: Optional[str] = None,
     else:
         base_data = _decision_simulation_base_data(
             conn, teaching_semester, limit, student_scope, student_scope_params,
-            lesson_scope, lesson_scope_params, scope_type,
+            lesson_scope, lesson_scope_params, scope_type, selected_expert_id,
+            persistent_fail_rate, significant_change_pp, minimum_students,
+            multi_class_lessons, multi_class_students,
         )
         _DECISION_SIMULATION_BASE_CACHE[base_key] = (
             time.time(), json.loads(json.dumps(base_data, ensure_ascii=False))
@@ -3101,6 +3265,7 @@ def graduation_course_support_simulation(semester: Optional[str] = None,
     supply = base_data["supply"]
     teams = base_data["teams"]
     substitutions = base_data["substitutions"]
+    evidence_kind = base_data.get("evidenceKind") or "graduation"
 
     course_items = []
     totals = {
@@ -3133,23 +3298,49 @@ def graduation_course_support_simulation(semester: Optional[str] = None,
             bottlenecks.append("当前无开课供给证据")
         if teacher_count <= 1:
             bottlenecks.append("课程团队备份能力需核查")
-        if subst == 0:
+        if evidence_kind == "graduation" and subst == 0:
             bottlenecks.append("暂无课程替代关系证据")
+        if evidence_kind == "course_quality":
+            if int(row.get("observed_terms") or 0) >= 2 and float(row.get("fail_rate") or 0) >= persistent_fail_rate:
+                bottlenecks.append("跨学期未通过表现需核查")
+            if float(row.get("volatility") or 0) >= significant_change_pp:
+                bottlenecks.append(f"最高与最低相差{row.get('volatility')}个百分点")
+        if evidence_kind == "faculty_team":
+            bottlenecks = ["高影响单点课程：需核实备份教师与接续安排"]
+            if int(row.get("unknown_title_count") or 0) > 0:
+                bottlenecks.append("职称主数据不完整，结构判断需核验")
 
         new_class_capacity = class_capacity if row_index < usable_added_classes and failed > spare else 0
         retake_capacity = spare + new_class_capacity
         retake_impact = min(failed, retake_capacity)
         recognition_impact = min(verify, max(subst * 5, round(verify * (0.35 if subst else 0.12))))
         tutoring_impact = min(failed, max(0, round(failed * 0.22) + min(lesson_count, 3) * 2))
-        team_impact = min(failed + verify, 18 if teacher_count <= 1 else 8 if "title_incomplete" in team_reasons else 0)
+        if evidence_kind == "faculty_team":
+            team_impact = int(row.get("involved_students") or 0) if (
+                row_index < available_teachers and teacher_count <= 1
+            ) else 0
+        else:
+            team_impact = min(failed + verify, 18 if teacher_count <= 1 else 8 if "title_incomplete" in team_reasons else 0)
 
         courses_score = failed * 2.2 + verify * 1.2 + majors * 5
         if lesson_count == 0:
             courses_score += 18
         if teacher_count <= 1:
             courses_score += 14
-        if subst == 0:
+        if evidence_kind == "graduation" and subst == 0:
             courses_score += 5
+        if evidence_kind == "course_quality":
+            courses_score += (
+                float(row.get("fail_rate") or 0)
+                + float(row.get("volatility") or 0)
+                + int(row.get("retake_attempts") or 0) * 0.4
+            )
+        elif evidence_kind == "faculty_team":
+            courses_score = (
+                int(row.get("involved_students") or 0) * 0.5
+                + int(row.get("lesson_count") or 0) * 8
+                + (20 if int(row.get("unknown_title_count") or 0) else 0)
+            )
 
         raw_course_name = row.get("course_name") or cid
         course_name_mapped = raw_course_name != cid
@@ -3169,6 +3360,10 @@ def graduation_course_support_simulation(semester: Optional[str] = None,
             "spareSeats": spare,
             "plannedAddedCapacity": new_class_capacity,
             "substitutionCount": subst,
+            "observedTerms": int(row.get("observed_terms") or 0),
+            "failRate": float(row.get("fail_rate") or 0),
+            "volatility": float(row.get("volatility") or 0),
+            "retakeAttempts": int(row.get("retake_attempts") or 0),
             "bottlenecks": bottlenecks or ["常规关注"],
             "priority": _simulation_priority(courses_score),
             "priorityScore": round(courses_score, 1),
@@ -3327,15 +3522,40 @@ def graduation_course_support_simulation(semester: Optional[str] = None,
         "source": "ai_sample",
         "sourceLabel": "AI辅助决策模拟",
         "traceability": {
-            "dataSources": ["student_plan_course_status", "curriculum_plan_course", "teaching_lesson", "lesson_teacher", "agg_course_team", "student_course_substitution"],
-            "calculationLogic": "先筛选必修课中存在明确未通过或到期缺证据的课程，再叠加开课容量、教师覆盖、课程团队和替代关系，比较不同管理动作的可核查覆盖规模和实施难度。",
-            "rules": ["明确未通过来自 completion_status='failed'", "到期缺证据来自 completion_status in ('not_completed','unknown') 且 is_overdue=1", "重修/补修测算优先参考课程缺口人数和当前开课余量", "认定核查测算优先参考到期缺证据人数和替代关系线索", "课程团队保障测算优先参考单教师或职称信息缺口"],
-            "formula": "方案优先级 = 预计优先核查人次 × 管理收益权重，并结合成本、实施难度和课程团队瓶颈调整。",
-            "boundary": "模拟结果是管理测算，不是学生最终通过预测、毕业结论或开课承诺。",
+            "dataSources": [
+                item["source"] for item in effective_expert.get("dataRequirements") or []
+                if item.get("required") or item.get("source")
+            ],
+            "calculationLogic": effective_expert["description"],
+            "rules": [
+                f"{item['ruleId']}：{item['condition']}（{item['meaning']}）"
+                for item in effective_expert.get("rules") or []
+            ],
+            "formula": "；".join(
+                f"{item['name']}：{item['formula']}"
+                for item in effective_expert.get("metrics") or []
+            ),
+            "boundary": "；".join(effective_expert.get("boundaries") or []),
+            "expertVersion": expert_version["version"],
+            "parameterVersion": expert_version["version"],
+            "scopeFingerprint": scope_key,
+            "role": user.get("role_id"),
+            "asOfTime": _now(),
+            "generationMethod": "结构化指标与专家规则计算；自然语言只解释临时参数，不直接计算正式指标",
         },
         "generatedBy": "offline_llm_curated_sample_with_rule_simulation",
         "generatedAt": _now(),
         "semester": teaching_semester,
+        "expert": {
+            "expertId": selected_expert_id,
+            "name": effective_expert["name"],
+            "version": expert_version["version"],
+            "protocolVersion": "management-expert/1.0",
+            "managementQuestion": effective_expert["managementQuestion"],
+            "configurationSource": effective_expert.get("configurationSource"),
+            "recommendedQuestions": effective_expert.get("recommendedQuestions") or [],
+            "boundaries": effective_expert.get("boundaries") or [],
+        },
         "problem": {"type": problem_type, **problem_meta},
         "parameters": {
             "addedClasses": added_classes,
@@ -3343,21 +3563,37 @@ def graduation_course_support_simulation(semester: Optional[str] = None,
             "availableTeachers": available_teachers,
             "usableAddedClasses": usable_added_classes,
             "priorityFocus": priority_focus,
+            "supportCourseLimit": limit if selected_expert_id == "high-impact-course-support" else None,
+            "significantChangePp": significant_change_pp,
+            "minimumStudents": minimum_students,
         },
         "scope": {
             "uniqueStudents": impacted_unique_students,
             "uniqueMajors": impacted_unique_majors,
             "courseMajorRelations": totals["majorCoverage"],
             "dataScope": scope_key,
+            "role": user.get("role_id"),
+            "naturalLanguageMayExpandScope": False,
         },
         "summary": summary,
-        "metrics": [
-            {"label": "模拟课程", "value": len(course_items), "unit": "门", "hint": "必修课中存在明确未通过或到期缺证据的重点课程"},
-            {"label": "涉及学生", "value": impacted_unique_students, "unit": "人", "hint": "本次模拟课程中涉及问题证据的去重学生数"},
-            {"label": "明确未通过", "value": totals["failedStudents"], "unit": "人次", "hint": "按课程汇总，可能包含同一学生多门课程"},
-            {"label": "到期缺证据", "value": totals["verificationStudents"], "unit": "人次", "hint": "建议学期已到但尚无通过/失败/认定证据"},
-            {"label": "覆盖专业", "value": impacted_unique_majors, "unit": "个", "hint": f"去重专业数；另有课程—专业关系 {totals['majorCoverage']} 专业次"},
-        ],
+        "metrics": (
+            [
+                {"label": "候选课程", "value": len(course_items), "unit": "门", "hint": "跨学期成绩达到可比样本量且存在未通过记录的课程"},
+                {"label": "影响学生", "value": impacted_unique_students, "unit": "人", "hint": "候选课程中存在未通过记录的去重学生"},
+                {"label": "未通过人次", "value": totals["failedStudents"], "unit": "人次", "hint": "按课程和学期汇总，同一学生可能重复"},
+                {"label": "累计重修", "value": sum(item["retakeAttempts"] for item in course_items), "unit": "人次", "hint": "候选课程中的重修尝试记录"},
+            ] if evidence_kind == "course_quality" else [
+                {"label": "高影响单点", "value": len(course_items), "unit": "门", "hint": "单教师且覆盖≥300人次，或≥3个教学班且覆盖≥100人次"},
+                {"label": "学生覆盖", "value": impacted_unique_students, "unit": "人次", "hint": "高影响单点课程当期选课人次，不是去重学生"},
+                {"label": "可协调教师", "value": available_teachers, "unit": "人", "hint": "用户确认可讨论的备份教师上限"},
+                {"label": "预计可保障", "value": min(available_teachers, len(course_items)), "unit": "门", "hint": "按每门课程配置一名备份教师的情景上限"},
+            ] if evidence_kind == "faculty_team" else [
+                {"label": "模拟课程", "value": len(course_items), "unit": "门", "hint": "必修课中存在明确未通过或到期缺证据的重点课程"},
+                {"label": "涉及学生", "value": impacted_unique_students, "unit": "人", "hint": "本次模拟课程中涉及问题证据的去重学生数"},
+                {"label": "明确未通过", "value": totals["failedStudents"], "unit": "人次", "hint": "按课程汇总，可能包含同一学生多门课程"},
+                {"label": "到期缺证据", "value": totals["verificationStudents"], "unit": "人次", "hint": "建议学期已到但尚无通过/失败/认定证据"},
+            ]
+        ),
         "scenarios": scenarios,
         "courses": course_items,
         "recommendation": {

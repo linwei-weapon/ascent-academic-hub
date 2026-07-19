@@ -578,6 +578,42 @@ CREATE TABLE sys_config (
     updated_by    TEXT                -- 更新人 username
 );
 
+-- AI管理专家学校配置版本：产品专家定义在代码注册表中，学校只能覆盖白名单参数。
+CREATE TABLE IF NOT EXISTS sys_ai_expert_version (
+    version_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    expert_id TEXT NOT NULL,
+    version_no TEXT NOT NULL,
+    base_definition_version TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('draft','published','retired')),
+    override_json TEXT NOT NULL DEFAULT '{}',
+    change_reason TEXT NOT NULL,
+    action TEXT NOT NULL DEFAULT 'override',
+    source_version_id INTEGER,
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    published_by TEXT,
+    published_at TEXT,
+    UNIQUE(expert_id,version_no)
+);
+CREATE INDEX IF NOT EXISTS idx_ai_expert_version_lookup
+ON sys_ai_expert_version(expert_id,status,version_id);
+
+CREATE TABLE IF NOT EXISTS sys_ai_analysis_scheme (
+    scheme_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    expert_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    expert_version TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('draft','published','retired')),
+    parameters_json TEXT NOT NULL,
+    scope_policy_json TEXT NOT NULL,
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    published_by TEXT,
+    published_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_ai_analysis_scheme_lookup
+ON sys_ai_analysis_scheme(expert_id,status,scheme_id);
+
 CREATE TABLE IF NOT EXISTS sys_kpi_config (
     kpi_id           TEXT PRIMARY KEY,
     module           TEXT NOT NULL,       -- 所属模块

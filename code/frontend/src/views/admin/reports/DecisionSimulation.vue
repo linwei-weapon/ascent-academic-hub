@@ -2,33 +2,79 @@
   <div class="decision-page">
     <el-breadcrumb separator="/">
       <el-breadcrumb-item to="/admin/reports">管理决策专题</el-breadcrumb-item>
-      <el-breadcrumb-item>AI决策模拟</el-breadcrumb-item>
+      <el-breadcrumb-item>决策研判</el-breadcrumb-item>
     </el-breadcrumb>
 
     <header class="page-head">
       <div>
-        <h2 class="sa-page-title">AI决策模拟</h2>
-        <p class="sa-page-sub">从管理问题出发，逐步查看基线、设置约束、比较方案并形成候选决策单；模拟不写入业务数据。</p>
+        <h2 class="sa-page-title">决策研判</h2>
+        <p class="sa-page-sub">无需学习“Skill”操作：从学校预设的管理问题出发，由管理专家组织事实、约束、方案和证据；临时研判不写入业务数据。</p>
       </div>
       <el-tag type="info" effect="plain">管理测算，不是审批结论</el-tag>
     </header>
 
     <section class="step-card sa-card">
-      <StepTitle :number="1" title="选择本次要解决的管理问题" tip="一次只比较一个问题，避免把不同目标混成综合分数" />
+      <StepTitle :number="1" title="选择本次要解决的管理问题" tip="每个问题由一个版本化管理专家负责，学校可调整白名单阈值和默认参数" />
       <div class="problem-grid">
         <button
           v-for="item in problemOptions"
-          :key="item.type"
+          :key="item.expertId"
           class="problem-card"
-          :class="{ active: params.problemType === item.type }"
-          @click="chooseProblem(item.type)"
+          :class="{ active: selectedExpertId === item.expertId }"
+          @click="chooseExpert(item)"
         >
-          <span>{{ item.owner }}</span>
-          <b>{{ item.title }}</b>
-          <p>{{ item.question }}</p>
-          <small>{{ item.output }}</small>
+          <span>{{ (item.owners || []).join(' / ') }} · {{ item.version?.version }}</span>
+          <b>{{ item.name }}</b>
+          <p>{{ item.managementQuestion }}</p>
+          <small>{{ item.description }}</small>
         </button>
       </div>
+      <div v-if="expertRuntime.expertId" class="expert-context">
+        <div><span>当前专家</span><b>{{ expertRuntime.expertName }} · {{ expertRuntime.expertVersion }}</b></div>
+        <div><span>分析范围</span><b>{{ scopeLabel }}</b></div>
+        <div><span>数据条件</span><b :class="{ ready: expertRuntime.dataReadiness?.ready }">{{ expertRuntime.dataReadiness?.ready ? '所需数据已接入' : '存在必需数据缺口' }}</b></div>
+        <div><span>会话边界</span><b>临时条件不改变正式口径</b></div>
+      </div>
+    </section>
+
+    <section v-if="expertRuntime.expertId" class="dialogue-card sa-card">
+      <div class="dialogue-head">
+        <div>
+          <b>和管理专家继续讨论</b>
+          <p>可用自然语言调整本次临时条件；系统会先复述理解，再局部重算，不改变正式口径和数据权限。</p>
+        </div>
+        <div class="dialogue-actions">
+          <el-button size="small" :disabled="interpreting" @click="askExpert('恢复正式口径')">恢复正式口径</el-button>
+          <el-button v-if="canManageSchemes" size="small" type="primary" plain @click="saveScheme">保存为学校方案草稿</el-button>
+        </div>
+      </div>
+      <div class="understood-scope">
+        <span>我理解的范围：{{ scopeLabel }}</span>
+        <span>学期：{{ sessionSemester || data.semester || '当前数据学期' }}</span>
+        <span>专家：{{ expertRuntime.expertName }} · {{ expertRuntime.expertVersion }}</span>
+        <span>临时条件：{{ temporaryConditionText }}</span>
+      </div>
+      <div class="question-chips">
+        <button v-for="question in expertRuntime.recommendedQuestions || []" :key="question" @click="askExpert(question)">
+          {{ question }}
+        </button>
+      </div>
+      <div class="conversation">
+        <article v-for="(message,index) in messages" :key="index" :class="message.role">
+          <span>{{ message.role === 'user' ? '你' : expertRuntime.expertName }}</span>
+          <p>{{ message.text }}</p>
+          <small v-if="message.detail">{{ message.detail }}</small>
+        </article>
+      </div>
+      <div class="composer">
+        <el-input v-model="chatInput" type="textarea" :rows="2" maxlength="500"
+          placeholder="例如：如果可协调5名教师，每班40人，优先处理明确未通过学生"
+          @keydown.ctrl.enter.prevent="submitMessage" />
+        <el-button type="primary" :loading="interpreting" :disabled="!chatInput.trim()" @click="submitMessage">
+          发送并重新研判
+        </el-button>
+      </div>
+      <p class="composer-tip">Ctrl + Enter 发送。对话只能缩小或调整当前授权范围内的临时条件，不能切换到其他学院或全校。</p>
     </section>
 
     <el-alert
@@ -47,7 +93,7 @@
           <StepTitle :number="2" title="先确认当前基线和为什么现在要决策" tip="基线不准确时，不应继续调参数" />
           <div class="baseline-hero">
             <div>
-              <el-tag type="danger" effect="plain">当前管理问题</el-tag>
+              <el-tag type="danger" effect="plain">{{ data.expert?.name || '当前管理问题' }} · {{ data.expert?.version || '—' }}</el-tag>
               <h3>{{ data.problem.question }}</h3>
               <p>{{ data.problem.why }}</p>
             </div>
@@ -57,12 +103,11 @@
             </div>
           </div>
           <div class="baseline-grid">
-            <div><span>候选课程</span><b>{{ metricValue('模拟课程') }}门</b><small>本次纳入比较的重点必修课程</small></div>
-            <div><span>涉及学生</span><b>{{ metricValue('涉及学生') }}人</b><small>问题证据涉及的去重学生</small></div>
-            <div><span>明确未通过</span><b>{{ metricValue('明确未通过') }}人次</b><small>已有失败证据，需要课程处理路径</small></div>
-            <div><span>到期缺证据</span><b>{{ metricValue('到期缺证据') }}人次</b><small>先核验认定、替代或数据回写</small></div>
+            <div v-for="item in (data.metrics || []).slice(0,4)" :key="item.label">
+              <span>{{ item.label }}</span><b>{{ item.value }}{{ item.unit }}</b><small>{{ item.hint }}</small>
+            </div>
           </div>
-          <el-alert type="info" :closable="false" show-icon title="口径边界" description="涉及学生为去重人数；课程缺口按人次汇总，同一学生涉及多门课程时会重复计算。" />
+          <el-alert type="info" :closable="false" show-icon title="口径边界" :description="data.expert?.boundaries?.join('；') || trace.boundary" />
         </section>
 
         <section class="step-card sa-card">
@@ -91,6 +136,21 @@
                 <el-option label="优先核验缺证据" value="verification" />
               </el-select>
               <small>影响方案排序，不改变原始数据</small>
+            </label>
+            <label v-if="params.problemType === 'course_support'">
+              <span>本轮优先支持课程</span>
+              <el-input-number v-model="params.supportCourseLimit" :min="1" :max="20" />
+              <small>限制本轮候选课程数量，避免资源平均摊薄</small>
+            </label>
+            <label v-if="params.problemType === 'course_support'">
+              <span>显著波动阈值</span>
+              <el-input-number v-model="params.significantChangePp" :min="3" :max="30" :step="1" />
+              <small>单位为百分点，用于解释最高与最低未通过率之差</small>
+            </label>
+            <label v-if="params.problemType === 'faculty_assurance'">
+              <span>高影响覆盖阈值</span>
+              <el-input-number v-model="params.minimumStudents" :min="50" :max="1000" :step="50" />
+              <small>单教师课程达到该学生覆盖规模时进入重点核查</small>
             </label>
           </div>
           <div class="constraint-action">
@@ -195,8 +255,13 @@
 
 <script setup lang="ts">
 import { computed, defineComponent, h, onMounted, reactive, ref } from 'vue'
-import { useRouter } from 'vue-router'
-import { getGraduationCourseSupportSimulation } from '@/utils/ai'
+import { useRoute, useRouter } from 'vue-router'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import {
+  getAIExpertCatalog, getAIExpertRuntime, getGraduationCourseSupportSimulation,
+  interpretAIExpertMessage, saveAIAnalysisScheme,
+} from '@/utils/ai'
+import { authStore } from '@/store/auth'
 
 type ProblemType = 'graduation' | 'course_support' | 'faculty_assurance'
 
@@ -211,50 +276,209 @@ const StepTitle = defineComponent({
 })
 
 const router = useRouter()
+const route = useRoute()
+const sessionSemester = String(route.query.semester || '')
 const loading = ref(false)
 const showEvidence = ref(false)
 const selectedScenarioId = ref('')
+const selectedExpertId = ref('')
+const chatInput = ref('')
+const interpreting = ref(false)
+const messages = ref<Array<{ role: 'assistant' | 'user'; text: string; detail?: string }>>([])
 const data = reactive<any>({})
+const expertCatalog = reactive<any>({ experts: [] })
+const expertRuntime = reactive<any>({})
 const params = reactive({
   problemType: 'graduation' as ProblemType,
   addedClasses: 3,
   classCapacity: 30,
   availableTeachers: 3,
   priorityFocus: 'balanced' as 'balanced' | 'failed' | 'verification',
+  supportCourseLimit: 5,
+  significantChangePp: 8,
+  minimumStudents: 300,
 })
 
-const problemOptions: Array<{ type: ProblemType; owner: string; title: string; question: string; output: string }> = [
-  { type: 'graduation', owner: '教务处 / 二级学院', title: '毕业准备', question: '先核验还是先开班？', output: '输出学生课程处理和重修资源候选方案' },
-  { type: 'course_support', owner: '教务处 / 开课学院', title: '课程支持', question: '有限资源优先投入哪些课程？', output: '输出课程支持优先序和资源要求' },
-  { type: 'faculty_assurance', owner: '教务处 / 开课学院', title: '师资保障', question: '有限备份能力优先保障哪些课程？', output: '输出高影响课程团队保障候选方案' },
-]
+const problemOptions = computed<any[]>(() => expertCatalog.experts || [])
+const scenarioByExpert: Record<string, ProblemType> = {
+  'graduation-readiness': 'graduation',
+  'high-impact-course-support': 'course_support',
+  'course-team-continuity': 'faculty_assurance',
+}
+const focusLabels: Record<string, string> = {
+  balanced: '先核验再分流',
+  failed: '明确未通过优先',
+  verification: '待核验证据优先',
+}
+const parameterLabels: Record<string, string> = {
+  addedClasses: '新增班数',
+  classCapacity: '单班容量',
+  availableTeachers: '可协调教师',
+  priorityFocus: '研判侧重',
+  supportCourseLimit: '优先支持课程',
+  significantChangePp: '显著波动阈值',
+  minimumStudents: '高影响覆盖阈值',
+}
 
 const trace = computed(() => data.traceability || {})
 const usableClasses = computed(() => Math.min(params.addedClasses, params.availableTeachers))
 const selectedScenario = computed(() => (data.scenarios || []).find((item: any) => item.id === selectedScenarioId.value))
-
-function metricValue(label: string) {
-  return (data.metrics || []).find((item: any) => item.label === label)?.value ?? '—'
-}
+const scopeLabel = computed(() => {
+  const scope = expertRuntime.scope || expertCatalog.scope || {}
+  if (scope.scopeType === 'all') return `${scope.roleName || '当前角色'} · 全校`
+  if (scope.scopeType === 'college') return `${scope.roleName || '当前角色'} · 本学院`
+  return `${scope.roleName || '当前角色'} · 当前授权范围`
+})
+const canManageSchemes = computed(() => (
+  authStore.user?.permissionContext?.actionPermissions || []
+).includes('system.manage'))
+const temporaryConditionText = computed(() => {
+  if (params.problemType === 'graduation') {
+    return `新增班≤${params.addedClasses}，单班${params.classCapacity}人，可协调教师${params.availableTeachers}人，侧重${focusLabels[params.priorityFocus] || params.priorityFocus}`
+  }
+  if (params.problemType === 'course_support') {
+    return `优先支持${params.supportCourseLimit}门，显著波动${params.significantChangePp}个百分点，可协调教师${params.availableTeachers}人`
+  }
+  return `高影响覆盖≥${params.minimumStudents}人次，可协调备份教师${params.availableTeachers}人`
+})
 
 function listText(value: unknown) {
   return Array.isArray(value) ? value.join('；') : String(value || '—')
 }
 
-async function chooseProblem(type: ProblemType) {
-  if (params.problemType === type && data.problem) return
+function parameterChangeText(key: string, value: unknown) {
+  const label = parameterLabels[key] || key
+  if (key === 'priorityFocus') return `${label}：${focusLabels[String(value)] || value}`
+  const unit = key === 'classCapacity' || key === 'minimumStudents'
+    ? '人'
+    : key === 'availableTeachers' ? '名'
+      : key === 'addedClasses' ? '个'
+        : key === 'supportCourseLimit' ? '门'
+          : key === 'significantChangePp' ? '个百分点' : ''
+  return `${label}：${value}${unit}`
+}
+
+async function chooseExpert(item: any) {
+  const type = scenarioByExpert[item.expertId] || item.simulatorScenario || 'graduation'
+  if (selectedExpertId.value === item.expertId && data.problem) return
+  selectedExpertId.value = item.expertId
   params.problemType = type
   if (type === 'course_support') params.priorityFocus = 'failed'
   else if (type === 'faculty_assurance') params.priorityFocus = 'balanced'
   else params.priorityFocus = 'balanced'
+  await loadExpertRuntime(item.expertId, true)
+  resetConversation(item.managementQuestion)
   await load()
+}
+
+async function loadExpertRuntime(expertId: string, applyDefaults = false) {
+  const result = await getAIExpertRuntime(expertId, sessionSemester || undefined)
+  Object.keys(expertRuntime).forEach((key) => delete expertRuntime[key])
+  Object.assign(expertRuntime, result)
+  if (!applyDefaults) return
+  const runtimeParams = result.parameters || {}
+  if (runtimeParams.addedClasses) params.addedClasses = runtimeParams.addedClasses.value
+  if (runtimeParams.classCapacity) params.classCapacity = runtimeParams.classCapacity.value
+  if (runtimeParams.availableTeachers) params.availableTeachers = runtimeParams.availableTeachers.value
+  if (runtimeParams.priorityFocus) params.priorityFocus = runtimeParams.priorityFocus.value
+  if (runtimeParams.supportCourseLimit) params.supportCourseLimit = runtimeParams.supportCourseLimit.value
+  if (runtimeParams.significantChangePp) params.significantChangePp = runtimeParams.significantChangePp.value
+  if (runtimeParams.minimumStudents) params.minimumStudents = runtimeParams.minimumStudents.value
+}
+
+async function loadExperts() {
+  const result = await getAIExpertCatalog()
+  Object.assign(expertCatalog, result)
+  const requested = String(route.query.expert || '')
+  const first = problemOptions.value.find((item) => item.expertId === requested) || problemOptions.value[0]
+  if (!first) return
+  selectedExpertId.value = first.expertId
+  params.problemType = scenarioByExpert[first.expertId] || first.simulatorScenario || 'graduation'
+  await loadExpertRuntime(first.expertId, true)
+  resetConversation(String(route.query.question || first.managementQuestion || ''))
+}
+
+function resetConversation(question: string) {
+  messages.value = [{
+    role: 'assistant',
+    text: question || '请选择上方推荐问题，或直接说明本次可用资源和关注重点。',
+    detail: '我会在当前工作身份和数据范围内解释条件，不会修改学校正式指标。',
+  }]
+}
+
+async function askExpert(question: string) {
+  chatInput.value = question
+  await submitMessage()
+}
+
+async function submitMessage() {
+  const message = chatInput.value.trim()
+  if (!message || interpreting.value) return
+  messages.value.push({ role: 'user', text: message })
+  chatInput.value = ''
+  interpreting.value = true
+  try {
+    const result = await interpretAIExpertMessage(selectedExpertId.value, {
+      message,
+      scopeFingerprint: expertRuntime.scope?.scopeFingerprint || expertCatalog.scope?.scopeFingerprint || '',
+      currentParameters: { ...params },
+      semester: sessionSemester || undefined,
+    })
+    for (const [key, value] of Object.entries(result.parameterChanges || {})) {
+      if (key in params) (params as any)[key] = value
+    }
+    const changed = Object.entries(result.parameterChanges || {})
+      .map(([key, value]) => parameterChangeText(key, value)).join('；')
+    const groundedResponse = !result.understood && !result.scopeRequest?.blocked && data.summary
+      ? `基于当前已加载的专家结果：${data.summary}${data.recommendation?.reason ? ` ${data.recommendation.reason}` : ''}`
+      : result.response
+    messages.value.push({
+      role: 'assistant',
+      text: groundedResponse,
+      detail: result.scopeRequest?.blocked
+        ? `权限边界：${result.scopeRequest.message}`
+        : changed ? `已理解的临时条件：${changed}` : '未改变当前临时条件。',
+    })
+    if (result.recalculate) await load()
+  } catch (error: any) {
+    messages.value.push({ role: 'assistant', text: error?.message || '本次条件解释失败，请重新表述。' })
+  } finally {
+    interpreting.value = false
+  }
+}
+
+async function saveScheme() {
+  try {
+    const result = await ElMessageBox.prompt(
+      '保存的是学校分析方案草稿，不会立即发布，也不会保存越权数据范围。',
+      '保存学校分析方案',
+      { inputPlaceholder: `例如：${expertRuntime.expertName}常用方案`, inputValue: `${expertRuntime.expertName}常用方案` },
+    )
+    const parameterKeys = Object.keys(expertRuntime.parameters || {})
+    const schemeParameters = Object.fromEntries(
+      parameterKeys.map((key) => [key, (params as any)[key]]),
+    )
+    await saveAIAnalysisScheme(selectedExpertId.value, {
+      name: result.value,
+      parameters: schemeParameters,
+      changeReason: '由决策研判工作区保存，待管理员发布',
+    })
+    ElMessage.success('已保存为草稿；发布后才会成为学校正式分析方案')
+  } catch {
+    // 用户取消保存时不产生草稿，也不提示错误。
+  }
 }
 
 async function load() {
   loading.value = true
   showEvidence.value = false
   try {
-    const result = await getGraduationCourseSupportSimulation({ limit: 12, ...params })
+    const result = await getGraduationCourseSupportSimulation({
+      limit: 12,
+      ...params,
+      expertId: selectedExpertId.value,
+      semester: sessionSemester || undefined,
+    })
     Object.keys(data).forEach((key) => delete data[key])
     Object.assign(data, result)
     selectedScenarioId.value = result.recommendation?.bestScenarioId || result.scenarios?.[0]?.id || ''
@@ -267,7 +491,15 @@ function enterEvidence() {
   if (data.problem?.route) router.push(data.problem.route)
 }
 
-onMounted(load)
+onMounted(async () => {
+  loading.value = true
+  try {
+    await loadExperts()
+    await load()
+  } finally {
+    loading.value = false
+  }
+})
 </script>
 
 <style scoped>
@@ -286,6 +518,29 @@ onMounted(load)
 .problem-card b { display:block; margin:7px 0 5px; color:#1e293b; font-size:17px; }
 .problem-card p { margin:0 0 10px; color:#334155; font-size:13px; }
 .problem-card small { color:#4f46e5; }
+.expert-context { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; margin-top:12px; padding:12px; border-radius:10px; background:#f8fafc; border:1px solid #e2e8f0; }
+.expert-context span { display:block; color:#64748b; font-size:11px; }
+.expert-context b { display:block; margin-top:4px; color:#334155; font-size:12px; line-height:1.5; }
+.expert-context b.ready { color:#047857; }
+.dialogue-card { margin-top:14px; border:1px solid #c7d2fe; background:linear-gradient(180deg,#fff 0%,#f8faff 100%); }
+.dialogue-head { display:flex; justify-content:space-between; gap:16px; align-items:flex-start; }
+.dialogue-head b { color:#1e1b4b; font-size:16px; }
+.dialogue-head p { margin:5px 0 0; color:#64748b; font-size:12px; }
+.dialogue-actions { display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
+.understood-scope { display:flex; flex-wrap:wrap; gap:8px 16px; margin:12px 0; padding:10px 12px; border-radius:9px; background:#eef2ff; color:#4338ca; font-size:11px; }
+.question-chips { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px; }
+.question-chips button { border:1px solid #c7d2fe; border-radius:999px; background:#fff; color:#4338ca; padding:6px 10px; cursor:pointer; font-size:11px; }
+.question-chips button:hover { background:#eef2ff; }
+.conversation { display:grid; gap:9px; max-height:280px; overflow:auto; padding:10px; border:1px solid #e2e8f0; border-radius:10px; background:#fff; }
+.conversation article { max-width:85%; padding:9px 12px; border-radius:10px; background:#f1f5f9; }
+.conversation article.user { justify-self:end; background:#4f46e5; color:#fff; }
+.conversation article span { display:block; margin-bottom:4px; color:#64748b; font-size:10px; }
+.conversation article.user span { color:#c7d2fe; }
+.conversation article p { margin:0; font-size:12px; line-height:1.65; }
+.conversation article small { display:block; margin-top:5px; color:#64748b; font-size:10px; line-height:1.5; }
+.conversation article.user small { color:#e0e7ff; }
+.composer { display:grid; grid-template-columns:1fr auto; gap:10px; align-items:end; margin-top:10px; }
+.composer-tip { margin:6px 0 0; color:#94a3b8; font-size:10px; }
 .loading-alert { margin:14px 0; }
 .baseline-hero { display:grid; grid-template-columns:1.35fr 1fr; gap:14px; margin-bottom:12px; }
 .baseline-hero > div { padding:16px; border-radius:12px; background:#f8fafc; border:1px solid #e2e8f0; }
@@ -328,6 +583,6 @@ onMounted(load)
 .evidence-table { margin-top:12px; }
 .trace-card { margin-top:14px; }
 .trace-card :deep(.el-collapse-item__header) { color:#4f46e5; font-weight:600; }
-@media (max-width:1100px) { .problem-grid,.baseline-grid,.constraint-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
-@media (max-width:760px) { .page-head,.baseline-hero,.sheet-head,.constraint-action { display:block; } .problem-grid,.baseline-grid,.constraint-grid,.sheet-grid { grid-template-columns:1fr; } .sheet-actions { justify-content:stretch; } }
+@media (max-width:1100px) { .problem-grid,.baseline-grid,.constraint-grid,.expert-context { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media (max-width:760px) { .page-head,.baseline-hero,.sheet-head,.constraint-action,.dialogue-head { display:block; } .problem-grid,.baseline-grid,.constraint-grid,.sheet-grid,.expert-context,.composer { grid-template-columns:1fr; } .sheet-actions { justify-content:stretch; } }
 </style>
