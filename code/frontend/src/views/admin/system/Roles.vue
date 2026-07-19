@@ -71,7 +71,10 @@ interface RoleRow {
   role_id: string; name: string; data_scope_type: string | null
   user_count: number; menu_count: number
 }
-interface MenuRow { menu_id: string; title: string; sort_order: number }
+interface MenuRow {
+  menu_id: string; parent_id: string | null; title: string
+  path: string; sort_order: number; children?: MenuRow[]
+}
 
 const roles = ref<RoleRow[]>([])
 const menuTree = ref<MenuRow[]>([])
@@ -90,7 +93,17 @@ async function load() {
   loading.value = true
   try {
     roles.value = await http.get('/admin/rbac/roles')
-    menuTree.value = await http.get('/admin/rbac/menus')
+    const menus = await http.get<MenuRow[]>('/admin/rbac/menus')
+    menuTree.value = menus
+      .filter(menu => !menu.parent_id)
+      .map(parent => ({
+        ...parent,
+        children: menus
+          .filter(menu => menu.parent_id === parent.menu_id)
+          .sort((a, b) => a.sort_order - b.sort_order),
+      }))
+      .filter(parent => parent.children?.length)
+      .sort((a, b) => a.sort_order - b.sort_order)
   } finally {
     loading.value = false
   }
@@ -143,7 +156,8 @@ async function openMenuDrawer(row: any) {
 
 async function saveMenus() {
   if (!current.value) return
-  const ids = (treeRef.value?.getCheckedKeys(false) || []) as string[]
+  // 父节点只用于导航分组，后端和数据库都只保存叶子菜单权限。
+  const ids = (treeRef.value?.getCheckedKeys(true) || []) as string[]
   saving.value = true
   try {
     await http.put(`/admin/rbac/roles/${current.value.role_id}/menus`, { menu_ids: ids })

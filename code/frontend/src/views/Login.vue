@@ -67,7 +67,8 @@ import { reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { User, Lock } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
-import { login } from '@/store/auth'
+import { authStore, login } from '@/store/auth'
+import { homePathForUser } from '@/utils/menu'
 
 const router = useRouter()
 const loading = ref(false)
@@ -82,7 +83,8 @@ async function onSubmit() {
   try {
     await login(form.username.trim(), form.password)
     ElMessage.success('登录成功')
-    const redirect = (router.currentRoute.value.query.redirect as string) || '/admin/dashboard'
+    const redirect = (router.currentRoute.value.query.redirect as string)
+      || homePathForUser(authStore.user, authStore.menus)
     router.replace(redirect)
   } catch {
     // 错误提示已在 http 层统一弹出

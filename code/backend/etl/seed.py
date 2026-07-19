@@ -42,36 +42,31 @@ ROLES = [
     ("counselor", "辅导员", "class"),
     ("dept_director", "系主任", "major"),
     ("teacher", "任课教师", "teacher"),  # V1.1新增
-    ("counselor", "辅导员", "class"),
-    ("dept_director", "系主任", "major"),
 ]
 
-# ---- 菜单（优化后结构：预警中心扩展子页、教学运行独立子页、学生学业含清单、
-#         系统管理分组、系统设置精简）----
+# ---- 菜单（三个一级分组；业务模块内部使用页内Tab，不形成三级导航）----
 # 格式: (menu_id, title, icon, sort_order, parent_id)
 MENUS = [
-    # ── 业务模块 ──
-    ("/admin/dashboard",              "数据大屏",       "Odometer",    1,  None),
-    ("/admin/alert",                  "学业预警监控",   "Warning",     2,  None),
-    ("/admin/operation",              "教学运行",       "Calendar",    5,  None),
-    ("/admin/operation/courses",      "课程总览",       "Calendar",    6,  "/admin/operation"),
-    ("/admin/operation/classroom",    "教室利用率",     "OfficeBuilding",7, "/admin/operation"),
-    ("/admin/operation/schedule-changes","调停课分析",  "Warning",     8,  "/admin/operation"),
-    ("/admin/operation/teacher-load", "教师负荷",       "User",        9,  "/admin/operation"),
-    ("/admin/curriculum",             "培养质量",       "Reading",     10, None),
-    ("/admin/faculty",                "师资保障分析",   "User",        11, None),
-    ("/admin/students/analysis",      "学生学业",       "DataLine",    12, None),
-    ("/admin/students/list",          "学生清单",       "List",        13, "/admin/students/analysis"),
-    ("/admin/reports",                "报表中心",       "Document",    14, None),
-    # ── 系统管理（仅 dean）──
-    ("/admin/system",                 "系统管理",       "Setting",     15, None),
-    ("/admin/system/accounts",        "账号管理",       "User",        16, "/admin/system"),
-    ("/admin/system/roles",           "角色管理",       "UserFilled",  17, "/admin/system"),
-    ("/admin/system/menus",           "菜单管理",       "Menu",        18, "/admin/system"),
-    ("/admin/system/audit",           "安全审计",       "Document",    19, "/admin/system"),
-    ("/admin/system/kpis",            "指标配置",       "DataAnalysis",20, "/admin/system"),
-    # ── 系统设置（仅 dean）──
-    ("/admin/settings",               "系统设置",       "Setting",     21, None),
+    ("/admin/analysis", "教学管理分析", "DataAnalysis", 1, None),
+    ("/admin/decision", "AI管理决策", "MagicStick", 2, None),
+    ("/admin/system", "系统管理", "Setting", 3, None),
+
+    ("/admin/dashboard", "教学数据总览", "Odometer", 101, "/admin/analysis"),
+    ("/admin/alert", "学业预警监控", "Warning", 102, "/admin/analysis"),
+    ("/admin/operation/courses", "教学运行分析", "Calendar", 103, "/admin/analysis"),
+    ("/admin/curriculum", "培养质量分析", "Reading", 104, "/admin/analysis"),
+    ("/admin/faculty", "师资保障分析", "User", 105, "/admin/analysis"),
+    ("/admin/students/analysis", "学生成长与学业分析", "DataLine", 106, "/admin/analysis"),
+
+    ("/admin/reports/management-briefing", "管理要情", "Bell", 201, "/admin/decision"),
+    ("/admin/reports/decision-simulation", "决策研判", "Opportunity", 202, "/admin/decision"),
+
+    ("/admin/system/accounts", "账号管理", "User", 301, "/admin/system"),
+    ("/admin/system/roles", "角色与功能权限", "UserFilled", 302, "/admin/system"),
+    ("/admin/system/menus", "菜单管理", "Menu", 303, "/admin/system"),
+    ("/admin/system/kpis", "指标与口径管理", "DataAnalysis", 304, "/admin/system"),
+    ("/admin/system/audit", "审计日志", "Document", 305, "/admin/system"),
+    ("/admin/settings", "系统参数", "Setting", 306, "/admin/system"),
 ]
 
 # ---- 角色→菜单可见性（优化后）----
@@ -85,22 +80,10 @@ ROLE_MENU = {
     # 预警中心（6 角色）
     "/admin/alert": [
         "school_leader", "dean", "dept_research",
-        "college_dean", "college_secretary", "counselor",
+        "college_dean", "college_secretary", "counselor", "teacher",
     ],
-    # 教学运行（4 角色，父级+4 子页）
-    "/admin/operation": [
-        "dean", "dept_operation", "college_dean", "college_secretary",
-    ],
+    # 教学运行（模块内部以Tab组织）
     "/admin/operation/courses": [
-        "dean", "dept_operation", "college_dean", "college_secretary",
-    ],
-    "/admin/operation/classroom": [
-        "dean", "dept_operation", "college_dean", "college_secretary",
-    ],
-    "/admin/operation/schedule-changes": [
-        "dean", "dept_operation", "college_dean", "college_secretary",
-    ],
-    "/admin/operation/teacher-load": [
         "dean", "dept_operation", "college_dean", "college_secretary",
     ],
     # 培养质量（7 角色，校领导负责例外规则最终激活）
@@ -112,31 +95,27 @@ ROLE_MENU = {
     "/admin/faculty": [
         "dean", "dept_research", "college_dean", "dept_director",
     ],
-    # 学生学业（3 角色父菜单 + 5 角色子菜单）
+    # 学生成长与学业
     "/admin/students/analysis": [
-        "dean", "college_dean", "college_secretary",
-    ],
-    "/admin/students/list": [
         "dean", "college_dean", "college_secretary",
         "counselor", "dept_director",
     ],
-    # 报表中心（6 角色）
-    "/admin/reports": [
-        "dean", "dept_research", "dept_practice", "quality_office",
+    # AI管理决策
+    "/admin/reports/management-briefing": [
+        "school_leader", "dean", "dept_research", "dept_practice", "quality_office",
         "college_dean", "college_secretary",
     ],
-    # 系统管理（仅 dean）
-    "/admin/system":          ["dean"],
+    "/admin/reports/decision-simulation": [
+        "school_leader", "dean", "dept_research", "dept_practice", "quality_office",
+        "college_dean", "college_secretary",
+    ],
+    # 系统管理（仅 dean；父菜单由登录接口自动补齐）
     "/admin/system/accounts": ["dean"],
     "/admin/system/roles":    ["dean"],
     "/admin/system/menus":    ["dean"],
     "/admin/system/audit":    ["dean"],
     "/admin/system/kpis":     ["dean"],
-    # 系统设置（仅 dean）
-    "/admin/settings": ["dean", "quality_office", "school_leader"],
-    # V1.1新增：任课教师仅看预警
-    "/admin/alert": ["school_leader", "dean", "dept_research",
-                     "college_dean", "college_secretary", "counselor", "teacher"],
+    "/admin/settings": ["dean"],
 }
 
 DEMO_PASSWORD = "Demo@2026"

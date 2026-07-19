@@ -90,9 +90,15 @@ def main():
     print("\n[2] 登录与菜单权限")
     for role in ("dean", "counselor", "college_dean"):
         r = http(base, "/api/auth/login", "POST", {"username": role, "password": DEMO_PASSWORD})
-        exp_menus = scalar(c, "SELECT COUNT(*) FROM sys_role_menu WHERE role_id=?", role)
+        exp_leaves = scalar(c, "SELECT COUNT(*) FROM sys_role_menu WHERE role_id=?", role)
+        exp_parents = scalar(c, """SELECT COUNT(DISTINCT m.parent_id)
+            FROM sys_role_menu rm JOIN sys_menu m ON m.menu_id=rm.menu_id
+            WHERE rm.role_id=? AND m.parent_id IS NOT NULL""", role)
+        exp_menus = exp_leaves + exp_parents
         check(f"login {role}.code", 0, r["code"])
         check(f"login {role}.menus", exp_menus, len(r["data"]["user"]["menus"]))
+        check(f"login {role}.menu_parent_id", True,
+              all("parent_id" in m for m in r["data"]["user"]["menus"]))
     bad = http(base, "/api/auth/login", "POST", {"username": "dean", "password": "wrong"})
     check("login 错误密码.code", 401, bad["code"])
     token = http(base, "/api/auth/login", "POST",

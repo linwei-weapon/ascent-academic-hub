@@ -235,6 +235,50 @@ class MenuUpdateIn(BaseModel):
     sort_order: int | None = None
 
 
+def _menu_update_fields(body: MenuUpdateIn) -> set[str]:
+    """兼容 Pydantic v1/v2，区分“未传字段”和“明确传 null”."""
+    return set(getattr(body, "model_fields_set",
+                       getattr(body, "__fields_set__", set())))
+
+
+def _assert_valid_parent(conn: sqlite3.Connection, menu_id: str,
+                         parent_id: str | None) -> None:
+    """只允许两级菜单，并阻止自身/后代成为父菜单。"""
+    if not parent_id:
+        return
+    if parent_id == menu_id:
+        raise ApiError("菜单不能以自身作为父菜单", code=400, status_code=400)
+    parent = dbm.query_one(
+        conn, "SELECT menu_id,parent_id FROM sys_menu WHERE menu_id=?",
+        (parent_id,))
+    if not parent:
+        raise ApiError("父菜单不存在", code=400, status_code=400)
+    if parent["parent_id"]:
+        raise ApiError("系统仅支持两级菜单，不能挂到二级菜单下",
+                       code=400, status_code=400)
+    if dbm.scalar(conn, "SELECT COUNT(*) FROM sys_menu WHERE parent_id=?",
+                  (menu_id,)):
+        raise ApiError("含有子菜单的一级菜单不能再挂到其他菜单下",
+                       code=400, status_code=400)
+
+
+def _leaf_menu_ids(conn: sqlite3.Connection,
+                   menu_ids: list[str]) -> list[str]:
+    """校验菜单ID并仅保留叶子节点；父菜单本身不授予业务权限。"""
+    requested = list(dict.fromkeys(menu_ids))
+    unknown = [mid for mid in requested
+               if not dbm.query_one(
+                   conn, "SELECT 1 FROM sys_menu WHERE menu_id=?", (mid,))]
+    if unknown:
+        raise ApiError(f"菜单不存在: {', '.join(unknown)}",
+                       code=400, status_code=400)
+    return [
+        mid for mid in requested
+        if not dbm.scalar(
+            conn, "SELECT COUNT(*) FROM sys_menu WHERE parent_id=?", (mid,))
+    ]
+
+
 @router.get("/menus")
 def list_menus(_: dict = Depends(require_admin),
                conn: sqlite3.Connection = Depends(get_db)):
@@ -249,8 +293,7 @@ def create_menu(body: MenuIn, admin: dict = Depends(require_admin),
                 conn: sqlite3.Connection = Depends(get_db_rw)):
     if dbm.query_one(conn, "SELECT 1 FROM sys_menu WHERE menu_id=?", (body.menu_id,)):
         raise ApiError("菜单 ID 已存在")
-    if body.parent_id and not dbm.query_one(conn, "SELECT 1 FROM sys_menu WHERE menu_id=?", (body.parent_id,)):
-        raise ApiError("父菜单不存在", code=400, status_code=400)
+    _assert_valid_parent(conn, body.menu_id, body.parent_id)
     if body.path and not body.path.startswith("/admin/"):
         raise ApiError("菜单路径必须位于 /admin/ 下", code=400, status_code=400)
     dbm.execute(conn, """
@@ -268,16 +311,14 @@ def update_menu(menu_id: str, body: MenuUpdateIn, admin: dict = Depends(require_
     if not dbm.query_one(conn, "SELECT 1 FROM sys_menu WHERE menu_id=?", (menu_id,)):
         raise ApiError("菜单不存在", status_code=404)
     fields, params = [], []
-    if body.parent_id == menu_id:
-        raise ApiError("菜单不能以自身作为父菜单", code=400, status_code=400)
-    if body.parent_id and not dbm.query_one(conn, "SELECT 1 FROM sys_menu WHERE menu_id=?", (body.parent_id,)):
-        raise ApiError("父菜单不存在", code=400, status_code=400)
-    if body.path and not body.path.startswith("/admin/"):
+    provided = _menu_update_fields(body)
+    if "parent_id" in provided:
+        _assert_valid_parent(conn, menu_id, body.parent_id)
+    if "path" in provided and body.path and not body.path.startswith("/admin/"):
         raise ApiError("菜单路径必须位于 /admin/ 下", code=400, status_code=400)
     for col in ("parent_id", "title", "path", "icon", "sort_order"):
-        val = getattr(body, col)
-        if val is not None:
-            fields.append(f"{col}=?"); params.append(val)
+        if col in provided:
+            fields.append(f"{col}=?"); params.append(getattr(body, col))
     if fields:
         params.append(menu_id)
         dbm.execute(conn, f"UPDATE sys_menu SET {','.join(fields)} WHERE menu_id=?", params)
@@ -307,7 +348,15 @@ class RoleMenusIn(BaseModel):
 @router.get("/roles/{role_id}/menus")
 def get_role_menus(role_id: str, _: dict = Depends(require_admin),
                    conn: sqlite3.Connection = Depends(get_db)):
-    rows = dbm.query(conn, "SELECT menu_id FROM sys_role_menu WHERE role_id=?", (role_id,))
+    rows = dbm.query(conn, """
+        SELECT rm.menu_id
+        FROM sys_role_menu rm
+        WHERE rm.role_id=?
+          AND NOT EXISTS (
+              SELECT 1 FROM sys_menu child WHERE child.parent_id=rm.menu_id
+          )
+        ORDER BY rm.menu_id
+    """, (role_id,))
     return ok([r["menu_id"] for r in rows])
 
 
@@ -316,16 +365,14 @@ def set_role_menus(role_id: str, body: RoleMenusIn, admin: dict = Depends(requir
                    conn: sqlite3.Connection = Depends(get_db_rw)):
     if not dbm.query_one(conn, "SELECT 1 FROM sys_role WHERE role_id=?", (role_id,)):
         raise ApiError("角色不存在", status_code=404)
-    unknown = [mid for mid in dict.fromkeys(body.menu_ids)
-               if not dbm.query_one(conn, "SELECT 1 FROM sys_menu WHERE menu_id=?", (mid,))]
-    if unknown:
-        raise ApiError(f"菜单不存在: {', '.join(unknown)}", code=400, status_code=400)
+    leaf_ids = _leaf_menu_ids(conn, body.menu_ids)
     dbm.execute(conn, "DELETE FROM sys_role_menu WHERE role_id=?", (role_id,))
-    for mid in dict.fromkeys(body.menu_ids):  # 去重保序
+    for mid in leaf_ids:
         dbm.execute(conn, "INSERT INTO sys_role_menu (role_id, menu_id) VALUES (?,?)",
                     (role_id, mid))
     write_audit(conn, admin["username"], "rbac.role.menus_update", "role", role_id,
-                detail={"menuIds": list(dict.fromkeys(body.menu_ids))})
+                detail={"requestedMenuIds": list(dict.fromkeys(body.menu_ids)),
+                        "leafMenuIds": leaf_ids})
     return ok(msg="菜单权限已保存")
 
 

@@ -20,12 +20,27 @@ class LoginIn(BaseModel):
 
 
 def _menus_for_role(conn: sqlite3.Connection, role_id: str) -> list[dict]:
-    """该角色可见菜单（按 sort_order）。"""
+    """返回角色获授权的叶子菜单及其父菜单。
+
+    sys_role_menu 只保存叶子权限；父菜单只是导航分组，不能作为获得全部
+    子菜单权限的凭据。登录响应自动补齐至少有一个授权子项的父菜单。
+    """
     return dbm.query(conn, """
-        SELECT m.menu_id, m.title, m.path, m.icon, m.sort_order
-        FROM sys_role_menu rm JOIN sys_menu m ON rm.menu_id = m.menu_id
-        WHERE rm.role_id = ?
-        ORDER BY m.sort_order
+        WITH granted_leaf AS (
+            SELECT m.menu_id, m.parent_id
+            FROM sys_role_menu rm
+            JOIN sys_menu m ON m.menu_id = rm.menu_id
+            WHERE rm.role_id = ?
+        ),
+        visible_id AS (
+            SELECT menu_id FROM granted_leaf
+            UNION
+            SELECT parent_id FROM granted_leaf WHERE parent_id IS NOT NULL
+        )
+        SELECT m.menu_id, m.parent_id, m.title, m.path, m.icon, m.sort_order
+        FROM sys_menu m
+        JOIN visible_id v ON v.menu_id = m.menu_id
+        ORDER BY m.sort_order, m.menu_id
     """, (role_id,))
 
 

@@ -1,11 +1,14 @@
-"""一次性幂等迁移：对齐侧边栏菜单 + 新增「系统管理」三页菜单并绑定到管理员(dean)。
+"""P1幂等迁移：把侧边栏统一为三个一级分组和业务模块二级菜单。
 
-只动 sys_menu / sys_role_menu，不重 seed、不碰其他演示数据。可重复执行。
+只修改 sys_menu / sys_role_menu，不重跑 seed，不触碰业务事实数据。
+sys_role_menu 最终只保存叶子菜单权限；父菜单由登录接口按叶子授权补齐。
 
-运行：cd 平台管理端-0618 && python -X utf8 scripts/migrate_menu.py
+运行（仓库根目录）：
+    python -X utf8 code/scripts/migrate_menu.py
 """
 import sqlite3
 import sys
+from pathlib import Path
 
 sys.stdout.reconfigure(encoding="utf-8")
 sys.path.insert(0, __file__.rsplit("scripts", 1)[0])  # 让 backend 包可导入
@@ -13,82 +16,159 @@ sys.path.insert(0, __file__.rsplit("scripts", 1)[0])  # 让 backend 包可导入
 from backend.etl import config
 
 ADMIN_ROLE = "dean"
-RULE_GOVERNANCE_ROLES = ("dean", "quality_office", "school_leader")
 
-# 期望的最终顺序（menu_id == path）。去实践教学；教学运行分析升到培养质量上方；
-# 报表中心移到系统设置上方（系统管理三页其后、系统设置收尾）。
-MENU_ORDER = [
-    "/admin/dashboard",
-    "/admin/alert",
-    "/admin/operation/courses",
-    "/admin/curriculum",
-    "/admin/faculty",
-    "/admin/students/analysis",
-    "/admin/reports",
-    "/admin/system/accounts",
-    "/admin/system/menus",
-    "/admin/system/roles",
-    "/admin/settings",
+# menu_id, parent_id, title, path, icon, sort_order
+TARGET_MENUS = [
+    ("/admin/analysis", None, "教学管理分析", "/admin/analysis", "DataAnalysis", 1),
+    ("/admin/decision", None, "AI管理决策", "/admin/decision", "MagicStick", 2),
+    ("/admin/system", None, "系统管理", "/admin/system", "Setting", 3),
+
+    ("/admin/dashboard", "/admin/analysis", "教学数据总览",
+     "/admin/dashboard", "Odometer", 101),
+    ("/admin/alert", "/admin/analysis", "学业预警监控",
+     "/admin/alert", "Warning", 102),
+    ("/admin/operation/courses", "/admin/analysis", "教学运行分析",
+     "/admin/operation/courses", "Calendar", 103),
+    ("/admin/curriculum", "/admin/analysis", "培养质量分析",
+     "/admin/curriculum", "Reading", 104),
+    ("/admin/faculty", "/admin/analysis", "师资保障分析",
+     "/admin/faculty", "User", 105),
+    ("/admin/students/analysis", "/admin/analysis", "学生成长与学业分析",
+     "/admin/students/analysis", "DataLine", 106),
+
+    ("/admin/reports/management-briefing", "/admin/decision", "管理要情",
+     "/admin/reports/management-briefing", "Bell", 201),
+    ("/admin/reports/decision-simulation", "/admin/decision", "决策研判",
+     "/admin/reports/decision-simulation", "Opportunity", 202),
+
+    ("/admin/system/accounts", "/admin/system", "账号管理",
+     "/admin/system/accounts", "User", 301),
+    ("/admin/system/roles", "/admin/system", "角色与功能权限",
+     "/admin/system/roles", "UserFilled", 302),
+    ("/admin/system/menus", "/admin/system", "菜单管理",
+     "/admin/system/menus", "Menu", 303),
+    ("/admin/system/kpis", "/admin/system", "指标与口径管理",
+     "/admin/system/kpis", "DataAnalysis", 304),
+    ("/admin/system/audit", "/admin/system", "审计日志",
+     "/admin/system/audit", "Document", 305),
+    ("/admin/settings", "/admin/system", "系统参数",
+     "/admin/settings", "Setting", 306),
 ]
 
-# 新增菜单：menu_id, title, icon
-NEW_MENUS = [
-    ("/admin/system/accounts", "账号管理", "User"),
-    ("/admin/system/menus", "菜单管理", "Menu"),
-    ("/admin/system/roles", "角色管理", "UserFilled"),
-]
+PARENT_IDS = {row[0] for row in TARGET_MENUS if row[1] is None}
+LEAF_IDS = {row[0] for row in TARGET_MENUS if row[1] is not None}
+SYSTEM_LEAF_IDS = {
+    row[0] for row in TARGET_MENUS if row[1] == "/admin/system"
+}
 
-# 历史残留（如存在则清掉，幂等）：school/sync + 已下线的实践教学分析
-OBSOLETE = ["/admin/school", "/admin/sync", "/admin/practice"]
+# 历史菜单权限转移到新的业务模块叶子。
+LEGACY_GRANT_TRANSFER = {
+    "/admin/operation": ("/admin/operation/courses",),
+    "/admin/operation/classroom": ("/admin/operation/courses",),
+    "/admin/operation/schedule-changes": ("/admin/operation/courses",),
+    "/admin/operation/teacher-load": ("/admin/operation/courses",),
+    "/admin/operation/schedule-analysis": ("/admin/operation/courses",),
+    "/admin/students/list": ("/admin/students/analysis",),
+    "/admin/reports": (
+        "/admin/reports/management-briefing",
+        "/admin/reports/decision-simulation",
+    ),
+}
+
+OBSOLETE = {
+    "/admin/school", "/admin/sync", "/admin/practice",
+    "/admin/alert/monitor", "/admin/alert/rules", "/admin/alert/discovery",
+    *LEGACY_GRANT_TRANSFER.keys(),
+}
 
 
-def main() -> None:
-    conn = sqlite3.connect(str(config.DB_PATH))
-    conn.execute("PRAGMA foreign_keys = ON")
+def snapshot(conn: sqlite3.Connection) -> list[tuple]:
+    return conn.execute("""
+        SELECT menu_id,parent_id,title,path,sort_order
+        FROM sys_menu ORDER BY sort_order,menu_id
+    """).fetchall()
+
+
+def migrate(conn: sqlite3.Connection) -> None:
     cur = conn.cursor()
 
-    # 1) 清掉历史残留菜单
-    for mid in OBSOLETE:
-        cur.execute("DELETE FROM sys_role_menu WHERE menu_id=?", (mid,))
-        cur.execute("DELETE FROM sys_menu WHERE menu_id=?", (mid,))
+    transfers: list[tuple[str, str]] = []
+    for old_id, targets in LEGACY_GRANT_TRANSFER.items():
+        roles = [r[0] for r in cur.execute(
+            "SELECT role_id FROM sys_role_menu WHERE menu_id=?", (old_id,))]
+        transfers.extend((role_id, target) for role_id in roles for target in targets)
 
-    # 2) UPSERT 新增菜单（菜单管理三页）
-    for mid, title, icon in NEW_MENUS:
+    # 先补齐目标菜单，保证转移角色授权时外键/引用始终有效。
+    for row in TARGET_MENUS:
         cur.execute("""
-            INSERT INTO sys_menu (menu_id, parent_id, title, path, icon, sort_order)
-            VALUES (?, NULL, ?, ?, ?, 0)
-            ON CONFLICT(menu_id) DO UPDATE SET title=excluded.title, icon=excluded.icon
-        """, (mid, title, mid, icon))
+            INSERT INTO sys_menu(menu_id,parent_id,title,path,icon,sort_order)
+            VALUES(?,?,?,?,?,?)
+            ON CONFLICT(menu_id) DO UPDATE SET
+                parent_id=excluded.parent_id,
+                title=excluded.title,
+                path=excluded.path,
+                icon=excluded.icon,
+                sort_order=excluded.sort_order
+        """, row)
 
-    # 3) 统一排序
-    for order, mid in enumerate(MENU_ORDER, start=1):
-        cur.execute("UPDATE sys_menu SET sort_order=? WHERE menu_id=?", (order, mid))
+    for role_id, target in transfers:
+        cur.execute("""INSERT OR IGNORE INTO sys_role_menu(role_id,menu_id)
+                       VALUES(?,?)""", (role_id, target))
 
-    # 4) 新菜单绑定到管理员角色（幂等）
-    for mid, _, _ in NEW_MENUS:
-        cur.execute("""
-            INSERT OR IGNORE INTO sys_role_menu (role_id, menu_id) VALUES (?, ?)
-        """, (ADMIN_ROLE, mid))
+    # 校领导应能进入AI管理决策；系统管理员(dean)明确拥有全部叶子菜单。
+    for target in (
+        "/admin/reports/management-briefing",
+        "/admin/reports/decision-simulation",
+    ):
+        cur.execute("""INSERT OR IGNORE INTO sys_role_menu(role_id,menu_id)
+                       VALUES('school_leader',?)""", (target,))
+    for leaf_id in LEAF_IDS:
+        cur.execute("""INSERT OR IGNORE INTO sys_role_menu(role_id,menu_id)
+                       VALUES(?,?)""", (ADMIN_ROLE, leaf_id))
+    for leaf_id in SYSTEM_LEAF_IDS:
+        cur.execute("""DELETE FROM sys_role_menu
+                       WHERE menu_id=? AND role_id<>?""",
+                    (leaf_id, ADMIN_ROLE))
 
-    # 瑙勫垯娌荤悊鑱岃矗鍒嗙锛氳川閲忓姙瀹℃牳銆佹牎棰嗗婵€娲伙紝闇€鍏卞悓璁块棶绯荤粺璁剧疆銆?    for role_id in RULE_GOVERNANCE_ROLES:
-    for governance_role in RULE_GOVERNANCE_ROLES:
-        cur.execute("""INSERT OR IGNORE INTO sys_role_menu (role_id,menu_id)
-                       VALUES (?, '/admin/settings')""", (governance_role,))
-    cur.execute("""INSERT OR IGNORE INTO sys_role_menu (role_id,menu_id)
-                   VALUES ('school_leader', '/admin/curriculum')""")
+    # sys_role_menu 只保存目标叶子；移除父级、旧Tab和历史残留授权。
+    for menu_id in PARENT_IDS | OBSOLETE:
+        cur.execute("DELETE FROM sys_role_menu WHERE menu_id=?", (menu_id,))
 
+    # 删除不再作为侧栏真值的旧菜单。保留业务路由，不保留菜单记录。
+    for menu_id in OBSOLETE:
+        if menu_id not in LEAF_IDS and menu_id not in PARENT_IDS:
+            cur.execute("DELETE FROM sys_menu WHERE menu_id=?", (menu_id,))
+
+    # 删除不属于目标结构的其他菜单，确保三组两级结构是唯一真值。
+    placeholders = ",".join("?" for _ in TARGET_MENUS)
+    cur.execute(
+        f"DELETE FROM sys_role_menu WHERE menu_id NOT IN ({placeholders})",
+        tuple(row[0] for row in TARGET_MENUS))
+    cur.execute(
+        f"DELETE FROM sys_menu WHERE menu_id NOT IN ({placeholders})",
+        tuple(row[0] for row in TARGET_MENUS))
     conn.commit()
 
-    print("== 迁移后 sys_menu ==")
-    for r in conn.execute(
-            "SELECT sort_order, menu_id, title FROM sys_menu ORDER BY sort_order"):
-        print(f"  {r[0]:>2}  {r[1]:<28} {r[2]}")
-    n = conn.execute(
-        "SELECT COUNT(*) FROM sys_role_menu WHERE role_id=?", (ADMIN_ROLE,)).fetchone()[0]
-    print(f"== 管理员({ADMIN_ROLE}) 可见菜单数: {n}")
+
+def main(db_path: Path | None = None) -> None:
+    path = Path(db_path or config.DB_PATH)
+    conn = sqlite3.connect(str(path))
+    conn.execute("PRAGMA foreign_keys = ON")
+    before = snapshot(conn)
+    migrate(conn)
+    after = snapshot(conn)
+
+    print(f"== P1菜单迁移: {path} ==")
+    print(f"迁移前 {len(before)} 项，迁移后 {len(after)} 项")
+    for menu_id, parent_id, title, _, order in after:
+        print(f"  {order:>3}  {menu_id:<42} {title}  parent={parent_id or '-'}")
+    leaf_grants = conn.execute(
+        "SELECT COUNT(*) FROM sys_role_menu WHERE role_id=?",
+        (ADMIN_ROLE,)).fetchone()[0]
+    print(f"系统管理员({ADMIN_ROLE}) 叶子菜单权限: {leaf_grants}")
     conn.close()
-    print("迁移完成。")
+    print("迁移完成，可安全重复执行。")
 
 
 if __name__ == "__main__":
-    main()
+    main(Path(sys.argv[1]) if len(sys.argv) > 1 else None)

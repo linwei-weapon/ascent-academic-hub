@@ -3,19 +3,21 @@
     <el-aside width="220px" class="sidebar">
       <div class="logo">智能学业分析平台</div>
       <el-menu
+        :key="menuRenderKey"
         :default-active="activeMenu"
         :default-openeds="openMenus"
+        :unique-opened="true"
         @select="navigateMenu"
         class="sa-menu"
         background-color="transparent"
         text-color="#475569"
         active-text-color="#4F46E5"
       >
-        <template v-for="m in menuTree" :key="m.path">
+        <template v-for="m in menuTree" :key="m.menu_id">
           <!-- 有子菜单的父级 -->
-          <el-sub-menu v-if="m.children && m.children.length" :index="m.path">
+          <el-sub-menu v-if="m.children && m.children.length" :index="m.menu_id">
             <template #title><span>{{ m.title }}</span></template>
-            <el-menu-item v-for="c in m.children" :key="c.path" :index="c.path">
+            <el-menu-item v-for="c in m.children" :key="c.menu_id" :index="c.path">
               <span>{{ c.title }}</span>
             </el-menu-item>
           </el-sub-menu>
@@ -53,6 +55,7 @@ import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { SwitchButton } from '@element-plus/icons-vue'
 import { authStore, visibleMenus, logout, type AuthMenu } from '@/store/auth'
+import { menuKeyOfPath } from '@/utils/menu'
 
 const route = useRoute()
 const router = useRouter()
@@ -61,40 +64,32 @@ const router = useRouter()
 interface MenuNode extends AuthMenu {
   children?: MenuNode[]
 }
-const menuTitle = (menu: AuthMenu) => menu.path === '/admin/reports' ? '管理决策专题' : menu.title
 const menuTree = computed<MenuNode[]>(() => {
   const all = visibleMenus.value as AuthMenu[]
-  // 找出父级菜单（无 parent_id 且有子菜单的）
-  const parentIds = new Set(all.filter(m => m.parent_id).map(m => m.parent_id))
   return all
-    .filter(m => !m.parent_id || !parentIds.has(m.path))
+    .filter(m => !m.parent_id)
     .map(m => ({
       ...m,
-      title: menuTitle(m),
-      children: all.filter(c => c.parent_id === m.path).map(c => ({ ...c, title: menuTitle(c) })).sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)),
+      children: all
+        .filter(c => c.parent_id === m.menu_id)
+        .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)),
     }))
+    .filter(m => m.children.length)
     .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
 })
 
-// 默认展开的父级菜单
-const openMenus = computed(() => menuTree.value.filter(m => m.children?.length).map(m => m.path))
-
 const activeMenu = computed(() => {
-  const p = route.path
-  // 子路由映射到父菜单高亮
-  if (p.startsWith('/admin/college/')) return '/admin/dashboard'
-  if (p.startsWith('/admin/major/')) return '/admin/dashboard'
-  if (p.startsWith('/admin/course/')) return '/admin/dashboard'
-  if (p.startsWith('/admin/student/')) return '/admin/alert'
-  if (p.startsWith('/admin/alert/')) return p  // 预警子页直接高亮自己
-  if (p.startsWith('/admin/operation/')) return p  // 教学运行子页直接高亮自己
-  if (p.startsWith('/admin/curriculum/')) return '/admin/curriculum'
-  if (p.startsWith('/admin/reports/')) return '/admin/reports'
-  if (p.startsWith('/admin/faculty/')) return '/admin/faculty'
-  if (p.startsWith('/admin/students/')) return p  // 学生学业子页直接高亮自己
-  if (p.startsWith('/admin/system/')) return p  // 系统管理子页直接高亮自己
-  return p
+  return menuKeyOfPath(route.path, String(route.query.returnTo || ''))
 })
+const activeParent = computed(() => (
+  menuTree.value.find(parent => parent.children?.some(
+    child => child.path === activeMenu.value,
+  ))?.menu_id || ''
+))
+const openMenus = computed(() => activeParent.value ? [activeParent.value] : [])
+const menuRenderKey = computed(() => (
+  `${authStore.user?.username || 'guest'}:${authStore.user?.role || ''}:${activeParent.value}`
+))
 const refreshKey = ref(0)
 
 function onLogout() {
@@ -169,5 +164,22 @@ function navigateMenu(path: string) {
   background: #eef2ff;
   color: var(--sa-primary);
   font-weight: 600;
+}
+.sa-menu :deep(.el-sub-menu__title) {
+  height: 44px;
+  line-height: 44px;
+  margin: 3px 8px;
+  padding: 0 12px !important;
+  border-radius: 8px;
+  color: var(--sa-text);
+  font-size: 13.5px;
+  font-weight: 650;
+}
+.sa-menu :deep(.el-sub-menu__title:hover) {
+  background: #f8fafc;
+}
+.sa-menu :deep(.el-sub-menu .el-menu-item) {
+  margin-left: 18px;
+  font-size: 13px;
 }
 </style>

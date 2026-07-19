@@ -2,6 +2,7 @@ import type { App } from 'vue'
 import { createRouter, createWebHashHistory } from 'vue-router'
 import { getToken } from '@/utils/http'
 import { authStore, fetchMe } from '@/store/auth'
+import { homePathForUser, menuKeyOfPath } from '@/utils/menu'
 
 const AdminLayout = () => import('@/views/admin/Layout.vue')
 
@@ -49,7 +50,7 @@ export const router = createRouter({
         { path: 'students/list', component: () => import('@/views/admin/students/List.vue') },
 
         // ====== 报表中心 ======
-        { path: 'reports', component: () => import('@/views/admin/curriculum/Reports.vue') },
+        { path: 'reports', redirect: '/admin/reports/management-briefing' },
         { path: 'reports/early-setback', component: () => import('@/views/admin/reports/EarlySetback.vue') },
         { path: 'reports/graduation-readiness', component: () => import('@/views/admin/reports/GraduationReadiness.vue') },
         { path: 'reports/course-quality', component: () => import('@/views/admin/reports/CourseQuality.vue') },
@@ -67,6 +68,7 @@ export const router = createRouter({
 
         // ====== 系统设置 ======
         { path: 'settings', component: () => import('@/views/admin/settings/index.vue') },
+        { path: 'forbidden', component: () => import('@/views/admin/Forbidden.vue') },
       ]
     },
     { path: '/', redirect: '/admin/dashboard' },
@@ -86,37 +88,28 @@ router.onError((error) => {
   location.reload()
 })
 
-/** 子路径 → 所属一级菜单 path（与 Layout 高亮一致），用于菜单级准入判断 */
-function menuKeyOf(p: string): string {
-  if (p.startsWith('/admin/alert/')) return '/admin/alert'
-  if (p.startsWith('/admin/college/')) return '/admin/dashboard'
-  if (p.startsWith('/admin/major/')) return '/admin/dashboard'
-  if (p.startsWith('/admin/course/')) return '/admin/dashboard'
-  if (p.startsWith('/admin/operation/')) return '/admin/operation/courses'
-  if (p.startsWith('/admin/curriculum/')) return '/admin/curriculum'
-  if (p.startsWith('/admin/reports/')) return '/admin/reports'
-  if (p.startsWith('/admin/faculty/')) return '/admin/faculty'
-  if (p.startsWith('/admin/students/')) return p  // 学生学业子页保留自身路径
-  if (p === '/admin/system/audit') return '/admin/system/accounts'
-  if (p === '/admin/system/kpis') return '/admin/system/accounts'
-  if (p.startsWith('/admin/system/')) return p    // 系统管理子页保留自身路径
-  return p
-}
-
 function isAllowed(path: string): boolean {
   const has = (p: string) => authStore.menus.some(m => m.path === p)
   // 学生详情可由「预警查看」或「学生学业分析」进入
   if (path.startsWith('/admin/student/')) return has('/admin/alert') || has('/admin/students/analysis')
   // 学生清单：拥有预警查看或学生学业分析菜单权限的角色可访问（5 类角色）
   if (path === '/admin/students/list') return has('/admin/alert') || has('/admin/students/analysis')
-  return has(menuKeyOf(path))
+  return has(menuKeyOfPath(path))
 }
 
 router.beforeEach(async (to) => {
   const token = getToken()
 
   if (to.path === '/login') {
-    return token ? '/admin/dashboard' : true
+    if (!token) return true
+    if (!authStore.user) {
+      try {
+        await fetchMe()
+      } catch {
+        return true
+      }
+    }
+    return homePathForUser(authStore.user, authStore.menus)
   }
   if (!token) {
     return { path: '/login', query: { redirect: to.fullPath } }
@@ -130,8 +123,13 @@ router.beforeEach(async (to) => {
     }
   }
   // 菜单级准入
+  if (to.path === '/admin/forbidden') return true
   if (to.path.startsWith('/admin') && !isAllowed(to.path)) {
-    return authStore.menus[0]?.path || '/login'
+    return {
+      path: '/admin/forbidden',
+      query: { from: to.fullPath },
+      replace: true,
+    }
   }
   return true
 })
