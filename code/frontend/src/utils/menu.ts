@@ -16,14 +16,11 @@ export function menuKeyOfPath(path: string, returnTo = ''): string {
   if (path === '/admin/students/list') return '/admin/students/analysis'
   if (path.startsWith('/admin/students/')) return '/admin/students/analysis'
 
-  if (path === '/admin/reports' || path === '/admin/reports/management-briefing') {
-    return '/admin/reports/management-briefing'
-  }
-  if (path === '/admin/reports/decision') {
+  // 决策简报（含专题工作区）与已废弃的旧「管理要情」「决策研判」统一收口
+  if (path.startsWith('/admin/reports/decision')) return '/admin/reports/decision'
+  if (path === '/admin/reports' || path === '/admin/reports/management-briefing'
+      || path === '/admin/reports/decision-simulation') {
     return '/admin/reports/decision'
-  }
-  if (path === '/admin/reports/decision-simulation') {
-    return '/admin/reports/decision-simulation'
   }
   // 事实型旧专题保留兼容路由，但权限归回对应的预设业务模块。
   if (path === '/admin/reports/early-setback') return '/admin/alert'
@@ -53,6 +50,6 @@ export function homePathForUser(user: AuthUser | null, menus: AuthMenu[]): strin
   } else {
     preferred.push('/admin/dashboard')
   }
-  preferred.push('/admin/reports/management-briefing', '/admin/system/accounts')
+  preferred.push('/admin/reports/decision', '/admin/system/accounts')
   return preferred.find(path => allowed.has(path)) || leafMenus(menus)[0]?.path || '/login'
 }

@@ -5,7 +5,7 @@
         <h2 class="sa-page-title">分析方案管理</h2>
         <p class="sa-page-sub">集中管理学校管理专家版本与分析方案；普通用户不需要理解技术 Skill 或 Prompt。</p>
       </div>
-      <el-button type="primary" @click="$router.push('/admin/reports/decision-simulation')">从决策研判创建方案</el-button>
+      <el-button type="primary" @click="$router.push('/admin/reports/decision')">前往决策简报</el-button>
     </div>
 
     <el-alert type="info" :closable="false" show-icon class="boundary-alert" :title="data.boundary || '学校方案不改变正式指标和数据权限。'" />

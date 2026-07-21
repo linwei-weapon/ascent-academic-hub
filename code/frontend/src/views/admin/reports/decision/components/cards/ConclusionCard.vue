@@ -1,43 +1,46 @@
 <template>
-  <article class="signal-card" :class="[`sev-${signal.severity}`, { compact }]">
+  <!-- 结论卡：一个完整的管理判断。五要素顺序固定：判断→依据→动作→时限→代价 -->
+  <article class="conclusion-card" :class="[`sev-${signal.severity}`, { compact }]">
     <div class="sig-head">
-      <el-tag size="small" :type="severityMeta.tag" effect="dark">{{ severityMeta.label }}</el-tag>
-      <el-tag size="small" :type="changeMeta.tag" effect="plain">{{ changeMeta.label }}</el-tag>
+      <el-tag size="small" :type="severityMeta(signal).tag" effect="dark">{{ severityMeta(signal).label }}</el-tag>
+      <el-tag size="small" :type="changeMeta(signal).tag" effect="plain">{{ changeMeta(signal).label }}</el-tag>
       <el-tag v-if="signal.hotspot" size="small" type="danger" effect="plain">跨专题热点</el-tag>
-      <el-tag v-if="signal.tracking" size="small" :type="trackingMeta.tag" effect="plain">
-        {{ trackingMeta.label }}<template v-if="signal.tracking.assignee">·{{ signal.tracking.assignee }}</template>
+      <el-tag v-if="signal.tracking" size="small" :type="trackingMeta(signal).tag" effect="plain">
+        {{ trackingMeta(signal).label }}<template v-if="signal.tracking.assignee">·{{ signal.tracking.assignee }}</template>
       </el-tag>
-      <span class="sig-type">{{ signal.skill_id }}</span>
     </div>
 
+    <!-- ① 判断 -->
     <h4 class="headline">{{ signal.headline }}</h4>
 
-    <div v-if="factEntries.length" class="facts">
-      <span v-for="[k, v] in factEntries" :key="k" class="fact"><em>{{ k }}</em><b>{{ v }}</b></span>
+    <!-- ② 依据（可点击下钻证据卡） -->
+    <div class="facts">
+      <button v-for="[k, v] in factEntries(signal)" :key="k" class="fact" type="button"
+        title="点击查看证据" @click="emit('evidence', signal)">
+        <em>{{ k }}</em><b>{{ v }}</b>
+      </button>
     </div>
 
-    <div class="action-box">
+    <!-- ③ 动作 + ④ 时限 -->
+    <div v-if="!compact" class="action-box">
       <div><span>建议责任</span><b>{{ signal.action.owner || '—' }}</b></div>
-      <div><span>建议时点</span><b>{{ signal.action.when || '—' }}</b></div>
+      <div><span>时限</span><b class="when">{{ signal.action.when || '—' }}</b></div>
       <p>{{ signal.action.what }}</p>
       <small v-if="signal.action.rationale">{{ signal.action.rationale }}</small>
     </div>
+    <div v-else class="compact-when">时限：{{ signal.action.when || '—' }}</div>
 
+    <!-- ⑤ 代价 -->
     <p class="consequence">暂不处理：{{ signal.consequence }}</p>
 
-    <div v-if="!compact && signal.suggested_questions?.length" class="questions">
-      <span class="q-label">可追问</span>
-      <el-button v-for="q in signal.suggested_questions" :key="q" link type="primary" size="small"
-        @click="ask(q)">{{ q }}</el-button>
-    </div>
-
     <div class="sig-foot">
-      <span class="evidence" :title="evidenceTitle">
-        {{ signal.entity.name }} · 置信{{ confidenceLabel }} · {{ signal.evidence.freshness || signal.data_boundary }}
+      <span class="evidence" :title="evidenceTitle(signal)">
+        {{ signal.entity.name }} · 置信{{ confidenceLabel(signal) }} · {{ signal.evidence.freshness || signal.data_boundary }}
       </span>
       <div class="ops">
-        <el-button v-if="signal.evidence.verify_route" link type="primary" size="small"
-          @click="goEvidence">事实证据</el-button>
+        <el-button link type="primary" size="small" @click="emit('evidence', signal)">证据</el-button>
+        <el-button v-if="signal.suggested_questions?.length" link size="small"
+          @click="goWorkspace">追问</el-button>
         <template v-if="trackable">
           <el-button v-if="status !== 'in_progress'" link size="small" @click="track('in_progress')">处理中</el-button>
           <el-button v-if="status !== 'done'" link size="small" type="success" @click="track('done')">完成</el-button>
@@ -53,36 +56,26 @@ import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
 import type { DecisionSignal } from '@/types/decision'
-import { SEVERITY_META, CHANGE_META, TRACKING_META } from '@/types/decision'
+import {
+  severityMeta, changeMeta, trackingMeta, confidenceLabel, factEntries, evidenceTitle,
+} from './signalMeta'
 
 const props = withDefaults(defineProps<{
   signal: DecisionSignal
   compact?: boolean
   trackable?: boolean
-  semester?: string
-}>(), { compact: false, trackable: true, semester: '' })
+}>(), { compact: false, trackable: true })
 
-const emit = defineEmits<{ track: [status: string, note: string, signal: DecisionSignal] }>()
+const emit = defineEmits<{
+  evidence: [signal: DecisionSignal]
+  track: [status: string, note: string, signal: DecisionSignal]
+}>()
 const router = useRouter()
 
-const severityMeta = computed(() => SEVERITY_META[props.signal.severity] || SEVERITY_META.low)
-const changeMeta = computed(() => CHANGE_META[props.signal.change] || CHANGE_META.ongoing)
 const status = computed(() => props.signal.tracking?.status || '')
-const trackingMeta = computed(() => TRACKING_META[status.value] || { label: status.value, tag: 'info' })
-const factEntries = computed(() => Object.entries(props.signal.facts || {}).slice(0, 6))
-const confidenceLabel = computed(() =>
-  ({ high: '高', medium: '中', limited: '有限' }[props.signal.confidence] || props.signal.confidence))
-const evidenceTitle = computed(() =>
-  `数据表 ${props.signal.evidence.table} · 条件 ${props.signal.evidence.condition} · ${props.signal.data_boundary}`)
 
-function goEvidence() {
-  const route = props.signal.evidence.verify_route
-  if (route) router.push(route)
-}
-
-function ask(question: string) {
-  router.push({ path: '/admin/reports/decision-simulation',
-    query: { question, semester: props.semester } })
+function goWorkspace() {
+  router.push(`/admin/reports/decision/skills/${props.signal.skill_id}`)
 }
 
 async function track(next: string) {
@@ -101,32 +94,32 @@ async function track(next: string) {
 </script>
 
 <style scoped>
-.signal-card { background: #fff; border: 1px solid #e4e7ed; border-left: 4px solid #909399;
+.conclusion-card { background: #fff; border: 1px solid #e4e7ed; border-left: 4px solid #909399;
   border-radius: 10px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
-.signal-card.sev-critical { border-left-color: #c45656; }
-.signal-card.sev-high { border-left-color: #e6a23c; }
-.signal-card.sev-medium { border-left-color: #b88230; }
+.conclusion-card.sev-critical { border-left-color: #c45656; }
+.conclusion-card.sev-high { border-left-color: #e6a23c; }
+.conclusion-card.sev-medium { border-left-color: #b88230; }
 .sig-head { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-.sig-type { margin-left: auto; color: #c0c4cc; font-size: 11px; }
 .headline { margin: 0; font-size: 15px; line-height: 1.55; color: #303133; }
 .facts { display: flex; flex-wrap: wrap; gap: 8px; }
-.fact { background: #f5f7fa; border-radius: 6px; padding: 4px 10px; font-size: 12px; }
+.fact { background: #f5f7fa; border: 1px solid transparent; border-radius: 6px; padding: 4px 10px;
+  font-size: 12px; cursor: pointer; transition: border-color .15s; }
+.fact:hover { border-color: #4f46e5; }
 .fact em { font-style: normal; color: #909399; margin-right: 6px; }
-.fact b { color: #303133; }
+.fact b { color: #4f46e5; }
 .action-box { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px;
   background: #eef2ff; border-radius: 8px; padding: 10px 12px; }
 .action-box span { display: block; color: #94a3b8; font-size: 11px; }
 .action-box b { font-size: 12px; color: #3730a3; }
+.action-box b.when { color: #b45309; }
 .action-box p, .action-box small { grid-column: 1 / -1; margin: 2px 0 0; font-size: 12px;
   color: #334155; line-height: 1.6; }
 .action-box small { color: #64748b; }
+.compact-when { font-size: 12px; color: #b45309; }
 .consequence { margin: 0; font-size: 12px; color: #9f1239; line-height: 1.6; }
-.questions { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; }
-.q-label { color: #909399; font-size: 11px; }
 .sig-foot { display: flex; justify-content: space-between; gap: 10px; align-items: center;
   border-top: 1px dashed #ebeef5; padding-top: 8px; }
 .evidence { color: #909399; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ops { flex-shrink: 0; display: flex; gap: 2px; }
-.compact .action-box { display: none; }
 .compact .consequence { display: none; }
 </style>

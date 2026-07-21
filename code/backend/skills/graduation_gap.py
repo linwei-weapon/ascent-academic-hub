@@ -280,6 +280,23 @@ class GraduationGapSkill(Skill):
                 "哪些课程没有补修路径？",
                 "按学院分布看，哪个学院压力最大？",
             ],
+            # 专题工作区双列分流明细（不进信号指纹，扩展示例名单+总数）
+            context={
+                "blocked_students": [
+                    {"student_id": s["student_id"], "course_id": s["course_id"],
+                     "course_name": s["course_name"],
+                     "major_name": s.get("major_name") or ""}
+                    for s in a1[:50]
+                ],
+                "blocked_total": len(students),
+                "suspected_students": [
+                    {"student_id": s["student_id"], "course_id": s["course_id"],
+                     "course_name": s["course_name"],
+                     "major_name": s.get("major_name") or ""}
+                    for s in a2[:50]
+                ],
+                "suspected_total": len({s["student_id"] for s in a2}),
+            },
             data_boundary=DATA_BOUNDARY,
         )]
 

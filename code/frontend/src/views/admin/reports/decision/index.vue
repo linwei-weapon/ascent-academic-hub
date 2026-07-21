@@ -1,14 +1,14 @@
 <template>
   <div>
     <el-breadcrumb separator="/">
-      <el-breadcrumb-item to="/admin/reports">AI管理决策</el-breadcrumb-item>
+      <el-breadcrumb-item to="/admin/reports/decision">AI管理决策</el-breadcrumb-item>
       <el-breadcrumb-item>决策简报</el-breadcrumb-item>
     </el-breadcrumb>
 
     <div class="page-head">
       <div>
         <h2 class="sa-page-title">AI决策简报</h2>
-        <p class="sa-page-sub">全部数字由 Skill 确定性代码产出；数据未变化时复用快照，不重复制造任务。</p>
+        <p class="sa-page-sub">首屏只有判断：全部数字由 Skill 确定性代码产出；数据未变化时复用快照，不重复制造任务。</p>
       </div>
       <div class="head-actions">
         <el-button :loading="loading" @click="load(false)">刷新</el-button>
@@ -26,29 +26,29 @@
         <div class="section-heading">
           <div>
             <h3>优先处置</h3>
-            <p>按严重度排序的跨专题热点信号，先处理第 1 项。</p>
+            <p>按严重度排序的跨专题热点信号，先处理第 1 项；点击数字可下钻证据。</p>
           </div>
         </div>
         <div class="priority-grid">
           <div v-for="(sig, i) in briefing.priority_items" :key="sig.signal_id" class="priority-item">
             <span class="rank">{{ i + 1 }}</span>
-            <SignalCard :signal="sig" :semester="briefing.semester" @track="onTrack" />
+            <ConclusionCard :signal="sig" @evidence="openEvidence" @track="onTrack" />
           </div>
         </div>
       </section>
 
       <FollowupPanel v-if="briefing.previous_followup.length"
-        :items="briefing.previous_followup" @track="onTrackFollowup" />
+        :items="briefing.previous_followup" @track="onTrack" />
 
       <section class="sa-card sections-card">
         <div class="sa-card-title">
           专题信号分区
-          <span class="extra">每个 Skill 独立产出信号，口径与排除项随卡片呈现</span>
+          <span class="extra">每个 Skill 独立产出信号；进入专题工作区查看专属呈现</span>
         </div>
         <el-tabs v-model="activeSkill">
           <el-tab-pane v-for="sec in briefing.skill_sections" :key="sec.skill_id"
             :label="`${sec.skill_name}（${sec.signals.length}）`" :name="sec.skill_id" lazy>
-            <SkillSection :section="sec" :semester="briefing.semester" @track="onTrack" />
+            <SkillSection :section="sec" @evidence="openEvidence" @track="onTrack" />
           </el-tab-pane>
         </el-tabs>
       </section>
@@ -57,14 +57,14 @@
         <section class="sa-card">
           <div class="sa-card-title">观察项 <span class="extra">低严重度，暂不占用处置资源</span></div>
           <el-empty v-if="!briefing.watch_items.length" description="当前无观察项" :image-size="60" />
-          <SignalCard v-for="sig in briefing.watch_items" :key="sig.signal_id" :signal="sig"
-            compact :trackable="false" :semester="briefing.semester" class="mini-card" />
+          <RiskCard v-for="sig in briefing.watch_items" :key="sig.signal_id" :signal="sig"
+            class="mini-card" @evidence="openEvidence" />
         </section>
         <section class="sa-card">
           <div class="sa-card-title">积极变化 <span class="extra">趋势向好，可在例会通报</span></div>
           <el-empty v-if="!briefing.positive_developments.length" description="当前无积极变化" :image-size="60" />
-          <SignalCard v-for="sig in briefing.positive_developments" :key="sig.signal_id" :signal="sig"
-            compact :trackable="false" :semester="briefing.semester" class="mini-card" />
+          <ConclusionCard v-for="sig in briefing.positive_developments" :key="sig.signal_id"
+            :signal="sig" compact :trackable="false" class="mini-card" @evidence="openEvidence" />
         </section>
       </div>
 
@@ -81,23 +81,31 @@
     </template>
 
     <el-skeleton v-else-if="loading" animated :rows="8" />
+
+    <EvidenceCard v-model:visible="evidenceVisible" :signal="evidenceSignal" @ask="onAsk" />
   </div>
 </template>
 
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import type { DecisionBriefing, DecisionSignal, FollowupItem, Severity } from '@/types/decision'
+import type { DecisionBriefing, DecisionSignal, Severity } from '@/types/decision'
 import { SEVERITY_META } from '@/types/decision'
 import { getDecisionBriefing, updateDecisionTracking } from '@/utils/decision'
 import ToplineBar from './components/ToplineBar.vue'
-import SignalCard from './components/SignalCard.vue'
+import ConclusionCard from './components/cards/ConclusionCard.vue'
+import RiskCard from './components/cards/RiskCard.vue'
+import EvidenceCard from './components/cards/EvidenceCard.vue'
 import FollowupPanel from './components/FollowupPanel.vue'
 import SkillSection from './components/SkillSection.vue'
 
+const router = useRouter()
 const briefing = ref<DecisionBriefing | null>(null)
 const loading = ref(false)
 const activeSkill = ref('')
+const evidenceVisible = ref(false)
+const evidenceSignal = ref<DecisionSignal | null>(null)
 
 async function load(force: boolean) {
   loading.value = true
@@ -112,7 +120,18 @@ async function load(force: boolean) {
   }
 }
 
-async function pushTracking(signal: DecisionSignal | FollowupItem, status: string, note: string) {
+function openEvidence(signal: DecisionSignal) {
+  evidenceSignal.value = signal
+  evidenceVisible.value = true
+}
+
+function onAsk(_question: string, signal: DecisionSignal) {
+  evidenceVisible.value = false
+  router.push(`/admin/reports/decision/skills/${signal.skill_id}`)
+}
+
+async function onTrack(status: string, note: string,
+                       signal: DecisionSignal | import('@/types/decision').FollowupItem) {
   await updateDecisionTracking({
     signalId: signal.signal_id,
     skillId: signal.skill_id,
@@ -124,14 +143,6 @@ async function pushTracking(signal: DecisionSignal | FollowupItem, status: strin
   })
   ElMessage.success('追踪状态已更新')
   await load(false)
-}
-
-function onTrack(status: string, note: string, signal: DecisionSignal) {
-  pushTracking(signal, status, note)
-}
-
-function onTrackFollowup(status: string, note: string, item: FollowupItem) {
-  pushTracking(item, status, note)
 }
 
 onMounted(() => load(false))

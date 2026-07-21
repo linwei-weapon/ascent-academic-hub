@@ -11,6 +11,7 @@
         </el-tag>
         <el-tag size="small" type="info" effect="plain">配置 {{ section.config_version }}</el-tag>
         <el-tag size="small" type="info" effect="plain">{{ section.signals.length }} 项信号</el-tag>
+        <el-button type="primary" plain size="small" @click="goWorkspace">进入专题工作区</el-button>
       </div>
     </div>
 
@@ -20,8 +21,9 @@
 
     <el-empty v-if="!section.signals.length" description="本专题当前无异常信号" :image-size="60" />
     <div v-else class="signals">
-      <SignalCard v-for="sig in section.signals" :key="sig.signal_id" :signal="sig"
-        :semester="semester" @track="(s, n, sig2) => $emit('track', s, n, sig2)" />
+      <ConclusionCard v-for="sig in section.signals" :key="sig.signal_id" :signal="sig"
+        @evidence="sig2 => emit('evidence', sig2)"
+        @track="(s, n, sig2) => emit('track', s, n, sig2)" />
     </div>
 
     <el-collapse v-if="section.exclusions?.length || section.data_boundary" class="boundary">
@@ -39,14 +41,28 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { SkillSection } from '@/types/decision'
-import SignalCard from './SignalCard.vue'
+import { useRouter } from 'vue-router'
+import type { DecisionSignal, SkillSection } from '@/types/decision'
+import ConclusionCard from './cards/ConclusionCard.vue'
 
-const props = defineProps<{ section: SkillSection; semester: string }>()
-defineEmits<{ track: [status: string, note: string, signal: any] }>()
+const props = defineProps<{ section: SkillSection }>()
+const emit = defineEmits<{
+  track: [status: string, note: string, signal: DecisionSignal]
+  evidence: [signal: DecisionSignal]
+}>()
+const router = useRouter()
 
 const STAT_LABELS: Record<string, string> = {
   snapshot_semester: '数据学期',
+  target_grade: '目标届',
+  blocked_students: '受阻学生',
+  suspected_students: '待核验学生',
+  active_alerts: '活动预警',
+  queue_size: '本周队列',
+  stale_critical: '滞留严重',
+  courses_in_snapshot: '快照课程',
+  single_teacher_high: '大规模单人',
+  single_teacher_mid: '中规模单人',
 }
 
 const statEntries = computed(() =>
@@ -57,6 +73,10 @@ const statEntries = computed(() =>
 function statLabel(key: string): string {
   return STAT_LABELS[key] || key
 }
+
+function goWorkspace() {
+  router.push(`/admin/reports/decision/skills/${props.section.skill_id}`)
+}
 </script>
 
 <style scoped>
@@ -64,7 +84,7 @@ function statLabel(key: string): string {
 .skill-head { display: flex; justify-content: space-between; gap: 14px; align-items: flex-start; }
 .skill-title h3 { margin: 0; font-size: 16px; color: #303133; }
 .skill-title p { margin: 5px 0 0; color: #909399; font-size: 12px; }
-.skill-meta { display: flex; gap: 6px; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; }
+.skill-meta { display: flex; gap: 6px; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; align-items: center; }
 .stats { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
 .stat { background: #f5f7fa; border-radius: 6px; padding: 4px 10px; font-size: 12px; }
 .stat em { font-style: normal; color: #909399; margin-right: 6px; }

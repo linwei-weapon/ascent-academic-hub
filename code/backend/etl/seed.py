@@ -63,8 +63,6 @@ MENUS = [
     ("/admin/students/analysis", "学生成长与学业分析", "DataLine", 106, "/admin/analysis"),
 
     ("/admin/reports/decision", "决策简报", "DataBoard", 200, "/admin/decision"),
-    ("/admin/reports/management-briefing", "管理要情", "Bell", 201, "/admin/decision"),
-    ("/admin/reports/decision-simulation", "决策研判", "Opportunity", 202, "/admin/decision"),
 
     ("/admin/system/accounts", "账号管理", "User", 301, "/admin/system"),
     ("/admin/system/roles", "角色与功能权限", "UserFilled", 302, "/admin/system"),
@@ -109,16 +107,8 @@ ROLE_MENU = {
         "dean", "college_dean", "college_secretary",
         "counselor", "dept_director", "class_adviser", "mentor",
     ],
-    # AI管理决策
+    # AI管理决策（Skill链路统一收口：管理要情/决策研判旧页已废弃）
     "/admin/reports/decision": [
-        "school_leader", "dean", "dept_research", "dept_practice", "quality_office",
-        "college_dean", "college_secretary",
-    ],
-    "/admin/reports/management-briefing": [
-        "school_leader", "dean", "dept_research", "dept_practice", "quality_office",
-        "college_dean", "college_secretary",
-    ],
-    "/admin/reports/decision-simulation": [
         "school_leader", "dean", "dept_research", "dept_practice", "quality_office",
         "college_dean", "college_secretary",
     ],

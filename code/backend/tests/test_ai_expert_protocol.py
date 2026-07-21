@@ -66,17 +66,6 @@ class AIExpertProtocolTest(unittest.TestCase):
         self.assertEqual(3, len(list_experts("college_dean")))
         self.assertEqual([], list_experts("student"))
 
-    def test_decision_workspace_uses_expert_catalog_instead_of_page_registry(self):
-        root = Path(__file__).resolve().parents[2]
-        page = (root / "frontend/src/views/admin/reports/DecisionSimulation.vue").read_text(
-            encoding="utf-8"
-        )
-        client = (root / "frontend/src/utils/ai.ts").read_text(encoding="utf-8")
-        self.assertIn("getAIExpertCatalog", page)
-        self.assertIn("selectedExpertId", page)
-        self.assertNotIn("const problemOptions: Array", page)
-        self.assertIn("/admin/ai/experts", client)
-
     def test_natural_language_only_maps_registered_temporary_parameters(self):
         expert = get_expert("graduation-readiness")
         changes, matched = _interpret_parameters(

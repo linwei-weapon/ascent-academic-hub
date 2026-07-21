@@ -220,6 +220,22 @@ class FacultyStructureSkill(Skill):
                 "这些课程分别属于哪些开课单位？",
                 "上次排课时这些课程是否有备份教师？",
             ],
+            # 专题工作区判别矩阵明细（不进信号指纹）
+            context={
+                "high_enrolled_line": high_n,
+                "high_courses": [
+                    {"course_id": c["course_id"], "course_name": c["course_name"],
+                     "enrolled": c["enrolled"], "lesson_count": c["lesson_count"],
+                     "organization_id": c["organization_id"] or ""}
+                    for c in high
+                ],
+                "mid_courses": [
+                    {"course_id": c["course_id"], "course_name": c["course_name"],
+                     "enrolled": c["enrolled"], "lesson_count": c["lesson_count"],
+                     "organization_id": c["organization_id"] or ""}
+                    for c in mid
+                ],
+            },
             data_boundary=DATA_BOUNDARY,
         )]
 

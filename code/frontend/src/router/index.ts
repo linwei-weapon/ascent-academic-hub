@@ -51,15 +51,17 @@ export const router = createRouter({
         { path: 'students/list', component: () => import('@/views/admin/students/List.vue') },
 
         // ====== AI管理决策（旧事实专题保留兼容重定向） ======
-        { path: 'reports', redirect: '/admin/reports/management-briefing' },
+        { path: 'reports', redirect: '/admin/reports/decision' },
         { path: 'reports/early-setback', redirect: '/admin/alert?tab=early-risk' },
         { path: 'reports/graduation-readiness', redirect: '/admin/curriculum?tab=graduation-readiness' },
         { path: 'reports/course-quality', redirect: '/admin/operation/course-quality' },
         { path: 'reports/faculty-resource-risk', redirect: '/admin/faculty' },
         { path: 'reports/schedule-strategy', redirect: '/admin/operation/schedule-analysis' },
         { path: 'reports/decision', component: () => import('@/views/admin/reports/decision/index.vue') },
-        { path: 'reports/management-briefing', component: () => import('@/views/admin/reports/ManagementBriefing.vue') },
-        { path: 'reports/decision-simulation', component: () => import('@/views/admin/reports/DecisionSimulation.vue') },
+        { path: 'reports/decision/skills/:skillId', component: () => import('@/views/admin/reports/decision/workspaces/SkillWorkspace.vue') },
+        // 旧「管理要情」「决策研判」已废弃，统一收口到 Skill 链路决策简报
+        { path: 'reports/management-briefing', redirect: '/admin/reports/decision' },
+        { path: 'reports/decision-simulation', redirect: '/admin/reports/decision' },
 
         // ====== 系统管理（账号 / 菜单 / 角色） ======
         { path: 'system/accounts', component: () => import('@/views/admin/system/Accounts.vue') },
