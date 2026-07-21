@@ -8,7 +8,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import datetime, timezone
 
-from . import config_store, store
+from . import config_store, llm_config, narrative, store
 from .merger import (diff_signals, merge_signals, scope_key, signal_digest)
 from .protocol import (SEVERITY_ORDER, Signal, SkillContext, SkillResult,
                        briefing_fingerprint, empty_briefing)
@@ -205,6 +205,8 @@ def generate_briefing(user: dict, legacy: sqlite3.Connection,
         cached = store.latest_snapshot(rw_conn, skey)
         if cached and cached["fingerprint"] == fingerprint:
             briefing = cached["briefing"]
+            # 旧快照结构向后兼容：新增字段补默认值
+            briefing.setdefault("llm_status", "disabled")
             tracking_rows = store.list_tracking(
                 rw_conn, skey, statuses=("open", "in_progress", "done"))
             _embed_tracking(briefing, tracking_rows)
@@ -221,6 +223,13 @@ def generate_briefing(user: dict, legacy: sqlite3.Connection,
         rw_conn, skey, statuses=("open", "in_progress", "done"))
     briefing = build_briefing(merged, results, resolved, tracking_rows,
                               semester, fingerprint)
+    # 叙事增强（阶段4.2）：LLM 只改文字，失败回退模板版；增强结果随快照缓存
+    try:
+        briefing = narrative.enhance_briefing(
+            briefing, llm_config.load_config(rw_conn))
+    except Exception:
+        briefing["generation_method"] = "rule_template"
+        briefing["llm_status"] = "failed:internal"
     digests = [signal_digest(s) for s in merged["all_signals"]]
     store.save_snapshot(rw_conn, skey, semester, fingerprint,
                         briefing["generation_method"], briefing, digests,

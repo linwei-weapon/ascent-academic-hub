@@ -111,6 +111,52 @@ export interface SkillMeta {
   data_readiness: { ready: boolean; items: any[] }
 }
 
+/** 对话编排（阶段4）：SSE 事件载荷 */
+export type ChatIntent = 'verify' | 'simulate' | 'compare' | 'attribute' | 'open'
+
+export interface ChatCitedSignal {
+  signal_id: string
+  skill_id: string
+  severity: Severity
+  headline: string
+  facts: Record<string, string>
+  entity: SignalEntity
+  action: SignalAction
+  consequence: string
+  evidence: SignalEvidence
+  change: SignalChange
+  suggested_questions: string[]
+}
+
+export interface ChatBlock {
+  layer: 'facts' | 'hypothesis' | 'action' | 'points'
+  title: string
+  text?: string
+  verify?: string
+  items?: string[]
+}
+
+export interface ChatMetaEvent {
+  intent: ChatIntent
+  intent_label: string
+  cited: ChatCitedSignal[]
+}
+
+export interface ChatDoneEvent {
+  blocks: ChatBlock[]
+  followups: string[]
+  llm_status: string
+}
+
+export interface LlmStatus {
+  enabled: boolean
+  ready: boolean
+  narrative_enabled: boolean
+  chat_enabled: boolean
+  model: string
+  base_url: string
+}
+
 export const SEVERITY_META: Record<Severity, { label: string; tag: TagType; color: string }> = {
   critical: { label: '紧急', tag: 'danger', color: '#c45656' },
   high: { label: '重点', tag: 'danger', color: '#e6a23c' },

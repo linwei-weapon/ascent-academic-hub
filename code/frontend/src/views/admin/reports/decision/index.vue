@@ -11,6 +11,7 @@
         <p class="sa-page-sub">首屏只有判断：全部数字由 Skill 确定性代码产出；数据未变化时复用快照，不重复制造任务。</p>
       </div>
       <div class="head-actions">
+        <el-button type="success" plain @click="openChat()">决策追问</el-button>
         <el-button :loading="loading" @click="load(false)">刷新</el-button>
         <el-button type="primary" :loading="loading" @click="load(true)">重新生成</el-button>
       </div>
@@ -32,7 +33,7 @@
         <div class="priority-grid">
           <div v-for="(sig, i) in briefing.priority_items" :key="sig.signal_id" class="priority-item">
             <span class="rank">{{ i + 1 }}</span>
-            <ConclusionCard :signal="sig" @evidence="openEvidence" @track="onTrack" />
+            <ConclusionCard :signal="sig" @evidence="openEvidence" @track="onTrack" @ask="onCardAsk" />
           </div>
         </div>
       </section>
@@ -48,7 +49,7 @@
         <el-tabs v-model="activeSkill">
           <el-tab-pane v-for="sec in briefing.skill_sections" :key="sec.skill_id"
             :label="`${sec.skill_name}（${sec.signals.length}）`" :name="sec.skill_id" lazy>
-            <SkillSection :section="sec" @evidence="openEvidence" @track="onTrack" />
+            <SkillSection :section="sec" @evidence="openEvidence" @track="onTrack" @ask="onCardAsk" />
           </el-tab-pane>
         </el-tabs>
       </section>
@@ -58,7 +59,7 @@
           <div class="sa-card-title">观察项 <span class="extra">低严重度，暂不占用处置资源</span></div>
           <el-empty v-if="!briefing.watch_items.length" description="当前无观察项" :image-size="60" />
           <RiskCard v-for="sig in briefing.watch_items" :key="sig.signal_id" :signal="sig"
-            class="mini-card" @evidence="openEvidence" />
+            class="mini-card" @evidence="openEvidence" @ask="onCardAsk" />
         </section>
         <section class="sa-card">
           <div class="sa-card-title">积极变化 <span class="extra">趋势向好，可在例会通报</span></div>
@@ -83,12 +84,12 @@
     <el-skeleton v-else-if="loading" animated :rows="8" />
 
     <EvidenceCard v-model:visible="evidenceVisible" :signal="evidenceSignal" @ask="onAsk" />
+    <ChatDrawer ref="chatDrawerRef" v-model:visible="chatVisible" />
   </div>
 </template>
 
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import type { DecisionBriefing, DecisionSignal, Severity } from '@/types/decision'
 import { SEVERITY_META } from '@/types/decision'
@@ -99,13 +100,15 @@ import RiskCard from './components/cards/RiskCard.vue'
 import EvidenceCard from './components/cards/EvidenceCard.vue'
 import FollowupPanel from './components/FollowupPanel.vue'
 import SkillSection from './components/SkillSection.vue'
+import ChatDrawer from './components/ChatDrawer.vue'
 
-const router = useRouter()
 const briefing = ref<DecisionBriefing | null>(null)
 const loading = ref(false)
 const activeSkill = ref('')
 const evidenceVisible = ref(false)
 const evidenceSignal = ref<DecisionSignal | null>(null)
+const chatVisible = ref(false)
+const chatDrawerRef = ref<InstanceType<typeof ChatDrawer> | null>(null)
 
 async function load(force: boolean) {
   loading.value = true
@@ -125,9 +128,19 @@ function openEvidence(signal: DecisionSignal) {
   evidenceVisible.value = true
 }
 
-function onAsk(_question: string, signal: DecisionSignal) {
+/** 证据卡追问：带预置问题直接发问（打字<30% 的关键路径） */
+function onAsk(question: string, signal: DecisionSignal) {
   evidenceVisible.value = false
-  router.push(`/admin/reports/decision/skills/${signal.skill_id}`)
+  chatDrawerRef.value?.open({ question, signal })
+}
+
+/** 卡片追问按钮：带信号上下文打开抽屉，推荐问题 chips 免输入 */
+function onCardAsk(signal: DecisionSignal) {
+  chatDrawerRef.value?.open({ signal })
+}
+
+function openChat() {
+  chatDrawerRef.value?.open({ signal: null })
 }
 
 async function onTrack(status: string, note: string,

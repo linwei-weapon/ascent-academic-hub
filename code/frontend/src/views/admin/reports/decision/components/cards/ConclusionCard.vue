@@ -40,7 +40,7 @@
       <div class="ops">
         <el-button link type="primary" size="small" @click="emit('evidence', signal)">证据</el-button>
         <el-button v-if="signal.suggested_questions?.length" link size="small"
-          @click="goWorkspace">追问</el-button>
+          @click="emit('ask', signal)">追问</el-button>
         <template v-if="trackable">
           <el-button v-if="status !== 'in_progress'" link size="small" @click="track('in_progress')">处理中</el-button>
           <el-button v-if="status !== 'done'" link size="small" type="success" @click="track('done')">完成</el-button>
@@ -53,7 +53,6 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
 import type { DecisionSignal } from '@/types/decision'
 import {
@@ -69,14 +68,10 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{
   evidence: [signal: DecisionSignal]
   track: [status: string, note: string, signal: DecisionSignal]
+  ask: [signal: DecisionSignal]
 }>()
-const router = useRouter()
 
 const status = computed(() => props.signal.tracking?.status || '')
-
-function goWorkspace() {
-  router.push(`/admin/reports/decision/skills/${props.signal.skill_id}`)
-}
 
 async function track(next: string) {
   let note = ''

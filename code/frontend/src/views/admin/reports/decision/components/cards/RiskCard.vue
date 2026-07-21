@@ -26,6 +26,8 @@
       </span>
       <div class="ops">
         <el-button link type="primary" size="small" @click="emit('evidence', signal)">证据</el-button>
+        <el-button v-if="signal.suggested_questions?.length" link size="small"
+          @click="emit('ask', signal)">追问</el-button>
         <el-button link size="small" @click="goWorkspace">专题</el-button>
       </div>
     </div>
@@ -38,7 +40,10 @@ import type { DecisionSignal } from '@/types/decision'
 import { severityMeta, changeMeta, confidenceLabel, factEntries, evidenceTitle } from './signalMeta'
 
 const props = defineProps<{ signal: DecisionSignal }>()
-const emit = defineEmits<{ evidence: [signal: DecisionSignal] }>()
+const emit = defineEmits<{
+  evidence: [signal: DecisionSignal]
+  ask: [signal: DecisionSignal]
+}>()
 const router = useRouter()
 
 function goWorkspace() {

@@ -23,7 +23,8 @@
     <div v-else class="signals">
       <ConclusionCard v-for="sig in section.signals" :key="sig.signal_id" :signal="sig"
         @evidence="sig2 => emit('evidence', sig2)"
-        @track="(s, n, sig2) => emit('track', s, n, sig2)" />
+        @track="(s, n, sig2) => emit('track', s, n, sig2)"
+        @ask="sig2 => emit('ask', sig2)" />
     </div>
 
     <el-collapse v-if="section.exclusions?.length || section.data_boundary" class="boundary">
@@ -49,6 +50,7 @@ const props = defineProps<{ section: SkillSection }>()
 const emit = defineEmits<{
   track: [status: string, note: string, signal: DecisionSignal]
   evidence: [signal: DecisionSignal]
+  ask: [signal: DecisionSignal]
 }>()
 const router = useRouter()
 
