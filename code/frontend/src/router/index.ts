@@ -57,6 +57,7 @@ export const router = createRouter({
         { path: 'reports/course-quality', redirect: '/admin/operation/course-quality' },
         { path: 'reports/faculty-resource-risk', redirect: '/admin/faculty' },
         { path: 'reports/schedule-strategy', redirect: '/admin/operation/schedule-analysis' },
+        { path: 'reports/decision', component: () => import('@/views/admin/reports/decision/index.vue') },
         { path: 'reports/management-briefing', component: () => import('@/views/admin/reports/ManagementBriefing.vue') },
         { path: 'reports/decision-simulation', component: () => import('@/views/admin/reports/DecisionSimulation.vue') },
 

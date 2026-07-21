@@ -19,6 +19,9 @@ export function menuKeyOfPath(path: string, returnTo = ''): string {
   if (path === '/admin/reports' || path === '/admin/reports/management-briefing') {
     return '/admin/reports/management-briefing'
   }
+  if (path === '/admin/reports/decision') {
+    return '/admin/reports/decision'
+  }
   if (path === '/admin/reports/decision-simulation') {
     return '/admin/reports/decision-simulation'
   }

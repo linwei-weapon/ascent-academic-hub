@@ -62,6 +62,7 @@ MENUS = [
     ("/admin/faculty", "师资保障分析", "User", 105, "/admin/analysis"),
     ("/admin/students/analysis", "学生成长与学业分析", "DataLine", 106, "/admin/analysis"),
 
+    ("/admin/reports/decision", "决策简报", "DataBoard", 200, "/admin/decision"),
     ("/admin/reports/management-briefing", "管理要情", "Bell", 201, "/admin/decision"),
     ("/admin/reports/decision-simulation", "决策研判", "Opportunity", 202, "/admin/decision"),
 
@@ -109,6 +110,10 @@ ROLE_MENU = {
         "counselor", "dept_director", "class_adviser", "mentor",
     ],
     # AI管理决策
+    "/admin/reports/decision": [
+        "school_leader", "dean", "dept_research", "dept_practice", "quality_office",
+        "college_dean", "college_secretary",
+    ],
     "/admin/reports/management-briefing": [
         "school_leader", "dean", "dept_research", "dept_practice", "quality_office",
         "college_dean", "college_secretary",
