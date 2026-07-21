@@ -159,7 +159,7 @@ async function publishScheme(row:any) {
   const result:any = await http.post(`/admin/system/analysis-schemes/${row.scheme_id}/test`)
   if (!result.passed) { testResult.value=result;testVisible.value=true;return }
   await ElMessageBox.confirm('发布后将成为学校正式分析方案，仍按用户实时权限运行。是否发布？','发布分析方案',{type:'warning'})
-  await http.post(`/admin/ai/experts/${row.expert_id}/schemes/${row.scheme_id}/publish`)
+  await http.post(`/admin/system/analysis-schemes/${row.scheme_id}/publish`)
   ElMessage.success('分析方案已发布')
   await load()
 }
@@ -171,13 +171,13 @@ async function retireScheme(row:any) {
 }
 async function publishVersion(row:any) {
   await ElMessageBox.confirm('发布会使同一专家的上一学校版本退役。是否继续？','发布专家版本',{type:'warning'})
-  await http.post(`/admin/ai/experts/${row.expert_id}/versions/${row.version_id}/publish`)
+  await http.post(`/admin/system/expert-versions/${row.version_id}/publish`)
   ElMessage.success('专家版本已发布')
   await load()
 }
 async function rollbackVersion(row:any) {
   await ElMessageBox.confirm('系统会基于该版本生成新的已发布版本，不覆盖历史。是否继续？','回滚专家版本',{type:'warning'})
-  await http.post(`/admin/ai/experts/${row.expert_id}/versions/${row.version_id}/rollback`)
+  await http.post(`/admin/system/expert-versions/${row.version_id}/rollback`)
   ElMessage.success('已生成新的回滚发布版本')
   await load()
 }

@@ -8,13 +8,17 @@ from typing import Any
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
-from ...ai_experts import get_expert, list_experts, validate_school_override
+from ...ai_experts import (get_expert, list_experts, validate_expert_definition,
+                           validate_school_override)
 from .. import db as dbm
 from ..deps import get_db_rw, require_admin
 from ..envelope import ApiError, ok
 from ..security_governance import write_audit
 from ..settings import CURRENT_SEMESTER
-from .ai_experts import _ensure_tables, resolve_effective_expert
+from ...ai_experts.versions import (decode_override as _decode_override,
+                                    ensure_tables as _ensure_tables,
+                                    now as _now,
+                                    resolve_effective_expert)
 
 
 router = APIRouter(prefix="/api/admin/system", tags=["system-management"])
@@ -355,3 +359,137 @@ def retire_analysis_scheme(scheme_id: int, admin: dict = Depends(require_admin),
     )
     return ok({"schemeId": scheme_id, "status": "retired"},
               msg="分析方案已停用")
+
+
+# ---------------------------------------------------------------------------
+# 方案发布与专家版本发布/回滚（自旧 /api/admin/ai/experts 路由迁入，阶段6收口）
+# ---------------------------------------------------------------------------
+
+@router.post("/analysis-schemes/{scheme_id}/publish")
+def publish_analysis_scheme(scheme_id: int, admin: dict = Depends(require_admin),
+                            conn: sqlite3.Connection = Depends(get_db_rw)):
+    _ensure_system_tables(conn)
+    row = dbm.query_one(conn, """
+        SELECT * FROM sys_ai_analysis_scheme WHERE scheme_id=?
+    """, (scheme_id,))
+    if not row:
+        raise ApiError("分析方案不存在", code=404, status_code=404)
+    expert = get_expert(row["expert_id"])
+    if not expert:
+        raise ApiError("方案引用的管理专家不存在", code=409, status_code=409)
+    if row["status"] != "draft":
+        raise ApiError("只有草稿方案可以发布", code=409, status_code=409)
+    _, current_version = resolve_effective_expert(conn, expert)
+    if row["expert_version"] != current_version["version"]:
+        raise ApiError("专家版本已变化，请用当前版本重新保存方案",
+                       code=409, status_code=409)
+    now = _now()
+    conn.execute("""
+        UPDATE sys_ai_analysis_scheme SET status='published',
+               published_by=?,published_at=? WHERE scheme_id=?
+    """, (admin["username"], now, scheme_id))
+    write_audit(
+        conn, admin["username"], "ai.analysis_scheme.publish",
+        "ai_analysis_scheme", str(scheme_id),
+        detail={"expertId": row["expert_id"],
+                "expertVersion": row["expert_version"]},
+    )
+    return ok({"schemeId": scheme_id, "status": "published"},
+              msg="学校分析方案已发布")
+
+
+def _require_valid_expert(expert_id: str) -> dict:
+    expert = get_expert(expert_id)
+    if not expert:
+        raise ApiError("管理专家不存在", code=404, status_code=404)
+    errors = validate_expert_definition(expert)
+    if errors:
+        raise ApiError("管理专家协议无效：" + "；".join(errors),
+                       code=500, status_code=500)
+    return expert
+
+
+@router.post("/expert-versions/{version_id}/publish")
+def publish_expert_version(version_id: int, admin: dict = Depends(require_admin),
+                           conn: sqlite3.Connection = Depends(get_db_rw)):
+    _ensure_system_tables(conn)
+    row = dbm.query_one(conn, """
+        SELECT * FROM sys_ai_expert_version WHERE version_id=?
+    """, (version_id,))
+    if not row:
+        raise ApiError("专家配置版本不存在", code=404, status_code=404)
+    expert = _require_valid_expert(row["expert_id"])
+    if row["status"] != "draft":
+        raise ApiError("只有草稿版本可以发布", code=409, status_code=409)
+    if row["base_definition_version"] != expert["version"]:
+        raise ApiError("草稿基于旧产品版本，需重新生成后发布",
+                       code=409, status_code=409)
+    errors = validate_school_override(expert, _decode_override(row))
+    if errors:
+        raise ApiError("学校配置无效：" + "；".join(errors),
+                       code=400, status_code=400)
+    now = _now()
+    conn.execute("""
+        UPDATE sys_ai_expert_version SET status='retired'
+        WHERE expert_id=? AND status='published'
+    """, (expert["expertId"],))
+    conn.execute("""
+        UPDATE sys_ai_expert_version
+        SET status='published',published_by=?,published_at=?
+        WHERE version_id=?
+    """, (admin["username"], now, version_id))
+    write_audit(
+        conn, admin["username"], "ai.expert.version.publish", "ai_expert",
+        expert["expertId"],
+        detail={"versionId": version_id, "version": row["version_no"]},
+    )
+    return ok({"versionId": version_id, "version": row["version_no"],
+               "status": "published"}, msg="学校专家配置已发布")
+
+
+@router.post("/expert-versions/{version_id}/rollback")
+def rollback_expert_version(version_id: int, admin: dict = Depends(require_admin),
+                            conn: sqlite3.Connection = Depends(get_db_rw)):
+    _ensure_system_tables(conn)
+    target = dbm.query_one(conn, """
+        SELECT * FROM sys_ai_expert_version
+        WHERE version_id=? AND status IN ('published','retired')
+    """, (version_id,))
+    if not target:
+        raise ApiError("只能回滚到已发布或已退役版本", code=409, status_code=409)
+    expert = _require_valid_expert(target["expert_id"])
+    serial = int(dbm.scalar(
+        conn, "SELECT COUNT(*) FROM sys_ai_expert_version WHERE expert_id=?",
+        (expert["expertId"],),
+    ) or 0) + 1
+    version_no = f"{expert['version']}-school.{serial}"
+    now = _now()
+    conn.execute("""
+        UPDATE sys_ai_expert_version SET status='retired'
+        WHERE expert_id=? AND status='published'
+    """, (expert["expertId"],))
+    cursor = conn.execute("""
+        INSERT INTO sys_ai_expert_version(
+            expert_id,version_no,base_definition_version,status,override_json,
+            change_reason,action,source_version_id,created_by,created_at,
+            published_by,published_at
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+    """, (
+        expert["expertId"], version_no, expert["version"], "published",
+        target["override_json"], f"回滚到 {target['version_no']}", "rollback",
+        target["version_id"], admin["username"], now, admin["username"], now,
+    ))
+    write_audit(
+        conn, admin["username"], "ai.expert.version.rollback", "ai_expert",
+        expert["expertId"], detail={
+            "versionId": cursor.lastrowid,
+            "version": version_no,
+            "sourceVersionId": target["version_id"],
+        },
+    )
+    return ok({
+        "versionId": cursor.lastrowid,
+        "version": version_no,
+        "status": "published",
+        "sourceVersionId": target["version_id"],
+    }, msg="专家配置已回滚并生成新的发布版本")

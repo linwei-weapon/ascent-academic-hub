@@ -22,8 +22,8 @@ from ..envelope import ApiError, ok
 from ..permission_context import (
     ALL_SCOPE_ROLES, SCOPED_ROLE_TYPES, v2_lesson_scope, v2_student_scope,
 )
-from .ai_experts import resolve_effective_expert
 from ...ai_experts import get_expert
+from ...ai_experts.versions import resolve_effective_expert
 from ..util import clean_dept, normalize_title
 
 router = APIRouter(prefix="/api/admin/ai", tags=["ai"])

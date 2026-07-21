@@ -16,7 +16,7 @@ from .security import decode_token
 from .security_governance import write_audit
 from .routers import (auth, dashboard, alert, curriculum, reports,
                       operation, faculty, settings as settings_router, students,
-                      admin_rbac, meta, teacher, ai, ai_decision, ai_experts,
+                      admin_rbac, meta, teacher, ai, ai_decision,
                       system_management)
 from .routers import v2
 
@@ -130,7 +130,6 @@ app.include_router(admin_rbac.router)
 app.include_router(meta.router)
 app.include_router(ai.router)
 app.include_router(ai_decision.router)
-app.include_router(ai_experts.router)
 app.include_router(system_management.router)
 app.include_router(teacher.router)  # V1.1新增：任课教师视图
 app.include_router(v2.router)       # V2真实数据验证接口（只读）

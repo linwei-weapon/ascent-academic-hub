@@ -14,7 +14,7 @@ sys.path.insert(0, __file__.rsplit("scripts", 1)[0])
 
 from backend.ai_experts import get_expert
 from backend.api.routers.admin_rbac import AUTH_IDENTITY_DDL
-from backend.api.routers.ai_experts import _ensure_tables
+from backend.ai_experts.versions import ensure_tables as _ensure_tables
 from backend.api.routers.settings import _ensure_kpi_config
 from backend.api.routers.system_management import _ensure_system_tables
 from backend.api.security import verify_password

@@ -9,7 +9,6 @@ from backend.ai_experts.registry import (
     validate_expert_definition,
     validate_school_override,
 )
-from backend.api.routers.ai_experts import _interpret_parameters
 
 
 class AIExpertProtocolTest(unittest.TestCase):
@@ -65,28 +64,6 @@ class AIExpertProtocolTest(unittest.TestCase):
     def test_role_catalog_is_filtered(self):
         self.assertEqual(3, len(list_experts("college_dean")))
         self.assertEqual([], list_experts("student"))
-
-    def test_natural_language_only_maps_registered_temporary_parameters(self):
-        expert = get_expert("graduation-readiness")
-        changes, matched = _interpret_parameters(
-            expert, "如果新增5个班，每班40人，可协调4名教师，优先处理明确未通过"
-        )
-        self.assertEqual(5, changes["addedClasses"])
-        self.assertEqual(40, changes["classCapacity"])
-        self.assertEqual(4, changes["availableTeachers"])
-        self.assertEqual("failed", changes["priorityFocus"])
-        self.assertEqual(set(changes), set(matched))
-
-    def test_natural_language_values_are_bounded_by_expert_protocol(self):
-        expert = get_expert("course-team-continuity")
-        changes, _ = _interpret_parameters(expert, "如果可协调99名教师，只看覆盖20人的课程")
-        self.assertEqual(20, changes["availableTeachers"])
-        self.assertEqual(50, changes["minimumStudents"])
-
-    def test_natural_language_accepts_management_word_order(self):
-        expert = get_expert("course-team-continuity")
-        changes, _ = _interpret_parameters(expert, "把可协调教师改为5名")
-        self.assertEqual(5, changes["availableTeachers"])
 
 
 if __name__ == "__main__":
