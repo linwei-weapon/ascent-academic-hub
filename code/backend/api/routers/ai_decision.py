@@ -12,12 +12,13 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from ...skills import chat as decision_chat
-from ...skills import config_store, llm_config, store
+from ...skills import config_store, llm_client, llm_config, store
 from ...skills.briefing import generate_briefing
 from ...skills.merger import scope_key
 from ...skills.protocol import SkillContext
 from ...skills.registry import get_skill, list_skills
-from ..deps import get_current_user, get_db, get_db_rw, get_v2_db
+from ..deps import (get_current_user, get_db, get_db_rw, get_v2_db,
+                    require_admin)
 from ..envelope import ApiError, ok
 from ..settings import CURRENT_SEMESTER
 
@@ -39,6 +40,27 @@ class ChatIn(BaseModel):
     message: str = Field(min_length=1, max_length=500)
     signalId: str = Field(default="", max_length=200)
     history: list[dict] = Field(default_factory=list, max_length=12)
+
+
+class SkillConfigDraftIn(BaseModel):
+    override: dict = Field(default_factory=dict)
+    changeReason: str = Field(min_length=2, max_length=200)
+
+
+class ConfigActionIn(BaseModel):
+    configId: int
+    changeReason: str = Field(default="", max_length=200)
+
+
+class LlmConfigIn(BaseModel):
+    enabled: bool = False
+    base_url: str = Field(default="", max_length=300)
+    api_key: str | None = None          # None=保持原密钥，""=清除
+    model: str = Field(default="", max_length=100)
+    timeout_seconds: int = Field(default=20, ge=1, le=120)
+    max_retries: int = Field(default=1, ge=0, le=1)
+    narrative_enabled: bool = True
+    chat_enabled: bool = True
 
 
 def _sse(event: str, data: dict) -> str:
@@ -189,3 +211,122 @@ def chat(body: ChatIn, user: dict = Depends(get_current_user),
     return StreamingResponse(
         stream(), media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+# ---------------------------------------------------------------------------
+# 学校配置中心（阶段5）：仅系统管理员；配置治理口径见 config_store / llm_config
+# ---------------------------------------------------------------------------
+
+@router.get("/config/skills")
+def skill_config_list(admin: dict = Depends(require_admin),
+                      rw: sqlite3.Connection = Depends(get_db_rw)):
+    """全部Skill的默认值、可覆写边界、生效覆写与版本链。"""
+    items = []
+    for skill in list_skills():
+        override, version = config_store.active_override(rw, skill.skill_id)
+        config, _ = config_store.resolve_config(rw, skill)
+        items.append({
+            "skill_id": skill.skill_id,
+            "name": skill.name,
+            "management_question": skill.management_question,
+            "description": skill.description,
+            "default_config": skill.default_config,
+            "config_bounds": skill.config_bounds,
+            "active_config": config,
+            "active_override": override,
+            "config_version": version,
+            "versions": config_store.list_versions(rw, skill.skill_id),
+        })
+    return ok({"items": items})
+
+
+@router.post("/config/skills/{skill_id}/draft")
+def skill_config_draft(skill_id: str, body: SkillConfigDraftIn,
+                       admin: dict = Depends(require_admin),
+                       rw: sqlite3.Connection = Depends(get_db_rw)):
+    """创建学校覆写草稿（按 config_bounds 白名单校验，公式与数据来源不可覆写）。"""
+    skill = get_skill(skill_id)
+    if not skill:
+        raise ApiError("Skill不存在", code=404, status_code=404)
+    try:
+        result = config_store.create_draft(
+            rw, skill, body.override, body.changeReason,
+            admin.get("username", ""))
+    except ValueError as exc:
+        raise ApiError(str(exc), code=400, status_code=400)
+    rw.commit()
+    return ok(result)
+
+
+@router.post("/config/skills/{skill_id}/publish")
+def skill_config_publish(skill_id: str, body: ConfigActionIn,
+                         admin: dict = Depends(require_admin),
+                         rw: sqlite3.Connection = Depends(get_db_rw)):
+    """发布草稿：先生效后旧版自动退役。"""
+    try:
+        result = config_store.publish(rw, skill_id, body.configId,
+                                      admin.get("username", ""))
+    except ValueError as exc:
+        raise ApiError(str(exc), code=400, status_code=400)
+    rw.commit()
+    return ok(result)
+
+
+@router.post("/config/skills/{skill_id}/rollback")
+def skill_config_rollback(skill_id: str, body: ConfigActionIn,
+                          admin: dict = Depends(require_admin),
+                          rw: sqlite3.Connection = Depends(get_db_rw)):
+    """回滚到任一历史版本（以其内容为蓝本生成新发布版本，保留审计链）。"""
+    try:
+        result = config_store.rollback(rw, skill_id, body.configId,
+                                       admin.get("username", ""),
+                                       body.changeReason)
+    except ValueError as exc:
+        raise ApiError(str(exc), code=400, status_code=400)
+    rw.commit()
+    return ok(result)
+
+
+def _masked_llm(cfg: dict) -> dict:
+    """LLM配置出参：密钥脱敏（只回尾部4位供辨认，不回原文）。"""
+    key = cfg.get("api_key") or ""
+    return {
+        "enabled": bool(cfg.get("enabled")),
+        "base_url": cfg.get("base_url") or "",
+        "has_api_key": bool(key),
+        "api_key_tail": key[-4:] if key else "",
+        "model": cfg.get("model") or "",
+        "timeout_seconds": cfg.get("timeout_seconds"),
+        "max_retries": cfg.get("max_retries"),
+        "narrative_enabled": bool(cfg.get("narrative_enabled")),
+        "chat_enabled": bool(cfg.get("chat_enabled")),
+        "ready": llm_config.llm_ready(cfg),
+    }
+
+
+@router.get("/config/llm")
+def llm_config_get(admin: dict = Depends(require_admin),
+                   rw: sqlite3.Connection = Depends(get_db_rw)):
+    return ok(_masked_llm(llm_config.load_config(rw)))
+
+
+@router.put("/config/llm")
+def llm_config_put(body: LlmConfigIn, admin: dict = Depends(require_admin),
+                   rw: sqlite3.Connection = Depends(get_db_rw)):
+    patch = body.model_dump(exclude={"api_key"})
+    if body.api_key is not None:
+        patch["api_key"] = body.api_key
+    saved = llm_config.save_config(rw, patch, admin.get("username", ""))
+    return ok(_masked_llm(saved))
+
+
+@router.post("/config/llm/test")
+def llm_config_test(admin: dict = Depends(require_admin),
+                    rw: sqlite3.Connection = Depends(get_db_rw)):
+    """连通性测试（用已保存的配置试调一次，不要求 enabled）。"""
+    cfg = llm_config.load_config(rw)
+    try:
+        reply = llm_client.test_connection(cfg)
+    except llm_client.LLMError as exc:
+        return ok({"success": False, "kind": exc.kind, "detail": exc.detail})
+    return ok({"success": True, "reply": reply[:80], "model": cfg.get("model")})

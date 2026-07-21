@@ -42,6 +42,78 @@ export function getDecisionLlmStatus() {
   return http.get<LlmStatus>('/admin/ai/decision/llm-status')
 }
 
+/* ---- 学校配置中心（阶段5，仅系统管理员） ---- */
+
+export interface SkillConfigVersion {
+  config_id: number
+  version_no: string
+  status: 'draft' | 'published' | 'retired'
+  change_reason: string
+  created_by: string
+  created_at: string
+  published_by?: string | null
+  published_at?: string | null
+}
+
+export interface SkillConfigInfo {
+  skill_id: string
+  name: string
+  management_question: string
+  description: string
+  default_config: Record<string, any>
+  config_bounds: Record<string, { type: string; min?: number; max?: number; options?: any[] }>
+  active_config: Record<string, any>
+  active_override: Record<string, any>
+  config_version: string
+  versions: SkillConfigVersion[]
+}
+
+export function getDecisionSkillConfigs() {
+  return http.get<{ items: SkillConfigInfo[] }>('/admin/ai/decision/config/skills')
+}
+
+export function createSkillConfigDraft(skillId: string, override: Record<string, any>, changeReason: string) {
+  return http.post<any>(`/admin/ai/decision/config/skills/${encodeURIComponent(skillId)}/draft`,
+    { override, changeReason })
+}
+
+export function publishSkillConfig(skillId: string, configId: number) {
+  return http.post<any>(`/admin/ai/decision/config/skills/${encodeURIComponent(skillId)}/publish`,
+    { configId })
+}
+
+export function rollbackSkillConfig(skillId: string, configId: number, changeReason = '') {
+  return http.post<any>(`/admin/ai/decision/config/skills/${encodeURIComponent(skillId)}/rollback`,
+    { configId, changeReason })
+}
+
+export interface LlmConfigView {
+  enabled: boolean
+  base_url: string
+  has_api_key: boolean
+  api_key_tail: string
+  model: string
+  timeout_seconds: number
+  max_retries: number
+  narrative_enabled: boolean
+  chat_enabled: boolean
+  ready: boolean
+}
+
+export function getDecisionLlmConfig() {
+  return http.get<LlmConfigView>('/admin/ai/decision/config/llm')
+}
+
+/** api_key: undefined=保持原密钥；''=清除；其他=更新 */
+export function saveDecisionLlmConfig(body: Omit<LlmConfigView, 'has_api_key' | 'api_key_tail' | 'ready'> & { api_key?: string }) {
+  return http.put<LlmConfigView>('/admin/ai/decision/config/llm', body)
+}
+
+export function testDecisionLlmConnection() {
+  return http.post<{ success: boolean; kind?: string; detail?: string; reply?: string; model?: string }>(
+    '/admin/ai/decision/config/llm/test')
+}
+
 export interface ChatStreamHandlers {
   onMeta?: (e: ChatMetaEvent) => void
   onDelta?: (text: string) => void

@@ -71,6 +71,7 @@ export const router = createRouter({
         { path: 'system/audit', component: () => import('@/views/admin/system/Audit.vue') },
         { path: 'system/kpis', component: () => import('@/views/admin/system/Kpis.vue') },
         { path: 'system/schemes', component: () => import('@/views/admin/system/Schemes.vue') },
+        { path: 'system/decision-config', component: () => import('@/views/admin/system/DecisionConfig.vue') },
 
         // ====== 系统设置 ======
         { path: 'settings', component: () => import('@/views/admin/system/Parameters.vue') },

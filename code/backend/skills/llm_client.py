@@ -89,3 +89,18 @@ def _safe_body(resp: httpx.Response, limit: int = 200) -> str:
         return resp.text[:limit]
     except Exception:
         return f"status={resp.status_code}"
+
+
+def test_connection(cfg: dict, timeout: float = 8) -> str:
+    """连通性测试：保存前的试调，只要求 base_url/api_key/model 齐全（不要求 enabled）。
+
+    返回模型回复文本；失败抛 LLMError（kind 同 chat_completion）。
+    """
+    if not (cfg.get("base_url") and cfg.get("api_key") and cfg.get("model")):
+        raise LLMError(KIND_NOT_CONFIGURED, "base_url / api_key / model 未配齐")
+    trial = dict(cfg)
+    trial["enabled"] = True
+    trial["timeout_seconds"] = timeout
+    trial["max_retries"] = 0  # 测试调用不重试，快速反馈
+    return chat_completion(trial, [
+        {"role": "user", "content": "连通性测试，请回复 ok"}], max_tokens=8, temperature=0)
