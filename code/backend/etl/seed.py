@@ -357,6 +357,11 @@ def build_kpi_config_df() -> pd.DataFrame:
         # 教学运行
         {"kpi_id":"operation_course_count","module":"operation","label":"开课门数","enabled":1,"sort_order":1,"scope_applicable":"all"},
         {"kpi_id":"operation_merged_rate","module":"operation","label":"合班率","enabled":1,"sort_order":4,"scope_applicable":"all"},
+        # M1 课程质量三分层（口径与 scripts/migrate_course_pass_stat.py 登记一致）
+        {"kpi_id":"course_first_pass_rate","module":"course_quality","label":"课程首次通过率","enabled":1,"sort_order":1,"calc_type":"rate","formula":"first_pass_rate","unit":"%","scope_applicable":"all"},
+        {"kpi_id":"course_makeup_pass_rate","module":"course_quality","label":"课程补考通过率","enabled":1,"sort_order":2,"calc_type":"rate","formula":"makeup_pass_rate","unit":"%","scope_applicable":"all"},
+        {"kpi_id":"course_retake_pass_rate","module":"course_quality","label":"课程重修通过率","enabled":1,"sort_order":3,"calc_type":"rate","formula":"retake_pass_rate","unit":"%","scope_applicable":"all"},
+        {"kpi_id":"public_required_first_pass_rate","module":"course_quality","label":"公共必修首次通过率","enabled":1,"sort_order":4,"calc_type":"rate","formula":"public_required_first_pass_rate","unit":"%","scope_applicable":"all"},
     ])
 
 

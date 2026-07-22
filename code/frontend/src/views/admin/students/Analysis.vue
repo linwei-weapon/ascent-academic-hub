@@ -118,7 +118,7 @@
     </el-row>
 
     <div class="sa-card">
-      <div class="sa-card-title">挂科集中课程 TOP10 <KpiLabel label="" formula="挂科率=不及格人次÷总修读人次，仅统计修读≥30人次课程" /></div>
+      <div class="sa-card-title">挂科集中课程 TOP10 <KpiLabel label="" formula="挂科率=不及格人次÷总修读人次，仅统计修读≥30人次课程；首次/补考/重修三分层通过率见「课程质量与教学运行」专题" /></div>
       <el-table v-if="data.failCourses.length" :data="data.failCourses" size="small" @row-click="goCourse" row-class-name="row-clickable">
         <el-table-column prop="name" label="课程" width="160"><template #default="{row}"><span class="link">{{ row.name }}</span></template></el-table-column>
         <el-table-column prop="dept" label="开课学院" width="140" />
@@ -131,8 +131,10 @@
         <el-table-column prop="failCount" label="不及格" width="76" align="right" />
         <el-table-column prop="totalCount" label="修读人数" width="86" align="right" />
         <el-table-column prop="avgScore" label="平均分" width="76" align="right"><template #default="{row}"><b class="tnum">{{ row.avgScore }}</b></template></el-table-column>
-        <el-table-column label="首次通过率" width="96" align="right"><template #default="{row}"><span class="tnum" :style="{color:(row.firstPassRate||0)>70?'#0D9488':'#E11D48'}">{{ row.firstPassRate ?? '—' }}{{ row.firstPassRate != null ? '%' : '' }}</span></template></el-table-column>
-        <el-table-column label="最终通过率" width="96" align="right"><template #default="{row}"><span class="tnum" :style="{color:(row.finalPassRate||0)>85?'#0D9488':'#D97706'}">{{ row.finalPassRate ?? '—' }}{{ row.finalPassRate != null ? '%' : '' }}</span></template></el-table-column>
+        <el-table-column width="110" align="right"><template #header><span>首次通过率 <KpiLabel label="" formula="V1 agg_course_term 口径：按学生-课程首次修读记录计算" /></span></template><template #default="{row}"><span class="tnum" :style="{color:(row.firstPassRate||0)>70?'#0D9488':'#E11D48'}">{{ row.firstPassRate ?? '—' }}{{ row.firstPassRate != null ? '%' : '' }}</span></template></el-table-column>
+        <el-table-column width="110" align="right"><template #header><span>补考通过率 <KpiLabel label="" formula="V2 grade_attempt attempt_type=makeup，全学期累计加权" /></span></template><template #default="{row}"><span class="tnum">{{ row.makeupPassRate ?? '—' }}{{ row.makeupPassRate != null ? '%' : '' }}</span></template></el-table-column>
+        <el-table-column width="110" align="right"><template #header><span>重修通过率 <KpiLabel label="" formula="V2 grade_attempt attempt_type=retake，全学期累计加权" /></span></template><template #default="{row}"><span class="tnum">{{ row.retakePassRate ?? '—' }}{{ row.retakePassRate != null ? '%' : '' }}</span></template></el-table-column>
+        <el-table-column width="130" align="right"><template #header><span>最终通过率（旧口径） <KpiLabel label="" formula="deprecated：V1 agg_course_term 按学生-课程末次记录计算，已由首次/补考/重修三分层口径替代" /></span></template><template #default="{row}"><span class="tnum" style="color:#94A3B8">{{ row.finalPassRate ?? '—' }}{{ row.finalPassRate != null ? '%' : '' }}</span></template></el-table-column>
       </el-table>
       <div v-else class="sa-faint" style="font-size:12px">暂无数据</div>
     </div>

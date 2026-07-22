@@ -1063,6 +1063,32 @@ KPI_DEFAULTS = [
      ["/admin/dashboard"], "观察学位获得总体情况，正式结果以学校学位审核为准。"),
 ]
 
+# M1：课程质量三分层指标（module='course_quality'），结构与 KPI_DEFAULTS 相同。
+KPI_DEFAULTS_COURSE_QUALITY = [
+    ("course_first_pass_rate", "课程首次通过率", 1, "rate",
+     "首次修读（attempt_type=regular，含缓考）通过人次数÷首次修读有效人次数；"
+     "有效记录=已发布且未作废且is_pass非空；分母为0时不输出比率", "%",
+     "agg_course_pass_stat", "课程×学期", "成绩发布后", "1.1",
+     ["/admin/operation/course-quality"],
+     "衡量课程首修教学结果，是课程质量三分层口径的主指标。"),
+    ("course_makeup_pass_rate", "课程补考通过率", 2, "rate",
+     "补考（attempt_type=makeup）通过人次数÷补考有效人次数；分母为0时不输出比率", "%",
+     "agg_course_pass_stat", "课程×学期", "成绩发布后", "1.1",
+     ["/admin/operation/course-quality"],
+     "观察补考通道的挽救效果，辅助判断考核与帮扶安排。"),
+    ("course_retake_pass_rate", "课程重修通过率", 3, "rate",
+     "重修（attempt_type=retake）通过人次数÷重修有效人次数；分母为0时不输出比率", "%",
+     "agg_course_pass_stat", "课程×学期", "成绩发布后", "1.1",
+     ["/admin/operation/course-quality"],
+     "观察重修通道的收敛效果，辅助安排重修资源。"),
+    ("public_required_first_pass_rate", "公共必修首次通过率", 4, "rate",
+     "公共必修课程首次修读通过人次数÷公共必修首次修读有效人次数；"
+     "课程类别由培养方案模块与V1课程类别合并推导", "%",
+     "agg_course_pass_stat", "全校/学院×学期", "成绩发布后", "1.1",
+     ["/admin/dashboard", "/admin/operation/course-quality"],
+     "公共必修覆盖全体学生，是重点关注的通识基础课质量指标。"),
+]
+
 KPI_HISTORY_DDL = """
 CREATE TABLE IF NOT EXISTS sys_kpi_config_history (
     history_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1095,36 +1121,38 @@ def _ensure_kpi_config(conn: sqlite3.Connection) -> None:
             dbm.execute(
                 conn, f"ALTER TABLE sys_kpi_config ADD COLUMN {name} {definition}"
             )
-    for (kpi_id, label, order, calc_type, formula, unit, data_source,
-         grain, update_cycle, version, page_refs, management_value) in KPI_DEFAULTS:
-        dbm.execute(conn, """INSERT OR IGNORE INTO sys_kpi_config
-            (kpi_id,module,label,enabled,sort_order,calc_type,formula,unit,
-             scope_applicable,data_source,grain,update_cycle,version,page_refs,
-             management_value)
-            VALUES (?,'dashboard',?,1,?,?,?,?, 'all',?,?,?,?,?,?)""",
-            (
-                kpi_id, label, order, calc_type, formula, unit, data_source,
-                grain, update_cycle, version,
-                json.dumps(page_refs, ensure_ascii=False), management_value,
-            ))
-        dbm.execute(conn, """UPDATE sys_kpi_config SET
-            label=?,
-            calc_type=?,
-            formula=?,
-            unit=?,
-            data_source=COALESCE(NULLIF(data_source,''),?),
-            grain=COALESCE(NULLIF(grain,''),?),
-            update_cycle=COALESCE(NULLIF(update_cycle,''),?),
-            version=COALESCE(NULLIF(version,''),?),
-            page_refs=CASE WHEN page_refs IS NULL OR page_refs='' OR page_refs='[]'
-                           THEN ? ELSE page_refs END,
-            management_value=COALESCE(NULLIF(management_value,''),?)
-            WHERE kpi_id=?""", (
-                label, calc_type, formula, unit,
-                data_source, grain, update_cycle, version,
-                json.dumps(page_refs, ensure_ascii=False), management_value,
-                kpi_id,
-            ))
+    for defaults, module in ((KPI_DEFAULTS, "dashboard"),
+                             (KPI_DEFAULTS_COURSE_QUALITY, "course_quality")):
+        for (kpi_id, label, order, calc_type, formula, unit, data_source,
+             grain, update_cycle, version, page_refs, management_value) in defaults:
+            dbm.execute(conn, """INSERT OR IGNORE INTO sys_kpi_config
+                (kpi_id,module,label,enabled,sort_order,calc_type,formula,unit,
+                 scope_applicable,data_source,grain,update_cycle,version,page_refs,
+                 management_value)
+                VALUES (?,?,?,1,?,?,?,?, 'all',?,?,?,?,?,?)""",
+                (
+                    kpi_id, module, label, order, calc_type, formula, unit, data_source,
+                    grain, update_cycle, version,
+                    json.dumps(page_refs, ensure_ascii=False), management_value,
+                ))
+            dbm.execute(conn, """UPDATE sys_kpi_config SET
+                label=?,
+                calc_type=?,
+                formula=?,
+                unit=?,
+                data_source=COALESCE(NULLIF(data_source,''),?),
+                grain=COALESCE(NULLIF(grain,''),?),
+                update_cycle=COALESCE(NULLIF(update_cycle,''),?),
+                version=COALESCE(NULLIF(version,''),?),
+                page_refs=CASE WHEN page_refs IS NULL OR page_refs='' OR page_refs='[]'
+                               THEN ? ELSE page_refs END,
+                management_value=COALESCE(NULLIF(management_value,''),?)
+                WHERE kpi_id=?""", (
+                    label, calc_type, formula, unit,
+                    data_source, grain, update_cycle, version,
+                    json.dumps(page_refs, ensure_ascii=False), management_value,
+                    kpi_id,
+                ))
 
 
 @router.get("/settings/kpi-config")

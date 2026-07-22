@@ -471,6 +471,33 @@ CREATE TABLE IF NOT EXISTS student_timeline_event (
     source TEXT NOT NULL DEFAULT 'derived'
 );
 
+-- 课程通过率三分层聚合（M1）：粒度 课程×学期。
+-- 口径：仅统计 grade_attempt 中 is_published=1 AND is_void=0 AND is_pass IS NOT NULL 的有效记录；
+--   first=首次修读（attempt_type='regular'，含缓考 deferred 与空值，均视为首次修读链路）、
+--   makeup=补考、retake=重修；三个通过率存放 0-1 小数，分母为 0 时存 NULL 不存 0。
+-- course_group 推导优先级：①培养方案模块+修读要求 ②V1 dim_course.category 映射 ③其他；
+-- group_basis 记录实际命中的推导来源（plan_module / v1_category / default）。
+CREATE TABLE IF NOT EXISTS agg_course_pass_stat (
+    course_id TEXT NOT NULL,
+    semester_id TEXT NOT NULL,
+    course_name TEXT,
+    course_group TEXT NOT NULL DEFAULT '其他',
+    group_basis TEXT,
+    first_attempts INTEGER NOT NULL DEFAULT 0,
+    first_pass INTEGER NOT NULL DEFAULT 0,
+    makeup_attempts INTEGER NOT NULL DEFAULT 0,
+    makeup_pass INTEGER NOT NULL DEFAULT 0,
+    retake_attempts INTEGER NOT NULL DEFAULT 0,
+    retake_pass INTEGER NOT NULL DEFAULT 0,
+    first_pass_rate REAL,
+    makeup_pass_rate REAL,
+    retake_pass_rate REAL,
+    rule_version TEXT NOT NULL,
+    calculated_at TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT 'derived',
+    PRIMARY KEY(course_id, semester_id)
+);
+
 CREATE TABLE IF NOT EXISTS agg_course_offering (
     semester_id TEXT NOT NULL, course_id TEXT NOT NULL, lesson_count INTEGER NOT NULL,
     teacher_count INTEGER NOT NULL, enrolled INTEGER NOT NULL DEFAULT 0,
@@ -526,3 +553,4 @@ CREATE INDEX IF NOT EXISTS idx_lesson_teacher_lesson ON lesson_teacher(lesson_id
 CREATE INDEX IF NOT EXISTS idx_substitution_original ON student_course_substitution(original_course_id, substitution_id);
 CREATE INDEX IF NOT EXISTS idx_difficulty_student ON student_difficulty_flag(student_id, severity);
 CREATE INDEX IF NOT EXISTS idx_timeline_student ON student_timeline_event(student_id, event_date);
+CREATE INDEX IF NOT EXISTS idx_course_pass_stat_semester ON agg_course_pass_stat(semester_id, course_group);

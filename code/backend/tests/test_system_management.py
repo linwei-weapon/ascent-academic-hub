@@ -42,7 +42,8 @@ class SystemManagementTest(unittest.TestCase):
         self.assertEqual(first, second)
         self.assertEqual(8, second["systemMenus"])
         self.assertEqual(len(PARAMETER_DEFAULTS), second["systemParameters"])
-        self.assertEqual(8, second["registeredKpis"])
+        # 8 条总览指标 + M1 新增 4 条课程质量三分层指标。
+        self.assertEqual(12, second["registeredKpis"])
         system_titles = {
             row["title"] for row in conn.execute(
                 "SELECT title FROM sys_menu WHERE parent_id='/admin/system'"

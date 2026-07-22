@@ -32,6 +32,46 @@ def _gpa_bucket(value: float) -> str:
     return "<2.0"
 
 
+def _rate(passed, attempts):
+    """百分数通过率（1位小数）；分母为0或None时返回None，不落0。"""
+    return round(passed * 100.0 / attempts, 1) if attempts else None
+
+
+def _v2_pass_stats():
+    """读取 V2 agg_course_pass_stat（M1 课程通过率三分层，全学期累计加权）。
+
+    V2 库或聚合表缺失时返回 None：总览其余指标仍走 V1 正常输出，
+    三分层字段输出 None 并在 coursePassRates.source 中说明，不静默混用口径。
+    """
+    try:
+        conn = dbm.get_v2_conn()
+    except Exception:
+        return None
+    try:
+        if not dbm.scalar(conn, """SELECT 1 FROM sqlite_master
+            WHERE type='table' AND name='agg_course_pass_stat'"""):
+            return None
+        courses = {r["course_id"]: r for r in dbm.query(conn, """
+            SELECT course_id, MAX(course_group) course_group,
+              SUM(first_attempts) fa, SUM(first_pass) fp,
+              SUM(makeup_attempts) ma, SUM(makeup_pass) mp,
+              SUM(retake_attempts) ra, SUM(retake_pass) rp
+            FROM agg_course_pass_stat GROUP BY course_id""")}
+        overall = dbm.query_one(conn, """
+            SELECT SUM(first_attempts) fa, SUM(first_pass) fp,
+              SUM(makeup_attempts) ma, SUM(makeup_pass) mp,
+              SUM(retake_attempts) ra, SUM(retake_pass) rp
+            FROM agg_course_pass_stat""") or {}
+        public = dbm.query_one(conn, """
+            SELECT SUM(first_attempts) fa, SUM(first_pass) fp
+            FROM agg_course_pass_stat WHERE course_group='公共必修'""") or {}
+        return {"courses": courses, "overall": overall, "public_required": public}
+    except Exception:
+        return None
+    finally:
+        conn.close()
+
+
 def _apply_kpi_config(conn: sqlite3.Connection, kpis: list[dict]) -> tuple[list[dict], bool]:
     """Apply display-only governance to registered dashboard KPIs.
 
@@ -202,6 +242,10 @@ def dashboard(semester: Optional[str] = None,
     failCourses = []
     rate_map = {r["course_id"]: r for r in dbm.query(conn, """SELECT course_id,
         first_pass_rate,final_pass_rate FROM agg_course_term WHERE semester_id=?""", (cur,))}
+    # M1：首次通过率改读 V2 agg_course_pass_stat（attempt_type 三分层，全学期累计加权）；
+    # finalPassRate 仍取 V1 agg_course_term（deprecated，保留一个版本周期）。
+    v2pass = _v2_pass_stats()
+    v2_courses = (v2pass or {}).get("courses", {})
     for r in dbm.query(conn, f"""SELECT g.course_id,co.name,co.dept,COUNT(*) total,
         SUM(CASE WHEN g.is_pass=0 THEN 1 ELSE 0 END) fail_count,
         AVG(g.score) avg_score,
@@ -212,6 +256,7 @@ def dashboard(semester: Optional[str] = None,
         GROUP BY g.course_id HAVING total>=30
         ORDER BY (fail_count*1.0/total) DESC LIMIT 8""", tuple([cur] + scope_params)):
         rates = rate_map.get(r["course_id"], {})
+        v2c = v2_courses.get(r["course_id"]) or {}
         failCourses.append({
             "id": r["course_id"], "name": r["name"] or r["course_id"],
             "college": r["dept"] or "—",
@@ -219,9 +264,33 @@ def dashboard(semester: Optional[str] = None,
             "failRate": str(round(r["fail_count"] / r["total"] * 100, 1)),
             "avgScore": round(r["avg_score"] or 0, 1),
             "excellentRate": str(round((r["excellent_rate"] or 0) * 100, 1)),
-            "firstPassRate": None if restricted else round((rates.get("first_pass_rate") or 0) * 100, 1),
+            "firstPassRate": None if restricted else _rate(v2c.get("fp"), v2c.get("fa")),
+            "makeupPassRate": None if restricted else _rate(v2c.get("mp"), v2c.get("ma")),
+            "retakePassRate": None if restricted else _rate(v2c.get("rp"), v2c.get("ra")),
+            "courseGroup": None if restricted else v2c.get("course_group"),
+            # deprecated：V1 末次通过率口径，保留一个版本周期后移除。
             "finalPassRate": None if restricted else round((rates.get("final_pass_rate") or 0) * 100, 1),
         })
+
+    course_pass_rates = None
+    if not restricted:
+        overall, public = (v2pass or {}).get("overall") or {}, (v2pass or {}).get("public_required") or {}
+        final_v1 = dbm.scalar(conn, """SELECT SUM(final_pass_rate*total)/SUM(total)
+            FROM agg_course_term WHERE total>0""")
+        course_pass_rates = {
+            "firstPassRate": _rate(overall.get("fp"), overall.get("fa")),
+            "makeupPassRate": _rate(overall.get("mp"), overall.get("ma")),
+            "retakePassRate": _rate(overall.get("rp"), overall.get("ra")),
+            "publicRequiredFirstPassRate": _rate(public.get("fp"), public.get("fa")),
+            "attempts": {"first": overall.get("fa") or 0, "makeup": overall.get("ma") or 0,
+                         "retake": overall.get("ra") or 0},
+            # deprecated：V1 agg_course_term 末次通过率，保留一个版本周期。
+            "finalPassRate": round(final_v1 * 100, 1) if final_v1 is not None else None,
+            "source": ("V2 agg_course_pass_stat（grade_attempt attempt_type 三分层，"
+                       "全学期累计加权，SUM(pass)/SUM(attempts)）"
+                       if v2pass else "V2 agg_course_pass_stat 未构建，三分层指标暂缺"),
+            "deprecatedFields": ["finalPassRate"],
+        }
 
     total_cur = sum(cur_fail_by_col.values()) if cur_fail_by_col else 0
     total_hist = sum(hist_fail_by_col.values()) if hist_fail_by_col else 0
@@ -231,6 +300,7 @@ def dashboard(semester: Optional[str] = None,
 
     return ok({"kpi": kpi, "colleges": colleges, "gpaDist": gpaDist,
                "gpaDistByCollege": gpaDistByCollege, "failCourses": failCourses,
+               "coursePassRates": course_pass_rates,
                "kpiConfigApplied": kpi_config_applied,
                "scope": {"restricted": restricted,
                          "label": scope_label,
@@ -368,6 +438,9 @@ def _college_fail_courses(conn, college_id, cur, scope_and="", scope_params=None
         "SELECT course_id, first_pass_rate, final_pass_rate FROM agg_course_term "
         "WHERE semester_id=? AND first_pass_rate IS NOT NULL", (cur,)):
         cr_map[r["course_id"]] = (r["first_pass_rate"], r["final_pass_rate"])
+    # M1：firstPassRate 改读 V2 agg_course_pass_stat 三分层（全学期累计加权）；
+    # finalPassRate 仍取 V1（deprecated，保留一个版本周期）。
+    v2_courses = (_v2_pass_stats() or {}).get("courses", {})
     out = []
     for r in dbm.query(conn, f"""
         SELECT g.course_id, co.name, co.credits,
@@ -380,12 +453,17 @@ def _college_fail_courses(conn, college_id, cur, scope_and="", scope_params=None
         ORDER BY (fc*1.0/total) DESC LIMIT ?""",
         tuple([college_id, cur] + scope_params + [limit])):
         fpr, lpr = cr_map.get(r["course_id"], (None, None))
+        v2c = v2_courses.get(r["course_id"]) or {}
         out.append({
             "id": r["course_id"], "name": r["name"] or r["course_id"],
             "failCount": r["fc"], "totalCount": r["total"],
             "failRate": str(round(r["fc"] / r["total"] * 100, 1)),
             "avgScore": round(r["av"] or 0, 1), "credits": r["credits"],
-            "firstPassRate": None if restricted else (round((fpr or 0) * 100, 1) if fpr is not None else None),
+            "firstPassRate": None if restricted else _rate(v2c.get("fp"), v2c.get("fa")),
+            "makeupPassRate": None if restricted else _rate(v2c.get("mp"), v2c.get("ma")),
+            "retakePassRate": None if restricted else _rate(v2c.get("rp"), v2c.get("ra")),
+            "courseGroup": None if restricted else v2c.get("course_group"),
+            # deprecated：V1 末次通过率口径，保留一个版本周期后移除。
             "finalPassRate": None if restricted else (round((lpr or 0) * 100, 1) if lpr is not None else None),
         })
     return out

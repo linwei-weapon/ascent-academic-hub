@@ -20,7 +20,7 @@ REQUIRED_TABLES = {
     "metric_definition",
     "student_plan_course_status", "student_growth_indicator",
     "student_difficulty_flag", "student_timeline_event",
-    "agg_course_offering", "agg_course_team", "agg_teacher_schedule_preference",
+    "agg_course_pass_stat", "agg_course_offering", "agg_course_team", "agg_teacher_schedule_preference",
     "access_scope_mapping",
 }
 

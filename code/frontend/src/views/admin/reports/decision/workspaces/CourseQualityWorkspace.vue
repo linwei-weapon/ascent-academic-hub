@@ -16,6 +16,7 @@
         <div class="cc-head">
           <el-tag :type="stateOf(sig).tag" effect="dark" size="small">{{ stateOf(sig).label }}</el-tag>
           <el-tag size="small" type="info" effect="plain">{{ sig.facts['课程属性'] }}</el-tag>
+          <el-tag v-if="sig.facts['课程类别']" size="small" :type="sig.facts['课程类别']==='公共必修'?'warning':'info'" effect="plain">{{ sig.facts['课程类别'] }}</el-tag>
           <span class="cc-action-when">{{ sig.action.when }}</span>
         </div>
 
@@ -47,6 +48,10 @@
           <div class="ep-row">
             <span>本学期</span>
             <b>{{ sig.facts['本学期未通过率'] }} · {{ sig.facts['未通过人数'] }} / {{ sig.facts['修读人数'] }}</b>
+          </div>
+          <div v-if="hasLayeredRates(sig)" class="ep-row">
+            <span>三分层</span>
+            <b>首次 {{ sig.facts['首次通过率'] }} · 补考 {{ sig.facts['补考通过率'] }} · 重修 {{ sig.facts['重修通过率'] }}（全校累计口径）</b>
           </div>
         </div>
 
@@ -110,6 +115,11 @@ function stateOf(sig: DecisionSignal) {
 
 function historyOf(sig: DecisionSignal): { semester: string; rate: number }[] {
   return sig.context?.history || []
+}
+
+// M1：三分层通过率 facts 为可选附加证据，后端未附带时不渲染该行
+function hasLayeredRates(sig: DecisionSignal): boolean {
+  return sig.facts?.['首次通过率'] != null || sig.facts?.['补考通过率'] != null || sig.facts?.['重修通过率'] != null
 }
 
 function yOf(rate: number): number {

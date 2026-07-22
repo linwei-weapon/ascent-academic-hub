@@ -212,12 +212,16 @@ def analysis(semester: Optional[str] = None, grade: Optional[str] = None,
 
     # 挂科集中课程 TOP10（真实，修读≥30）
     fcw, fcp = _grade_clauses("g")
-    # 课程级首次/最终通过率（取自 agg_course_term）
+    # 课程级首次/最终通过率（取自 agg_course_term，旧口径，保留一个版本周期）
     cr_map = {}
     for cr in dbm.query(conn,
         "SELECT course_id, first_pass_rate, final_pass_rate FROM agg_course_term "
         "WHERE first_pass_rate IS NOT NULL GROUP BY course_id"):
         cr_map[cr["course_id"]] = (cr["first_pass_rate"], cr["final_pass_rate"])
+    # M1：三分层通过率与课程类别改读 V2 agg_course_pass_stat（全学期累计加权，
+    # 与总览/课程质量专题同口径）；V2 未构建时字段为 None，前端渲染"—"。
+    from .dashboard import _rate as _v2_rate, _v2_pass_stats
+    v2_courses = (_v2_pass_stats() or {}).get("courses", {})
     failCourses = []
     for r in dbm.query(conn, f"""
         SELECT g.course_id, co.name cname, co.dept, COUNT(*) total,
@@ -228,6 +232,7 @@ def analysis(semester: Optional[str] = None, grade: Optional[str] = None,
         ORDER BY (fc*1.0/total) DESC LIMIT 10""", tuple(fcp)):
         fr = round(r["fc"] / r["total"] * 100, 1)
         fpr, lpr = cr_map.get(r["course_id"], (None, None))
+        v2c = v2_courses.get(r["course_id"]) or {}
         failCourses.append({
             "id": r["course_id"], "name": r["cname"] or r["course_id"],
             "dept": r["dept"] or "—", "failRate": fr, "failCount": r["fc"],
@@ -235,6 +240,9 @@ def analysis(semester: Optional[str] = None, grade: Optional[str] = None,
             "avgScore": round(r["av"], 1) if r["av"] is not None else "—",
             "firstPassRate": round((fpr or 0) * 100, 1),
             "finalPassRate": round((lpr or 0) * 100, 1),
+            "makeupPassRate": _v2_rate(v2c.get("mp"), v2c.get("ma")),
+            "retakePassRate": _v2_rate(v2c.get("rp"), v2c.get("ra")),
+            "courseGroup": v2c.get("course_group"),
         })
 
     # 相邻学期画像迁移：优先使用所选学年中的后两个学期；单学期时向前补一学期；

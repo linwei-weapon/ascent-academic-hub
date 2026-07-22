@@ -51,6 +51,22 @@
       />
     </div>
 
+    <!-- 课程通过率三分层（M1：V2 agg_course_pass_stat，全校累计加权口径） -->
+    <div style="margin-bottom:4px;font-size:12px;color:var(--sa-faint)">
+      课程通过率三分层<span v-if="data.coursePassRates?.source"> · {{ data.coursePassRates.source }}</span>
+    </div>
+    <div class="sa-kpi-row" style="margin-bottom:16px">
+      <KpiCard
+        v-for="k in passRateKpis"
+        :key="k.label"
+        :label="k.label"
+        :value="k.value"
+        :sub="k.sub"
+        :tone="k.tone"
+        :hint="k.hint"
+      />
+    </div>
+
     <!-- 学院对比表（全宽） -->
     <div class="sa-card" style="margin-bottom:16px">
       <div class="sa-card-title">
@@ -168,11 +184,20 @@
               <template #default="{row}"><span>{{ row.totalCount.toLocaleString() }}</span></template>
             </el-table-column>
             <el-table-column prop="avgScore" label="平均分" width="70" align="right"><template #default="{row}"><b class="tnum">{{ row.avgScore }}</b></template></el-table-column>
-            <el-table-column label="首次通过率" width="90" align="right">
-              <template #default="{row}"><span class="tnum" :style="{color:(row.firstPassRate||0)>70?'#0D9488':'#E11D48'}">{{ row.firstPassRate ?? '—' }}{{ row.firstPassRate != null ? '%' : '' }}</span></template>
+            <el-table-column label="类别" width="82" align="center">
+              <template #default="{row}">
+                <el-tag v-if="row.courseGroup" size="small" effect="plain" :type="row.courseGroup==='公共必修'?'warning':'info'">{{ row.courseGroup }}</el-tag>
+                <span v-else class="sa-faint">—</span>
+              </template>
             </el-table-column>
-            <el-table-column label="最终通过率" width="90" align="right">
-              <template #default="{row}"><span class="tnum" :style="{color:(row.finalPassRate||0)>85?'#0D9488':'#D97706'}">{{ row.finalPassRate ?? '—' }}{{ row.finalPassRate != null ? '%' : '' }}</span></template>
+            <el-table-column label="首次通过率" width="90" align="right">
+              <template #default="{row}"><span class="tnum" :style="{color:row.firstPassRate==null?'#94A3B8':(row.firstPassRate||0)>70?'#0D9488':'#E11D48'}">{{ row.firstPassRate ?? '—' }}{{ row.firstPassRate != null ? '%' : '' }}</span></template>
+            </el-table-column>
+            <el-table-column label="补考通过率" width="90" align="right">
+              <template #default="{row}"><span class="tnum" :style="{color:row.makeupPassRate==null?'#94A3B8':'#334155'}">{{ row.makeupPassRate ?? '—' }}{{ row.makeupPassRate != null ? '%' : '' }}</span></template>
+            </el-table-column>
+            <el-table-column label="重修通过率" width="90" align="right">
+              <template #default="{row}"><span class="tnum" :style="{color:row.retakePassRate==null?'#94A3B8':'#334155'}">{{ row.retakePassRate ?? '—' }}{{ row.retakePassRate != null ? '%' : '' }}</span></template>
             </el-table-column>
             <el-table-column label="" width="36"><template #default><span style="color:var(--sa-faint)">&rsaquo;</span></template></el-table-column>
           </el-table>
@@ -214,6 +239,31 @@ const failCourses = ref([] as any[]);
 const pageLoading = ref(false);
 const loadError = ref('');
 const updatedAt = ref('');
+
+// M1 课程通过率三分层（V2 agg_course_pass_stat，全校累计加权）；受限身份后端返回 null，统一显示“—”
+const passRateKpis = computed(() => {
+  const c = data.coursePassRates;
+  const pctText = (v: any) => (v == null ? '—' : `${v}%`);
+  const na = '全校口径指标，当前身份视角不适用';
+  const fmtWan = (n: any) => (n == null ? '' : `${Number(n).toLocaleString()} 人次`);
+  return [
+    { label: '首次通过率', value: pctText(c?.firstPassRate), tone: 'primary' as const,
+      sub: c ? `首次修读 ${fmtWan(c.attempts?.first)}` : na,
+      hint: '首次修读（attempt_type=regular，含缓考）通过人次数÷首次修读人次数，全校累计加权' },
+    { label: '补考通过率', value: pctText(c?.makeupPassRate), tone: 'amber' as const,
+      sub: c ? `补考 ${fmtWan(c.attempts?.makeup)}` : na,
+      hint: '补考（attempt_type=makeup）通过人次数÷补考人次数，全校累计加权' },
+    { label: '重修通过率', value: pctText(c?.retakePassRate), tone: 'teal' as const,
+      sub: c ? `重修 ${fmtWan(c.attempts?.retake)}` : na,
+      hint: '重修（attempt_type=retake）通过人次数÷重修人次数，全校累计加权' },
+    { label: '公共必修首次通过率', value: pctText(c?.publicRequiredFirstPassRate), tone: 'danger' as const,
+      sub: c ? '公共必修课组 · 重点关注' : na,
+      hint: '公共必修课的首次通过率，口径同首次通过率；公共必修影响面覆盖全校学生' },
+    { label: '末次通过率（旧口径）', value: pctText(c?.finalPassRate), tone: 'plain' as const,
+      sub: 'deprecated：V1 末次口径，保留一个版本周期',
+      hint: 'V1 agg_course_term 按学生-课程末次记录的通过率，已由上方三分层口径替代' },
+  ];
+});
 
 // GPA 5 档色：不及格→优秀（玫红/琥珀/靛/靛蓝/青绿）
 const GPA_COLORS = ['#E11D48', '#D97706', '#6366F1', '#4F46E5', '#0D9488'];

@@ -14,6 +14,10 @@
   C 下钻证据: 挂科分数段分布、先修链、改善课程清单
 
 边界：不对未通过率差异做原因归因，只输出"值得核查"及核查方向。
+
+M1 起课程级信号附带 V2 agg_course_pass_stat 的三分层通过率（首次/补考/重修）
+与课程类别（公共必修等）作为附加证据；主判定序列仍基于 legacy fact_grade，
+三分层只加不改，聚合表缺失时附加事实自动省略。
 """
 from __future__ import annotations
 
@@ -26,7 +30,9 @@ from .protocol import (DataRequirement, Signal, Skill, SkillContext,
 
 DATA_BOUNDARY = (
     "趋势判定基于相对基线（全校动态中位数），基线随全校整体水平变化；"
-    "本Skill只标记值得核查的课程，不对未通过率差异做教学原因归因。"
+    "本Skill只标记值得核查的课程，不对未通过率差异做教学原因归因；"
+    "信号附带的首次/补考/重修通过率与课程类别来自V2 agg_course_pass_stat"
+    "（grade_attempt attempt_type 三分层，全校累计口径），仅作附加证据，不参与判定。"
 )
 
 VERIFY_ROUTE = "/admin/operation/course-quality"
@@ -43,6 +49,8 @@ class CourseQualitySkill(Skill):
         DataRequirement("fact_grade", "legacy", True, "课程未通过率与分数段"),
         DataRequirement("dim_course", "legacy", True, "课程名称与必修属性"),
         DataRequirement("dim_student", "legacy", False, "权限范围过滤"),
+        DataRequirement("agg_course_pass_stat", "v2", False,
+                        "M1课程通过率三分层与课程类别（附加证据）"),
     ]
     data_boundary = DATA_BOUNDARY
 
@@ -169,7 +177,7 @@ class CourseQualitySkill(Skill):
         signals: list[Signal] = []
         signals += self._overview_signal(judged, baseline, ctx.semester)
         signals += self._course_signals(legacy, judged, cfg, ctx.semester,
-                                        scope_sql, scope_params)
+                                        scope_sql, scope_params, v2=ctx.v2)
         signals += self._positive_signal(improving)
 
         stats = {
@@ -373,12 +381,47 @@ class CourseQualitySkill(Skill):
             data_boundary=DATA_BOUNDARY,
         )]
 
+    def _pass_layers(self, v2, course_id):
+        """M1：V2 agg_course_pass_stat 三分层通过率与课程类别（全校累计口径）。
+
+        纯附加证据：库/表缺失或课程无记录时返回 None，不影响主判定。
+        """
+        if v2 is None:
+            return None
+        try:
+            exists = dbm.scalar(v2, """SELECT 1 FROM sqlite_master
+                WHERE type='table' AND name='agg_course_pass_stat'""")
+            if not exists:
+                return None
+            row = dbm.query_one(v2, """
+                SELECT MAX(course_group) course_group,
+                       SUM(first_attempts) fa, SUM(first_pass) fp,
+                       SUM(makeup_attempts) ma, SUM(makeup_pass) mp,
+                       SUM(retake_attempts) ra, SUM(retake_pass) rp
+                FROM agg_course_pass_stat WHERE course_id=?
+                GROUP BY course_id""", (course_id,))
+        except Exception:
+            return None
+        if not row:
+            return None
+
+        def _pct(passed, attempts):
+            return round(passed * 100.0 / attempts, 1) if attempts else None
+
+        return {
+            "course_group": row.get("course_group"),
+            "first_pass_rate": _pct(row.get("fp"), row.get("fa")),
+            "makeup_pass_rate": _pct(row.get("mp"), row.get("ma")),
+            "retake_pass_rate": _pct(row.get("rp"), row.get("ra")),
+        }
+
     def _course_signals(self, legacy, judged, cfg, semester,
-                        scope_sql="", scope_params=()) -> list[Signal]:
+                        scope_sql="", scope_params=(), v2=None) -> list[Signal]:
         signals = []
         for j in judged[: int(cfg["max_course_signals"])]:
             band = self._score_band(legacy, j["course_id"], semester)
             prereq = self._prereq_signal(legacy, j["course_name"])
+            layers = self._pass_layers(v2, j["course_id"])
             failed_rows, failed_total = self._failed_students(
                 legacy, j["course_id"], semester, scope_sql, scope_params)
             state_label = {"persistent": "持续偏高", "spike": "显著恶化",
@@ -407,6 +450,22 @@ class CourseQualitySkill(Skill):
             if band:
                 band_text = f"；挂科集中在{band['band']}分段（占{band['pct']}%）"
             prereq_text = f"；{prereq}" if prereq else ""
+            facts = {
+                "本学期未通过率": f"{round(j['cur_rate'] * 100, 1)}%",
+                "未通过人数": f"{j['cur_fails']}人",
+                "修读人数": f"{j['cur_total']}人",
+                "课程属性": "必修" if j["is_required"] else "选修",
+                "状态": state_label,
+            }
+            if layers:
+                # M1：三分层通过率与课程类别（只加不改既有键）。
+                facts["首次通过率"] = (
+                    f"{layers['first_pass_rate']}%" if layers["first_pass_rate"] is not None else "—")
+                facts["补考通过率"] = (
+                    f"{layers['makeup_pass_rate']}%" if layers["makeup_pass_rate"] is not None else "—")
+                facts["重修通过率"] = (
+                    f"{layers['retake_pass_rate']}%" if layers["retake_pass_rate"] is not None else "—")
+                facts["课程类别"] = layers["course_group"] or "其他"
             signals.append(Signal(
                 signal_id=f"{self.skill_id}:course:{j['course_id']}",
                 skill_id=self.skill_id,
@@ -415,13 +474,7 @@ class CourseQualitySkill(Skill):
                 headline=(f"{j['course_name']}（{state_label}）：本学期未通过率"
                           f"{round(j['cur_rate'] * 100, 1)}%、{j['cur_fails']}人未通过"
                           f"{band_text}{prereq_text}"),
-                facts={
-                    "本学期未通过率": f"{round(j['cur_rate'] * 100, 1)}%",
-                    "未通过人数": f"{j['cur_fails']}人",
-                    "修读人数": f"{j['cur_total']}人",
-                    "课程属性": "必修" if j["is_required"] else "选修",
-                    "状态": state_label,
-                },
+                facts=facts,
                 entity={"type": "course", "id": j["course_id"],
                         "name": j["course_name"]},
                 action=action_map[j["state"]],
@@ -438,7 +491,7 @@ class CourseQualitySkill(Skill):
                     "freshness": "按学期成绩实时聚合",
                 },
                 context={"history": j["history"], "score_band": band,
-                         "prereq": prereq,
+                         "prereq": prereq, "pass_layers": layers,
                          "failed_students": failed_rows,
                          "failed_total": failed_total},
                 suggested_questions=[

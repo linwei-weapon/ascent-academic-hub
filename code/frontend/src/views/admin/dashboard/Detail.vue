@@ -65,8 +65,10 @@
             <el-table-column prop="failCount" label="不及格" width="64" align="right" />
             <el-table-column prop="totalCount" label="修读人数" width="80" align="right" />
             <el-table-column prop="avgScore" label="平均分" width="70" align="right"><template #default="{row}"><b class="tnum">{{ row.avgScore }}</b></template></el-table-column>
-            <el-table-column label="首次通过率" width="90" align="right"><template #default="{row}">{{ row.firstPassRate ?? '—' }}{{ row.firstPassRate != null ? '%' : '' }}</template></el-table-column>
-            <el-table-column label="最终通过率" width="90" align="right"><template #default="{row}">{{ row.finalPassRate ?? '—' }}{{ row.finalPassRate != null ? '%' : '' }}</template></el-table-column>
+            <el-table-column label="类别" width="82" align="center"><template #default="{row}"><el-tag v-if="row.courseGroup" size="small" effect="plain" :type="row.courseGroup==='公共必修'?'warning':'info'">{{ row.courseGroup }}</el-tag><span v-else class="sa-faint">—</span></template></el-table-column>
+            <el-table-column label="首次通过率" width="86" align="right"><template #default="{row}">{{ row.firstPassRate ?? '—' }}{{ row.firstPassRate != null ? '%' : '' }}</template></el-table-column>
+            <el-table-column label="补考通过率" width="86" align="right"><template #default="{row}">{{ row.makeupPassRate ?? '—' }}{{ row.makeupPassRate != null ? '%' : '' }}</template></el-table-column>
+            <el-table-column label="重修通过率" width="86" align="right"><template #default="{row}">{{ row.retakePassRate ?? '—' }}{{ row.retakePassRate != null ? '%' : '' }}</template></el-table-column>
           </el-table>
         </div>
       </el-col>

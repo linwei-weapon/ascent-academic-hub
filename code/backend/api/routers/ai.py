@@ -2712,6 +2712,44 @@ def management_ai_briefing(period: str = "morning",
         """, tuple(scope["legacyStudentParams"]))
         graduation, graduation_courses = graduation_future.result()
 
+    # M1：课程通过率三分层（V2 agg_course_pass_stat，全校累计加权）作为附加证据，
+    # 只新增键不改变既有 fail_rate 口径；聚合表缺失时字段为 None。
+    # 必须放在 graduation_future.result() 之后：v2_conn 不能跨线程并发使用。
+    pass_layer = {}
+    if _table_exists(v2_conn, "agg_course_pass_stat"):
+        pass_layer["__overall__"] = dbm.query_one(v2_conn, """
+            SELECT SUM(first_attempts) fa,SUM(first_pass) fp,
+                   SUM(makeup_attempts) ma,SUM(makeup_pass) mp,
+                   SUM(retake_attempts) ra,SUM(retake_pass) rp
+            FROM agg_course_pass_stat""") or {}
+        if top_fail_courses:
+            marks = ",".join("?" for _ in top_fail_courses)
+            for row in _safe_query(v2_conn, f"""
+                SELECT course_id,MAX(course_group) course_group,
+                       SUM(first_attempts) fa,SUM(first_pass) fp,
+                       SUM(makeup_attempts) ma,SUM(makeup_pass) mp,
+                       SUM(retake_attempts) ra,SUM(retake_pass) rp
+                FROM agg_course_pass_stat WHERE course_id IN ({marks})
+                GROUP BY course_id
+            """, tuple(c["course_id"] for c in top_fail_courses)):
+                pass_layer[row["course_id"]] = row
+
+    def _layer_rate(layer, passed_key, attempts_key):
+        if not layer or not layer.get(attempts_key):
+            return None
+        return round(layer[passed_key] * 100.0 / layer[attempts_key], 1)
+
+    overall_layer = pass_layer.get("__overall__") or {}
+    grade_stats["first_pass_rate"] = _layer_rate(overall_layer, "fp", "fa")
+    grade_stats["makeup_pass_rate"] = _layer_rate(overall_layer, "mp", "ma")
+    grade_stats["retake_pass_rate"] = _layer_rate(overall_layer, "rp", "ra")
+    for course in top_fail_courses:
+        layer = pass_layer.get(course["course_id"]) or {}
+        course["first_pass_rate"] = _layer_rate(layer, "fp", "fa")
+        course["makeup_pass_rate"] = _layer_rate(layer, "mp", "ma")
+        course["retake_pass_rate"] = _layer_rate(layer, "rp", "ra")
+        course["course_group"] = layer.get("course_group")
+
     room_summary = {"available": False}
     if scope["type"] == "all" and _table_exists(conn, "fact_room_occupancy"):
         room_semester = semester or _safe_scalar(conn, "SELECT MAX(semester_id) FROM fact_room_occupancy", default="")
@@ -2976,33 +3014,56 @@ def _decision_simulation_base_data(conn: sqlite3.Connection, teaching_semester: 
     evidence_kind = "graduation"
     if expert_id == "high-impact-course-support":
         evidence_kind = "course_quality"
+        if not _table_exists(conn, "agg_course_pass_stat"):
+            raise ApiError("课程通过率聚合表未构建，请先执行 scripts/migrate_course_pass_stat.py",
+                           code=503, status_code=503)
+        # M1：课程级通过率/人次数改读 agg_course_pass_stat（attempt_type 三分层，全校口径）；
+        # fail_rate 键的口径随之变为“首次未通过率”。学生级 failed_students 仍按当前身份范围过滤。
         rows = dbm.query(conn, f"""
             WITH term AS (
+                SELECT a.course_id,a.semester_id,
+                       COALESCE(MAX(a.course_name),MAX(c.name),a.course_id) course_name,
+                       MAX(a.course_group) course_group,
+                       (a.first_attempts+a.makeup_attempts+a.retake_attempts) attempts,
+                       ((a.first_attempts-a.first_pass)+(a.makeup_attempts-a.makeup_pass)+(a.retake_attempts-a.retake_pass)) failures,
+                       a.first_attempts,a.first_pass,a.makeup_attempts,a.makeup_pass,
+                       a.retake_attempts,a.retake_pass,
+                       CASE WHEN a.first_attempts>0
+                            THEN ROUND((a.first_attempts-a.first_pass)*100.0/a.first_attempts,1) END fail_rate
+                FROM agg_course_pass_stat a
+                LEFT JOIN dim_course c ON c.course_id=a.course_id
+                GROUP BY a.course_id,a.semester_id
+                HAVING attempts>=30
+            ),
+            failed AS (
                 SELECT g.course_id,g.semester_id,
-                       COALESCE(MAX(g.course_name),MAX(c.name),g.course_id) course_name,
-                       COUNT(*) attempts,
-                       SUM(CASE WHEN g.is_pass=0 THEN 1 ELSE 0 END) failures,
-                       COUNT(DISTINCT CASE WHEN g.is_pass=0 THEN g.student_id END) failed_students,
-                       SUM(CASE WHEN g.attempt_type='retake' THEN 1 ELSE 0 END) retake_attempts,
-                       ROUND(SUM(CASE WHEN g.is_pass=0 THEN 1.0 ELSE 0 END)*100.0/COUNT(*),1) fail_rate
+                       COUNT(DISTINCT CASE WHEN g.is_pass=0 THEN g.student_id END) failed_students
                 FROM grade_attempt g
                 JOIN dim_student s ON s.student_id=g.student_id
-                LEFT JOIN dim_course c ON c.course_id=g.course_id
                 WHERE g.is_published=1 AND g.is_void=0 AND g.is_pass IS NOT NULL
                   {student_scope_and}
                 GROUP BY g.course_id,g.semester_id
-                HAVING COUNT(*)>=30
             )
-            SELECT course_id,MAX(course_name) course_name,'课程质量与教学运行' module,
-                   SUM(failed_students) failed_students,0 verification_students,
-                   SUM(failed_students) involved_students,0 major_count,
-                   COUNT(*) observed_terms,SUM(attempts) attempts,SUM(failures) failures,
-                   ROUND(SUM(failures)*100.0/NULLIF(SUM(attempts),0),1) fail_rate,
-                   ROUND(MAX(fail_rate)-MIN(fail_rate),1) volatility,
-                   SUM(retake_attempts) retake_attempts
-            FROM term GROUP BY course_id
+            SELECT t.course_id,MAX(t.course_name) course_name,'课程质量与教学运行' module,
+                   MAX(t.course_group) course_group,
+                   SUM(COALESCE(f.failed_students,0)) failed_students,0 verification_students,
+                   SUM(COALESCE(f.failed_students,0)) involved_students,0 major_count,
+                   COUNT(*) observed_terms,SUM(t.attempts) attempts,SUM(t.failures) failures,
+                   CASE WHEN SUM(t.first_attempts)>0
+                        THEN ROUND((SUM(t.first_attempts)-SUM(t.first_pass))*100.0/SUM(t.first_attempts),1) END fail_rate,
+                   ROUND(MAX(t.fail_rate)-MIN(t.fail_rate),1) volatility,
+                   SUM(t.retake_attempts) retake_attempts,
+                   CASE WHEN SUM(t.first_attempts)>0
+                        THEN ROUND(SUM(t.first_pass)*100.0/SUM(t.first_attempts),1) END first_pass_rate,
+                   CASE WHEN SUM(t.makeup_attempts)>0
+                        THEN ROUND(SUM(t.makeup_pass)*100.0/SUM(t.makeup_attempts),1) END makeup_pass_rate,
+                   CASE WHEN SUM(t.retake_attempts)>0
+                        THEN ROUND(SUM(t.retake_pass)*100.0/SUM(t.retake_attempts),1) END retake_pass_rate
+            FROM term t LEFT JOIN failed f
+              ON f.course_id=t.course_id AND f.semester_id=t.semester_id
+            GROUP BY t.course_id
             HAVING failures>0
-            ORDER BY (CASE WHEN COUNT(*)>=2 AND MIN(fail_rate)>=? THEN 1 ELSE 0 END) DESC,
+            ORDER BY (CASE WHEN COUNT(*)>=2 AND MIN(t.fail_rate)>=? THEN 1 ELSE 0 END) DESC,
                      failures DESC,fail_rate DESC
             LIMIT ?
         """, tuple([*student_scope_params, persistent_fail_rate, limit]))
@@ -3364,6 +3425,11 @@ def graduation_course_support_simulation(semester: Optional[str] = None,
             "failRate": float(row.get("fail_rate") or 0),
             "volatility": float(row.get("volatility") or 0),
             "retakeAttempts": int(row.get("retake_attempts") or 0),
+            # M1：三分层通过率与课程类别（附加键，仅 course_quality 证据有值）。
+            "courseGroup": row.get("course_group"),
+            "firstPassRate": row.get("first_pass_rate"),
+            "makeupPassRate": row.get("makeup_pass_rate"),
+            "retakePassRate": row.get("retake_pass_rate"),
             "bottlenecks": bottlenecks or ["常规关注"],
             "priority": _simulation_priority(courses_score),
             "priorityScore": round(courses_score, 1),

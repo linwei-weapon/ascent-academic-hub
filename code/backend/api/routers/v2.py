@@ -823,56 +823,102 @@ def graduation_readiness_topic(organization_id: Optional[str] = None, major_code
     return ok(payload)
 
 
+_COURSE_GROUPS = ("公共必修", "专业必修", "选修", "实践", "其他")
+
+
 @router.get("/topics/course-quality")
-def course_quality_topic(course_id: Optional[str] = None, semester_from: Optional[str] = None,
+def course_quality_topic(course_id: Optional[str] = None, course_group: Optional[str] = None,
+                         semester_from: Optional[str] = None,
                          semester_to: Optional[str] = None, min_sample: int = Query(30, ge=10, le=500),
                          limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0),
                          conn: sqlite3.Connection = Depends(get_v2_db), user: dict = Depends(require_v2_all_reader)):
-    """跨学期课程结果与教学供给专题，不用于教师个人评价。"""
-    cond, params = ["g.is_published=1", "g.is_void=0", "g.is_pass IS NOT NULL"], []
-    if course_id: cond.append("g.course_id=?"); params.append(course_id)
-    if semester_from: cond.append("g.semester_id>=?"); params.append(semester_from)
-    if semester_to: cond.append("g.semester_id<=?"); params.append(semester_to)
+    """跨学期课程结果与教学供给专题，不用于教师个人评价。
+
+    M1 起通过率统一走 agg_course_pass_stat（grade_attempt attempt_type 三分层）：
+    首次/补考/重修通过率 + course_group（公共必修等）过滤。fail_rate 为兼容字段
+    （=首次未通过率），deprecated，保留一个版本周期后移除。
+    """
+    if course_group is not None and course_group not in _COURSE_GROUPS:
+        raise ApiError(f"course_group 仅支持 {'/'.join(_COURSE_GROUPS)}", code=400, status_code=400)
+    if not dbm.scalar(conn, "SELECT 1 FROM sqlite_master WHERE type='table' AND name='agg_course_pass_stat'"):
+        raise ApiError("课程通过率聚合表未构建，请先执行 scripts/migrate_course_pass_stat.py",
+                       code=503, status_code=503)
+    cond, params = ["1=1"], []
+    if course_id: cond.append("a.course_id=?"); params.append(course_id)
+    if course_group: cond.append("a.course_group=?"); params.append(course_group)
+    if semester_from: cond.append("a.semester_id>=?"); params.append(semester_from)
+    if semester_to: cond.append("a.semester_id<=?"); params.append(semester_to)
     where = " AND ".join(cond)
-    term_rows = dbm.query(conn, f"""SELECT g.course_id,COALESCE(MAX(g.course_name),MAX(c.name),g.course_id) course_name,g.semester_id,
-        COUNT(*) attempts,COUNT(DISTINCT g.student_id) students,
-        SUM(CASE WHEN g.is_pass=0 THEN 1 ELSE 0 END) failures,
-        ROUND(SUM(CASE WHEN g.is_pass=0 THEN 1.0 ELSE 0 END)*100.0/COUNT(*),1) fail_rate,
-        ROUND(AVG(g.score),1) avg_score,SUM(CASE WHEN g.attempt_type='retake' THEN 1 ELSE 0 END) retake_attempts
-      FROM grade_attempt g LEFT JOIN dim_course c ON c.course_id=g.course_id WHERE {where}
-      GROUP BY g.course_id,g.semester_id HAVING COUNT(*)>=?""", tuple(params + [min_sample]))
+    # 通过率与人次数来自 agg_course_pass_stat；修读人数（去重学生）仍取 grade_attempt 明细。
+    term_rows = dbm.query(conn, f"""SELECT a.course_id,COALESCE(a.course_name,c.name,a.course_id) course_name,
+        a.course_group,a.semester_id,
+        (a.first_attempts+a.makeup_attempts+a.retake_attempts) attempts,
+        COALESCE(s.students,0) students,
+        ((a.first_attempts-a.first_pass)+(a.makeup_attempts-a.makeup_pass)+(a.retake_attempts-a.retake_pass)) failures,
+        a.first_attempts,a.first_pass,a.makeup_attempts,a.makeup_pass,a.retake_attempts,a.retake_pass
+      FROM agg_course_pass_stat a LEFT JOIN dim_course c ON c.course_id=a.course_id
+      LEFT JOIN (SELECT course_id,semester_id,COUNT(DISTINCT student_id) students
+                 FROM grade_attempt WHERE is_published=1 AND is_void=0 AND is_pass IS NOT NULL
+                 GROUP BY course_id,semester_id) s
+        ON s.course_id=a.course_id AND s.semester_id=a.semester_id
+      WHERE {where}
+      GROUP BY a.course_id,a.semester_id
+      HAVING attempts>=?""", tuple(params + [min_sample]))
     groups = defaultdict(list)
     for row in term_rows: groups[row["course_id"]].append(row)
     all_courses = []
     for cid, rows in groups.items():
         attempts = sum(x["attempts"] for x in rows); failures = sum(x["failures"] for x in rows)
-        rates = [x["fail_rate"] for x in rows]; retakes = sum(x["retake_attempts"] for x in rows)
+        fa = sum(x["first_attempts"] for x in rows); fp = sum(x["first_pass"] for x in rows)
+        ma = sum(x["makeup_attempts"] for x in rows); mp = sum(x["makeup_pass"] for x in rows)
+        ra = sum(x["retake_attempts"] for x in rows); rp = sum(x["retake_pass"] for x in rows)
+        # deprecated fail_rate 口径 = 首次未通过率；波动与持续判定同样基于首次未通过率。
+        first_fail_rates = [round((x["first_attempts"] - x["first_pass"]) * 100.0 / x["first_attempts"], 1)
+                            for x in rows if x["first_attempts"]]
         reasons = []
-        if len(rows) >= 2 and all(x >= 15 for x in rates): reasons.append("persistent_high")
-        if len(rows) >= 2 and max(rates) - min(rates) >= 15: reasons.append("volatile")
+        if len(first_fail_rates) >= 2 and all(x >= 15 for x in first_fail_rates): reasons.append("persistent_high")
+        if len(first_fail_rates) >= 2 and max(first_fail_rates) - min(first_fail_rates) >= 15: reasons.append("volatile")
         if failures >= 50: reasons.append("wide_impact")
-        if retakes >= 30: reasons.append("retake_pressure")
-        all_courses.append({"course_id": cid, "course_name": rows[0]["course_name"], "observed_terms": len(rows),
+        if ra >= 30: reasons.append("retake_pressure")
+        all_courses.append({"course_id": cid, "course_name": rows[0]["course_name"],
+          "course_group": rows[0]["course_group"], "observed_terms": len(rows),
           "attempts": attempts, "student_term_count": sum(x["students"] for x in rows), "failures": failures,
-          "fail_rate": round(failures * 100.0 / attempts, 1), "min_fail_rate": min(rates), "max_fail_rate": max(rates),
-          "volatility": round(max(rates) - min(rates), 1), "retake_attempts": retakes, "attention_reasons": reasons})
+          "first_attempts": fa, "first_pass": fp, "makeup_attempts": ma, "makeup_pass": mp,
+          "retake_attempts": ra, "retake_pass": rp,
+          "first_pass_rate": round(fp * 100.0 / fa, 1) if fa else None,
+          "makeup_pass_rate": round(mp * 100.0 / ma, 1) if ma else None,
+          "retake_pass_rate": round(rp * 100.0 / ra, 1) if ra else None,
+          # deprecated：兼容字段，=首次未通过率，保留一个版本周期。
+          "fail_rate": round((fa - fp) * 100.0 / fa, 1) if fa else None,
+          "min_fail_rate": min(first_fail_rates) if first_fail_rates else None,
+          "max_fail_rate": max(first_fail_rates) if first_fail_rates else None,
+          "volatility": round(max(first_fail_rates) - min(first_fail_rates), 1) if first_fail_rates else None,
+          "attention_reasons": reasons})
     attention = [x for x in all_courses if x["attention_reasons"]]
-    attention.sort(key=lambda x: (-len(x["attention_reasons"]), -x["failures"], -x["fail_rate"]))
+    attention.sort(key=lambda x: (-len(x["attention_reasons"]), -x["failures"], -(x["fail_rate"] or 0)))
     total = len(attention); courses = attention[offset:offset + limit]
     attempts = sum(x["attempts"] for x in all_courses); failures = sum(x["failures"] for x in all_courses)
+    fa = sum(x["first_attempts"] for x in all_courses); fp = sum(x["first_pass"] for x in all_courses)
     summary = {"observed_courses": len(all_courses), "attempts": attempts, "failures": failures,
       "overall_fail_rate": round(failures * 100.0 / attempts, 1) if attempts else 0,
+      "overall_first_pass_rate": round(fp * 100.0 / fa, 1) if fa else None,
+      "public_required_courses": sum(1 for x in all_courses if x["course_group"] == "公共必修"),
       "persistent_high_courses": sum("persistent_high" in x["attention_reasons"] for x in all_courses),
       "volatile_courses": sum("volatile" in x["attention_reasons"] for x in all_courses),
       "wide_impact_courses": sum("wide_impact" in x["attention_reasons"] for x in all_courses),
       "retake_attempts": sum(x["retake_attempts"] for x in all_courses)}
-    semesters = dbm.query(conn, f"SELECT DISTINCT g.semester_id FROM grade_attempt g WHERE {where} ORDER BY g.semester_id", tuple(params))
+    semesters = dbm.query(conn, f"SELECT DISTINCT a.semester_id FROM agg_course_pass_stat a WHERE {where} ORDER BY a.semester_id", tuple(params))
     return ok({"summary": summary, "courses": courses,
                "semesters": [x["semester_id"] for x in semesters], "total": total, "limit": limit, "offset": offset,
-               "definition": {"sample": f"至少有一个学期达到{min_sample}条有效成绩记录的去重课程数。",
+               "definition": {"sample": f"至少有一个学期达到{min_sample}条有效成绩记录的去重课程数；有效记录=已发布且未作废且is_pass非空。",
+                 "first_pass_rate": "首次修读（attempt_type=regular，含缓考）通过人次数÷首次修读人次数，分母为0时不输出（null）。",
+                 "makeup_pass_rate": "补考（attempt_type=makeup）通过人次数÷补考人次数，分母为0时不输出（null）。",
+                 "retake_pass_rate": "重修（attempt_type=retake）通过人次数÷重修人次数，分母为0时不输出（null）。",
+                 "course_group": "课程类别由培养方案模块与V1课程类别合并推导：公共必修/专业必修/选修/实践/其他，可用 course_group 参数过滤。",
+                 "fail_rate": "deprecated：兼容字段，=首次未通过率（100-首次通过率），保留一个版本周期后移除。",
                  "overall": "进入统计范围的未通过成绩记录数 / 有效成绩记录总数，不是有挂科经历的学生比例。",
-                 "persistent_high": "至少2个可比学期且每学期未通过率均不低于15%。",
-                 "volatile": "至少2个可比学期，最高与最低未通过率相差不低于15个百分点。",
+                 "persistent_high": "至少2个可比学期且每学期首次未通过率均不低于15%。",
+                 "volatile": "至少2个可比学期，最高与最低首次未通过率相差不低于15个百分点。",
                  "wide_impact": "观察期累计未通过达到50人次。", "retake_pressure": "观察期重修尝试达到30人次。",
                  "boundary": "课程结果用于发现需核查的课程与资源问题，不证明教学质量原因，不用于教师个人排名。"}})
 
@@ -886,13 +932,28 @@ def course_quality_detail(course_id: str, semester_from: Optional[str] = None, s
     trends = dbm.query(conn, f"""SELECT g.semester_id,COUNT(*) attempts,COUNT(DISTINCT g.student_id) students,
       SUM(CASE WHEN g.is_pass=0 THEN 1 ELSE 0 END) failures,
       ROUND(SUM(CASE WHEN g.is_pass=0 THEN 1.0 ELSE 0 END)*100.0/COUNT(*),1) fail_rate,
-      ROUND(AVG(g.score),1) avg_score,SUM(CASE WHEN g.attempt_type='retake' THEN 1 ELSE 0 END) retake_attempts
+      ROUND(AVG(g.score),1) avg_score,SUM(CASE WHEN g.attempt_type='retake' THEN 1 ELSE 0 END) retake_attempts,
+      SUM(CASE WHEN g.attempt_type IS NULL OR g.attempt_type NOT IN ('makeup','retake') THEN 1 ELSE 0 END) first_attempts,
+      SUM(CASE WHEN (g.attempt_type IS NULL OR g.attempt_type NOT IN ('makeup','retake')) AND g.is_pass=1 THEN 1 ELSE 0 END) first_pass,
+      SUM(CASE WHEN g.attempt_type='makeup' THEN 1 ELSE 0 END) makeup_attempts,
+      SUM(CASE WHEN g.attempt_type='makeup' AND g.is_pass=1 THEN 1 ELSE 0 END) makeup_pass,
+      SUM(CASE WHEN g.attempt_type='retake' AND g.is_pass=1 THEN 1 ELSE 0 END) retake_pass
       FROM grade_attempt g WHERE {' AND '.join(cond)} GROUP BY g.semester_id ORDER BY g.semester_id""", tuple(params))
+    for t in trends:
+        # M1：明细趋势同步三分层通过率（百分数，分母为0时为None），fail_rate保留旧口径兼容。
+        t["first_pass_rate"] = round(t["first_pass"] * 100.0 / t["first_attempts"], 1) if t["first_attempts"] else None
+        t["makeup_pass_rate"] = round(t["makeup_pass"] * 100.0 / t["makeup_attempts"], 1) if t["makeup_attempts"] else None
+        t["retake_pass_rate"] = round(t["retake_pass"] * 100.0 / t["retake_attempts"], 1) if t["retake_attempts"] else None
+    course_group = None
+    if dbm.scalar(conn, "SELECT 1 FROM sqlite_master WHERE type='table' AND name='agg_course_pass_stat'"):
+        course_group = dbm.scalar(conn,
+            "SELECT course_group FROM agg_course_pass_stat WHERE course_id=? LIMIT 1", (course_id,))
     offerings = dbm.query(conn, """SELECT a.semester_id,a.lesson_count,a.teacher_count,a.enrolled,a.total_hours,
       ROUND(a.enrolled*1.0/NULLIF(a.lesson_count,0),1) avg_class_size FROM agg_course_offering a
       WHERE a.course_id=? ORDER BY a.semester_id DESC""", (course_id,))
     name = dbm.scalar(conn, "SELECT name FROM dim_course WHERE course_id=?", (course_id,)) or course_id
-    return ok({"course_id": course_id, "course_name": name, "trends": trends, "offerings": offerings,
+    return ok({"course_id": course_id, "course_name": name, "course_group": course_group,
+               "trends": trends, "offerings": offerings,
                "offering_boundary": "当前真实教学任务主要覆盖一个接入学期，只能展示已接入供给，不能据此判断未来是否开课或资源是否充足。"})
 
 
