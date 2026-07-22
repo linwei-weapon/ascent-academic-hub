@@ -2,7 +2,7 @@
 import { http, getToken, getActiveIdentity } from './http'
 import type {
   AdviceDoneEvent, AdviceExpert, AdviceMetaEvent, AdviceSession, AdviceSessionDetail,
-  DecisionBriefing, LlmStatus,
+  DecisionBriefing, LlmStatus, SignalDetail,
   SignalEvidencePack, SkillMeta, SkillSection,
 } from '@/types/decision'
 
@@ -35,6 +35,19 @@ export function getSignalEvidence(signalId: string) {
     不带 width/height 等窗口特征参数，确保浏览器按用户默认开新标签页而非弹窗。 */
 export function openEvidenceWindow(signalId: string) {
   const url = `${window.location.origin}${window.location.pathname}#/admin/verify/signal/${encodeURIComponent(signalId)}`
+  window.open(url, '_blank', 'noopener')
+}
+
+/* ---- 明细清单（数据要素数字 → 该数字代表的业务明细，新开标签页） ---- */
+
+export function getSignalDetail(signalId: string, fact: string) {
+  return http.get<SignalDetail>(
+    `/admin/ai/decision/signals/${encodeURIComponent(signalId)}/detail?fact=${encodeURIComponent(fact)}`)
+}
+
+/** 明细清单在新浏览器标签页打开（与查证窗口同一策略），主对话窗口状态不动。 */
+export function openDetailWindow(signalId: string, fact: string) {
+  const url = `${window.location.origin}${window.location.pathname}#/admin/verify/signal/${encodeURIComponent(signalId)}/detail?fact=${encodeURIComponent(fact)}`
   window.open(url, '_blank', 'noopener')
 }
 

@@ -43,6 +43,8 @@ export interface DecisionSignal {
   change: SignalChange
   suggested_questions: string[]
   hotspot: boolean
+  /** 可下钻明细的 facts 标签（来自 Skill.detail_specs 契约）；未列出的数字是聚合/判定值，不可点击 */
+  drillable_facts?: string[]
 }
 
 export interface SkillSection {
@@ -150,6 +152,27 @@ export interface AdviceEvidenceRef {
   headline: string
   facts: Record<string, string>
   entity: SignalEntity
+  /** 该信号可下钻明细的 facts 标签 */
+  drillable_facts?: string[]
+}
+
+/** 明细清单页（新开标签页）：GET /signals/{id}/detail 的载荷 */
+export interface SignalDetail {
+  drillable: boolean
+  signal_id: string
+  fact: string
+  fact_value: string
+  title: string
+  headline: string
+  columns: { key: string; label: string }[]
+  rows: Record<string, any>[]
+  total: number
+  truncated: boolean
+  skill: { skill_id: string; skill_name: string }
+  semester: string
+  generated_at: string
+  data_boundary: string
+  verify_route: string
 }
 
 /** 越界指路：拒答时指向对应专家 */

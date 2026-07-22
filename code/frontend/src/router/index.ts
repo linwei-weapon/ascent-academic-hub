@@ -12,6 +12,8 @@ export const router = createRouter({
     { path: '/login', component: () => import('@/views/Login.vue') },
     // 查证窗口（R2）：独立只读证据页，不挂 Layout，专供新开浏览器窗口
     { path: '/admin/verify/signal/:signalId', component: () => import('@/views/admin/verify/SignalEvidence.vue') },
+    // 明细清单页：数据要素数字直达业务明细，同样独立只读、新开标签页
+    { path: '/admin/verify/signal/:signalId/detail', component: () => import('@/views/admin/verify/SignalDetail.vue') },
     {
       path: '/admin', component: AdminLayout,
       children: [

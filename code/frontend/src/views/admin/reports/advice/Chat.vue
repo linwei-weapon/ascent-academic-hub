@@ -148,13 +148,14 @@
 
         <div v-if="factTiles.length" class="rail-section">
           <p class="rail-title">数据要素 · 本专家速览</p>
-          <p class="rail-sub">点击任一数字查证来源</p>
+          <p class="rail-sub">人数类数字点按直达明细清单，其余数字查证来源</p>
           <div class="fact-grid">
             <button v-for="t in factTiles" :key="t.k" type="button" class="fact-tile"
-              :title="`查证来源信号：${t.headline}`"
-              @click="openEvidenceWindow(t.signal_id)">
+              :class="{ drillable: t.drillable }"
+              :title="t.drillable ? `查看「${t.k}」明细清单（新开标签页）` : `查证来源信号：${t.headline}`"
+              @click="t.drillable ? openDetailWindow(t.signal_id, t.k) : openEvidenceWindow(t.signal_id)">
               <span class="fact-k">{{ t.k }}</span>
-              <b class="fact-v">{{ t.v }}</b>
+              <b class="fact-v">{{ t.v }}<i v-if="t.drillable" class="drill-mark">›</i></b>
             </button>
           </div>
         </div>
@@ -190,7 +191,7 @@ import type {
 } from '@/types/decision'
 import { SEVERITY_META } from '@/types/decision'
 import {
-  getAdviceExperts, getAdviceSession, getAdviceSessions, openEvidenceWindow, streamAdviceAsk,
+  getAdviceExperts, getAdviceSession, getAdviceSessions, openDetailWindow, openEvidenceWindow, streamAdviceAsk,
 } from '@/utils/decision'
 
 interface AdviceMessage {
@@ -230,15 +231,16 @@ const latestRefs = computed<AdviceEvidenceRef[]>(() => {
   return []
 })
 
-/** 数据要素速览：最近引用的 facts 键值，带来源信号（可点击查证），去重取前 6 */
+/** 数据要素速览：最近引用的 facts 键值，带来源信号；可下钻数字直达明细清单 */
 const factTiles = computed(() => {
-  const tiles: { k: string; v: string; signal_id: string; headline: string }[] = []
+  const tiles: { k: string; v: string; signal_id: string; headline: string; drillable: boolean }[] = []
   const seen = new Set<string>()
   for (const r of latestRefs.value) {
     for (const [k, v] of Object.entries(r.facts || {})) {
       if (seen.has(k)) continue
       seen.add(k)
-      tiles.push({ k, v, signal_id: r.signal_id, headline: r.headline })
+      tiles.push({ k, v, signal_id: r.signal_id, headline: r.headline,
+        drillable: (r.drillable_facts || []).includes(k) })
       if (tiles.length >= 6) return tiles
     }
   }
@@ -523,6 +525,10 @@ onMounted(init)
 .fact-tile:hover { border-color: #c7d2fe; background: #eef2ff; }
 .fact-k { font-size: 11px; color: #909399; }
 .fact-v { font-size: 15px; color: #4f46e5; }
+.fact-tile.drillable { border-color: #a5b4fc; background: #eef2ff; }
+.fact-tile.drillable:hover { border-color: #4f46e5; background: #e0e7ff; }
+.fact-tile.drillable .fact-v { text-decoration: underline; text-underline-offset: 3px; }
+.drill-mark { font-style: normal; margin-left: 2px; font-size: 12px; }
 
 @media (max-width: 1200px) {
   .advice-layout { grid-template-columns: 200px minmax(0, 1fr); height: auto; }

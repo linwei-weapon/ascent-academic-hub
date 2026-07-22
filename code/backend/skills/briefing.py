@@ -12,9 +12,13 @@ from . import config_store, llm_config, narrative, store
 from .merger import (diff_signals, merge_signals, scope_key, signal_digest)
 from .protocol import (SEVERITY_ORDER, Signal, SkillContext, SkillResult,
                        briefing_fingerprint, empty_briefing)
-from .registry import list_skills
+from .registry import get_skill, list_skills
 
 POSITIVE_TYPES = {"improving"}
+
+# 快照结构版本：卡片/context 结构发生不兼容变化时递增，
+# 旧快照自动失效重建，避免升级后长期消费旧结构缓存。
+BRIEFING_SCHEMA_VERSION = 2
 
 
 def _now() -> str:
@@ -52,10 +56,19 @@ def _urgency(counts: dict[str, int]) -> tuple[str, str]:
     return "normal", "无紧急/重点事项，按常规节奏推进即可。"
 
 
+def drillable_facts_of(skill_id: str, signal_type: str) -> list[str]:
+    """该信号可下钻明细的 facts 标签列表（来自 Skill.detail_specs 契约）。"""
+    skill = get_skill(skill_id)
+    if not skill:
+        return []
+    return sorted((skill.detail_specs.get(signal_type) or {}).keys())
+
+
 def _signal_card(sig: Signal, hotspot_ids: set[str]) -> dict:
     """信号 → 前端卡片载荷（五要素结构完整）。不含任何追踪/交办状态。"""
     card = sig.to_dict()
     card["hotspot"] = sig.signal_id in hotspot_ids
+    card["drillable_facts"] = drillable_facts_of(sig.skill_id, sig.signal_type)
     return card
 
 
@@ -110,6 +123,7 @@ def build_briefing(merged: dict, results: list[SkillResult],
     briefing["stats"] = {r.skill_id: r.summary_stats for r in results}
     briefing["snapshot_fingerprint"] = fingerprint
     briefing["semester"] = semester
+    briefing["schema_version"] = BRIEFING_SCHEMA_VERSION
     return briefing
 
 
@@ -159,6 +173,61 @@ def build_signal_evidence(briefing: dict, signal_id: str) -> dict | None:
 
 
 # ---------------------------------------------------------------------------
+# 明细下钻：数据要素数字 → 该数字代表的业务明细清单
+# ---------------------------------------------------------------------------
+
+DETAIL_ROW_CAP = 200    # 明细行数硬上限，超出提示前往专题工作区
+
+
+def build_signal_detail(briefing: dict, signal_id: str, fact: str) -> dict | None:
+    """单信号单数据要素的明细清单。
+
+    返回 None：信号不存在/越权（对外 404）。
+    返回 {"drillable": False}：该数据要素是聚合/判定值，无明细语义（对外 400）。
+    明细行取自信号 context（Skill 按当前身份数据范围预计算），
+    本函数不做任何客户端传入的筛选，天然继承权限边界。
+    """
+    for card, section in _iter_cards(briefing):
+        if card.get("signal_id") != signal_id:
+            continue
+        skill = get_skill(card.get("skill_id", ""))
+        spec = ((skill.detail_specs.get(card.get("signal_type", "")) or {})
+                .get(fact) if skill else None)
+        if not spec:
+            return {"drillable": False, "signal_id": signal_id, "fact": fact}
+        context = card.get("context") or {}
+        rows = list(context.get(spec["context_key"]) or [])
+        filt = spec.get("filter")
+        if filt:
+            rows = [r for r in rows if r.get(filt["key"]) == filt["equals"]]
+        total = context.get(spec.get("total_key") or "") or len(rows)
+        total = max(int(total), len(rows))
+        capped = rows[:DETAIL_ROW_CAP]
+        return {
+            "drillable": True,
+            "signal_id": signal_id,
+            "fact": fact,
+            "fact_value": (card.get("facts") or {}).get(fact, ""),
+            "title": spec.get("title") or fact,
+            "headline": card.get("headline", ""),
+            "columns": spec.get("columns") or [],
+            "rows": capped,
+            "total": total,
+            "truncated": total > len(capped),
+            "skill": {
+                "skill_id": card.get("skill_id"),
+                "skill_name": section.get("skill_name", ""),
+            },
+            "semester": briefing.get("semester", ""),
+            "generated_at": briefing.get("generated_at", ""),
+            "data_boundary": card.get("data_boundary", "")
+            or section.get("data_boundary", ""),
+            "verify_route": (card.get("evidence") or {}).get("verify_route", ""),
+        }
+    return None
+
+
+# ---------------------------------------------------------------------------
 # 编排：运行Skills → 合并 → 指纹缓存 → diff → 装配 → 落库
 # ---------------------------------------------------------------------------
 
@@ -187,7 +256,9 @@ def generate_briefing(user: dict, legacy: sqlite3.Connection,
 
     if not force:
         cached = store.latest_snapshot(rw_conn, skey)
-        if cached and cached["fingerprint"] == fingerprint:
+        # 快照结构版本不一致（如明细下钻 context 扩容）时弃用缓存重建
+        if (cached and cached["fingerprint"] == fingerprint
+                and cached["briefing"].get("schema_version") == BRIEFING_SCHEMA_VERSION):
             briefing = cached["briefing"]
             # 旧快照结构向后兼容：新增字段补默认值，退役字段清理
             briefing.setdefault("llm_status", "disabled")
@@ -197,9 +268,13 @@ def generate_briefing(user: dict, legacy: sqlite3.Connection,
                             "positive_developments"):
                 for item in briefing.get(section, []):
                     item.pop("tracking", None)
+                    item["drillable_facts"] = drillable_facts_of(
+                        item.get("skill_id", ""), item.get("signal_type", ""))
             for sec in briefing.get("skill_sections", []):
                 for item in sec.get("signals", []):
                     item.pop("tracking", None)
+                    item["drillable_facts"] = drillable_facts_of(
+                        item.get("skill_id", ""), item.get("signal_type", ""))
             briefing["cache_hit"] = True
             return briefing
 

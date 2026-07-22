@@ -13,7 +13,8 @@ from pydantic import BaseModel, Field
 
 from ...skills import chat as decision_chat
 from ...skills import advice, config_store, llm_client, llm_config, store
-from ...skills.briefing import build_signal_evidence, generate_briefing
+from ...skills.briefing import (build_signal_detail, build_signal_evidence,
+                                generate_briefing)
 from ...skills.protocol import SkillContext
 from ...skills.registry import get_skill, list_skills
 from ..deps import (get_current_user, get_db, get_db_rw, get_v2_db,
@@ -264,6 +265,33 @@ def signal_evidence(signal_id: str, user: dict = Depends(get_current_user),
         raise ApiError("信号不存在或不在当前数据权限范围内",
                        code=404, status_code=404)
     return ok(pack)
+
+
+@router.get("/signals/{signal_id}/detail")
+def signal_detail(signal_id: str, fact: str = "",
+                  user: dict = Depends(get_current_user),
+                  legacy: sqlite3.Connection = Depends(get_db),
+                  v2: sqlite3.Connection = Depends(get_v2_db),
+                  rw: sqlite3.Connection = Depends(get_db_rw)):
+    """数据要素明细清单：点击数字直达该数字代表的业务明细（新开标签页数据源）。
+
+    权限语义与证据包一致：明细行来自 Skill 按当前身份数据范围预计算的
+    信号 context，本端点不接受任何客户端筛选参数，越权信号一律 404。
+    聚合/判定类数字（无明细语义）返回 400，前端不应为其提供点击入口。
+    """
+    _require_context(user)
+    if not fact:
+        raise ApiError("缺少数据要素参数 fact", code=400, status_code=400)
+    data = generate_briefing(user, legacy, v2, rw, CURRENT_SEMESTER,
+                             force=False)
+    detail = build_signal_detail(data, signal_id, fact)
+    if detail is None:
+        raise ApiError("信号不存在或不在当前数据权限范围内",
+                       code=404, status_code=404)
+    if not detail.get("drillable"):
+        raise ApiError("该数据为聚合/判定值，无明细清单",
+                       code=400, status_code=400)
+    return ok(detail)
 
 
 @router.get("/tracking")

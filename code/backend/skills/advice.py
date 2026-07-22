@@ -164,6 +164,7 @@ def build_evidence_refs(cited: list[dict]) -> list[dict]:
             "severity": card.get("severity"),
             "headline": card.get("headline"),
             "facts": card.get("facts") or {},
+            "drillable_facts": card.get("drillable_facts") or [],
             "entity": (card.get("entity") or {}).get("name")
             if isinstance(card.get("entity"), dict) else card.get("entity"),
         })

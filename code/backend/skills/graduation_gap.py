@@ -75,6 +75,87 @@ class GraduationGapSkill(Skill):
         "max_course_signals": {"type": "int", "min": 3, "max": 20},
     }
 
+    # 明细下钻：人数类数字直达学生清单；"覆盖专业/历史教学班/出路判定/
+    # 替代认定先例/目标届"等聚合或判定值不下钻。
+    _COURSE_STUDENT_COLUMNS = [
+        {"key": "student_id", "label": "学号"},
+        {"key": "student_name", "label": "姓名"},
+        {"key": "major_name", "label": "专业"},
+        {"key": "class_code", "label": "班级"},
+        {"key": "suggested_term", "label": "建议修读学期"},
+    ]
+    detail_specs = {
+        "blocked_overview": {
+            "受阻学生": {
+                "context_key": "blocked_students",
+                "title": "必修明确未通过学生清单",
+                "columns": [
+                    {"key": "student_id", "label": "学号"},
+                    {"key": "student_name", "label": "姓名"},
+                    {"key": "major_name", "label": "专业"},
+                    {"key": "course_name", "label": "未通过课程"},
+                    {"key": "suggested_term", "label": "建议修读学期"},
+                ],
+                "total_key": "blocked_total",
+            },
+        },
+        "course_gap": {
+            "明确未通过": {
+                "context_key": "failed_students",
+                "title": "明确未通过学生清单",
+                "columns": _COURSE_STUDENT_COLUMNS,
+                "total_key": "failed_total",
+            },
+            "待核验": {
+                "context_key": "suspected_students",
+                "title": "待核验学生清单",
+                "columns": _COURSE_STUDENT_COLUMNS,
+                "total_key": "suspected_total",
+            },
+        },
+        "structural_gap": {
+            "集中待核验": {
+                "context_key": "suspected_students",
+                "title": "集中待核验学生清单",
+                "columns": _COURSE_STUDENT_COLUMNS,
+                "total_key": "suspected_total",
+            },
+        },
+        "verification_pool": {
+            "分散待核验学生": {
+                "context_key": "students",
+                "title": "分散待核验学生清单",
+                "columns": [
+                    {"key": "student_id", "label": "学号"},
+                    {"key": "student_name", "label": "姓名"},
+                    {"key": "major_name", "label": "专业"},
+                    {"key": "course_name", "label": "缺口课程"},
+                    {"key": "suggested_term", "label": "建议修读学期"},
+                ],
+                "total_key": "students_total",
+            },
+        },
+    }
+
+    @staticmethod
+    def _student_rows(rows, course_id=None, cap=200):
+        """行级学生明细（供信号 context 携带，明细下钻的数据源）。"""
+        items = []
+        for s in rows:
+            if course_id is not None and s["course_id"] != course_id:
+                continue
+            items.append({
+                "student_id": s["student_id"],
+                "student_name": s.get("student_name") or "",
+                "major_name": s.get("major_name") or "",
+                "class_code": s.get("class_code") or "",
+                "course_name": s.get("course_name") or "",
+                "suggested_term": s.get("suggested_term") or "",
+            })
+            if len(items) >= cap:
+                break
+        return items
+
     # ---------------------------------------------------------------
     def run(self, ctx: SkillContext) -> SkillResult:
         cfg = ctx.config
@@ -94,7 +175,7 @@ class GraduationGapSkill(Skill):
 
         signals: list[Signal] = []
         signals += self._overview_signal(a1, a2, grade)
-        signals += self._course_signals(courses, cfg)
+        signals += self._course_signals(courses, a1, a2, cfg)
         signals += self._verify_signal(a2, courses, grade)
 
         structural_courses = {c["course_id"] for c in courses if c["level"] == "structural"}
@@ -130,7 +211,7 @@ class GraduationGapSkill(Skill):
         return dbm.query(v2, f"""
             SELECT x.student_id, x.course_id, COALESCE(c.name, x.course_id) course_name,
                    x.module, x.suggested_term, s.major_code, s.major_name,
-                   s.organization_id, s.class_code
+                   s.organization_id, s.class_code, s.display_name student_name
             FROM student_plan_course_status x
             JOIN dim_student s ON s.student_id = x.student_id
             LEFT JOIN dim_course c ON c.course_id = x.course_id
@@ -147,7 +228,7 @@ class GraduationGapSkill(Skill):
         return dbm.query(v2, f"""
             SELECT x.student_id, x.course_id, COALESCE(c.name, x.course_id) course_name,
                    x.module, x.suggested_term, s.major_code, s.major_name,
-                   s.organization_id, s.class_code
+                   s.organization_id, s.class_code, s.display_name student_name
             FROM student_plan_course_status x
             JOIN dim_student s ON s.student_id = x.student_id
             LEFT JOIN dim_course c ON c.course_id = x.course_id
@@ -282,19 +363,9 @@ class GraduationGapSkill(Skill):
             ],
             # 专题工作区双列分流明细（不进信号指纹，扩展示例名单+总数）
             context={
-                "blocked_students": [
-                    {"student_id": s["student_id"], "course_id": s["course_id"],
-                     "course_name": s["course_name"],
-                     "major_name": s.get("major_name") or ""}
-                    for s in a1[:50]
-                ],
+                "blocked_students": self._student_rows(a1),
                 "blocked_total": len(students),
-                "suspected_students": [
-                    {"student_id": s["student_id"], "course_id": s["course_id"],
-                     "course_name": s["course_name"],
-                     "major_name": s.get("major_name") or ""}
-                    for s in a2[:50]
-                ],
+                "suspected_students": self._student_rows(a2),
                 "suspected_total": len({s["student_id"] for s in a2}),
             },
             data_boundary=DATA_BOUNDARY,
@@ -310,18 +381,20 @@ class GraduationGapSkill(Skill):
         name, n = max(counts.values(), key=lambda x: x[1])
         return f"{name}（{n}人）"
 
-    def _course_signals(self, courses, cfg) -> list[Signal]:
+    def _course_signals(self, courses, a1, a2, cfg) -> list[Signal]:
         signals = []
         limit = int(cfg["max_course_signals"])
         actionable = [c for c in courses if c["level"] in ("school", "college", "structural")]
         for c in actionable[:limit]:
+            failed_rows = self._student_rows(a1, course_id=c["course_id"])
+            suspected_rows = self._student_rows(a2, course_id=c["course_id"])
             if c["level"] == "structural":
-                signals.append(self._structural_signal(c))
+                signals.append(self._structural_signal(c, suspected_rows))
             else:
-                signals.append(self._gap_signal(c))
+                signals.append(self._gap_signal(c, failed_rows, suspected_rows))
         return signals
 
-    def _gap_signal(self, c) -> Signal:
+    def _gap_signal(self, c, failed_rows, suspected_rows) -> Signal:
         school = c["level"] == "school"
         parts = []
         if c["failed_n"]:
@@ -376,6 +449,10 @@ class GraduationGapSkill(Skill):
             context={
                 "path": c["path"], "substitutions": c["substitutions"],
                 "supply_semesters": c["supply_sems"],
+                "failed_students": failed_rows,
+                "failed_total": c["failed_n"],
+                "suspected_students": suspected_rows,
+                "suspected_total": c["suspected_n"],
             },
             suggested_questions=[
                 f"{c['course_name']}的受阻学生名单？",
@@ -385,7 +462,7 @@ class GraduationGapSkill(Skill):
             data_boundary=DATA_BOUNDARY,
         )
 
-    def _structural_signal(self, c) -> Signal:
+    def _structural_signal(self, c, suspected_rows) -> Signal:
         return Signal(
             signal_id=f"{self.skill_id}:structural:{c['course_id']}",
             skill_id=self.skill_id,
@@ -416,7 +493,9 @@ class GraduationGapSkill(Skill):
                 "verify_route": f"{VERIFY_ROUTE}&course={c['course_id']}",
                 "freshness": "growth-v1 规则实时计算",
             },
-            context={"path": c["path"], "supply_semesters": c["supply_sems"]},
+            context={"path": c["path"], "supply_semesters": c["supply_sems"],
+                     "suspected_students": suspected_rows,
+                     "suspected_total": c["suspected_n"]},
             suggested_questions=[
                 f"{c['course_name']}缺证据学生的共同特征是什么？",
                 "这门课的成绩是如何回写的？",
@@ -462,6 +541,10 @@ class GraduationGapSkill(Skill):
             suggested_questions=[
                 "待核验学生按学院怎么分布？",
             ],
+            context={
+                "students": self._student_rows(scattered),
+                "students_total": len(students),
+            },
             data_boundary=DATA_BOUNDARY,
         )]
 

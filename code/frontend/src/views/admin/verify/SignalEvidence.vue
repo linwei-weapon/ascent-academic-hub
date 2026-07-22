@@ -30,14 +30,17 @@
         <p class="consequence">暂不处理：{{ sig.consequence }}</p>
       </section>
 
-      <!-- 关键数字 -->
+      <!-- 关键数字：人数类数字可直达明细清单，聚合/判定值仅展示 -->
       <section class="card">
         <h2>关键数字</h2>
         <div class="facts">
-          <div v-for="[k, v] in allFacts" :key="k" class="fact">
+          <div v-for="[k, v] in allFacts" :key="k" class="fact" :class="{ drillable: isDrillable(k) }">
             <em>{{ k }}</em><b>{{ v }}</b>
+            <button v-if="isDrillable(k)" type="button" class="drill-btn"
+              :title="`查看「${k}」明细清单`" @click="goDetail(k)">明细 ›</button>
           </div>
         </div>
+        <p v-if="drillableFacts.length" class="drill-hint">带「明细」的数字可直达该数字代表的业务清单。</p>
         <p v-if="!allFacts.length" class="empty">该信号无结构化数字，判断依据见下方证据明细。</p>
       </section>
 
@@ -96,6 +99,16 @@ const pack = ref<SignalEvidencePack | null>(null)
 
 const sig = computed(() => pack.value!.signal)
 const allFacts = computed(() => Object.entries(pack.value?.signal.facts || {}))
+const drillableFacts = computed(() => pack.value?.signal.drillable_facts || [])
+function isDrillable(label: string): boolean {
+  return drillableFacts.value.includes(label)
+}
+function goDetail(label: string) {
+  router.push({
+    path: `/admin/verify/signal/${encodeURIComponent(String(route.params.signalId || ''))}/detail`,
+    query: { fact: label },
+  })
+}
 const methodLabel = computed(() =>
   pack.value?.generation_method === 'llm_enhanced' ? 'LLM增强生成' : '规则模板生成')
 const entityLabel = computed(() => {
@@ -157,6 +170,11 @@ onMounted(async () => {
 .fact { background: #f5f7fa; border-radius: 6px; padding: 6px 12px; font-size: 13px; }
 .fact em { font-style: normal; color: #909399; margin-right: 8px; }
 .fact b { color: #4f46e5; }
+.fact.drillable { border: 1px solid #c7d2fe; background: #eef2ff; }
+.drill-btn { margin-left: 8px; border: none; background: none; color: #4f46e5;
+  font-size: 12px; cursor: pointer; padding: 0; text-decoration: underline; }
+.drill-btn:hover { color: #3730a3; }
+.drill-hint { margin: 8px 0 0; font-size: 12px; color: #909399; }
 .empty { margin: 0; font-size: 12px; color: #909399; }
 code { background: #f5f7fa; border-radius: 4px; padding: 1px 6px; font-size: 12px; color: #475569; }
 .boundary { margin: 12px 0 0; font-size: 12px; color: #b45309; background: #fdf6ec;

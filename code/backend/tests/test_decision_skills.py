@@ -60,7 +60,7 @@ class GraduationGapTest(unittest.TestCase):
         v2.executescript("""
         CREATE TABLE dim_student(student_id TEXT PRIMARY KEY, entry_grade INTEGER,
             student_status TEXT, major_code TEXT, major_name TEXT,
-            organization_id TEXT, class_code TEXT);
+            organization_id TEXT, class_code TEXT, display_name TEXT);
         CREATE TABLE dim_course(course_id TEXT PRIMARY KEY, name TEXT);
         CREATE TABLE student_plan_course_status(student_id TEXT, course_id TEXT,
             rule_version TEXT, requirement_type TEXT, completion_status TEXT,
@@ -76,8 +76,9 @@ class GraduationGapTest(unittest.TestCase):
                     ("S4", 2022, "M1"), ("S5", 2022, "M1"), ("S6", 2022, "M1"),
                     ("S7", 2022, "M1"), ("S8", 2023, "M1")]
         for sid, grade, major in students:
-            v2.execute("INSERT INTO dim_student VALUES(?,?,?,?,?,?,?)",
-                       (sid, grade, "在校", major, f"专业{major}", "ORG1", "C1"))
+            v2.execute("INSERT INTO dim_student VALUES(?,?,?,?,?,?,?,?)",
+                       (sid, grade, "在校", major, f"专业{major}", "ORG1", "C1",
+                        f"学生{sid}"))
         v2.executemany("INSERT INTO dim_course VALUES(?,?)",
                        [("C1", "硬课A"), ("C2", "疑似课B"), ("C3", "在途课C")])
         plan = []

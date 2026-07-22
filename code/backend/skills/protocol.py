@@ -117,6 +117,15 @@ class Skill:
     config_bounds: dict[str, dict] = {}
     # 数据边界声明（会呈现在每张卡片上）
     data_boundary: str = ""
+    # 明细下钻契约：{signal_type: {facts标签: 规格}}
+    # 规格字段：
+    #   context_key  信号 context 中明细行列表的键
+    #   title        明细清单页标题（管理语义）
+    #   columns      [{key, label}] 输出列定义（顺序即展示顺序）
+    #   total_key    可选：context 中记录总数的键（行列表被预截断时用于提示）
+    #   filter       可选：{"key": 行字段, "equals": 值} 先过滤再输出
+    # 未声明的 facts 标签 = 聚合/判定值，前端渲染为纯文本，不可点击。
+    detail_specs: dict[str, dict[str, dict]] = {}
 
     def run(self, ctx: SkillContext) -> SkillResult:
         raise NotImplementedError

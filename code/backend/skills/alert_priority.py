@@ -72,6 +72,48 @@ class AlertPrioritySkill(Skill):
         "top_n": {"type": "int", "min": 5, "max": 30},
     }
 
+    # 明细下钻：只有"队列人数/其中严重级/滞留严重预警"有行级清单语义；
+    # "全校活动预警/最长滞留/集中院系"是聚合上下文数字，不下钻。
+    _QUEUE_COLUMNS = [
+        {"key": "rank", "label": "序号"},
+        {"key": "student_id", "label": "学号"},
+        {"key": "student_name", "label": "姓名"},
+        {"key": "college_id", "label": "学院"},
+        {"key": "level", "label": "预警等级"},
+        {"key": "score", "label": "综合评分"},
+        {"key": "reasons_text", "label": "评分事由"},
+        {"key": "trigger_detail", "label": "预警内容"},
+        {"key": "days_open", "label": "滞留天数"},
+    ]
+    detail_specs = {
+        "priority_queue": {
+            "队列人数": {
+                "context_key": "queue",
+                "title": "本周优先介入队列明细",
+                "columns": _QUEUE_COLUMNS,
+            },
+            "其中严重级": {
+                "context_key": "queue",
+                "title": "本周优先介入队列·严重级学生明细",
+                "columns": _QUEUE_COLUMNS,
+                "filter": {"key": "level", "equals": "严重"},
+            },
+        },
+        "stale_critical": {
+            "滞留严重预警": {
+                "context_key": "stale",
+                "title": "滞留严重预警明细",
+                "columns": [
+                    {"key": "student_id", "label": "学号"},
+                    {"key": "student_name", "label": "姓名"},
+                    {"key": "college_id", "label": "学院"},
+                    {"key": "days_open", "label": "滞留天数"},
+                    {"key": "trigger_detail", "label": "预警内容"},
+                ],
+            },
+        },
+    }
+
     # ---------------------------------------------------------------
     def run(self, ctx: SkillContext) -> SkillResult:
         cfg = ctx.config
@@ -254,6 +296,7 @@ class AlertPrioritySkill(Skill):
                     "level": q["level"],
                     "score": q["score"],
                     "reasons": q["reasons"],
+                    "reasons_text": "；".join(q["reasons"]),
                     "trigger_detail": q["trigger_detail"],
                     "days_open": q["days_open"],
                 } for i, q in enumerate(queue)],

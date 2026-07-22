@@ -328,7 +328,8 @@ def _answer_open(message: str, cited: list[dict], cfg: dict,
 
 _CITED_FIELDS = ("signal_id", "skill_id", "severity", "signal_type", "headline",
                  "facts", "entity", "action", "consequence", "confidence",
-                 "evidence", "change", "suggested_questions", "data_boundary")
+                 "evidence", "change", "suggested_questions", "data_boundary",
+                 "drillable_facts")
 
 
 def _trim(card: dict) -> dict:
