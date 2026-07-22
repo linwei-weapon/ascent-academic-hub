@@ -408,6 +408,23 @@ CREATE TABLE IF NOT EXISTS metric_definition (
     PRIMARY KEY(metric_id, version)
 );
 
+-- M4：ETL 运行历史。与 data_batch 同库，batch_id 可空关联采集批次。
+CREATE TABLE IF NOT EXISTS etl_run (
+    run_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task TEXT NOT NULL,
+    batch_id TEXT,
+    started_at TEXT NOT NULL,
+    finished_at TEXT,
+    duration_ms INTEGER,
+    status TEXT NOT NULL DEFAULT 'running',
+    rows_read INTEGER,
+    rows_written INTEGER,
+    checks_json TEXT,
+    error TEXT,
+    triggered_by TEXT NOT NULL DEFAULT 'manual',
+    source TEXT NOT NULL DEFAULT 'etl'
+);
+
 CREATE TABLE IF NOT EXISTS student_plan_course_status (
     status_id TEXT PRIMARY KEY,
     student_id TEXT NOT NULL,
@@ -554,3 +571,7 @@ CREATE INDEX IF NOT EXISTS idx_substitution_original ON student_course_substitut
 CREATE INDEX IF NOT EXISTS idx_difficulty_student ON student_difficulty_flag(student_id, severity);
 CREATE INDEX IF NOT EXISTS idx_timeline_student ON student_timeline_event(student_id, event_date);
 CREATE INDEX IF NOT EXISTS idx_course_pass_stat_semester ON agg_course_pass_stat(semester_id, course_group);
+CREATE INDEX IF NOT EXISTS idx_etl_run_task_started ON etl_run(task, started_at);
+-- 同一任务同一时刻至多一条 running 记录（并发保护的硬约束）。
+CREATE UNIQUE INDEX IF NOT EXISTS uq_etl_run_running_task
+    ON etl_run(task) WHERE status='running';

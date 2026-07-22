@@ -81,6 +81,8 @@ export const router = createRouter({
         { path: 'system/kpis', component: () => import('@/views/admin/system/Kpis.vue') },
         { path: 'system/schemes', component: () => import('@/views/admin/system/Schemes.vue') },
         { path: 'system/decision-config', component: () => import('@/views/admin/system/DecisionConfig.vue') },
+        // M4：数据采集监控（批次台账 / ETL运行历史 / 手动触发 / 采集频率）
+        { path: 'system/data-collection', component: () => import('@/views/admin/system/DataCollection.vue') },
 
         // ====== 系统设置 ======
         { path: 'settings', component: () => import('@/views/admin/system/Parameters.vue') },

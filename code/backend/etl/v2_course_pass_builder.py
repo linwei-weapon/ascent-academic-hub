@@ -32,6 +32,7 @@ from pathlib import Path
 
 from . import config
 from .init_v2 import init_v2
+from .run_log import run_logged, should_skip_logging
 
 
 PASS_STAT_VERSION = "pass-stat-v1"
@@ -100,8 +101,8 @@ def _load_v1_categories(v1_db_path: Path | None) -> dict[str, str]:
         conn.close()
 
 
-def build_course_pass_stat(db_path: Path | None = None,
-                           v1_db_path: Path | None = None) -> dict:
+def _build_course_pass_stat(db_path: Path | None = None,
+                            v1_db_path: Path | None = None) -> dict:
     """全量重建 agg_course_pass_stat。先删后插，可安全重复执行。"""
     conn = init_v2(db_path)
     now = datetime.now(timezone.utc).isoformat()
@@ -180,6 +181,20 @@ def build_course_pass_stat(db_path: Path | None = None,
     finally:
         conn.close()
     return report
+
+
+def build_course_pass_stat(db_path: Path | None = None,
+                           v1_db_path: Path | None = None,
+                           triggered_by: str = "manual") -> dict:
+    """公共入口：全量重建 agg_course_pass_stat，并把运行结果落 etl_run。"""
+    if should_skip_logging(db_path):
+        return _build_course_pass_stat(db_path, v1_db_path)
+    with run_logged("v2_course_pass_builder", db_path,
+                    triggered_by=triggered_by, source="builder") as run:
+        report = _build_course_pass_stat(db_path, v1_db_path)
+        run["rows_written"] = report.get("rows")
+        run["checks"] = report
+        return report
 
 
 def main() -> None:

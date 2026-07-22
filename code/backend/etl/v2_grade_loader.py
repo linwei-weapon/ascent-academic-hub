@@ -11,6 +11,7 @@ import pandas as pd
 
 from . import config
 from .init_v2 import init_v2
+from .run_log import run_logged, should_skip_logging
 from .v2_master_loader import _code, _date, _hash, _number, _text
 from .v2_student_plan_loader import _batch
 
@@ -82,7 +83,7 @@ def _attempt_type(row: pd.Series) -> str:
     return "regular"
 
 
-def load_grades(root: Path | None = None, db_path: Path | None = None) -> dict:
+def _load_grades(root: Path | None = None, db_path: Path | None = None) -> dict:
     root = Path(root or config.V2_SOURCE_ROOT)
     grade_path = _locate(root, GRADE_FILE, "新增数据")
     substitution_path = _locate(root, SUBSTITUTION_FILE, "20260712")
@@ -188,6 +189,21 @@ def load_grades(root: Path | None = None, db_path: Path | None = None) -> dict:
     finally:
         conn.close()
     return report
+
+
+def load_grades(root: Path | None = None, db_path: Path | None = None,
+                triggered_by: str = "manual") -> dict:
+    """公共入口：接入成绩尝试与课程替代并重建有效结果，运行结果落 etl_run。"""
+    if should_skip_logging(db_path):
+        return _load_grades(root, db_path)
+    with run_logged("v2_grade_loader", db_path,
+                    triggered_by=triggered_by, source="loader") as run:
+        report = _load_grades(root, db_path)
+        run["rows_written"] = sum(int(report.get(key) or 0) for key in (
+            "grade_attempts", "approved_substitutions", "effective_results",
+        ))
+        run["checks"] = report
+        return report
 
 
 def main() -> None:

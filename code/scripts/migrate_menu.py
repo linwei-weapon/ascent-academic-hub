@@ -59,6 +59,8 @@ TARGET_MENUS = [
      "/admin/system/audit", "Document", 307),
     ("/admin/settings", "/admin/system", "系统参数",
      "/admin/settings", "Setting", 308),
+    ("/admin/system/data-collection", "/admin/system", "数据采集监控",
+     "/admin/system/data-collection", "Monitor", 310),
 ]
 
 PARENT_IDS = {row[0] for row in TARGET_MENUS if row[1] is None}

@@ -16,6 +16,7 @@ ACTION_CATALOG = {
     "curriculum.governance.activate": ("培养质量", "激活培养质量治理配置", "激活已审批治理版本"),
     "curriculum.governance.audit": ("培养质量", "查看培养质量治理记录", "查看治理版本和审计证据"),
     "rule.discovery.manage": ("学业预警", "管理规则自发现", "运行规则发现并创建候选变更"),
+    "etl.trigger": ("系统管理", "手动触发采集任务", "触发白名单内的数据采集与聚合重建任务"),
 }
 
 ROLE_ACTIONS = {
@@ -28,7 +29,7 @@ ROLE_ACTIONS = {
         "system.manage", "rbac.manage", "permission.manage", "definition.manage",
         "operation.quality.manage", "alert.event.manage_all",
         "curriculum.governance.edit", "curriculum.governance.audit",
-        "rule.discovery.manage",
+        "rule.discovery.manage", "etl.trigger",
     },
     "dept_operation": {
         "student.detail", "college.compare", "export.authorized",

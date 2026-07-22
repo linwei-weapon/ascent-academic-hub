@@ -155,7 +155,8 @@ def print_report(rep: dict):
     print("=" * 56)
 
 
-def main():
+def _main_pipeline() -> dict:
+    """完整 ETL 管线；返回 {load_counts, validate_report} 供运行历史落库。"""
     tables = build_all_tables()
     print("\n⑨ 入库 load …")
     conn = db.get_conn()
@@ -167,6 +168,22 @@ def main():
     print_report(rep)
     conn.close()
     print(f"\n分析库就绪：{config.DB_PATH}")
+    return {"load_counts": counts, "validate_report": rep}
+
+
+def main(triggered_by: str = "manual"):
+    """入口：跑完整 ETL 并把成败/行数/校验报告落 V2 库 etl_run（替代只打印控制台）。"""
+    from .run_log import run_logged
+    with run_logged("run_etl_full", triggered_by=triggered_by,
+                    source="pipeline") as run:
+        result = _main_pipeline()
+        counts = result["load_counts"]
+        run["rows_written"] = sum(counts.values())
+        run["checks"] = {
+            "tables": len(counts),
+            "rows_total": sum(counts.values()),
+            "validate": result["validate_report"],
+        }
 
 
 if __name__ == "__main__":

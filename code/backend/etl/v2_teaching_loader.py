@@ -10,6 +10,7 @@ import pandas as pd
 
 from . import config
 from .init_v2 import init_v2
+from .run_log import run_logged, should_skip_logging
 from .v2_master_loader import _code, _date, _number, _text
 from .v2_student_plan_loader import _batch
 
@@ -58,7 +59,7 @@ def day_part(period_start: int) -> str:
     return "morning" if period_start <= 4 else ("afternoon" if period_start <= 8 else "evening")
 
 
-def load_teaching(root: Path | None = None, db_path: Path | None = None) -> dict:
+def _load_teaching(root: Path | None = None, db_path: Path | None = None) -> dict:
     root = Path(root or config.V2_SOURCE_ROOT)
     teacher_path = _locate(root, "正式教师.xlsx", "新增数据")
     adviser_path = _locate(root, "行政班班主任.xlsx", "20260712")
@@ -155,6 +156,22 @@ def load_teaching(root: Path | None = None, db_path: Path | None = None) -> dict
     finally:
         conn.close()
     return report
+
+
+def load_teaching(root: Path | None = None, db_path: Path | None = None,
+                  triggered_by: str = "manual") -> dict:
+    """公共入口：接入教职工/班主任/导师与教学任务，运行结果落 etl_run。"""
+    if should_skip_logging(db_path):
+        return _load_teaching(root, db_path)
+    with run_logged("v2_teaching_loader", db_path,
+                    triggered_by=triggered_by, source="loader") as run:
+        report = _load_teaching(root, db_path)
+        run["rows_written"] = sum(int(report.get(key) or 0) for key in (
+            "teachers", "mentor_scopes", "class_adviser_scopes",
+            "lessons", "lesson_teachers", "meetings",
+        ))
+        run["checks"] = report
+        return report
 
 
 def main() -> None:
