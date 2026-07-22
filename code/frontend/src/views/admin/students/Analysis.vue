@@ -32,6 +32,13 @@
         </el-select>
       </div>
     </div>
+    <el-alert v-if="showMyScopeEntry" type="info" :closable="false" show-icon style="margin-bottom:12px">
+      <template #title>
+        当前为{{ authStore.user?.roleName || '带班/带生' }}身份，可前往
+        <span class="link" @click="router.push('/admin/students/my')">我的班级/学生</span>
+        查看所带班级或学生的群体视图。
+      </template>
+    </el-alert>
     <BusinessPageContext
       :period="studentPeriod"
       source="学籍、成绩、培养方案与历史预警数据"
@@ -151,7 +158,12 @@ import EChart from '@/components/EChart.vue'
 import BusinessPageContext from '@/components/BusinessPageContext.vue'
 import { useBusinessPageTitle } from '@/utils/businessPage'
 import { getFilterMeta, type SemesterOpt, type MajorOpt, type ClassOpt } from '@/utils/meta'
+import { authStore } from '@/store/auth'
 const router = useRouter()
+// M3：仅带班/带生三类身份且拥有「我的班级/学生」菜单时展示入口
+const showMyScopeEntry = computed(() =>
+  ['counselor', 'class_adviser', 'mentor'].includes(authStore.user?.role || '')
+  && authStore.menus.some(m => m.path === '/admin/students/my'))
 const pageTitle = useBusinessPageTitle('/admin/students/analysis', '学生成长与学业分析')
 const pageLoading = ref(false)
 const loadError = ref('')

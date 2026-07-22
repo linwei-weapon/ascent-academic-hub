@@ -35,6 +35,8 @@ TARGET_MENUS = [
      "/admin/faculty", "User", 105),
     ("/admin/students/analysis", "/admin/analysis", "学生成长与学业分析",
      "/admin/students/analysis", "DataLine", 106),
+    ("/admin/students/my", "/admin/analysis", "我的班级/学生",
+     "/admin/students/my", "User", 107),
 
     ("/admin/reports/management-briefing", "/admin/decision", "管理要情",
      "/admin/reports/management-briefing", "Bell", 201),
@@ -133,6 +135,9 @@ def migrate(conn: sqlite3.Connection) -> None:
     for role_id in ("counselor", "class_adviser", "mentor"):
         cur.execute("""INSERT OR IGNORE INTO sys_role_menu(role_id,menu_id)
                        VALUES(?, '/admin/dashboard')""", (role_id,))
+        # M3：三类带班/带生角色的「我的班级/学生」群体视图入口。
+        cur.execute("""INSERT OR IGNORE INTO sys_role_menu(role_id,menu_id)
+                       VALUES(?, '/admin/students/my')""", (role_id,))
     for leaf_id in SYSTEM_LEAF_IDS:
         cur.execute("""DELETE FROM sys_role_menu
                        WHERE menu_id=? AND role_id<>?""",

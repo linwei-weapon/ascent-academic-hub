@@ -9,8 +9,9 @@ from typing import Optional
 from fastapi import APIRouter, Depends
 
 from .. import db as dbm
-from ..deps import get_db, get_current_user, student_data_scope
+from ..deps import get_db, get_current_user, student_data_scope, _staff_student_ids
 from ..envelope import ApiError, ok
+from ..settings import CURRENT_SEMESTER
 
 router = APIRouter(prefix="/api/admin/students", tags=["students"])
 _ANALYSIS_CACHE: dict[tuple, tuple[float, dict]] = {}
@@ -552,3 +553,201 @@ def student_list(semester: Optional[str] = None, grade: Optional[str] = None,
     return ok({"total": total, "page": page, "pageSize": page_size, "students": students,
                "summary": {"withGpa": len(pop_gpas),
                            "avgGpa": round(sum(pop_gpas) / len(pop_gpas), 2) if pop_gpas else None}})
+
+
+# ── M3：我的班级/我的学生（辅导员/班主任/导师群体视图） ──
+# 口径与 /api/admin/student/{sid}（alert.py）及本模块 analysis 保持一致：
+# GPA=每生 AVG(fact_grade.gpa) 再平均；挂科=真实成绩 is_pass=0；
+# 学分完成率=已通过学分 ÷ fact_major_req.total_req（req 缺失不计入中位数）；
+# 未解除预警=alert_event.workflow_status 未进入 resolved/closed。
+
+_MY_SCOPE_ROLES = ("counselor", "class_adviser", "mentor")
+
+_MY_SCOPE_EVIDENCE = {
+    "real": ["学籍、成绩、GPA、挂科记录", "未解除预警事件（alert_event 工作流状态）"],
+    "simulated": ["非真实培养方案专业的学分要求（影响学分完成率）"],
+    "limitation": "学分完成率仅在真实培养方案覆盖的专业可精确解释；要求学分缺失的学生不计入学分完成率中位数。",
+}
+
+
+def _in_ph(ids) -> str:
+    return ",".join("?" * len(ids))
+
+
+def _per_student_gpa(conn, ids) -> dict:
+    if not ids:
+        return {}
+    return {r["student_id"]: r["g"] for r in dbm.query(conn, f"""
+        SELECT student_id, AVG(gpa) g FROM fact_grade
+        WHERE gpa IS NOT NULL AND student_id IN ({_in_ph(ids)})
+        GROUP BY student_id""", tuple(ids))}
+
+
+def _earned_credit_map(conn, ids) -> dict:
+    if not ids:
+        return {}
+    return {r["student_id"]: r["e"] for r in dbm.query(conn, f"""
+        SELECT student_id, SUM(credits) e FROM fact_grade
+        WHERE is_pass=1 AND student_id IN ({_in_ph(ids)})
+        GROUP BY student_id""", tuple(ids))}
+
+
+def _failed_student_set(conn, ids) -> set:
+    """有任一真实未通过记录的学生（挂科率分子，与挂科集中课程同取 source='real'）。"""
+    if not ids:
+        return set()
+    return {r["student_id"] for r in dbm.query(conn, f"""
+        SELECT DISTINCT student_id FROM fact_grade
+        WHERE source='real' AND is_pass=0 AND student_id IN ({_in_ph(ids)})""",
+        tuple(ids))}
+
+
+def _term_fail_count_map(conn, ids, semester) -> dict:
+    """本学期真实挂科门数（与学生详情页 semesterSummary 同学期口径）。"""
+    if not ids:
+        return {}
+    return {r["student_id"]: r["fc"] for r in dbm.query(conn, f"""
+        SELECT student_id, COUNT(*) fc FROM fact_grade
+        WHERE source='real' AND is_pass=0 AND semester_id=?
+          AND student_id IN ({_in_ph(ids)})
+        GROUP BY student_id""", (semester, *ids))}
+
+
+def _open_event_maps(conn, ids) -> tuple[dict, set]:
+    """未解除预警：alert_event.workflow_status 未进入 resolved/closed。
+    返回 (每生未解除事件数, 有未解除事件学生集合)。"""
+    if not ids:
+        return {}, set()
+    per_sid, sids = {}, set()
+    for r in dbm.query(conn, f"""
+        SELECT student_id, COUNT(*) n FROM alert_event
+        WHERE workflow_status NOT IN ('resolved','closed')
+          AND student_id IN ({_in_ph(ids)})
+        GROUP BY student_id""", tuple(ids)):
+        per_sid[r["student_id"]] = r["n"]
+        sids.add(r["student_id"])
+    return per_sid, sids
+
+
+def _credit_req_map(conn) -> dict:
+    return {(r["major_id"], r["grade"]): r["total_req"] for r in dbm.query(
+        conn, "SELECT major_id, grade, total_req FROM fact_major_req WHERE total_req>0")}
+
+
+def _median(values) -> Optional[float]:
+    vals = sorted(v for v in values if v is not None)
+    n = len(vals)
+    if not n:
+        return None
+    mid = n // 2
+    med = vals[mid] if n % 2 else (vals[mid - 1] + vals[mid]) / 2
+    return round(med, 1)
+
+
+def _scope_metrics(conn, students, semester) -> tuple[dict, list]:
+    """对一组 dim_student 行计算群体汇总与每生明细行（数字全部后端算好）。"""
+    ids = [s["student_id"] for s in students]
+    gpa = _per_student_gpa(conn, ids)
+    earned = _earned_credit_map(conn, ids)
+    failed = _failed_student_set(conn, ids)
+    term_fail = _term_fail_count_map(conn, ids, semester)
+    per_sid_alerts, alert_sids = _open_event_maps(conn, ids)
+    reqs = _credit_req_map(conn)
+    clname = {r["class_id"]: r["name"] for r in dbm.query(
+        conn, "SELECT class_id, name FROM dim_class")}
+    ratios, rows = [], []
+    for s in students:
+        sid = s["student_id"]
+        req = reqs.get((s["major_id"], s["grade"]))
+        ratio = None
+        if req:
+            ratio = round(min((earned.get(sid) or 0.0) / req, 1.0) * 100, 1)
+            ratios.append(ratio)
+        g = gpa.get(sid)
+        rows.append({
+            "sid": sid, "name": s["name"] or sid,
+            "classId": s["class_id"] or "",
+            "className": clname.get(s["class_id"], "") or (s["class_id"] or "—"),
+            "gpa": round(g, 2) if g is not None else None,
+            "failCount": term_fail.get(sid, 0),
+            "creditRatio": ratio,
+            "openAlerts": per_sid_alerts.get(sid, 0),
+        })
+    gpa_vals = [v for v in gpa.values() if v is not None]
+    summary = {
+        "studentCount": len(ids),
+        "avgGpa": round(sum(gpa_vals) / len(gpa_vals), 2) if gpa_vals else None,
+        "failRate": round(len(failed) / len(ids) * 100, 1) if ids else None,
+        "creditMedian": _median(ratios),
+        "withOpenAlerts": len(alert_sids),
+        "openAlerts": sum(per_sid_alerts.values()),
+    }
+    return summary, rows
+
+
+def _class_students(conn, class_id):
+    return dbm.query(conn, """
+        SELECT student_id, name, major_id, grade, class_id
+        FROM dim_student WHERE class_id=? ORDER BY student_id""", (class_id,))
+
+
+def _class_cards(conn, groups: list[tuple[str, list]], semester) -> list:
+    names = {r["class_id"]: r["name"] for r in dbm.query(
+        conn, "SELECT class_id, name FROM dim_class")}
+    cards = []
+    for class_id, students in groups:
+        summary, rows = _scope_metrics(conn, students, semester)
+        cards.append({
+            "classId": class_id,
+            "className": names.get(class_id, class_id or "未分班"),
+            **summary,
+            "students": rows,
+        })
+    return cards
+
+
+@router.get("/my-scope")
+def my_scope(user: dict = Depends(get_current_user),
+             conn: sqlite3.Connection = Depends(get_db)):
+    """M3 三视角群体视图：
+    - counselor：按 sys_user_scope 班级集合逐班聚合（班级卡 + 班内学生行）；
+    - class_adviser：按人员—行政班关系学生集合，再按行政班分组（同辅导员班级卡结构）；
+    - mentor：按人员—学生关系返回学生明细行数组；
+    - 其他角色：scopeKind='other' + 空载荷（前端引导去学生成长分析页），不报错。
+    """
+    role_id = user.get("role_id")
+    semester = CURRENT_SEMESTER
+    base = {"roleId": role_id, "semester": semester, "evidence": _MY_SCOPE_EVIDENCE}
+    if role_id not in _MY_SCOPE_ROLES:
+        return ok({**base, "scopeKind": "other", "view": "none",
+                   "summary": None, "classes": [], "students": []})
+
+    context = user.get("permission_context") or {}
+    detail = context.get("detailScope") or {}
+    if role_id == "counselor" and detail.get("type") == "class":
+        class_ids = sorted(detail.get("classIds") or [])
+        groups = [(cid, _class_students(conn, cid)) for cid in class_ids]
+        classes = _class_cards(conn, groups, semester)
+        all_students = [s for _, students in groups for s in students]
+        summary, _ = _scope_metrics(conn, all_students, semester)
+        return ok({**base, "scopeKind": "class", "view": "classes",
+                   "summary": summary, "classes": classes, "students": []})
+
+    # staff_relation：班主任/导师（或无班级范围的辅导员）按人员关系取学生集合
+    ids = _staff_student_ids(user)
+    students = dbm.query(conn, f"""
+        SELECT student_id, name, major_id, grade, class_id
+        FROM dim_student WHERE student_id IN ({_in_ph(ids)})
+        ORDER BY student_id""", tuple(ids)) if ids else []
+    if role_id == "mentor":
+        summary, rows = _scope_metrics(conn, students, semester)
+        return ok({**base, "scopeKind": "staff_relation", "view": "students",
+                   "summary": summary, "classes": [], "students": rows})
+    by_class: dict[str, list] = {}
+    for s in students:
+        by_class.setdefault(s["class_id"] or "", []).append(s)
+    groups = sorted(by_class.items(), key=lambda kv: kv[0])
+    classes = _class_cards(conn, groups, semester)
+    summary, _ = _scope_metrics(conn, students, semester)
+    return ok({**base, "scopeKind": "staff_relation", "view": "classes",
+               "summary": summary, "classes": classes, "students": []})

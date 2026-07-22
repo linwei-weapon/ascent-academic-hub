@@ -717,8 +717,15 @@ def activate_rule_change(change_id: int, user: dict = Depends(get_current_user),
         raise ApiError("生产规则不存在", code=404, status_code=404)
     now = datetime.now().astimezone().isoformat(timespec="seconds")
     version = f"{change['rule_id']}-change-{change_id}"
-    counselor = dbm.query_one(conn, """SELECT username,role_id FROM sys_user
-        WHERE role_id='counselor' AND status='active' LIMIT 1""")
+    from .alert_assignment import assignees_for_student, insert_event_assignees
+    v2_conn = dbm.get_v2_conn()
+    assignee_cache: dict[str, list[dict]] = {}
+
+    def _assignees(sid: str) -> list[dict]:
+        if sid not in assignee_cache:
+            assignee_cache[sid] = assignees_for_student(conn, sid, v2_conn)
+        return assignee_cache[sid]
+
     semester = dbm.scalar(conn, "SELECT semester_id FROM dim_semester ORDER BY semester_id DESC LIMIT 1")
     counts = {"retained": 0, "new": 0, "exited": 0}
     for item in candidates:
@@ -748,12 +755,10 @@ def activate_rule_change(change_id: int, user: dict = Depends(get_current_user),
                     VALUES (?,?,?,'new',?,?,?,'engine',?,?,?)""",
                     (new_alert_id, sid, change["rule_id"], now, now, now,
                      int(event["cycle_no"] or 1) + 1, event["event_id"], "已结束后规则再次命中"))
-                if counselor:
-                    dbm.execute(conn, """INSERT INTO alert_assignee
-                        (event_id,username,role_id,assignment_reason,assigned_at,is_primary)
-                        VALUES (?,?,?,?,?,1)""",
-                        (cur.lastrowid, counselor["username"], counselor["role_id"],
-                         f"风险第{int(event['cycle_no'] or 1)+1}周期自动分派", now))
+                if assignees := _assignees(sid):
+                    insert_event_assignees(
+                        conn, cur.lastrowid, assignees, now,
+                        reason_prefix=f"风险第{int(event['cycle_no'] or 1)+1}周期自动分派：")
             else:
                 dbm.execute(conn, """UPDATE fact_alert SET level=?,trigger_detail=?,rule_version=?,
                     activation_batch_id=? WHERE alert_id=?""",
@@ -798,12 +803,10 @@ def activate_rule_change(change_id: int, user: dict = Depends(get_current_user),
                 (alert_id, sid, change["rule_id"], now, now, now, cycle_no,
                  previous["event_id"] if previous else None,
                  "退出后重新命中" if previous else "首次命中"))
-            if counselor:
-                dbm.execute(conn, """INSERT INTO alert_assignee
-                    (event_id,username,role_id,assignment_reason,assigned_at,is_primary)
-                    VALUES (?,?,?,?,?,1)""",
-                    (cur.lastrowid, counselor["username"], counselor["role_id"],
-                     f"规则变更单#{change_id}激活自动分派", now))
+            if assignees := _assignees(sid):
+                insert_event_assignees(
+                    conn, cur.lastrowid, assignees, now,
+                    reason_prefix=f"规则变更单#{change_id}激活自动分派：")
         else:
             raise ApiError(f"未知候选动作：{action}", code=409, status_code=409)
         counts[action] += 1
@@ -813,6 +816,7 @@ def activate_rule_change(change_id: int, user: dict = Depends(get_current_user),
         (change_id, change["rule_id"], counts["retained"], counts["new"],
          counts["exited"], user["username"], now, "事务化通用候选激活"))
     dbm.execute(conn, "UPDATE alert_rule_change SET status='activated' WHERE change_id=?", (change_id,))
+    v2_conn.close()
     return ok({"changeId": change_id, "status": "activated", **counts},
               msg="候选预警已受控激活")
 

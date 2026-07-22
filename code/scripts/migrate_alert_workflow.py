@@ -1,6 +1,7 @@
 """幂等迁移：创建预警处理闭环表，并从 fact_alert 初始化事件。"""
 import sqlite3
 import sys
+from datetime import datetime
 
 sys.stdout.reconfigure(encoding="utf-8")
 sys.path.insert(0, __file__.rsplit("scripts", 1)[0])
@@ -78,18 +79,23 @@ def main() -> None:
             (alert_id, student_id, rule_id, status, created_at, created_at,
              created_at, "engine"),
         )
-    # 演示环境只有一个辅导员账号；初始化为主责任人，后续再按班级关系精细分派。
-    counselor = conn.execute(
-        "SELECT username,role_id FROM sys_user WHERE role_id='counselor' AND status='active' LIMIT 1"
-    ).fetchone()
-    if counselor:
-        conn.execute(
-            """INSERT OR IGNORE INTO alert_assignee
-               (event_id,username,role_id,assignment_reason,assigned_at,is_primary)
-               SELECT event_id,?,?,?,COALESCE(first_detected_at,datetime('now')),1
-               FROM alert_event""",
-            (counselor[0], counselor[1], "按辅导员角色初始化分派"),
-        )
+    # 按"学生→有效人员关系"分派：辅导员=主责，班主任/导师=协同，
+    # 未命中时回退学院教学秘书，再无则保底第一个辅导员。
+    from backend.api import db as dbm
+    from backend.api.routers.alert_assignment import (assignees_for_student,
+                                                      insert_event_assignees)
+    now = datetime.now().astimezone().isoformat(timespec="seconds")
+    v2_conn = dbm.get_v2_conn()
+    try:
+        for (student_id,) in conn.execute(
+                "SELECT DISTINCT student_id FROM alert_event ORDER BY student_id"):
+            assignees = assignees_for_student(conn, student_id, v2_conn)
+            for (event_id,) in conn.execute(
+                    "SELECT event_id FROM alert_event WHERE student_id=?",
+                    (student_id,)):
+                insert_event_assignees(conn, event_id, assignees, now)
+    finally:
+        v2_conn.close()
     conn.commit()
     events = conn.execute("SELECT COUNT(*) FROM alert_event").fetchone()[0]
     assignees = conn.execute("SELECT COUNT(*) FROM alert_assignee").fetchone()[0]
