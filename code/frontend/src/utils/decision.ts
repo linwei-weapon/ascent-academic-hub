@@ -31,10 +31,11 @@ export function getSignalEvidence(signalId: string) {
     `/admin/ai/decision/signals/${encodeURIComponent(signalId)}/evidence`)
 }
 
-/** 统一的新窗口打开入口：只读证据页，noopener 隔离，主窗口状态不动。 */
+/** 统一的查证入口：只读证据页在新浏览器标签页打开，noopener 隔离，主标签页状态不动。
+    不带 width/height 等窗口特征参数，确保浏览器按用户默认开新标签页而非弹窗。 */
 export function openEvidenceWindow(signalId: string) {
   const url = `${window.location.origin}${window.location.pathname}#/admin/verify/signal/${encodeURIComponent(signalId)}`
-  window.open(url, '_blank', 'noopener,width=1120,height=820')
+  window.open(url, '_blank', 'noopener')
 }
 
 /* ---- 学校配置中心（阶段5，仅系统管理员） ---- */

@@ -148,11 +148,14 @@
 
         <div v-if="factTiles.length" class="rail-section">
           <p class="rail-title">数据要素 · 本专家速览</p>
+          <p class="rail-sub">点击任一数字查证来源</p>
           <div class="fact-grid">
-            <div v-for="t in factTiles" :key="t.k" class="fact-tile">
+            <button v-for="t in factTiles" :key="t.k" type="button" class="fact-tile"
+              :title="`查证来源信号：${t.headline}`"
+              @click="openEvidenceWindow(t.signal_id)">
               <span class="fact-k">{{ t.k }}</span>
               <b class="fact-v">{{ t.v }}</b>
-            </div>
+            </button>
           </div>
         </div>
       </template>
@@ -227,15 +230,15 @@ const latestRefs = computed<AdviceEvidenceRef[]>(() => {
   return []
 })
 
-/** 数据要素速览：最近引用的 facts 键值，去重取前 6 */
+/** 数据要素速览：最近引用的 facts 键值，带来源信号（可点击查证），去重取前 6 */
 const factTiles = computed(() => {
-  const tiles: { k: string; v: string }[] = []
+  const tiles: { k: string; v: string; signal_id: string; headline: string }[] = []
   const seen = new Set<string>()
   for (const r of latestRefs.value) {
     for (const [k, v] of Object.entries(r.facts || {})) {
       if (seen.has(k)) continue
       seen.add(k)
-      tiles.push({ k, v })
+      tiles.push({ k, v, signal_id: r.signal_id, headline: r.headline })
       if (tiles.length >= 6) return tiles
     }
   }
@@ -335,8 +338,10 @@ async function send(raw: string, opts: { signalId?: string } = {}) {
   if (!text || sending.value || !skillId.value) return
   input.value = ''
   messages.value.push({ role: 'user', text })
-  const assistant: AdviceMessage = { role: 'assistant', text: '', streaming: true }
-  messages.value.push(assistant)
+  // 注意：必须通过数组内的响应式代理修改消息字段，
+  // 直接改原始对象不会触发 computed（右栏「本轮依据」会因此不刷新）
+  messages.value.push({ role: 'assistant', text: '', streaming: true })
+  const assistant = messages.value[messages.value.length - 1]
   sending.value = true
   scrollBottom()
 
@@ -513,7 +518,9 @@ onMounted(init)
 .ref-facts { font-size: 11px; color: #909399; line-height: 1.5; }
 .fact-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .fact-tile { display: flex; flex-direction: column; gap: 2px; background: #f8fafc;
-  border-radius: 8px; padding: 8px 10px; }
+  border: 1px solid transparent; border-radius: 8px; padding: 8px 10px;
+  cursor: pointer; text-align: left; transition: border-color .15s, background .15s; }
+.fact-tile:hover { border-color: #c7d2fe; background: #eef2ff; }
 .fact-k { font-size: 11px; color: #909399; }
 .fact-v { font-size: 15px; color: #4f46e5; }
 

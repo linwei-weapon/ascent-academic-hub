@@ -25,7 +25,7 @@
       </span>
       <div class="ops">
         <el-button link type="primary" size="small" @click="emit('ask', signal)">问专家</el-button>
-        <el-button link type="primary" size="small" @click="openVerify">查证·新窗口</el-button>
+        <el-button link type="primary" size="small" @click="openVerify">查证·新标签</el-button>
         <el-button link size="small" @click="goWorkspace">专题</el-button>
       </div>
     </div>

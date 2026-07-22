@@ -1,6 +1,6 @@
 <template>
   <!-- 结论卡：一个完整的管理判断。五要素顺序固定：判断→依据→动作→时限→代价。
-       动作三件套：问专家 / 查证·新窗口 / 核查清单（就地展开、可复制，不产生任何工单）。 -->
+       动作三件套：问专家 / 查证·新标签 / 核查清单（就地展开、可复制，不产生任何工单）。 -->
   <article class="conclusion-card" :class="[`sev-${signal.severity}`, { compact }]">
     <div class="sig-head">
       <el-tag size="small" :type="severityMeta(signal).tag" effect="dark">{{ severityMeta(signal).label }}</el-tag>
@@ -49,7 +49,7 @@
       <div class="ops">
         <el-button link type="primary" size="small"
           @click="emit('ask', signal)">问专家</el-button>
-        <el-button link type="primary" size="small" @click="openVerify">查证·新窗口</el-button>
+        <el-button link type="primary" size="small" @click="openVerify">查证·新标签</el-button>
         <el-button link size="small" @click="checklistOpen = !checklistOpen">
           {{ checklistOpen ? '收起清单' : '核查清单' }}
         </el-button>
@@ -75,7 +75,7 @@ const emit = defineEmits<{
   ask: [signal: DecisionSignal]
 }>()
 
-/** 查证·新窗口（R2）：只读证据页在独立浏览器窗口打开，主窗口状态不动。 */
+/** 查证·新标签（R2）：只读证据页在新浏览器标签页打开，主窗口状态不动。 */
 function openVerify() {
   openEvidenceWindow(props.signal.signal_id)
 }
@@ -90,7 +90,7 @@ const checklistItems = computed(() => {
     `责任确认：与${s.action.owner || '责任方'}确认——${s.action.what}（建议时限：${s.action.when || '尽快'}）`,
   ]
   if (s.related?.length) items.push(`关联信号：本信号与 ${s.related.length} 项其他专题信号关联，建议一并核查`)
-  items.push('证据复核：通过「查证·新窗口」核对数据时效、口径边界与排除项后再定性')
+  items.push('证据复核：通过「查证·新标签」核对数据时效、口径边界与排除项后再定性')
   return items
 })
 
