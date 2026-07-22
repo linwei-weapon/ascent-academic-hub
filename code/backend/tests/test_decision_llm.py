@@ -60,7 +60,7 @@ def make_briefing(cards=None):
         "urgency_rationale": "存在1项紧急事项与0项重点事项，需要今日内明确责任人与时限。",
         "priority_items": cards,
         "skill_sections": [], "watch_items": [], "positive_developments": [],
-        "previous_followup": [], "generation_method": "rule_template",
+        "generation_method": "rule_template",
     }
 
 

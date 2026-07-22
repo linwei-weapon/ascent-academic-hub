@@ -1,8 +1,9 @@
 /** AI管理决策（新版 Skill 链路）接口：/admin/ai/decision/* */
 import { http, getToken, getActiveIdentity } from './http'
 import type {
-  ChatDoneEvent, ChatMetaEvent, DecisionBriefing, LlmStatus,
-  SignalAction, SignalEntity, SkillMeta, SkillSection,
+  AdviceDoneEvent, AdviceExpert, AdviceMetaEvent, AdviceSession, AdviceSessionDetail,
+  DecisionBriefing, LlmStatus,
+  SignalEvidencePack, SkillMeta, SkillSection,
 } from '@/types/decision'
 
 export function getDecisionSkills() {
@@ -19,27 +20,21 @@ export function getDecisionBriefing(force = false) {
   return http.get<DecisionBriefing>(`/admin/ai/decision/briefing${qs}`)
 }
 
-export interface TrackingPayload {
-  signalId: string
-  skillId?: string
-  headline?: string
-  entity?: SignalEntity
-  action?: SignalAction
-  status: 'open' | 'in_progress' | 'done' | 'dismissed'
-  assignee?: string
-  note?: string
-}
-
-export function getDecisionTracking() {
-  return http.get<{ items: Record<string, unknown>[] }>('/admin/ai/decision/tracking')
-}
-
-export function updateDecisionTracking(body: TrackingPayload) {
-  return http.put<any>('/admin/ai/decision/tracking', body)
-}
-
 export function getDecisionLlmStatus() {
   return http.get<LlmStatus>('/admin/ai/decision/llm-status')
+}
+
+/* ---- 查证窗口（R2：新开浏览器窗口的只读证据页） ---- */
+
+export function getSignalEvidence(signalId: string) {
+  return http.get<SignalEvidencePack>(
+    `/admin/ai/decision/signals/${encodeURIComponent(signalId)}/evidence`)
+}
+
+/** 统一的新窗口打开入口：只读证据页，noopener 隔离，主窗口状态不动。 */
+export function openEvidenceWindow(signalId: string) {
+  const url = `${window.location.origin}${window.location.pathname}#/admin/verify/signal/${encodeURIComponent(signalId)}`
+  window.open(url, '_blank', 'noopener,width=1120,height=820')
 }
 
 /* ---- 学校配置中心（阶段5，仅系统管理员） ---- */
@@ -114,17 +109,37 @@ export function testDecisionLlmConnection() {
     '/admin/ai/decision/config/llm/test')
 }
 
-export interface ChatStreamHandlers {
-  onMeta?: (e: ChatMetaEvent) => void
+/* 旧「决策追问抽屉」链路（POST /chat + streamDecisionChat）已随 R4 退役：
+   对话入口统一收口到专家问策（/ask/*）。后端 /chat 保留一个版本周期兼容。 */
+
+/* ---- 专家问策（R4）：/admin/ai/decision/ask/* ---- */
+
+export function getAdviceExperts() {
+  return http.get<{ items: AdviceExpert[] }>('/admin/ai/decision/ask/experts')
+}
+
+export function getAdviceSessions(skillId: string) {
+  return http.get<{ items: AdviceSession[] }>(
+    `/admin/ai/decision/ask/sessions?skill_id=${encodeURIComponent(skillId)}`)
+}
+
+export function getAdviceSession(sessionId: string) {
+  return http.get<AdviceSessionDetail>(
+    `/admin/ai/decision/ask/sessions/${encodeURIComponent(sessionId)}`)
+}
+
+export interface AdviceStreamHandlers {
+  onMeta?: (e: AdviceMetaEvent) => void
   onDelta?: (text: string) => void
-  onDone?: (e: ChatDoneEvent) => void
+  onDone?: (e: AdviceDoneEvent) => void
   onError?: (message: string) => void
 }
 
-/** 对话编排（SSE）：POST + ReadableStream 读取，不走 http 封装的 envelope。 */
-export async function streamDecisionChat(
-  body: { message: string; signalId?: string; history?: { role: string; content: string }[] },
-  handlers: ChatStreamHandlers,
+/** 专家问策（SSE）：与 streamDecisionChat 同模式，POST + ReadableStream，不走 envelope。 */
+export async function streamAdviceAsk(
+  skillId: string,
+  body: { message: string; session_id?: string; signalId?: string },
+  handlers: AdviceStreamHandlers,
 ): Promise<void> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   const token = getToken()
@@ -132,11 +147,11 @@ export async function streamDecisionChat(
   const identity = getActiveIdentity()
   if (token && identity) headers['X-Active-Identity'] = identity
 
-  const res = await fetch('/api/admin/ai/decision/chat', {
+  const res = await fetch(`/api/admin/ai/decision/ask/${encodeURIComponent(skillId)}`, {
     method: 'POST', headers, body: JSON.stringify(body),
   })
   if (!res.ok || !res.body) {
-    let msg = `对话服务异常（${res.status}）`
+    let msg = `问策服务异常（${res.status}）`
     try {
       const data = await res.json()
       if (data?.msg) msg = data.msg
@@ -167,7 +182,7 @@ export async function streamDecisionChat(
         if (event === 'meta') handlers.onMeta?.(parsed)
         else if (event === 'delta') handlers.onDelta?.(parsed.text || '')
         else if (event === 'done') handlers.onDone?.(parsed)
-        else if (event === 'error') handlers.onError?.(parsed.message || '对话服务异常')
+        else if (event === 'error') handlers.onError?.(parsed.message || '问策服务异常')
       } catch { /* 忽略半包 */ }
     }
   }

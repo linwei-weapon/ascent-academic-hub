@@ -68,7 +68,7 @@ class GoldenEvalTest(unittest.TestCase):
         cls.results, cls.tier_map = _run_all_skills(cls.legacy, cls.v2, cls.rw)
         cls.merged = merge_signals(cls.results, cls.tier_map)
         cls.briefing = build_briefing(
-            cls.merged, cls.results, [], [], SEMESTER, "golden-eval")
+            cls.merged, cls.results, [], SEMESTER, "golden-eval")
 
     @classmethod
     def tearDownClass(cls):

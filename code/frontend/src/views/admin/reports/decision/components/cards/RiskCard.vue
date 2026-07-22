@@ -14,10 +14,9 @@
     </p>
 
     <div class="facts">
-      <button v-for="[k, v] in factEntries(signal, 3)" :key="k" class="fact" type="button"
-        title="点击查看证据" @click="emit('evidence', signal)">
+      <span v-for="[k, v] in factEntries(signal, 3)" :key="k" class="fact">
         <em>{{ k }}</em><b>{{ v }}</b>
-      </button>
+      </span>
     </div>
 
     <div class="sig-foot">
@@ -25,9 +24,8 @@
         {{ signal.entity.name }} · 置信{{ confidenceLabel(signal) }}
       </span>
       <div class="ops">
-        <el-button link type="primary" size="small" @click="emit('evidence', signal)">证据</el-button>
-        <el-button v-if="signal.suggested_questions?.length" link size="small"
-          @click="emit('ask', signal)">追问</el-button>
+        <el-button link type="primary" size="small" @click="emit('ask', signal)">问专家</el-button>
+        <el-button link type="primary" size="small" @click="openVerify">查证·新窗口</el-button>
         <el-button link size="small" @click="goWorkspace">专题</el-button>
       </div>
     </div>
@@ -37,14 +35,18 @@
 <script setup lang="ts">
 import { useRouter } from 'vue-router'
 import type { DecisionSignal } from '@/types/decision'
+import { openEvidenceWindow } from '@/utils/decision'
 import { severityMeta, changeMeta, confidenceLabel, factEntries, evidenceTitle } from './signalMeta'
 
 const props = defineProps<{ signal: DecisionSignal }>()
 const emit = defineEmits<{
-  evidence: [signal: DecisionSignal]
   ask: [signal: DecisionSignal]
 }>()
 const router = useRouter()
+
+function openVerify() {
+  openEvidenceWindow(props.signal.signal_id)
+}
 
 function goWorkspace() {
   router.push(`/admin/reports/decision/skills/${props.signal.skill_id}`)

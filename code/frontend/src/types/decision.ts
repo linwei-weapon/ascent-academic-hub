@@ -25,13 +25,6 @@ export interface SignalEntity {
   name: string
 }
 
-export interface TrackingState {
-  status: 'open' | 'in_progress' | 'done' | 'dismissed'
-  assignee?: string | null
-  note?: string | null
-  updated_at?: string | null
-}
-
 export interface DecisionSignal {
   signal_id: string
   skill_id: string
@@ -50,7 +43,6 @@ export interface DecisionSignal {
   change: SignalChange
   suggested_questions: string[]
   hotspot: boolean
-  tracking: TrackingState | null
 }
 
 export interface SkillSection {
@@ -65,20 +57,6 @@ export interface SkillSection {
   signals: DecisionSignal[]
 }
 
-export interface FollowupItem {
-  signal_id: string
-  skill_id: string
-  headline: string
-  entity: SignalEntity
-  action: SignalAction
-  status: string
-  assignee?: string | null
-  note?: string | null
-  updated_at?: string | null
-  state: 'active' | 'signal_gone' | 'recheck' | 'closed' | 'dismissed'
-  state_note: string
-}
-
 export interface DecisionBriefing {
   topline: string
   urgency: 'normal' | 'elevated' | 'critical'
@@ -87,7 +65,6 @@ export interface DecisionBriefing {
   skill_sections: SkillSection[]
   watch_items: DecisionSignal[]
   positive_developments: DecisionSignal[]
-  previous_followup: FollowupItem[]
   resolved_since_last: { signal_id: string; severity: string; headline: string }[]
   generated_at: string
   data_freshness: Record<string, string>
@@ -111,41 +88,13 @@ export interface SkillMeta {
   data_readiness: { ready: boolean; items: any[] }
 }
 
-/** 对话编排（阶段4）：SSE 事件载荷 */
-export type ChatIntent = 'verify' | 'simulate' | 'compare' | 'attribute' | 'open'
-
-export interface ChatCitedSignal {
-  signal_id: string
-  skill_id: string
-  severity: Severity
-  headline: string
-  facts: Record<string, string>
-  entity: SignalEntity
-  action: SignalAction
-  consequence: string
-  evidence: SignalEvidence
-  change: SignalChange
-  suggested_questions: string[]
-}
-
+/** 问策回复结构块（归因三明治/要点列表）。旧「决策追问抽屉」SSE 类型已随 R4 移除。 */
 export interface ChatBlock {
   layer: 'facts' | 'hypothesis' | 'action' | 'points'
   title: string
   text?: string
   verify?: string
   items?: string[]
-}
-
-export interface ChatMetaEvent {
-  intent: ChatIntent
-  intent_label: string
-  cited: ChatCitedSignal[]
-}
-
-export interface ChatDoneEvent {
-  blocks: ChatBlock[]
-  followups: string[]
-  llm_status: string
 }
 
 export interface LlmStatus {
@@ -155,6 +104,109 @@ export interface LlmStatus {
   chat_enabled: boolean
   model: string
   base_url: string
+}
+
+/** 查证窗口（新开浏览器窗口）：单信号完整证据包，与后端 build_signal_evidence 对齐。 */
+export interface SignalEvidencePack {
+  signal: DecisionSignal
+  skill: {
+    skill_id: string
+    skill_name: string
+    management_question: string
+    config_version: string
+    data_boundary: string
+    data_readiness: { ready: boolean; items: any[] }
+    exclusions: { what: string; why: string }[]
+  }
+  semester: string
+  generated_at: string
+  generation_method: string
+  data_freshness: string
+  summary_stats: Record<string, any>
+}
+
+/* ---- 专家问策（R4）：/admin/ai/decision/ask/* ---- */
+
+/** 专家库卡片：GET /ask/experts 的 items 元素 */
+export interface AdviceExpert {
+  skill_id: string
+  name: string
+  title: string
+  icon: string
+  management_question: string
+  description: string
+  boundary: string
+  example_questions: string[]
+  data_readiness: { ready: boolean; items: any[] }
+  signal_count: number
+  top_signal: { signal_id: string; severity: Severity; headline: string } | null
+}
+
+/** 对话中的编号证据引用（与正文 [n] 一一对应） */
+export interface AdviceEvidenceRef {
+  n: number
+  signal_id: string
+  severity: Severity
+  headline: string
+  facts: Record<string, string>
+  entity: SignalEntity
+}
+
+/** 越界指路：拒答时指向对应专家 */
+export interface AdviceRedirect {
+  skill_id: string
+  name: string
+}
+
+export interface AdviceMetaEvent {
+  session_id: string
+  intent: string
+  intent_label: string
+  evidence_refs: AdviceEvidenceRef[]
+  redirect: AdviceRedirect | null
+}
+
+export interface AdviceDoneEvent {
+  session_id: string
+  blocks: ChatBlock[]
+  suggested_questions: string[]
+  boundary: string
+  redirect: AdviceRedirect | null
+  llm_status: string
+}
+
+/** 历史会话列表项：GET /ask/sessions 的 items 元素 */
+export interface AdviceSession {
+  session_id: string
+  username: string
+  skill_id: string
+  title: string
+  context_signal_id: string | null
+  created_at: string
+  updated_at: string
+}
+
+/** 历史消息：payload 携带当轮结构化回答 */
+export interface AdviceSessionMessage {
+  message_id: number
+  role: string
+  content: string
+  payload: {
+    blocks?: ChatBlock[]
+    evidence_refs?: AdviceEvidenceRef[]
+    suggested_questions?: string[]
+    boundary?: string
+    intent?: string
+    intent_label?: string
+    redirect?: AdviceRedirect | null
+    llm_status?: string
+  } | null
+  created_at: string
+}
+
+export interface AdviceSessionDetail {
+  session: AdviceSession
+  messages: AdviceSessionMessage[]
 }
 
 export const SEVERITY_META: Record<Severity, { label: string; tag: TagType; color: string }> = {
@@ -169,11 +221,4 @@ export const CHANGE_META: Record<SignalChange, { label: string; tag: TagType }> 
   upgraded: { label: '已升级', tag: 'warning' },
   ongoing: { label: '持续', tag: 'info' },
   resolved: { label: '已消除', tag: 'success' },
-}
-
-export const TRACKING_META: Record<string, { label: string; tag: TagType }> = {
-  open: { label: '待处理', tag: 'info' },
-  in_progress: { label: '进行中', tag: 'warning' },
-  done: { label: '已完成', tag: 'success' },
-  dismissed: { label: '已忽略', tag: 'info' },
 }

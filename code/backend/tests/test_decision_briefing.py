@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
-"""阶段2单元测试：信号合并、快照diff、模板简报装配、快照存储与建议追踪。
+"""阶段2单元测试：信号合并、快照diff、模板简报装配、快照存储。
+
+建议追踪相关测试已随 R1 去闭环移除（AI决策不形成办理闭环）。
 
 运行：cd code && python -m unittest backend.tests.test_decision_briefing -v
 """
@@ -11,7 +13,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from backend.skills.briefing import _embed_tracking, build_briefing
+from backend.skills.briefing import build_briefing, build_signal_evidence
 from backend.skills.merger import (diff_signals, find_hotspots, merge_signals,
                                    scope_key, signal_digest)
 from backend.skills.protocol import Signal, SkillResult
@@ -119,7 +121,7 @@ class BriefingBuildTest(unittest.TestCase):
 
     def test_structure_and_topline(self):
         merged, results = self._merged()
-        b = build_briefing(merged, results, [], [], "2025-2026-2", "fp")
+        b = build_briefing(merged, results, [], "2025-2026-2", "fp")
         self.assertEqual(b["urgency"], "critical")
         self.assertIn("1项紧急", b["topline"])
         self.assertIn("体质测试", b["topline"])
@@ -129,41 +131,63 @@ class BriefingBuildTest(unittest.TestCase):
         self.assertEqual(b["generation_method"], "rule_template")
         self.assertEqual(b["snapshot_fingerprint"], "fp")
 
-    def test_followup_states(self):
+    def test_no_tracking_fields(self):
+        """R1 去闭环：简报任何位置不得出现追踪/交办字段。"""
         merged, results = self._merged()
-        tracking = [
-            {"signal_id": "g:1", "skill_id": "graduation-gap", "headline": "h",
-             "entity": {}, "action": {}, "status": "done", "assignee": None,
-             "note": None, "updated_at": "t"},
-            {"signal_id": "g:gone", "skill_id": "graduation-gap", "headline": "h2",
-             "entity": {}, "action": {}, "status": "open", "assignee": None,
-             "note": None, "updated_at": "t"},
-        ]
-        b = build_briefing(merged, results, [], tracking, "2025-2026-2", "fp")
-        follow = {f["signal_id"]: f for f in b["previous_followup"]}
-        self.assertEqual(follow["g:1"]["state"], "recheck")      # 完成但信号仍在
-        self.assertEqual(follow["g:gone"]["state"], "signal_gone")
-        # recheck 排在最前
-        self.assertEqual(b["previous_followup"][0]["state"], "recheck")
-        # 卡片回填追踪状态
-        top = b["priority_items"][0]
-        self.assertEqual(top["tracking"]["status"], "done")
+        b = build_briefing(merged, results, [], "2025-2026-2", "fp")
+        self.assertNotIn("previous_followup", b)
+        cards = (b["priority_items"] + b["watch_items"]
+                 + b["positive_developments"])
+        for sec in b["skill_sections"]:
+            cards += sec["signals"]
+        self.assertTrue(cards)
+        for card in cards:
+            self.assertNotIn("tracking", card)
 
-    def test_embed_tracking_refreshes_cached_briefing(self):
-        merged, results = self._merged()
-        b = build_briefing(merged, results, [], [], "2025-2026-2", "fp")
-        self.assertIsNone(b["priority_items"][0]["tracking"])
-        tracking = [
-            {"signal_id": "g:1", "skill_id": "graduation-gap", "headline": "h",
-             "entity": {}, "action": {}, "status": "in_progress",
-             "assignee": "张三", "note": "跟进中", "updated_at": "t2"},
+
+# ---------------------------------------------------------------------------
+class SignalEvidenceTest(unittest.TestCase):
+    """R2 查证窗口：单信号证据包装配。"""
+
+    def _briefing(self):
+        results = [
+            make_result("graduation-gap", [
+                make_signal("g:1", "graduation-gap", "critical",
+                            {"type": "course", "id": "C1", "name": "体质测试"}),
+            ], {"blocked_students": 3}),
         ]
-        _embed_tracking(b, tracking)
-        top = b["priority_items"][0]
-        self.assertEqual(top["tracking"]["status"], "in_progress")
-        self.assertEqual(top["tracking"]["assignee"], "张三")
-        follow = {f["signal_id"]: f for f in b["previous_followup"]}
-        self.assertEqual(follow["g:1"]["state"], "active")
+        merged = merge_signals(results, {"graduation-gap": "main"})
+        return build_briefing(merged, results, [], "2025-2026-2", "fp")
+
+    def test_pack_structure(self):
+        b = self._briefing()
+        pack = build_signal_evidence(b, "g:1")
+        self.assertIsNotNone(pack)
+        self.assertEqual(pack["signal"]["signal_id"], "g:1")
+        self.assertEqual(pack["signal"]["evidence"]["table"], "t")
+        self.assertEqual(pack["skill"]["skill_id"], "graduation-gap")
+        self.assertEqual(pack["skill"]["skill_name"], "名graduation-gap")
+        self.assertEqual(pack["semester"], "2025-2026-2")
+        self.assertEqual(pack["summary_stats"]["blocked_students"], 3)
+
+    def test_find_in_skill_section_and_watch(self):
+        results = [
+            make_result("course-quality", [
+                make_signal("q:low", "course-quality", "low"),
+                make_signal("q:pos", "course-quality", "low",
+                            signal_type="improving"),
+            ]),
+        ]
+        merged = merge_signals(results, {"course-quality": "main"})
+        b = build_briefing(merged, results, [], "2025-2026-2", "fp")
+        self.assertIsNotNone(build_signal_evidence(b, "q:low"))
+        pack = build_signal_evidence(b, "q:pos")
+        self.assertIsNotNone(pack)
+        self.assertEqual(pack["signal"]["signal_type"], "improving")
+
+    def test_missing_returns_none(self):
+        b = self._briefing()
+        self.assertIsNone(build_signal_evidence(b, "not-exist:1"))
 
 
 # ---------------------------------------------------------------------------
@@ -183,22 +207,6 @@ class StoreTest(unittest.TestCase):
         self.assertEqual(snap["briefing"]["topline"], "t")
         self.assertEqual(snap["signals"][0]["signal_id"], "s:1")
         self.assertIsNone(store.latest_snapshot(self.conn, "other-scope"))
-
-    def test_tracking_upsert_idempotent(self):
-        signal = {"signal_id": "s:1", "skill_id": "a", "headline": "h",
-                  "entity": {"id": "E"}, "action": {"what": "w"}}
-        r1 = store.upsert_tracking(self.conn, signal, "open", "admin", "scope1")
-        r2 = store.upsert_tracking(self.conn, signal, "in_progress", "admin",
-                                   "scope1", assignee="张三", note="跟进中")
-        self.assertEqual(r1["trackingId"], r2["trackingId"])
-        self.assertFalse(r1["updated"])
-        self.assertTrue(r2["updated"])
-        rows = store.list_tracking(self.conn, "scope1")
-        self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0]["status"], "in_progress")
-        self.assertEqual(rows[0]["assignee"], "张三")
-        with self.assertRaises(ValueError):
-            store.upsert_tracking(self.conn, signal, "bogus", "admin", "scope1")
 
 
 if __name__ == "__main__":

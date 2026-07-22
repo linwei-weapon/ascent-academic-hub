@@ -42,8 +42,6 @@
     </template>
 
     <el-skeleton v-else-if="loading" animated :rows="8" />
-
-    <EvidenceCard v-model:visible="evidenceVisible" :signal="evidenceSignal" @ask="onAsk" />
   </div>
 </template>
 
@@ -51,8 +49,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import type { DecisionSignal, SkillSection } from '@/types/decision'
-import { runDecisionSkill } from '@/utils/decision'
-import EvidenceCard from '../components/cards/EvidenceCard.vue'
+import { openEvidenceWindow, runDecisionSkill } from '@/utils/decision'
 import GraduationGapWorkspace from './GraduationGapWorkspace.vue'
 import CourseQualityWorkspace from './CourseQualityWorkspace.vue'
 import AlertPriorityWorkspace from './AlertPriorityWorkspace.vue'
@@ -70,8 +67,6 @@ const router = useRouter()
 const skillId = computed(() => String(route.params.skillId || ''))
 const result = ref<(SkillSection & { run_at?: string }) | null>(null)
 const loading = ref(false)
-const evidenceVisible = ref(false)
-const evidenceSignal = ref<DecisionSignal | null>(null)
 
 const workspaceComp = computed(() => WORKSPACES[skillId.value])
 const missingText = computed(() =>
@@ -92,13 +87,9 @@ async function load() {
   }
 }
 
+/** 查证改为新开浏览器窗口的只读证据页，不在页内弹窗 */
 function openEvidence(signal: DecisionSignal) {
-  evidenceSignal.value = signal
-  evidenceVisible.value = true
-}
-
-function onAsk() {
-  evidenceVisible.value = false
+  openEvidenceWindow(signal.signal_id)
 }
 
 watch(skillId, () => { result.value = null; load() })

@@ -52,57 +52,21 @@ def _urgency(counts: dict[str, int]) -> tuple[str, str]:
     return "normal", "无紧急/重点事项，按常规节奏推进即可。"
 
 
-def _signal_card(sig: Signal, hotspot_ids: set[str],
-                 tracked: dict[str, dict]) -> dict:
-    """信号 → 前端卡片载荷（五要素结构完整）。"""
+def _signal_card(sig: Signal, hotspot_ids: set[str]) -> dict:
+    """信号 → 前端卡片载荷（五要素结构完整）。不含任何追踪/交办状态。"""
     card = sig.to_dict()
     card["hotspot"] = sig.signal_id in hotspot_ids
-    track = tracked.get(sig.signal_id)
-    card["tracking"] = (
-        {"status": track["status"], "assignee": track.get("assignee"),
-         "note": track.get("note"), "updated_at": track.get("updated_at")}
-        if track else None)
     return card
 
 
-def _followups(tracking_rows: list[dict], current_ids: set[str]) -> list[dict]:
-    """上次建议追踪：追踪状态 × 信号是否仍存在，四种组合如实呈现。"""
-    out = []
-    for row in tracking_rows:
-        present = row["signal_id"] in current_ids
-        status = row["status"]
-        if status in ("open", "in_progress") and present:
-            state, state_note = "active", "信号仍有效"
-        elif status in ("open", "in_progress") and not present:
-            state, state_note = "signal_gone", "信号已消失，待确认是否完成"
-        elif status == "done" and present:
-            state, state_note = "recheck", "已标记完成但信号仍存在，需复核"
-        elif status == "done" and not present:
-            state, state_note = "closed", "已完成且信号消除"
-        else:  # dismissed
-            state, state_note = "dismissed", "已忽略"
-        out.append({
-            "signal_id": row["signal_id"], "skill_id": row["skill_id"],
-            "headline": row["headline"], "entity": row["entity"],
-            "action": row["action"], "status": status,
-            "assignee": row.get("assignee"), "note": row.get("note"),
-            "updated_at": row.get("updated_at"),
-            "state": state, "state_note": state_note,
-        })
-    order = {"recheck": 0, "active": 1, "signal_gone": 2, "closed": 3, "dismissed": 4}
-    out.sort(key=lambda x: (order.get(x["state"], 9), x["signal_id"]))
-    return out[:5]
-
-
 def build_briefing(merged: dict, results: list[SkillResult],
-                   resolved: list[dict], tracking_rows: list[dict],
+                   resolved: list[dict],
                    semester: str, fingerprint: str) -> dict:
-    """合并结果 + diff + 追踪 → 固定结构简报（模板版）。"""
+    """合并结果 + diff → 固定结构简报（模板版）。不含追踪/交办状态。"""
     briefing = empty_briefing()
     all_signals: list[Signal] = merged["all_signals"]
     priority: list[Signal] = merged["priority_items"]
     hotspot_ids = set(merged["hotspots"].keys())
-    tracked = {t["signal_id"]: t for t in tracking_rows}
 
     counts = {"critical": 0, "high": 0, "medium": 0, "low": 0}
     for sig in all_signals:
@@ -113,7 +77,7 @@ def build_briefing(merged: dict, results: list[SkillResult],
     briefing["urgency"] = urgency
     briefing["urgency_rationale"] = rationale
     briefing["priority_items"] = [
-        _signal_card(s, hotspot_ids, tracked) for s in priority]
+        _signal_card(s, hotspot_ids) for s in priority]
     briefing["skill_sections"] = [{
         "skill_id": r.skill_id,
         "skill_name": r.skill_name,
@@ -124,21 +88,19 @@ def build_briefing(merged: dict, results: list[SkillResult],
         "data_boundary": r.data_boundary,
         "config_version": r.config_version,
         "signals": [
-            _signal_card(s, hotspot_ids, tracked)
+            _signal_card(s, hotspot_ids)
             for s in sorted(r.signals,
                             key=lambda x: (SEVERITY_ORDER.get(x.severity, 9),
                                            x.signal_id))
         ],
     } for r in results]
     briefing["watch_items"] = [
-        _signal_card(s, hotspot_ids, tracked)
+        _signal_card(s, hotspot_ids)
         for s in all_signals if s.severity == "low"
         and s.signal_type not in POSITIVE_TYPES]
     briefing["positive_developments"] = [
-        _signal_card(s, hotspot_ids, tracked)
+        _signal_card(s, hotspot_ids)
         for s in all_signals if s.signal_type in POSITIVE_TYPES]
-    briefing["previous_followup"] = _followups(
-        tracking_rows, {s.signal_id for s in all_signals})
     briefing["resolved_since_last"] = resolved
     briefing["generated_at"] = _now()
     briefing["data_freshness"] = {
@@ -151,32 +113,54 @@ def build_briefing(merged: dict, results: list[SkillResult],
     return briefing
 
 
+def _iter_cards(briefing: dict):
+    """遍历简报内全部信号卡片及其所属Skill分区。"""
+    skill_names = {s.get("skill_id"): s for s in briefing.get("skill_sections", [])}
+    for card in briefing.get("priority_items", []):
+        yield card, skill_names.get(card.get("skill_id"), {})
+    for section in briefing.get("skill_sections", []):
+        for card in section.get("signals", []):
+            yield card, section
+    for card in briefing.get("watch_items", []):
+        yield card, skill_names.get(card.get("skill_id"), {})
+    for card in briefing.get("positive_developments", []):
+        yield card, skill_names.get(card.get("skill_id"), {})
+
+
+def build_signal_evidence(briefing: dict, signal_id: str) -> dict | None:
+    """单信号完整证据包（查证窗口数据源）。
+
+    找不到（不存在或不在当前用户数据范围内）返回 None——
+    两种情形对外都是404，不泄露范围外信号的存在性。
+    """
+    for card, section in _iter_cards(briefing):
+        if card.get("signal_id") != signal_id:
+            continue
+        return {
+            "signal": card,
+            "skill": {
+                "skill_id": section.get("skill_id") or card.get("skill_id"),
+                "skill_name": section.get("skill_name", ""),
+                "management_question": section.get("management_question", ""),
+                "config_version": section.get("config_version", ""),
+                "data_boundary": section.get("data_boundary", ""),
+                "data_readiness": section.get("data_readiness", {}),
+                "exclusions": section.get("exclusions", []),
+            },
+            "semester": briefing.get("semester", ""),
+            "generated_at": briefing.get("generated_at", ""),
+            "generation_method": briefing.get("generation_method", "rule_template"),
+            "data_freshness": (briefing.get("data_freshness") or {}).get(
+                card.get("skill_id"), ""),
+            "summary_stats": (briefing.get("stats") or {}).get(
+                card.get("skill_id"), {}),
+        }
+    return None
+
+
 # ---------------------------------------------------------------------------
 # 编排：运行Skills → 合并 → 指纹缓存 → diff → 装配 → 落库
 # ---------------------------------------------------------------------------
-
-def _embed_tracking(briefing: dict, tracking_rows: list[dict]) -> None:
-    """缓存命中时把最新追踪状态嵌回卡片与followup（追踪不进指纹，必须现取）。"""
-    tracked = {t["signal_id"]: t for t in tracking_rows}
-
-    def card_track(signal_id: str):
-        row = tracked.get(signal_id)
-        if not row:
-            return None
-        return {"status": row["status"], "assignee": row.get("assignee"),
-                "note": row.get("note"), "updated_at": row.get("updated_at")}
-
-    current_ids: set[str] = set()
-    for section in ("priority_items", "watch_items", "positive_developments"):
-        for item in briefing.get(section, []):
-            item["tracking"] = card_track(item["signal_id"])
-            current_ids.add(item["signal_id"])
-    for sec in briefing.get("skill_sections", []):
-        for item in sec.get("signals", []):
-            item["tracking"] = card_track(item["signal_id"])
-            current_ids.add(item["signal_id"])
-    briefing["previous_followup"] = _followups(tracking_rows, current_ids)
-
 
 def run_all_skills(user: dict, legacy: sqlite3.Connection,
                    v2: sqlite3.Connection, rw_conn: sqlite3.Connection,
@@ -205,11 +189,17 @@ def generate_briefing(user: dict, legacy: sqlite3.Connection,
         cached = store.latest_snapshot(rw_conn, skey)
         if cached and cached["fingerprint"] == fingerprint:
             briefing = cached["briefing"]
-            # 旧快照结构向后兼容：新增字段补默认值
+            # 旧快照结构向后兼容：新增字段补默认值，退役字段清理
             briefing.setdefault("llm_status", "disabled")
-            tracking_rows = store.list_tracking(
-                rw_conn, skey, statuses=("open", "in_progress", "done"))
-            _embed_tracking(briefing, tracking_rows)
+            briefing.pop("previous_followup", None)
+            # 旧快照卡片中可能嵌有已退役的追踪字段，统一清理
+            for section in ("priority_items", "watch_items",
+                            "positive_developments"):
+                for item in briefing.get(section, []):
+                    item.pop("tracking", None)
+            for sec in briefing.get("skill_sections", []):
+                for item in sec.get("signals", []):
+                    item.pop("tracking", None)
             briefing["cache_hit"] = True
             return briefing
 
@@ -219,9 +209,7 @@ def generate_briefing(user: dict, legacy: sqlite3.Connection,
         previous = cached["signals"]
     _, resolved = diff_signals(merged["all_signals"], previous)
 
-    tracking_rows = store.list_tracking(
-        rw_conn, skey, statuses=("open", "in_progress", "done"))
-    briefing = build_briefing(merged, results, resolved, tracking_rows,
+    briefing = build_briefing(merged, results, resolved,
                               semester, fingerprint)
     # 叙事增强（阶段4.2）：LLM 只改文字，失败回退模板版；增强结果随快照缓存
     try:

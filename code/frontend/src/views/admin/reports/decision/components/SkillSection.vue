@@ -22,8 +22,6 @@
     <el-empty v-if="!section.signals.length" description="本专题当前无异常信号" :image-size="60" />
     <div v-else class="signals">
       <ConclusionCard v-for="sig in section.signals" :key="sig.signal_id" :signal="sig"
-        @evidence="sig2 => emit('evidence', sig2)"
-        @track="(s, n, sig2) => emit('track', s, n, sig2)"
         @ask="sig2 => emit('ask', sig2)" />
     </div>
 
@@ -48,8 +46,6 @@ import ConclusionCard from './cards/ConclusionCard.vue'
 
 const props = defineProps<{ section: SkillSection }>()
 const emit = defineEmits<{
-  track: [status: string, note: string, signal: DecisionSignal]
-  evidence: [signal: DecisionSignal]
   ask: [signal: DecisionSignal]
 }>()
 const router = useRouter()

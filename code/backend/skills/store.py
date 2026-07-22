@@ -1,15 +1,16 @@
-"""决策简报快照存储与建议追踪（存于 legacy 库，与配置存储同库）。
+"""决策简报快照存储（存于 legacy 库，与配置存储同库）。
 
 - sys_ai_briefing_snapshot：每次生成的简报本体+信号摘要，按 scope_key 分链。
   指纹命中时直接复用，保证"同数据必同简报"。
-- sys_ai_action_tracking：管理者对信号动作的手动标记（一期为手动闭环）。
+- 建议追踪（sys_ai_action_tracking）已于产品终稿 R1 退役：AI决策不形成
+  办理闭环。历史数据保留在库中，应用不再读写；迁移脚本
+  code/scripts/migrate_decision_tracking_retire.py 负责标记。
 """
 from __future__ import annotations
 
 import json
 import sqlite3
 from datetime import datetime, timezone
-from typing import Any
 
 STORE_DDL = """
 CREATE TABLE IF NOT EXISTS sys_ai_briefing_snapshot (
@@ -25,28 +26,7 @@ CREATE TABLE IF NOT EXISTS sys_ai_briefing_snapshot (
 );
 CREATE INDEX IF NOT EXISTS idx_ai_briefing_snapshot_scope
 ON sys_ai_briefing_snapshot(scope_key, snapshot_id);
-CREATE TABLE IF NOT EXISTS sys_ai_action_tracking (
-    tracking_id INTEGER PRIMARY KEY AUTOINCREMENT,
-    signal_id TEXT NOT NULL UNIQUE,
-    skill_id TEXT NOT NULL,
-    entity_json TEXT NOT NULL DEFAULT '{}',
-    headline TEXT NOT NULL,
-    action_json TEXT NOT NULL DEFAULT '{}',
-    status TEXT NOT NULL DEFAULT 'open'
-        CHECK(status IN ('open','in_progress','done','dismissed')),
-    assignee TEXT,
-    note TEXT,
-    scope_key TEXT NOT NULL DEFAULT '',
-    created_by TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    updated_by TEXT,
-    updated_at TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_ai_action_tracking_status
-ON sys_ai_action_tracking(status, updated_at);
 """
-
-TRACKING_STATUSES = ("open", "in_progress", "done", "dismissed")
 
 
 def _now() -> str:
@@ -100,73 +80,125 @@ def save_snapshot(conn: sqlite3.Connection, scope_key: str, semester: str,
 
 
 # ---------------------------------------------------------------------------
-# 建议追踪
+# 建议追踪（已退役，R1）：函数保留为空实现会误导调用方，故直接移除。
+# 历史表 sys_ai_action_tracking 由迁移脚本标记退役，数据不删除。
 # ---------------------------------------------------------------------------
 
-def list_tracking(conn: sqlite3.Connection, scope_key: str,
-                  statuses: tuple[str, ...] | None = None,
-                  limit: int = 100) -> list[dict]:
-    ensure_tables(conn)
-    where = "WHERE (scope_key=? OR scope_key='')"
-    params: list[Any] = [scope_key]
-    if statuses:
-        where += f" AND status IN ({','.join('?' * len(statuses))})"
-        params.extend(statuses)
-    rows = conn.execute(f"""
-        SELECT tracking_id, signal_id, skill_id, entity_json, headline,
-               action_json, status, assignee, note, scope_key,
-               created_by, created_at, updated_by, updated_at
-        FROM sys_ai_action_tracking {where}
-        ORDER BY CASE status WHEN 'in_progress' THEN 0 WHEN 'open' THEN 1
-                 WHEN 'done' THEN 2 ELSE 3 END, updated_at DESC
-        LIMIT ?
-    """, tuple(params + [limit])).fetchall()
-    cols = ["tracking_id", "signal_id", "skill_id", "entity_json", "headline",
-            "action_json", "status", "assignee", "note", "scope_key",
-            "created_by", "created_at", "updated_by", "updated_at"]
-    out = []
-    for row in rows:
-        item = dict(zip(cols, row))
-        item["entity"] = json.loads(item.pop("entity_json") or "{}")
-        item["action"] = json.loads(item.pop("action_json") or "{}")
-        out.append(item)
-    return out
+ADVICE_DDL = """
+CREATE TABLE IF NOT EXISTS sys_ai_advice_session (
+    session_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL,
+    skill_id TEXT NOT NULL,
+    title TEXT NOT NULL DEFAULT '',
+    context_signal_id TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ai_advice_session_user
+ON sys_ai_advice_session(username, skill_id, updated_at);
+CREATE TABLE IF NOT EXISTS sys_ai_advice_message (
+    message_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id INTEGER NOT NULL,
+    role TEXT NOT NULL,
+    content TEXT NOT NULL,
+    payload_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ai_advice_message_session
+ON sys_ai_advice_message(session_id, message_id);
+"""
 
 
-def upsert_tracking(conn: sqlite3.Connection, signal: dict, status: str,
-                    username: str, scope_key: str,
-                    assignee: str = "", note: str = "") -> dict:
-    """按 signal_id 幂等创建/更新追踪记录。"""
-    if status not in TRACKING_STATUSES:
-        raise ValueError(f"状态必须为 {'/'.join(TRACKING_STATUSES)}")
-    ensure_tables(conn)
+def ensure_advice_tables(conn: sqlite3.Connection) -> None:
+    for statement in ADVICE_DDL.split(";"):
+        if statement.strip():
+            conn.execute(statement)
+
+
+def create_session(conn: sqlite3.Connection, username: str, skill_id: str,
+                   title: str = "", context_signal_id: str = "") -> int:
+    ensure_advice_tables(conn)
     now = _now()
-    existing = conn.execute(
-        "SELECT tracking_id, status FROM sys_ai_action_tracking WHERE signal_id=?",
-        (signal["signal_id"],)).fetchone()
-    if existing:
-        conn.execute("""
-            UPDATE sys_ai_action_tracking
-            SET status=?, assignee=?, note=?, updated_by=?, updated_at=?,
-                headline=?, action_json=?, entity_json=?
-            WHERE signal_id=?
-        """, (status, assignee.strip() or None, note.strip() or None,
-              username, now,
-              signal.get("headline", ""),
-              json.dumps(signal.get("action") or {}, ensure_ascii=False),
-              json.dumps(signal.get("entity") or {}, ensure_ascii=False),
-              signal["signal_id"]))
-        return {"trackingId": existing[0], "status": status, "updated": True}
     cur = conn.execute("""
-        INSERT INTO sys_ai_action_tracking(
-            signal_id, skill_id, entity_json, headline, action_json,
-            status, assignee, note, scope_key, created_by, created_at,
-            updated_by, updated_at
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
-    """, (signal["signal_id"], signal.get("skill_id", ""),
-          json.dumps(signal.get("entity") or {}, ensure_ascii=False),
-          signal.get("headline", ""),
-          json.dumps(signal.get("action") or {}, ensure_ascii=False),
-          status, assignee.strip() or None, note.strip() or None,
-          scope_key, username, now, username, now))
-    return {"trackingId": cur.lastrowid, "status": status, "updated": False}
+        INSERT INTO sys_ai_advice_session(
+            username, skill_id, title, context_signal_id, created_at, updated_at
+        ) VALUES (?,?,?,?,?,?)
+    """, (username, skill_id, title[:80], context_signal_id, now, now))
+    return cur.lastrowid
+
+
+def touch_session(conn: sqlite3.Connection, session_id: int,
+                  title: str = "") -> None:
+    if title:
+        conn.execute("""
+            UPDATE sys_ai_advice_session SET title=?, updated_at=?
+            WHERE session_id=?
+        """, (title[:80], _now(), session_id))
+    else:
+        conn.execute("""
+            UPDATE sys_ai_advice_session SET updated_at=? WHERE session_id=?
+        """, (_now(), session_id))
+
+
+def get_session(conn: sqlite3.Connection, session_id: int,
+                username: str) -> dict | None:
+    """按归属校验取会话：他人会话返回 None（对外表现为不存在）。"""
+    ensure_advice_tables(conn)
+    row = conn.execute("""
+        SELECT session_id, username, skill_id, title, context_signal_id,
+               created_at, updated_at
+        FROM sys_ai_advice_session WHERE session_id=?
+    """, (session_id,)).fetchone()
+    if not row or row[1] != username:
+        return None
+    cols = ["session_id", "username", "skill_id", "title",
+            "context_signal_id", "created_at", "updated_at"]
+    return dict(zip(cols, row))
+
+
+def list_sessions(conn: sqlite3.Connection, username: str,
+                  skill_id: str = "", limit: int = 50) -> list[dict]:
+    ensure_advice_tables(conn)
+    if skill_id:
+        rows = conn.execute("""
+            SELECT session_id, username, skill_id, title, context_signal_id,
+                   created_at, updated_at
+            FROM sys_ai_advice_session
+            WHERE username=? AND skill_id=?
+            ORDER BY updated_at DESC LIMIT ?
+        """, (username, skill_id, limit)).fetchall()
+    else:
+        rows = conn.execute("""
+            SELECT session_id, username, skill_id, title, context_signal_id,
+                   created_at, updated_at
+            FROM sys_ai_advice_session
+            WHERE username=? ORDER BY updated_at DESC LIMIT ?
+        """, (username, limit)).fetchall()
+    cols = ["session_id", "username", "skill_id", "title",
+            "context_signal_id", "created_at", "updated_at"]
+    return [dict(zip(cols, r)) for r in rows]
+
+
+def append_message(conn: sqlite3.Connection, session_id: int, role: str,
+                   content: str, payload: dict | None = None) -> int:
+    cur = conn.execute("""
+        INSERT INTO sys_ai_advice_message(session_id, role, content, payload_json, created_at)
+        VALUES (?,?,?,?,?)
+    """, (session_id, role, content,
+          json.dumps(payload or {}, ensure_ascii=False), _now()))
+    return cur.lastrowid
+
+
+def list_messages(conn: sqlite3.Connection, session_id: int) -> list[dict]:
+    rows = conn.execute("""
+        SELECT message_id, role, content, payload_json, created_at
+        FROM sys_ai_advice_message WHERE session_id=? ORDER BY message_id
+    """, (session_id,)).fetchall()
+    out = []
+    for mid, role, content, payload_json, created_at in rows:
+        out.append({
+            "message_id": mid, "role": role, "content": content,
+            "payload": json.loads(payload_json or "{}"),
+            "created_at": created_at,
+        })
+    return out

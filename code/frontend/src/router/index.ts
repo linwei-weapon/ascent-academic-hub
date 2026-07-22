@@ -10,6 +10,8 @@ export const router = createRouter({
   history: createWebHashHistory(),
   routes: [
     { path: '/login', component: () => import('@/views/Login.vue') },
+    // 查证窗口（R2）：独立只读证据页，不挂 Layout，专供新开浏览器窗口
+    { path: '/admin/verify/signal/:signalId', component: () => import('@/views/admin/verify/SignalEvidence.vue') },
     {
       path: '/admin', component: AdminLayout,
       children: [
@@ -59,6 +61,9 @@ export const router = createRouter({
         { path: 'reports/schedule-strategy', redirect: '/admin/operation/schedule-analysis' },
         { path: 'reports/decision', component: () => import('@/views/admin/reports/decision/index.vue') },
         { path: 'reports/decision/skills/:skillId', component: () => import('@/views/admin/reports/decision/workspaces/SkillWorkspace.vue') },
+        // 专家问策（R4）：专家库 + 三栏纯对话页
+        { path: 'reports/advice', component: () => import('@/views/admin/reports/advice/index.vue') },
+        { path: 'reports/advice/:skillId', component: () => import('@/views/admin/reports/advice/Chat.vue') },
         // 旧「管理要情」「决策研判」已废弃，统一收口到 Skill 链路决策简报
         { path: 'reports/management-briefing', redirect: '/admin/reports/decision' },
         { path: 'reports/decision-simulation', redirect: '/admin/reports/decision' },
@@ -101,6 +106,10 @@ function isAllowed(path: string): boolean {
   if (path.startsWith('/admin/student/')) return has('/admin/alert') || has('/admin/students/analysis')
   // 学生清单：拥有预警查看或学生学业分析菜单权限的角色可访问（5 类角色）
   if (path === '/admin/students/list') return has('/admin/alert') || has('/admin/students/analysis')
+  // 查证窗口：拥有 AI管理决策入口的角色可访问（服务端仍按信号数据范围二次鉴权）
+  if (path.startsWith('/admin/verify/')) return has('/admin/reports/decision')
+  // 专家问策：与 AI管理决策同一准入（服务端仍按当前身份与数据范围二次鉴权）
+  if (path.startsWith('/admin/reports/advice')) return has('/admin/reports/decision')
   return has(menuKeyOfPath(path))
 }
 

@@ -186,7 +186,6 @@ def empty_briefing() -> dict:
         "skill_sections": [],             # 按Skill分区的信号列表
         "watch_items": [],                # 观察项
         "positive_developments": [],      # 积极变化
-        "previous_followup": [],          # 上次建议追踪
         "generated_at": "",
         "data_freshness": {},
         "generation_method": "rule_template",   # rule_template | llm_enhanced
