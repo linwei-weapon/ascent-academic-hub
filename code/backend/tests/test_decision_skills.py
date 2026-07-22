@@ -162,7 +162,8 @@ class CourseQualityTest(unittest.TestCase):
         self.legacy = lv = mem_conn()
         self.v2 = mem_conn()
         lv.executescript("""
-        CREATE TABLE dim_student(student_id TEXT PRIMARY KEY, college_id TEXT);
+        CREATE TABLE dim_student(student_id TEXT PRIMARY KEY, college_id TEXT,
+            name TEXT);
         CREATE TABLE dim_course(course_id TEXT PRIMARY KEY, name TEXT, is_required INTEGER);
         CREATE TABLE fact_grade(student_id TEXT, course_id TEXT, semester_id TEXT,
             score REAL, gpa REAL, is_pass INTEGER, is_required INTEGER, credits REAL);
@@ -229,6 +230,19 @@ class CourseQualityTest(unittest.TestCase):
         ids = {s.entity.get("id") for s in r.signals}
         for base in ("BASE1", "BASE2", "BASE3", "BASE4"):
             self.assertNotIn(base, ids)
+
+    def test_failed_students_context(self):
+        """课程级信号携带本学期挂科学生行（明细下钻数据源）。"""
+        r = self._run()
+        p = [s for s in r.signals if s.signal_type == "course_persistent"][0]
+        self.assertEqual(p.context["failed_total"], 3)
+        self.assertEqual(len(p.context["failed_students"]), 3)
+        self.assertIn("score", p.context["failed_students"][0])
+        # 总览信号携带全量课程清单（门数类数字的明细下钻数据源）
+        ov = [s for s in r.signals if s.signal_type == "quality_overview"][0]
+        states = {c["state"] for c in ov.context["courses"]}
+        self.assertIn("persistent", states)
+        self.assertIn("spike", states)
 
 
 # ---------------------------------------------------------------------------

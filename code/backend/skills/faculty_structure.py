@@ -60,6 +60,30 @@ class FacultyStructureSkill(Skill):
         "max_course_signals": {"type": "int", "min": 1, "max": 20},
     }
 
+    # 明细下钻：门数类数字直达课程清单；课程级信号的修读人数/教学班数/
+    # 职称结构等是聚合值，快照内无行级名单，不下钻。
+    _COURSE_LIST_COLUMNS = [
+        {"key": "course_id", "label": "课程号"},
+        {"key": "course_name", "label": "课程名称"},
+        {"key": "organization_id", "label": "开课单位"},
+        {"key": "enrolled", "label": "修读人数"},
+        {"key": "lesson_count", "label": "教学班数"},
+    ]
+    detail_specs = {
+        "single_teacher_overview": {
+            "大规模单人课程": {
+                "context_key": "high_courses",
+                "title": "大规模单人依赖课程清单",
+                "columns": _COURSE_LIST_COLUMNS,
+            },
+            "中等规模单人课程": {
+                "context_key": "mid_courses",
+                "title": "中等规模单人依赖课程清单",
+                "columns": _COURSE_LIST_COLUMNS,
+            },
+        },
+    }
+
     # ---------------------------------------------------------------
     def run(self, ctx: SkillContext) -> SkillResult:
         cfg = ctx.config

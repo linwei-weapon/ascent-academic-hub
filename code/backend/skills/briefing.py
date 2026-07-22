@@ -18,7 +18,7 @@ POSITIVE_TYPES = {"improving"}
 
 # 快照结构版本：卡片/context 结构发生不兼容变化时递增，
 # 旧快照自动失效重建，避免升级后长期消费旧结构缓存。
-BRIEFING_SCHEMA_VERSION = 2
+BRIEFING_SCHEMA_VERSION = 3
 
 
 def _now() -> str:

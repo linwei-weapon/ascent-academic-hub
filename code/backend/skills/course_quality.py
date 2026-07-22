@@ -69,6 +69,89 @@ class CourseQualitySkill(Skill):
         "max_course_signals": {"type": "int", "min": 2, "max": 15},
     }
 
+    # 明细下钻：门数类数字直达课程清单，"未通过人数"直达本学期挂科学生清单；
+    # "全校基线/修读人数/课程属性/状态"等聚合或判定值不下钻。
+    _OVERVIEW_COURSE_COLUMNS = [
+        {"key": "course_id", "label": "课程号"},
+        {"key": "course_name", "label": "课程名称"},
+        {"key": "rate_pct", "label": "本学期未通过率(%)"},
+        {"key": "fails", "label": "未通过人数"},
+        {"key": "total", "label": "修读人数"},
+    ]
+    detail_specs = {
+        "quality_overview": {
+            "持续偏高": {
+                "context_key": "courses",
+                "title": "持续偏高课程清单（建议立项复盘）",
+                "columns": _OVERVIEW_COURSE_COLUMNS,
+                "filter": {"key": "state", "equals": "persistent"},
+            },
+            "显著恶化": {
+                "context_key": "courses",
+                "title": "显著恶化课程清单（建议原因核查）",
+                "columns": _OVERVIEW_COURSE_COLUMNS,
+                "filter": {"key": "state", "equals": "spike"},
+            },
+            "高影响面": {
+                "context_key": "courses",
+                "title": "高影响面课程清单（建议学习支持）",
+                "columns": _OVERVIEW_COURSE_COLUMNS,
+                "filter": {"key": "state", "equals": "high_impact"},
+            },
+        },
+        "course_persistent": {
+            "未通过人数": {
+                "context_key": "failed_students",
+                "title": "本学期未通过学生清单",
+                "columns": [
+                    {"key": "student_id", "label": "学号"},
+                    {"key": "student_name", "label": "姓名"},
+                    {"key": "college_id", "label": "学院"},
+                    {"key": "score", "label": "分数"},
+                ],
+                "total_key": "failed_total",
+            },
+        },
+        "course_spike": {
+            "未通过人数": {
+                "context_key": "failed_students",
+                "title": "本学期未通过学生清单",
+                "columns": [
+                    {"key": "student_id", "label": "学号"},
+                    {"key": "student_name", "label": "姓名"},
+                    {"key": "college_id", "label": "学院"},
+                    {"key": "score", "label": "分数"},
+                ],
+                "total_key": "failed_total",
+            },
+        },
+        "course_high_impact": {
+            "未通过人数": {
+                "context_key": "failed_students",
+                "title": "本学期未通过学生清单",
+                "columns": [
+                    {"key": "student_id", "label": "学号"},
+                    {"key": "student_name", "label": "姓名"},
+                    {"key": "college_id", "label": "学院"},
+                    {"key": "score", "label": "分数"},
+                ],
+                "total_key": "failed_total",
+            },
+        },
+        "improving": {
+            "改善课程": {
+                "context_key": "courses",
+                "title": "持续改善课程清单",
+                "columns": [
+                    {"key": "course_id", "label": "课程号"},
+                    {"key": "course_name", "label": "课程名称"},
+                    {"key": "from", "label": "改善前未通过率(%)"},
+                    {"key": "to", "label": "本学期未通过率(%)"},
+                ],
+            },
+        },
+    }
+
     # ---------------------------------------------------------------
     def run(self, ctx: SkillContext) -> SkillResult:
         cfg = ctx.config
@@ -85,7 +168,8 @@ class CourseQualitySkill(Skill):
 
         signals: list[Signal] = []
         signals += self._overview_signal(judged, baseline, ctx.semester)
-        signals += self._course_signals(legacy, judged, cfg, ctx.semester)
+        signals += self._course_signals(legacy, judged, cfg, ctx.semester,
+                                        scope_sql, scope_params)
         signals += self._positive_signal(improving)
 
         stats = {
@@ -276,14 +360,27 @@ class CourseQualitySkill(Skill):
                 "持续偏高的课程有哪些共同特征？",
                 "显著恶化的课程分数段怎么分布？",
             ],
+            # 门数类数字的课程清单（明细下钻数据源，不进信号指纹）
+            context={
+                "courses": [
+                    {"course_id": j["course_id"], "course_name": j["course_name"],
+                     "state": j["state"],
+                     "rate_pct": round(j["cur_rate"] * 100, 1),
+                     "fails": j["cur_fails"], "total": j["cur_total"]}
+                    for j in judged
+                ],
+            },
             data_boundary=DATA_BOUNDARY,
         )]
 
-    def _course_signals(self, legacy, judged, cfg, semester) -> list[Signal]:
+    def _course_signals(self, legacy, judged, cfg, semester,
+                        scope_sql="", scope_params=()) -> list[Signal]:
         signals = []
         for j in judged[: int(cfg["max_course_signals"])]:
             band = self._score_band(legacy, j["course_id"], semester)
             prereq = self._prereq_signal(legacy, j["course_name"])
+            failed_rows, failed_total = self._failed_students(
+                legacy, j["course_id"], semester, scope_sql, scope_params)
             state_label = {"persistent": "持续偏高", "spike": "显著恶化",
                            "high_impact": "高影响面"}[j["state"]]
             action_map = {
@@ -341,7 +438,9 @@ class CourseQualitySkill(Skill):
                     "freshness": "按学期成绩实时聚合",
                 },
                 context={"history": j["history"], "score_band": band,
-                         "prereq": prereq},
+                         "prereq": prereq,
+                         "failed_students": failed_rows,
+                         "failed_total": failed_total},
                 suggested_questions=[
                     f"{j['course_name']}的挂科学生先修课成绩如何？",
                     "这门课历学期的未通过率变化？",
@@ -350,6 +449,21 @@ class CourseQualitySkill(Skill):
                 data_boundary=DATA_BOUNDARY,
             ))
         return signals
+
+    def _failed_students(self, legacy, course_id, semester,
+                         scope_sql, scope_params, cap=200):
+        """本学期该课未通过学生行（明细下钻数据源；沿用权限范围过滤）。"""
+        rows = dbm.query(legacy, f"""
+            SELECT g.student_id, COALESCE(s.name, '') student_name,
+                   COALESCE(s.college_id, '') college_id, g.score
+            FROM fact_grade g
+            LEFT JOIN dim_student s ON s.student_id = g.student_id
+            WHERE g.course_id=? AND g.semester_id=?
+              AND g.is_pass=0 AND g.score IS NOT NULL
+              {scope_sql}
+            ORDER BY g.score ASC
+        """, tuple([course_id, semester] + list(scope_params)))
+        return rows[:cap], len(rows)
 
     def _score_band(self, legacy, course_id, semester):
         """本学期挂科分数段（样本<5时不输出，避免小样本误导）。"""
