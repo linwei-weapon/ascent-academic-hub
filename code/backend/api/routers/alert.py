@@ -107,7 +107,7 @@ def alerts(level: Optional[str] = None, type: Optional[str] = None,
     lst = []
     for r in dbm.query(conn, f"""
         SELECT a.student_id sid, st.name, c.name college, cl.name cls,
-               a.level, a.type, a.trigger_detail detail, a.status, a.created_at time,
+               a.rule_id, a.level, a.type, a.trigger_detail detail, a.status, a.created_at time,
                e.event_id, e.workflow_status,
                (SELECT aa.username FROM alert_assignee aa WHERE aa.event_id=e.event_id
                 AND aa.is_primary=1 LIMIT 1) assignee,
@@ -120,7 +120,8 @@ def alerts(level: Optional[str] = None, type: Optional[str] = None,
             p):
         lst.append({
             "sid": r["sid"], "name": r["name"], "college": r["college"] or "—",
-            "class": r["cls"] or "—", "level": r["level"], "type": r["type"],
+            "class": r["cls"] or "—", "ruleId": r["rule_id"],
+            "level": r["level"], "type": r["type"],
             "detail": r["detail"],
             "status": WORKFLOW_LABELS.get(r["workflow_status"], r["status"]),
             "workflowStatus": r["workflow_status"], "eventId": r["event_id"],

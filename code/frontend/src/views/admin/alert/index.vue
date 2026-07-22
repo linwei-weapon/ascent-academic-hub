@@ -207,6 +207,8 @@
           <div v-else class="sa-faint" style="font-size:12px">无历史记录</div>
         </div>
 
+        <TrajectoryCard :rule-id="selectedAlertRow?.ruleId || workflow.ruleId" :level="selectedAlertRow?.level || workflow.level" />
+
         <div class="sa-card" style="margin-bottom:12px" v-if="student.interventionHistory?.length">
           <div class="sa-card-title">已记录干预过程 <span class="extra">同步呈现在学生完整档案</span></div>
           <div v-for="item in student.interventionHistory" :key="item.event_id + '-' + item.created_at" class="intervention-item">
@@ -288,6 +290,7 @@ import { getAlertSummaryAIInsight, getStudentAIInsight } from '@/utils/ai';
 import KpiLabel from '@/components/KpiLabel.vue';
 import EChart from '@/components/EChart.vue';
 import AIInsightDrawer from '@/components/AIInsightDrawer.vue';
+import TrajectoryCard from './TrajectoryCard.vue';
 import { exportCsv } from '@/utils/export';
 import { authStore } from '@/store/auth';
 import { useRoute } from 'vue-router';

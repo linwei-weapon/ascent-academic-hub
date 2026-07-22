@@ -14,9 +14,9 @@ from .envelope import ApiError, fail, ok
 from . import db as dbm, settings
 from .security import decode_token
 from .security_governance import write_audit
-from .routers import (auth, dashboard, alert, curriculum, reports,
-                      operation, faculty, settings as settings_router, students,
-                      admin_rbac, meta, teacher, ai, ai_decision,
+from .routers import (auth, dashboard, alert, alert_trajectory, curriculum,
+                      reports, operation, faculty, settings as settings_router,
+                      students, admin_rbac, meta, teacher, ai, ai_decision,
                       system_management, data_collection)
 from .routers import v2
 
@@ -120,6 +120,7 @@ def health():
 app.include_router(auth.router)
 app.include_router(dashboard.router)
 app.include_router(alert.router)
+app.include_router(alert_trajectory.router)  # M5：同类预警后续轨迹分布
 app.include_router(curriculum.router)
 app.include_router(reports.router)
 app.include_router(operation.router)

@@ -133,9 +133,12 @@ class AlertPrioritySkill(Skill):
         stale = [s for s in scored
                  if s["level"] == "严重" and s["status"] == "new"
                  and s["days_open"] >= int(cfg["stale_days"])]
+        trajectory = self._trajectory_summary(
+            legacy, ctx.v2, scope_sql, scope_params,
+            scored[:int(cfg["top_n"])])
 
         signals: list[Signal] = []
-        signals += self._queue_signal(scored, cfg, len(alerts))
+        signals += self._queue_signal(scored, cfg, len(alerts), trajectory)
         signals += self._stale_signal(stale, cfg)
 
         stats = {
@@ -251,7 +254,53 @@ class AlertPrioritySkill(Skill):
         return scored
 
     # ---------------------------------------------------------------
-    def _queue_signal(self, scored, cfg, total_active) -> list[Signal]:
+    def _trajectory_summary(self, legacy, v2, scope_sql, scope_params, queue):
+        """M5：队列涉及桶的同类轨迹分布摘要（历史统计，不构成个体预测）。
+
+        只读既有表，失败（如演示夹具缺 rule_id/semester_id 列）时降级为空，
+        不影响优先级评分主流程。
+        """
+        if not queue:
+            return []
+        try:
+            from ..api.routers.alert_trajectory import (
+                DISCLAIMER, compute_trajectory)
+            ids = [a["alert_id"] for a in queue]
+            rows = dbm.query(legacy, f"""
+                SELECT alert_id, rule_id FROM fact_alert
+                WHERE alert_id IN ({','.join('?' * len(ids))})""", tuple(ids))
+            rule_by_alert = {r["alert_id"]: r["rule_id"] for r in rows}
+            pairs = sorted({
+                (rule_by_alert.get(a["alert_id"]), a["level"]) for a in queue
+                if rule_by_alert.get(a["alert_id"])})
+            out = []
+            for rid, lv in pairs[:4]:
+                data = compute_trajectory(
+                    legacy, v2, scope_sql, scope_params, rule_id=rid, level=lv)
+                for b in data["buckets"]:
+                    item = {
+                        "ruleId": b["ruleId"], "ruleName": b["ruleName"],
+                        "level": b["level"], "sampleSize": b["sampleSize"],
+                        "lowConfidence": b["lowConfidence"],
+                        "resolvedRatio": b["resolved"]["ratio"],
+                        "pendingCount": b["post"]["pending"],
+                        "disclaimer": DISCLAIMER,
+                    }
+                    mean = b["post"]["gpaDelta"]["mean"]
+                    if mean is not None:
+                        item["gpaDeltaMean"] = mean
+                    item["text"] = (
+                        f"{b['ruleName']}（{b['ruleId']}×{b['level']}）"
+                        f"同类预警历史样本{b['sampleSize']}条，"
+                        f"事件解除/关闭占比{b['resolved']['ratio']}"
+                        f"{'，样本量不足10条、低置信' if b['lowConfidence'] else ''}"
+                        f"（{DISCLAIMER}）")
+                    out.append(item)
+            return out
+        except Exception:
+            return []
+
+    def _queue_signal(self, scored, cfg, total_active, trajectory=None) -> list[Signal]:
         top_n = int(cfg["top_n"])
         queue = scored[:top_n]
         if not queue:
@@ -286,8 +335,11 @@ class AlertPrioritySkill(Skill):
                 "condition": "is_active=1，按综合评分降序",
                 "verify_route": VERIFY_ROUTE,
                 "freshness": "预警实时；成绩截至当前学期",
+                # M5：同类轨迹分布摘要（只加不改既有键；历史统计，不构成个体预测）
+                **({"trajectory": trajectory} if trajectory else {}),
             },
             context={
+                **({"trajectory": trajectory} if trajectory else {}),
                 "queue": [{
                     "rank": i + 1,
                     "student_id": q["student_id"],
