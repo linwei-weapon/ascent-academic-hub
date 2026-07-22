@@ -75,17 +75,11 @@
         <span>开课保障关注 TOP10 <span class="extra">按大班额、单一教师多班覆盖和单班集中供给排序，不是课程质量排名</span></span>
         <el-button size="small" type="primary" plain @click="openOfferingDrawer">查看全部 {{ v2Offering.total }} 门</el-button>
       </div>
-      <el-table :data="decisionOfferings.slice(0,10)" size="small" stripe>
-        <el-table-column prop="course_id" label="课程代码" width="140" />
-        <el-table-column prop="course_name" label="课程名称" min-width="190" />
-        <el-table-column prop="lesson_count" label="教学班" width="85" align="right" />
-        <el-table-column prop="teacher_count" label="教师数" width="80" align="right" />
-        <el-table-column prop="enrolled" label="选课人次" width="90" align="right" />
-        <el-table-column prop="avgClassSize" label="平均班额" width="90" align="right" />
-        <el-table-column label="管理关注" width="95"><template #default="{row}"><el-tag size="small" :type="offeringAttentionLevel(row).type">{{ offeringAttentionLevel(row).label }}</el-tag></template></el-table-column>
-        <el-table-column label="优先核查原因" min-width="250"><template #default="{row}"><span v-if="row.attention.length">{{ row.attention.join('；') }}</span><span v-else class="sa-faint">规模较大，建议常规核查</span></template></el-table-column>
-        <el-table-column label="操作" width="88"><template #default="{row}"><el-button link type="primary" @click.stop="openOfferingReview(row)">核查</el-button></template></el-table-column>
-      </el-table>
+      <DataTable :columns="offeringTopCols" :data="decisionOfferings.slice(0,10)" storage-key="operation:courses-top10" size="small" stripe>
+        <template #col-attention="{row}"><el-tag size="small" :type="offeringAttentionLevel(row).type">{{ offeringAttentionLevel(row).label }}</el-tag></template>
+        <template #col-reasons="{row}"><span v-if="row.attention.length">{{ row.attention.join('；') }}</span><span v-else class="sa-faint">规模较大，建议常规核查</span></template>
+        <template #col-actions="{row}"><el-button link type="primary" @click.stop="openOfferingReview(row)">核查</el-button></template>
+      </DataTable>
     </div>
 
     <div class="sa-kpi-row">
@@ -194,6 +188,7 @@ import { getFilterMeta, type SemesterOpt } from '@/utils/meta'
 import { ElMessageBox } from 'element-plus'
 import { getV2TeachingSemester } from '@/utils/v2meta'
 import AIInsightDrawer from '@/components/AIInsightDrawer.vue'
+import DataTable, { type DataTableColumn } from '@/components/DataTable.vue'
 import { getOperationCourseAIInsight } from '@/utils/ai'
 const router = useRouter()
 const route = useRoute()
@@ -263,6 +258,19 @@ const decisionOfferings = computed(() => (v2Offering.items || [])
   .map(offeringWithAttention)
   .sort((a:any,b:any) => b.attention.length-a.attention.length || b.enrolled-a.enrolled)
   .map((row:any,index:number) => ({ ...row, aiPriority:index < 3 })))
+
+// 开课保障关注 TOP10 表列定义（M6 DataTable）
+const offeringTopCols: DataTableColumn[] = [
+  { key: 'course_id', label: '课程代码', width: 140 },
+  { key: 'course_name', label: '课程名称', minWidth: 190 },
+  { key: 'lesson_count', label: '教学班', width: 85, align: 'right' },
+  { key: 'teacher_count', label: '教师数', width: 80, align: 'right' },
+  { key: 'enrolled', label: '选课人次', width: 90, align: 'right' },
+  { key: 'avgClassSize', label: '平均班额', width: 90, align: 'right' },
+  { key: 'attention', label: '管理关注', width: 95 },
+  { key: 'reasons', label: '优先核查原因', minWidth: 250 },
+  { key: 'actions', label: '操作', width: 88 },
+]
 const realKpis = computed(() => {
   const lessons = v2Offering.summary?.lesson_count || 0
   const enrolled = v2Offering.summary?.enrolled || 0

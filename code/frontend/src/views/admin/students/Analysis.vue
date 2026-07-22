@@ -126,23 +126,24 @@
 
     <div class="sa-card">
       <div class="sa-card-title">挂科集中课程 TOP10 <KpiLabel label="" formula="挂科率=不及格人次÷总修读人次，仅统计修读≥30人次课程；首次/补考/重修三分层通过率见「课程质量与教学运行」专题" /></div>
-      <el-table v-if="data.failCourses.length" :data="data.failCourses" size="small" @row-click="goCourse" row-class-name="row-clickable">
-        <el-table-column prop="name" label="课程" width="160"><template #default="{row}"><span class="link">{{ row.name }}</span></template></el-table-column>
-        <el-table-column prop="dept" label="开课学院" width="140" />
-        <el-table-column label="挂科率" min-width="160"><template #default="{row}">
+      <DataTable v-if="data.failCourses.length" :columns="failCourseCols" :data="data.failCourses" storage-key="students:analysis-fail-courses" size="small" @row-click="goCourse" row-class-name="row-clickable">
+        <template #col-name="{row}"><span class="link">{{ row.name }}</span></template>
+        <template #col-failRate="{row}">
           <div style="display:flex;align-items:center;gap:8px">
             <el-progress :percentage="Math.min(row.failRate*5,100)" :show-text="false" :stroke-width="9" :color="row.failRate>15?'#E11D48':'#D97706'" style="flex:1" />
             <span class="tnum" :style="{color:row.failRate>15?'#E11D48':'#D97706',fontWeight:600,minWidth:'44px',textAlign:'right'}">{{ row.failRate }}%</span>
           </div>
-        </template></el-table-column>
-        <el-table-column prop="failCount" label="不及格" width="76" align="right" />
-        <el-table-column prop="totalCount" label="修读人数" width="86" align="right" />
-        <el-table-column prop="avgScore" label="平均分" width="76" align="right"><template #default="{row}"><b class="tnum">{{ row.avgScore }}</b></template></el-table-column>
-        <el-table-column width="110" align="right"><template #header><span>首次通过率 <KpiLabel label="" formula="V1 agg_course_term 口径：按学生-课程首次修读记录计算" /></span></template><template #default="{row}"><span class="tnum" :style="{color:(row.firstPassRate||0)>70?'#0D9488':'#E11D48'}">{{ row.firstPassRate ?? '—' }}{{ row.firstPassRate != null ? '%' : '' }}</span></template></el-table-column>
-        <el-table-column width="110" align="right"><template #header><span>补考通过率 <KpiLabel label="" formula="V2 grade_attempt attempt_type=makeup，全学期累计加权" /></span></template><template #default="{row}"><span class="tnum">{{ row.makeupPassRate ?? '—' }}{{ row.makeupPassRate != null ? '%' : '' }}</span></template></el-table-column>
-        <el-table-column width="110" align="right"><template #header><span>重修通过率 <KpiLabel label="" formula="V2 grade_attempt attempt_type=retake，全学期累计加权" /></span></template><template #default="{row}"><span class="tnum">{{ row.retakePassRate ?? '—' }}{{ row.retakePassRate != null ? '%' : '' }}</span></template></el-table-column>
-        <el-table-column width="130" align="right"><template #header><span>最终通过率（旧口径） <KpiLabel label="" formula="deprecated：V1 agg_course_term 按学生-课程末次记录计算，已由首次/补考/重修三分层口径替代" /></span></template><template #default="{row}"><span class="tnum" style="color:#94A3B8">{{ row.finalPassRate ?? '—' }}{{ row.finalPassRate != null ? '%' : '' }}</span></template></el-table-column>
-      </el-table>
+        </template>
+        <template #col-avgScore="{row}"><b class="tnum">{{ row.avgScore }}</b></template>
+        <template #header-firstPassRate><span>首次通过率 <KpiLabel label="" formula="V1 agg_course_term 口径：按学生-课程首次修读记录计算" /></span></template>
+        <template #col-firstPassRate="{row}"><span class="tnum" :style="{color:(row.firstPassRate||0)>70?'#0D9488':'#E11D48'}">{{ row.firstPassRate ?? '—' }}{{ row.firstPassRate != null ? '%' : '' }}</span></template>
+        <template #header-makeupPassRate><span>补考通过率 <KpiLabel label="" formula="V2 grade_attempt attempt_type=makeup，全学期累计加权" /></span></template>
+        <template #col-makeupPassRate="{row}"><span class="tnum">{{ row.makeupPassRate ?? '—' }}{{ row.makeupPassRate != null ? '%' : '' }}</span></template>
+        <template #header-retakePassRate><span>重修通过率 <KpiLabel label="" formula="V2 grade_attempt attempt_type=retake，全学期累计加权" /></span></template>
+        <template #col-retakePassRate="{row}"><span class="tnum">{{ row.retakePassRate ?? '—' }}{{ row.retakePassRate != null ? '%' : '' }}</span></template>
+        <template #header-finalPassRate><span>最终通过率（旧口径） <KpiLabel label="" formula="deprecated：V1 agg_course_term 按学生-课程末次记录计算，已由首次/补考/重修三分层口径替代" /></span></template>
+        <template #col-finalPassRate="{row}"><span class="tnum" style="color:#94A3B8">{{ row.finalPassRate ?? '—' }}{{ row.finalPassRate != null ? '%' : '' }}</span></template>
+      </DataTable>
       <div v-else class="sa-faint" style="font-size:12px">暂无数据</div>
     </div>
   </div>
@@ -156,6 +157,7 @@ import KpiLabel from '@/components/KpiLabel.vue'
 import KpiCard from '@/components/KpiCard.vue'
 import EChart from '@/components/EChart.vue'
 import BusinessPageContext from '@/components/BusinessPageContext.vue'
+import DataTable, { type DataTableColumn } from '@/components/DataTable.vue'
 import { useBusinessPageTitle } from '@/utils/businessPage'
 import { getFilterMeta, type SemesterOpt, type MajorOpt, type ClassOpt } from '@/utils/meta'
 import { authStore } from '@/store/auth'
@@ -202,6 +204,20 @@ const data = reactive<any>({
   migration: { fromSemester: null, toSemester: null, improved: 0, stable: 0, declined: 0, mixed: 0, insufficient: 0, compared: 0, avgDelta: null, avgFailDelta: null, threshold: 0.3, failThreshold: 1 },
 })
 function signed(value: number | null) { return value == null ? '—' : `${value > 0 ? '+' : ''}${value}` }
+
+// 挂科集中课程 TOP10 表列定义（M6 DataTable）
+const failCourseCols: DataTableColumn[] = [
+  { key: 'name', label: '课程', width: 160 },
+  { key: 'dept', label: '开课学院', width: 140 },
+  { key: 'failRate', label: '挂科率', minWidth: 160 },
+  { key: 'failCount', label: '不及格', width: 76, align: 'right' },
+  { key: 'totalCount', label: '修读人数', width: 86, align: 'right' },
+  { key: 'avgScore', label: '平均分', width: 76, align: 'right' },
+  { key: 'firstPassRate', label: '首次通过率', width: 110, align: 'right' },
+  { key: 'makeupPassRate', label: '补考通过率', width: 110, align: 'right' },
+  { key: 'retakePassRate', label: '重修通过率', width: 110, align: 'right' },
+  { key: 'finalPassRate', label: '最终通过率（旧口径）', width: 130, align: 'right' },
+]
 async function load() {
   pageLoading.value = true
   loadError.value = ''

@@ -106,20 +106,16 @@
             <span>预警列表<span class="sa-faint" style="font-weight:400;font-size:12px;margin-left:8px">共 {{ filteredList.length }} 条</span></span>
             <el-button size="small" @click="exportList">导出 CSV</el-button>
           </div>
-          <el-table :data="pagedList" size="small" @row-click="showStudent" row-class-name="row-clickable" :class="{'is-filtered':hasFilters}">
-            <el-table-column prop="name" label="姓名" width="70"><template #default="{row}"><span class="link">{{ row.name }}</span></template></el-table-column>
-            <el-table-column prop="sid" label="学号" width="105" />
-            <el-table-column prop="college" label="学院" width="130" />
-            <el-table-column prop="class" label="班级" width="130" />
-            <el-table-column prop="level" label="等级" width="64"><template #default="{row}"><el-tag :type="tagType(row.level)" size="small">{{ row.level }}</el-tag></template></el-table-column>
-            <el-table-column prop="type" label="类型" width="120" />
-            <el-table-column prop="detail" label="触发数据链" min-width="180"><template #default="{row}"><span style="font-size:12px">{{ row.detail }}</span></template></el-table-column>
-            <el-table-column prop="status" label="状态" width="76"><template #default="{row}"><el-tag :type="statusType(row.status)" size="small">{{ row.status }}</el-tag></template></el-table-column>
-            <el-table-column prop="failSummary" label="挂科溯源摘要" width="160"><template #default="{row}"><el-tooltip :content="row.failSummary || ''" placement="top" :disabled="!row.failSummary" :show-after="300"><span class="fail-summary-cell">{{ row.failSummary || '-' }}</span></el-tooltip></template></el-table-column>
-            <el-table-column label="管理关注" width="90" fixed="right"><template #default="{row}"><el-tag v-if="isAIFocus(row)" type="danger" effect="plain" size="small">AI重点</el-tag><span v-else class="normal-view">常规查看</span></template></el-table-column>
-            <el-table-column prop="time" label="时间" width="92" />
-          </el-table>
-          <el-pagination v-model:current-page="page" :page-size="15" :total="filteredList.length" layout="prev,next,total" size="small" style="margin-top:12px;justify-content:flex-end" />
+          <DataTable :columns="alertCols" :data="filteredList" storage-key="alert:list" size="small"
+            pagination :default-page-size="15" :page-sizes="[15, 30, 50, 100]"
+            @row-click="showStudent" row-class-name="row-clickable" :class="{'is-filtered':hasFilters}">
+            <template #col-name="{row}"><span class="link">{{ row.name }}</span></template>
+            <template #col-level="{row}"><el-tag :type="tagType(row.level)" size="small">{{ row.level }}</el-tag></template>
+            <template #col-detail="{row}"><span style="font-size:12px">{{ row.detail }}</span></template>
+            <template #col-status="{row}"><el-tag :type="statusType(row.status)" size="small">{{ row.status }}</el-tag></template>
+            <template #col-failSummary="{row}"><el-tooltip :content="row.failSummary || ''" placement="top" :disabled="!row.failSummary" :show-after="300"><span class="fail-summary-cell">{{ row.failSummary || '-' }}</span></el-tooltip></template>
+            <template #col-attention="{row}"><el-tag v-if="isAIFocus(row)" type="danger" effect="plain" size="small">AI重点</el-tag><span v-else class="normal-view">常规查看</span></template>
+          </DataTable>
         </div>
       </el-col>
     </el-row>
@@ -290,6 +286,7 @@ import { getAlertSummaryAIInsight, getStudentAIInsight } from '@/utils/ai';
 import KpiLabel from '@/components/KpiLabel.vue';
 import EChart from '@/components/EChart.vue';
 import AIInsightDrawer from '@/components/AIInsightDrawer.vue';
+import DataTable, { type DataTableColumn } from '@/components/DataTable.vue';
 import TrajectoryCard from './TrajectoryCard.vue';
 import { exportCsv } from '@/utils/export';
 import { authStore } from '@/store/auth';
@@ -302,7 +299,7 @@ const drawerVisible = ref(false); const student = ref({} as any);
 const selectedAlertRow = ref<any>(null);
 const workflow = ref({} as any); const followupContent = ref(''); const nextStatus = ref('');
 const savingWorkflow = ref(false); const currentEventId = ref<number | null>(null);
-const page = ref(1); const fCollege = ref(''); const fType = ref(''); const fLevel = ref(''); const fStatus = ref('');
+const fCollege = ref(''); const fType = ref(''); const fLevel = ref(''); const fStatus = ref('');
 const activeFilter = ref('');
 const aiDrawerVisible = ref(false); const aiLoading = ref(false); const aiInsight = ref<any>(null);
 const pageLoading = ref(true);
@@ -318,6 +315,21 @@ const workflowStatuses = [
   { value: 'notified', label: '已通知' }, { value: 'contacted', label: '已联系' },
   { value: 'supporting', label: '帮扶中' }, { value: 'review_pending', label: '待复核' },
   { value: 'resolved', label: '已解决' }, { value: 'closed', label: '已关闭' },
+];
+
+// 预警列表列定义（M6 DataTable）
+const alertCols: DataTableColumn[] = [
+  { key: 'name', label: '姓名', width: 70 },
+  { key: 'sid', label: '学号', width: 105 },
+  { key: 'college', label: '学院', width: 130 },
+  { key: 'class', label: '班级', width: 130 },
+  { key: 'level', label: '等级', width: 64 },
+  { key: 'type', label: '类型', width: 120 },
+  { key: 'detail', label: '触发数据链', minWidth: 180 },
+  { key: 'status', label: '状态', width: 76 },
+  { key: 'failSummary', label: '挂科溯源摘要', width: 160 },
+  { key: 'attention', label: '管理关注', width: 90, fixed: 'right' },
+  { key: 'time', label: '时间', width: 92 },
 ];
 
 const data = reactive({
@@ -396,8 +408,6 @@ const activeFilterText = computed(() => {
   if (activeFilter.value === 'inbox') parts.unshift('范围=我的待办');
   return parts.join('、') || '全部预警';
 });
-const pagedList = computed(() => filteredList.value.slice((page.value - 1) * 15, page.value * 15));
-
 function fmtMonth(m: string) { const p = String(m).split('-'); return p.length > 1 ? `${+p[1]}月` : m; }
 function tagType(level: string) { return level === '严重' ? 'danger' : level === '警告' ? 'warning' : 'info'; }
 function statusType(s: string) { return s === '已解决' ? 'success' : s === '未处理' ? 'danger' : s === '已约谈' ? 'warning' : 'info'; }
@@ -456,18 +466,16 @@ function toggleFilter(a: any) {
     if (a.key === 'resolved') { fStatus.value = '已解决'; fLevel.value = ''; }
     else { fLevel.value = a.label; fStatus.value = ''; }
   }
-  page.value = 1;
+  // M6：列表分页内置在 DataTable 中，筛选导致 data 变化时自动回到第 1 页
 }
 function toggleInbox() {
   const selected = activeFilter.value === 'inbox';
   activeFilter.value = selected ? '' : 'inbox';
   fLevel.value = '';
   fStatus.value = '';
-  page.value = 1;
 }
 function clearFilters() {
   activeFilter.value = ''; fLevel.value = ''; fStatus.value = ''; fCollege.value = ''; fType.value = '';
-  page.value = 1;
 }
 
 watch([fCollege, fType, fLevel, fStatus], () => {
@@ -475,7 +483,6 @@ watch([fCollege, fType, fLevel, fStatus], () => {
   const selected = levels.find((item) => item.key === activeFilter.value);
   if (selected && selected.key === 'resolved' && fStatus.value !== '已解决') activeFilter.value = '';
   if (selected && selected.key !== 'resolved' && fLevel.value !== selected.label) activeFilter.value = '';
-  page.value = 1;
 });
 
 onMounted(async () => {

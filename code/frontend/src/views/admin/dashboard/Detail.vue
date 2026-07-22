@@ -21,21 +21,14 @@
     <!-- 各专业数据（全宽）-->
     <div class="sa-card" style="margin-bottom:16px">
       <div class="sa-card-title">各专业数据 <span class="extra">点击专业行下钻</span></div>
-      <el-table :data="data.majors" size="small" @row-click="goMajor" row-class-name="row-clickable">
-        <el-table-column prop="name" label="专业" min-width="140"><template #default="{row}"><span class="link">{{ row.name }}</span></template></el-table-column>
-        <el-table-column prop="students" label="人数" width="70" align="right" />
-        <el-table-column prop="gpa" label="平均GPA" width="80" align="right"><template #default="{row}"><b class="tnum">{{ row.gpa }}</b></template></el-table-column>
-        <el-table-column label="当前挂科率" width="90" align="right">
-          <template #default="{row}"><span class="tnum" :style="{color:parseFloat(row.currentFailRate||'0')>10?'#DC2626':'#6B7280'}">{{ row.currentFailRate || '—' }}</span></template>
-        </el-table-column>
-        <el-table-column prop="failRate" label="历史挂科经历率" width="120" align="right" />
-        <el-table-column prop="alertCount" label="预警人数" width="80" align="right" />
-        <el-table-column label="对比全院" width="72" align="center">
-          <template #default="{row}"><span :style="{color:row.trend==='up'?'#E11D48':row.trend==='down'?'#0D9488':'#94A3B8',fontSize:'14px'}">{{ row.trend==='up'?'▲':'▼' }}</span></template>
-          <template #header><span>对比全院<KpiLabel label="" formula="当前挂科率高于全院均值为▲(红)，低于为▼(绿)" /></span></template>
-        </el-table-column>
-        <el-table-column label="" width="36"><template #default><span style="color:var(--sa-faint)">›</span></template></el-table-column>
-      </el-table>
+      <DataTable :columns="majorCols" :data="data.majors" storage-key="dashboard:college-majors" size="small" @row-click="goMajor" row-class-name="row-clickable">
+        <template #col-name="{row}"><span class="link">{{ row.name }}</span></template>
+        <template #col-gpa="{row}"><b class="tnum">{{ row.gpa }}</b></template>
+        <template #col-currentFailRate="{row}"><span class="tnum" :style="{color:parseFloat(row.currentFailRate||'0')>10?'#DC2626':'#6B7280'}">{{ row.currentFailRate || '—' }}</span></template>
+        <template #col-trend="{row}"><span :style="{color:row.trend==='up'?'#E11D48':row.trend==='down'?'#0D9488':'#94A3B8',fontSize:'14px'}">{{ row.trend==='up'?'▲':'▼' }}</span></template>
+        <template #header-trend><span>对比全院<KpiLabel label="" formula="当前挂科率高于全院均值为▲(红)，低于为▼(绿)" /></span></template>
+        <template #col-drill><span style="color:var(--sa-faint)">›</span></template>
+      </DataTable>
       <div style="margin-top:8px;text-align:right">
         <el-button size="small" @click="goStudents">查看{{ data.scope?.restricted ? '授权范围' : '本学院全部' }}学生 →</el-button>
       </div>
@@ -83,6 +76,7 @@ import { useRoute, useRouter } from 'vue-router'
 import KpiLabel from '@/components/KpiLabel.vue';
 import KpiCard from '@/components/KpiCard.vue';
 import EChart from '@/components/EChart.vue';
+import DataTable, { type DataTableColumn } from '@/components/DataTable.vue';
 import { getFilterMeta, type SemesterOpt } from '@/utils/meta';
 const route = useRoute(); const router = useRouter();
 const collegeId = route.params.id as string;
@@ -90,6 +84,18 @@ const data = reactive<any>({ name:'', kpi:[], majors:[], gradeCompare:[], scope:
 const failCourses = reactive([] as any[]);
 const semesters = ref<SemesterOpt[]>([]);
 const fSemester = ref('');
+
+// 各专业数据表列定义（M6 DataTable；自定义渲染见模板 col-* / header-* 插槽）
+const majorCols: DataTableColumn[] = [
+  { key: 'name', label: '专业', minWidth: 140 },
+  { key: 'students', label: '人数', width: 70, align: 'right' },
+  { key: 'gpa', label: '平均GPA', width: 80, align: 'right' },
+  { key: 'currentFailRate', label: '当前挂科率', width: 90, align: 'right' },
+  { key: 'failRate', label: '历史挂科经历率', width: 120, align: 'right' },
+  { key: 'alertCount', label: '预警人数', width: 80, align: 'right' },
+  { key: 'trend', label: '对比全院', width: 72, align: 'center' },
+  { key: 'drill', label: '下钻', width: 36 },
+];
 
 async function loadData() {
   const id = route.params.id as string || 'C05';

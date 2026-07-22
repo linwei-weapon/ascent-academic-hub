@@ -76,21 +76,20 @@
       <!-- 导师视图：我的学生表 -->
       <div v-else class="sa-card">
         <div class="sa-card-title">我的学生 <KpiLabel label="" formula="按有效导师—学生关系取数；GPA 为全部学期平均，挂科为本学期真实未通过门数" /></div>
-        <el-table :data="data.students" size="small" @row-click="goStudent" row-class-name="row-clickable">
-          <el-table-column prop="name" label="姓名" width="120"><template #default="{ row }"><span class="link">{{ row.name }}</span></template></el-table-column>
-          <el-table-column prop="className" label="行政班" min-width="150" show-overflow-tooltip />
-          <el-table-column label="GPA" width="90" align="right"><template #default="{ row }"><b class="tnum">{{ gpaText(row.gpa) }}</b></template></el-table-column>
-          <el-table-column label="本学期挂科" width="110" align="right"><template #default="{ row }"><span class="tnum" :style="{ color: row.failCount ? '#E11D48' : '#64748B' }">{{ row.failCount }}门</span></template></el-table-column>
-          <el-table-column label="学分完成率" min-width="150"><template #default="{ row }">
+        <DataTable :columns="myStudentCols" :data="data.students" storage-key="students:my-students" size="small" @row-click="goStudent" row-class-name="row-clickable">
+          <template #col-name="{ row }"><span class="link">{{ row.name }}</span></template>
+          <template #col-gpa="{ row }"><b class="tnum">{{ gpaText(row.gpa) }}</b></template>
+          <template #col-failCount="{ row }"><span class="tnum" :style="{ color: row.failCount ? '#E11D48' : '#64748B' }">{{ row.failCount }}门</span></template>
+          <template #col-creditRatio="{ row }">
             <div v-if="row.creditRatio != null" style="display:flex;align-items:center;gap:8px">
               <el-progress :percentage="Math.min(row.creditRatio, 100)" :show-text="false" :stroke-width="9"
                 :color="row.creditRatio >= 80 ? '#0D9488' : row.creditRatio >= 60 ? '#D97706' : '#E11D48'" style="flex:1" />
               <span class="tnum" style="min-width:48px;text-align:right">{{ pctText(row.creditRatio) }}</span>
             </div>
             <span v-else class="sa-faint">—</span>
-          </template></el-table-column>
-          <el-table-column label="未解除预警" width="100" align="right"><template #default="{ row }"><span class="tnum" :style="{ color: row.openAlerts ? '#E11D48' : '#64748B' }">{{ row.openAlerts }}件</span></template></el-table-column>
-        </el-table>
+          </template>
+          <template #col-openAlerts="{ row }"><span class="tnum" :style="{ color: row.openAlerts ? '#E11D48' : '#64748B' }">{{ row.openAlerts }}件</span></template>
+        </DataTable>
       </div>
     </template>
   </div>
@@ -103,6 +102,7 @@ import { useRouter } from 'vue-router'
 import { ArrowDown } from '@element-plus/icons-vue'
 import KpiCard from '@/components/KpiCard.vue'
 import KpiLabel from '@/components/KpiLabel.vue'
+import DataTable, { type DataTableColumn } from '@/components/DataTable.vue'
 import BusinessPageContext from '@/components/BusinessPageContext.vue'
 import { useBusinessPageTitle } from '@/utils/businessPage'
 import { authStore } from '@/store/auth'
@@ -126,6 +126,16 @@ const isEmpty = computed(() =>
 
 function gpaText(v: number | null) { return v == null ? '—' : v.toFixed(2) }
 function pctText(v: number | null) { return v == null ? '—' : `${v}%` }
+
+// 导师视图「我的学生」表列定义（M6 DataTable）
+const myStudentCols: DataTableColumn[] = [
+  { key: 'name', label: '姓名', width: 120 },
+  { key: 'className', label: '行政班', minWidth: 150, tooltip: true },
+  { key: 'gpa', label: 'GPA', width: 90, align: 'right' },
+  { key: 'failCount', label: '本学期挂科', width: 110, align: 'right' },
+  { key: 'creditRatio', label: '学分完成率', minWidth: 150 },
+  { key: 'openAlerts', label: '未解除预警', width: 100, align: 'right' },
+]
 
 function toggleClass(classId: string) {
   if (expanded.has(classId)) expanded.delete(classId)

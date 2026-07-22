@@ -68,44 +68,28 @@
     <!-- 学生表格 -->
     <div class="sa-card student-table-card">
       <div class="sa-card-title list-title"><span>学生明细</span><span class="extra">点击姓名或“详情”在当前页面核查，筛选条件不会丢失</span></div>
-      <el-table :data="students" stripe v-loading="loading" class="student-table">
-        <el-table-column prop="sid" label="学号" width="130"><template #default="{row}"><span class="tnum sid">{{ row.sid }}</span></template></el-table-column>
-        <el-table-column prop="name" label="姓名" width="100"><template #default="{row}"><el-button link type="primary" class="name-link" @click.stop="openReview(row)">{{ row.name }}</el-button></template></el-table-column>
-        <el-table-column prop="college" label="学院" min-width="160" show-overflow-tooltip />
-        <el-table-column label="专业" min-width="140" show-overflow-tooltip>
-          <template #default="{row}"><span>{{ row.majorName || row.major }}</span></template>
-        </el-table-column>
-        <el-table-column label="班级" min-width="120" show-overflow-tooltip>
-          <template #default="{row}"><span>{{ row.className || row.class }}</span></template>
-        </el-table-column>
-        <el-table-column prop="grade" label="年级" width="82" align="center" />
-        <el-table-column label="GPA" width="72" align="right">
-          <template #default="{row}">
-            <span class="tnum" :style="{color: gpaColor(row.gpa), fontWeight:700}">{{ row.gpa != null ? row.gpa.toFixed(2) : '—' }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="挂科门数" width="80" align="right">
-          <template #default="{row}">
-            <span class="tnum" :style="{color: row.failCount > 0 ? '#DC2626' : '#6B7280', fontWeight: row.failCount > 0 ? 700 : 400}">{{ row.failCount }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="预警" width="100">
-          <template #default="{row}">
-            <el-tag v-if="row.alertLevel && row.alertLevel !== '—'" size="small" :type="alertTagType(row.alertLevel)">{{ row.alertLevel }}</el-tag>
-            <span v-else class="sa-faint">—</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="管理关注" width="105" align="center">
-          <template #default="{row}">
-            <el-tag size="small" :type="studentAttention(row).type">{{ studentAttention(row).label }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="88" fixed="right" align="center">
-          <template #default="{row}">
-            <el-button size="small" type="primary" plain @click.stop="openReview(row)">详情</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
+      <DataTable :columns="studentCols" :data="students" storage-key="students:list" stripe v-loading="loading" class="student-table" v-model:page-size="pageSize">
+        <template #col-sid="{row}"><span class="tnum sid">{{ row.sid }}</span></template>
+        <template #col-name="{row}"><el-button link type="primary" class="name-link" @click.stop="openReview(row)">{{ row.name }}</el-button></template>
+        <template #col-major="{row}"><span>{{ row.majorName || row.major }}</span></template>
+        <template #col-class="{row}"><span>{{ row.className || row.class }}</span></template>
+        <template #col-gpa="{row}">
+          <span class="tnum" :style="{color: gpaColor(row.gpa), fontWeight:700}">{{ row.gpa != null ? row.gpa.toFixed(2) : '—' }}</span>
+        </template>
+        <template #col-failCount="{row}">
+          <span class="tnum" :style="{color: row.failCount > 0 ? '#DC2626' : '#6B7280', fontWeight: row.failCount > 0 ? 700 : 400}">{{ row.failCount }}</span>
+        </template>
+        <template #col-alertLevel="{row}">
+          <el-tag v-if="row.alertLevel && row.alertLevel !== '—'" size="small" :type="alertTagType(row.alertLevel)">{{ row.alertLevel }}</el-tag>
+          <span v-else class="sa-faint">—</span>
+        </template>
+        <template #col-attention="{row}">
+          <el-tag size="small" :type="studentAttention(row).type">{{ studentAttention(row).label }}</el-tag>
+        </template>
+        <template #col-actions="{row}">
+          <el-button size="small" type="primary" plain @click.stop="openReview(row)">详情</el-button>
+        </template>
+      </DataTable>
 
       <div v-if="!loading && students.length === 0" class="sa-faint" style="text-align:center;padding:40px">未找到匹配学生</div>
 
@@ -144,13 +128,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { http } from '@/utils/http'
 import { getStudentAIInsight } from '@/utils/ai'
 import { getFilterMeta, type SemesterOpt, type MajorOpt, type ClassOpt } from '@/utils/meta'
 import KpiCard from '@/components/KpiCard.vue'
 import AIInsightDrawer from '@/components/AIInsightDrawer.vue'
+import DataTable, { type DataTableColumn } from '@/components/DataTable.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -166,7 +151,24 @@ const fRetake = ref('')
 const fRequired = ref('')
 const keyword = ref('')
 const page = ref(1)
-const pageSize = 20
+// M6：每页行数由 DataTable 偏好驱动（v-model:page-size），变化时回到第一页重查
+const pageSize = ref(20)
+watch(pageSize, () => { page.value = 1; loadPage(1) })
+
+// 学生明细表列定义（M6 DataTable）
+const studentCols: DataTableColumn[] = [
+  { key: 'sid', label: '学号', width: 130 },
+  { key: 'name', label: '姓名', width: 100 },
+  { key: 'college', label: '学院', minWidth: 160, tooltip: true },
+  { key: 'major', label: '专业', minWidth: 140, tooltip: true },
+  { key: 'class', label: '班级', minWidth: 120, tooltip: true },
+  { key: 'grade', label: '年级', width: 82, align: 'center' },
+  { key: 'gpa', label: 'GPA', width: 72, align: 'right' },
+  { key: 'failCount', label: '挂科门数', width: 80, align: 'right' },
+  { key: 'alertLevel', label: '预警', width: 100 },
+  { key: 'attention', label: '管理关注', width: 105, align: 'center' },
+  { key: 'actions', label: '操作', width: 88, align: 'center', fixed: 'right' },
+]
 
 // ── URL 参数预填 ──
 const courseName = ref(route.query.courseName as string || '')
@@ -259,7 +261,7 @@ function onYear() { if (fYear.value) fSemester.value = '' }
 async function loadPage(p: number) {
   loading.value = true
   try {
-    const params: Record<string, any> = { page: p, page_size: pageSize }
+    const params: Record<string, any> = { page: p, page_size: pageSize.value }
     if (fCollege.value) params.college = fCollege.value
     if (fMajor.value) params.major = fMajor.value
     if (fGrade.value) params.grade = fGrade.value

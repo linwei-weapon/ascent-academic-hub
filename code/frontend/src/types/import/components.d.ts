@@ -13,6 +13,7 @@ declare module 'vue' {
   export interface GlobalComponents {
     AIInsightDrawer: typeof import('./../../components/AIInsightDrawer.vue')['default']
     BusinessPageContext: typeof import('./../../components/BusinessPageContext.vue')['default']
+    DataTable: typeof import('./../../components/DataTable.vue')['default']
     EChart: typeof import('./../../components/EChart.vue')['default']
     ElAlert: typeof import('element-plus/es')['ElAlert']
     ElAside: typeof import('element-plus/es')['ElAside']

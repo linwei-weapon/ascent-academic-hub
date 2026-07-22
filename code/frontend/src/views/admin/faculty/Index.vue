@@ -44,8 +44,10 @@
           </div>
           <el-input v-model="collegeKeyword" clearable placeholder="搜索学院" class="college-search" />
         </div>
-        <el-table
+        <DataTable
+          :columns="facultyCollegeCols"
           :data="filteredColleges"
+          storage-key="faculty:college-overview"
           stripe
           size="small"
           row-class-name="college-row"
@@ -53,28 +55,16 @@
           @cell-mouse-enter="schedulePrefetch"
           @cell-mouse-leave="cancelPrefetch"
         >
-          <el-table-column prop="college_name" label="学院" min-width="175">
-            <template #default="{ row }"><span class="college-link">{{ row.college_name }}</span></template>
-          </el-table-column>
-          <el-table-column prop="courses" label="开课课程" width="90" align="right" />
-          <el-table-column prop="lessons" label="教学班" width="80" align="right" />
-          <el-table-column prop="enrolled" label="选课人次" width="95" align="right" />
-          <el-table-column prop="single_teacher_courses" label="单点课程" width="90" align="right" />
-          <el-table-column prop="high_impact_courses" width="125" align="center">
-            <template #header><KpiLabel label="高集中承担" :formula="definition.high_impact_courses" /></template>
-            <template #default="{ row }"><el-tag :type="row.high_impact_courses ? 'danger' : 'success'">{{ row.high_impact_courses }}</el-tag></template>
-          </el-table-column>
-          <el-table-column label="保障状态" width="100" align="center">
-            <template #default="{ row }">
-              <el-tag :type="row.high_impact_courses ? 'danger' : row.single_teacher_courses ? 'warning' : 'success'" effect="plain">
-                {{ row.high_impact_courses ? '优先核验' : '常规观察' }}
-              </el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column label="操作" width="90" fixed="right">
-            <template #default="{ row }"><el-button link type="primary" @click.stop="openCollege(row)">核查</el-button></template>
-          </el-table-column>
-        </el-table>
+          <template #col-college_name="{ row }"><span class="college-link">{{ row.college_name }}</span></template>
+          <template #header-high_impact_courses><KpiLabel label="高集中承担" :formula="definition.high_impact_courses" /></template>
+          <template #col-high_impact_courses="{ row }"><el-tag :type="row.high_impact_courses ? 'danger' : 'success'">{{ row.high_impact_courses }}</el-tag></template>
+          <template #col-status="{ row }">
+            <el-tag :type="row.high_impact_courses ? 'danger' : row.single_teacher_courses ? 'warning' : 'success'" effect="plain">
+              {{ row.high_impact_courses ? '优先核验' : '常规观察' }}
+            </el-tag>
+          </template>
+          <template #col-actions="{ row }"><el-button link type="primary" @click.stop="openCollege(row)">核查</el-button></template>
+        </DataTable>
       </section>
 
       <aside class="sa-card focus-card">
@@ -235,6 +225,7 @@ import { getFilterMeta, type SemesterOpt } from '@/utils/meta'
 import { COLLEGE_MAP } from '@/constants/colleges'
 import KpiCard from '@/components/KpiCard.vue'
 import KpiLabel from '@/components/KpiLabel.vue'
+import DataTable, { type DataTableColumn } from '@/components/DataTable.vue'
 import BusinessPageContext from '@/components/BusinessPageContext.vue'
 import { useBusinessPageTitle } from '@/utils/businessPage'
 
@@ -270,6 +261,18 @@ const drawerWidth = computed(() => window.innerWidth >= 1600 ? '74%' : window.in
 const drawerTitle = computed(() => drawerMode.value === 'course' ? `${selectedCourse.value?.name || '课程'} · 团队保障证据` : `${selectedCollege.value?.name || '学院'} · 师资保障核查`)
 const drawerSubtitle = computed(() => drawerMode.value === 'course' ? `${semester.value}学期 · 在当前抽屉内返回学院核查，不重新加载学院数据` : `${semester.value}学期 · 关闭抽屉即可回到原全校概览`)
 const collegeTopTeachers = computed(() => (collegeDetail.value?.teachers || []).slice(0, 5))
+
+// 学院师资保障概览表列定义（M6 DataTable）
+const facultyCollegeCols: DataTableColumn[] = [
+  { key: 'college_name', label: '学院', minWidth: 175 },
+  { key: 'courses', label: '开课课程', width: 90, align: 'right' },
+  { key: 'lessons', label: '教学班', width: 80, align: 'right' },
+  { key: 'enrolled', label: '选课人次', width: 95, align: 'right' },
+  { key: 'single_teacher_courses', label: '单点课程', width: 90, align: 'right' },
+  { key: 'high_impact_courses', label: '高集中承担', width: 125, align: 'center' },
+  { key: 'status', label: '保障状态', width: 100, align: 'center' },
+  { key: 'actions', label: '操作', width: 90, fixed: 'right' },
+]
 const teacherProfileKpis = computed(() => (teacherDrawer.data.kpis || []).filter((x:any) =>
   ['本学期授课门数','教学班记录','本学期总学时','近期平均成绩'].includes(x.label)))
 

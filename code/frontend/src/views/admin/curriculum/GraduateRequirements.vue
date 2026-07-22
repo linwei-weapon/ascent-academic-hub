@@ -66,28 +66,22 @@
         <el-col :span="14">
           <div class="sa-card">
             <div class="sa-card-title">达成度明细</div>
-            <el-table :data="data.requirements" size="small" max-height="360">
-              <el-table-column prop="index" label="#" width="44" align="center" />
-              <el-table-column prop="name" label="毕业要求" width="160" />
-              <el-table-column label="达成度" min-width="200">
-                <template #default="{row}">
-                  <div style="display:flex;align-items:center;gap:8px">
-                    <el-progress
-                      :percentage="Math.min(row.achievement, 100)"
-                      :stroke-width="8"
-                      :color="row.achievement >= 65 ? '#0D9488' : '#E11D48'"
-                      style="flex:1"
-                    />
-                    <span class="tnum" :style="{color: row.achievement >= 65 ? '#0D9488' : '#E11D48', fontWeight:700, minWidth:'40px', textAlign:'right'}">{{ row.achievement }}%</span>
-                  </div>
-                </template>
-              </el-table-column>
-              <el-table-column label="状态" width="70" align="center">
-                <template #default="{row}">
-                  <el-tag :type="row.status === '达标' ? 'success' : 'danger'" size="small">{{ row.status }}</el-tag>
-                </template>
-              </el-table-column>
-            </el-table>
+            <DataTable :columns="requirementCols" :data="data.requirements" storage-key="curriculum:graduate-requirements" size="small" max-height="360">
+              <template #col-achievement="{row}">
+                <div style="display:flex;align-items:center;gap:8px">
+                  <el-progress
+                    :percentage="Math.min(row.achievement, 100)"
+                    :stroke-width="8"
+                    :color="row.achievement >= 65 ? '#0D9488' : '#E11D48'"
+                    style="flex:1"
+                  />
+                  <span class="tnum" :style="{color: row.achievement >= 65 ? '#0D9488' : '#E11D48', fontWeight:700, minWidth:'40px', textAlign:'right'}">{{ row.achievement }}%</span>
+                </div>
+              </template>
+              <template #col-status="{row}">
+                <el-tag :type="row.status === '达标' ? 'success' : 'danger'" size="small">{{ row.status }}</el-tag>
+              </template>
+            </DataTable>
           </div>
         </el-col>
       </el-row>
@@ -131,6 +125,15 @@ import { http } from '@/utils/http'
 import { ref, reactive, computed, onMounted, watch } from 'vue'
 import KpiCard from '@/components/KpiCard.vue'
 import EChart from '@/components/EChart.vue'
+import DataTable, { type DataTableColumn } from '@/components/DataTable.vue'
+
+// 达成度明细表列定义（M6 DataTable；当前位于 v-if="false" 的停用模板中，保留迁移一致性）
+const requirementCols: DataTableColumn[] = [
+  { key: 'index', label: '#', width: 44, align: 'center' },
+  { key: 'name', label: '毕业要求', width: 160 },
+  { key: 'achievement', label: '达成度', minWidth: 200 },
+  { key: 'status', label: '状态', width: 70, align: 'center' },
+]
 
 const props = defineProps<{ majorId?: string }>()
 const embedded = computed(() => !!props.majorId)
