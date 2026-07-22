@@ -44,22 +44,33 @@
         <p v-if="!allFacts.length" class="empty">该信号无结构化数字，判断依据见下方证据明细。</p>
       </section>
 
-      <!-- 证据明细 -->
+      <!-- 这个结论是怎么得出的：管理者视角的业务口径，技术细节零出现 -->
       <section class="card">
-        <h2>证据明细</h2>
+        <h2>这个结论是怎么得出的</h2>
         <el-descriptions :column="1" border size="small">
-          <el-descriptions-item label="管理对象">{{ entityLabel }}</el-descriptions-item>
-          <el-descriptions-item label="数据表"><code>{{ sig.evidence.table || '—' }}</code></el-descriptions-item>
-          <el-descriptions-item label="筛选条件"><code>{{ sig.evidence.condition || '—' }}</code></el-descriptions-item>
+          <el-descriptions-item label="统计对象">{{ sig.entity?.name || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="数据来源">{{ sourceLabel }}</el-descriptions-item>
           <el-descriptions-item label="数据时效">{{ pack.data_freshness || sig.evidence.freshness || '—' }}</el-descriptions-item>
-          <el-descriptions-item label="置信度">{{ confidenceLabel(sig) }}</el-descriptions-item>
-          <el-descriptions-item label="配置版本">{{ pack.skill.config_version || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="结论可靠性">{{ reliabilityLabel }}</el-descriptions-item>
+          <el-descriptions-item label="统计口径">{{ caliberLabel }}</el-descriptions-item>
         </el-descriptions>
         <p class="boundary">口径边界：{{ sig.data_boundary || pack.skill.data_boundary || '—' }}</p>
         <div v-if="pack.skill.exclusions?.length" class="exclusions">
           <p class="ex-title">显式排除项（本结论不覆盖）：</p>
           <p v-for="(ex, i) in pack.skill.exclusions" :key="i" class="ex-item">· {{ ex.what }} —— {{ ex.why }}</p>
         </div>
+      </section>
+
+      <!-- 技术口径：仅系统管理员可见（数据核验是他的工作内容，对其他角色是噪音） -->
+      <section v-if="isTechViewer" class="card">
+        <h2>技术口径（数据管理员）</h2>
+        <el-descriptions :column="1" border size="small">
+          <el-descriptions-item label="数据表"><code>{{ sig.evidence.table || '—' }}</code></el-descriptions-item>
+          <el-descriptions-item label="筛选条件"><code>{{ sig.evidence.condition || '—' }}</code></el-descriptions-item>
+          <el-descriptions-item label="对象标识"><code>{{ entityTechLabel }}</code></el-descriptions-item>
+          <el-descriptions-item label="配置版本"><code>{{ pack.skill.config_version || '—' }}</code></el-descriptions-item>
+          <el-descriptions-item label="生成方式">{{ methodLabel }}</el-descriptions-item>
+        </el-descriptions>
       </section>
 
       <!-- 建议动作（只读参考，不产生任何办理动作） -->
@@ -88,6 +99,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Loading, CircleClose } from '@element-plus/icons-vue'
 import { getSignalEvidence } from '@/utils/decision'
+import { authStore } from '@/store/auth'
 import type { SignalEvidencePack } from '@/types/decision'
 import { SEVERITY_META, CHANGE_META } from '@/types/decision'
 
@@ -96,6 +108,56 @@ const router = useRouter()
 const loading = ref(true)
 const error = ref('')
 const pack = ref<SignalEvidencePack | null>(null)
+
+/** 技术口径区仅对系统管理员可见 */
+const isTechViewer = computed(() =>
+  authStore.user?.permissionContext?.activeRole === 'admin')
+
+/** 数据表 → 业务名映射（管理者不看表名；组合表按 + / × 拆分逐个翻译） */
+const TABLE_LABELS: Record<string, string> = {
+  student_plan_course_status: '学生必修完成记录',
+  teaching_lesson: '历史教学任务',
+  fact_alert: '学业预警记录',
+  alert_event: '预警认领状态',
+  fact_grade: '课程成绩记录',
+  dim_student: '学生基本信息',
+  dim_course: '课程基本信息',
+  dim_staff: '教师基本信息',
+  agg_course_offering: '教学任务快照',
+  agg_course_team: '教学团队快照',
+  student_course_substitution: '课程替代认定记录',
+  grade_attempt: '成绩修读记录',
+}
+const sourceLabel = computed(() => {
+  const raw = pack.value?.signal.evidence?.table || ''
+  if (!raw) return '—'
+  const parts = raw.split(/\+|×/).map(s => s.trim()).filter(Boolean)
+  const labels = parts.map(p => TABLE_LABELS[p] || p)
+  const sep = raw.includes('×') ? ' × ' : ' + '
+  return labels.join(sep)
+})
+
+/** 置信度的人话翻译：管理者关心的是"这结论有多硬" */
+const reliabilityLabel = computed(() => {
+  const c = pack.value?.signal.confidence
+  return ({
+    high: '高 —— 基于明确业务记录，非推断',
+    medium: '中 —— 基于推断或样本有限',
+    limited: '有限 —— 数据缺口较大，仅作线索',
+  } as Record<string, string>)[c || ''] || c || '—'
+})
+
+/** 规则版本的人话翻译：管理者关心"口径是不是我们学校自己定的" */
+const caliberLabel = computed(() => {
+  const v = pack.value?.skill.config_version
+  if (!v || v === 'product_default') return '标准口径（未做学校定制）'
+  return `学校定制口径（${v}）`
+})
+
+const entityTechLabel = computed(() => {
+  const e = pack.value?.signal.entity
+  return e ? `${e.type} · ${e.id}` : '—'
+})
 
 const sig = computed(() => pack.value!.signal)
 const allFacts = computed(() => Object.entries(pack.value?.signal.facts || {}))
@@ -111,19 +173,12 @@ function goDetail(label: string) {
 }
 const methodLabel = computed(() =>
   pack.value?.generation_method === 'llm_enhanced' ? 'LLM增强生成' : '规则模板生成')
-const entityLabel = computed(() => {
-  const e = pack.value?.signal.entity
-  return e ? `${e.name}（${e.type} · ${e.id}）` : '—'
-})
 
 function severityMeta(s: SignalEvidencePack['signal']) {
   return SEVERITY_META[s.severity] || SEVERITY_META.low
 }
 function changeMeta(s: SignalEvidencePack['signal']) {
   return CHANGE_META[s.change] || CHANGE_META.ongoing
-}
-function confidenceLabel(s: SignalEvidencePack['signal']): string {
-  return ({ high: '高', medium: '中', limited: '有限' } as Record<string, string>)[s.confidence] || s.confidence
 }
 
 function goDeep() {

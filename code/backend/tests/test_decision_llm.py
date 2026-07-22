@@ -308,11 +308,16 @@ class AnswerTest(unittest.TestCase):
         return chat.route(message, signal_id, briefing or make_briefing())
 
     def test_verify_answers_from_data_without_llm(self):
+        """LLM未启用时回退骨架模板：结论+建议+代价+查证指引，不罗列facts、不打印路由。"""
         result = chat.answer("受阻学生有多少？最好查一下体质测试", [],
                              self._routed("体质测试受阻学生有多少？"),
                              make_briefing(), DISABLED_CFG)
-        self.assertEqual(result["llm_status"], "not_used")
+        self.assertEqual(result["llm_status"], "disabled")
         self.assertIn("144", result["text"])
+        self.assertIn("建议", result["text"])
+        self.assertIn("依据见右栏", result["text"])
+        self.assertNotIn("/admin/", result["text"])   # 不再打印内部路由
+        self.assertNotIn("查到", result["text"])       # 不再数据倾倒
 
     def test_verify_without_match_states_boundary(self):
         result = chat.answer("食堂满意度有多少？", [],
@@ -449,8 +454,35 @@ class ChatEndpointTest(unittest.TestCase):
         self.assertEqual(events["meta"][0]["intent"], "verify")
         text = "".join(d["text"] for d in events["delta"])
         self.assertIn("144", text)
-        self.assertEqual(events["done"][0]["llm_status"], "not_used")
+        self.assertEqual(events["done"][0]["llm_status"], "disabled")
         self.assertTrue(events["done"][0]["followups"])
+
+    def test_verify_intent_llm_success(self):
+        """LLM主笔：答案经数字校验后下发，查证指引由代码拼接。"""
+        def fake_llm(cfg, messages, max_tokens=700):
+            return '{"answer": "体质测试有 144 人明确未通过，建议教务处牵头协调。"}'
+        with mock.patch.object(chat, "chat_completion", side_effect=fake_llm):
+            events = self._call("体质测试受阻学生有多少？", READY_CFG,
+                                chat_mock=mock.patch.object(chat, "chat_completion",
+                                                            side_effect=fake_llm))
+        text = "".join(d["text"] for d in events["delta"])
+        self.assertIn("144", text)
+        self.assertIn("依据见右栏", text)
+        self.assertEqual(events["done"][0]["llm_status"], "ok")
+
+    def test_verify_intent_llm_bad_numbers_falls_back(self):
+        """LLM编造材料外数字：整段回退骨架模板，状态诚实标注。"""
+        def bad_llm(cfg, messages, max_tokens=700):
+            return '{"answer": "体质测试有 999 人明确未通过。"}'
+        with mock.patch.object(chat, "chat_completion", side_effect=bad_llm):
+            events = self._call("体质测试受阻学生有多少？", READY_CFG,
+                                chat_mock=mock.patch.object(chat, "chat_completion",
+                                                            side_effect=bad_llm))
+        text = "".join(d["text"] for d in events["delta"])
+        self.assertNotIn("999", text)
+        self.assertIn("144", text)   # 回退到骨架模板的真实数字
+        self.assertEqual(events["done"][0]["llm_status"],
+                         "failed:number_validation")
 
     def test_attribute_intent_llm_failure_falls_back(self):
         # LLM故障注入：三明治仍给出事实层与行动层，状态诚实标注

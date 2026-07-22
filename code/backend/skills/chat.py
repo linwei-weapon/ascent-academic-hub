@@ -1,7 +1,8 @@
 """对话编排层（阶段4.3）：意图路由五类 + 归因三明治 + 禁区防线。
 
 设计约束（来自已确认计划）：
-- 查证类问题不调LLM：数字直接来自Skill信号，代码模板作答，零幻觉面。
+- 查证类问题由LLM按"结构骨架+标准范例"主笔（管理参谋语气），
+  数字字面量校验不变；LLM未启用/失败回退同骨架的代码模板。
 - 归因类问题强制"事实层/假设层(待验证)/行动层"三明治；假设层是L5条件性开放，
   必须标注待验证并给出验证路径。
 - 假设测算类问题：当前版本无测算Skill，诚实说明能力边界并引导到可查证入口。
@@ -17,7 +18,7 @@ from .llm_client import KIND_NOT_CONFIGURED, LLMError, chat_completion
 from .llm_config import llm_ready
 from .narrative import _parse_json, extract_numbers
 
-INTENT_VERIFY = "verify"        # 查证：走Skill数据，不调LLM
+INTENT_VERIFY = "verify"        # 查证：LLM按骨架范例主笔，数字校验；回退同骨架模板
 INTENT_SIMULATE = "simulate"    # 假设测算：能力边界声明（测算Skill属后续阶段）
 INTENT_COMPARE = "compare"      # 比较：LLM组织已引用信号的事实
 INTENT_ATTRIBUTE = "attribute"  # 归因：三明治强制
@@ -167,8 +168,61 @@ def _numbers_ok(text: str, allowed: set[str]) -> bool:
 # 五类意图的回答器
 # ---------------------------------------------------------------------------
 
-def _answer_verify(message: str, cited: list[dict]) -> dict:
-    """查证：纯代码模板，数字直接来自信号，不调LLM。"""
+def _verify_skeleton(cited: list[dict]) -> str:
+    """查证回答的结构骨架（LLM与模板兜底共用同一表达逻辑）：
+    结论句 → 建议动作 → 代价 → 其余信号一行带过。不再罗列facts、不打印路由。"""
+    top = cited[0]
+    name = (top.get("entity") or {}).get("name") or ""
+    head = top.get("headline") or ""
+    lines = [head if not name or head.startswith(name) else f"{name}：{head}"]
+    action = top.get("action") or {}
+    what, owner, when = action.get("what"), action.get("owner"), action.get("when")
+    if what:
+        tail = "；".join(x for x in (owner, when) if x)
+        lines.append(f"· 建议：{what}" + (f"（{tail}）" if tail else ""))
+    consequence = top.get("consequence") or ""
+    if consequence and consequence != "—":
+        lines.append(f"· 不处理：{consequence}")
+    for card in cited[1:]:
+        lines.append(f"· 另见：{card.get('headline')}")
+    return "\n".join(lines)
+
+
+def _verify_guide(top: dict) -> str:
+    """查证指引（代码拼接，不经LLM、不参与数字校验）。
+
+    只引导点击"非零"的可下钻数字——零值数字在前端渲染为静态文本，
+    引导用户去点一个点不动的数字是错误指引。
+    """
+    facts = top.get("facts") or {}
+    drill = [k for k in (top.get("drillable_facts") or [])
+             if not re.match(r"^0(?!\d)", str(facts.get(k, "")))]
+    if drill:
+        return f"依据见右栏[1]；点「{drill[0]}」可直接查看明细清单。"
+    return "依据见右栏编号引用，可点开查证页核验。"
+
+
+# 查证任务的表达规范与满分范例：LLM学语气与结构，范例数字不在允许集中，
+# 照抄范例数字必然触发数字校验失败——迫使模型只能使用材料数字。
+_VERIFY_TASK = """任务：以管理参谋的语气回答查证类问题，输出JSON {"answer": "≤160字"}。
+表达结构（必须按此逻辑组织，不得罗列材料原文）：
+1. 首句直接回答问题：结论+最关键数字；
+2. 支撑依据：只挑2-3个最能说明问题的事实（用"·"开头分行）；
+3. 建议动作：谁、做什么、何时完成（取自材料action）；
+4. 不处理的代价：一句（取自材料consequence）。
+禁区：不输出任何路径/链接/引用编号；不照搬headline原文；不补充材料之外的事实。
+风格范例（仅学语气与结构，其中数字不可用）：
+问：学生体质健康测试的受阻学生名单？
+答：学生体质健康测试有 51 名应届生必修明确未通过，涉及 10 个专业；更关键的是这门课历史上没有开课记录，学院无法自行消化。
+· 建议：教务处牵头协调补修安排，毕业审核启动前完成
+· 不处理：学生将失去最后补修机会，缺口转化为延毕风险
+材料：
+"""
+
+
+def _answer_verify(message: str, cited: list[dict], cfg: dict | None = None,
+                   history: list[dict] | None = None) -> dict:
+    """查证：LLM按"骨架+范例"主笔，数字校验；未启用/失败回退同骨架模板。"""
     if not cited:
         return {
             "text": ("当前简报中没有与该问题直接相关的信号。"
@@ -176,16 +230,22 @@ def _answer_verify(message: str, cited: list[dict]) -> dict:
                      "——可换个问法，或先打开对应专题工作区。"),
             "blocks": [], "llm_status": "not_used",
         }
-    lines = [f"查到 {len(cited)} 条相关信号："]
-    for i, card in enumerate(cited, 1):
-        facts = _facts_line(card)
-        lines.append(f"{i}. {card.get('headline')}"
-                     + (f"（{facts}）" if facts else ""))
     top = cited[0]
-    route = ((top.get("evidence") or {}).get("verify_route")) or ""
-    if route:
-        lines.append(f"明细可在「{route}」核验。")
-    return {"text": "\n".join(lines), "blocks": [], "llm_status": "not_used"}
+    guide = _verify_guide(top)
+    payload = {"问题": message, "相关信号": [_signal_payload(c) for c in cited]}
+    status = "not_used"
+    if cfg is not None:
+        data, status, allowed = _llm_json(cfg, _VERIFY_TASK, payload,
+                                          history or [])
+        if data and isinstance(data.get("answer"), str) \
+                and data["answer"].strip() \
+                and _numbers_ok(data["answer"], allowed):
+            return {"text": f"{data['answer'].strip()}\n{guide}",
+                    "blocks": [], "llm_status": "ok"}
+        if status == "ok":
+            status = "failed:number_validation"
+    return {"text": f"{_verify_skeleton(cited)}\n{guide}",
+            "blocks": [], "llm_status": status}
 
 
 def _answer_simulate(message: str, cited: list[dict]) -> dict:
@@ -313,7 +373,7 @@ def _answer_open(message: str, cited: list[dict], cfg: dict,
         return {"text": data["answer"].strip(), "blocks": [], "llm_status": "ok"}
     if status == "ok":
         status = "failed:number_validation"
-    # 回退：简报事实摘要
+    # 回退：简报事实摘要（复用查证骨架，LLM状态按开放意图如实标注）
     if cited:
         return _answer_verify(message, cited) | {"llm_status": status}
     topline = (briefing or {}).get("topline") or "当前无重点事项。"
@@ -355,7 +415,7 @@ def answer(message: str, history: list[dict], routed: dict,
     """阶段2：按意图生成答案（可能调LLM，全部经数字校验）。"""
     intent, cited = routed["intent"], routed["cited"]
     if intent == INTENT_VERIFY:
-        result = _answer_verify(message, cited)
+        result = _answer_verify(message, cited, cfg, history)
     elif intent == INTENT_SIMULATE:
         result = _answer_simulate(message, cited)
     elif intent == INTENT_COMPARE:

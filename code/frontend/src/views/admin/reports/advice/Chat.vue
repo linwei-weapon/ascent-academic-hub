@@ -148,14 +148,15 @@
 
         <div v-if="factTiles.length" class="rail-section">
           <p class="rail-title">数据要素 · 本专家速览</p>
-          <p class="rail-sub">人数类数字点按直达明细清单，其余数字查证来源</p>
+          <p class="rail-sub">高亮数字可点开明细清单，灰色为背景信息</p>
           <div class="fact-grid">
-            <button v-for="t in factTiles" :key="t.k" type="button" class="fact-tile"
-              :class="{ drillable: t.drillable }"
-              :title="t.drillable ? `查看「${t.k}」明细清单（新开标签页）` : `查证来源信号：${t.headline}`"
-              @click="t.drillable ? openDetailWindow(t.signal_id, t.k) : openEvidenceWindow(t.signal_id)">
+            <button v-for="t in factTiles" :key="t.k" type="button"
+              :class="t.clickable ? 'fact-tile drillable' : 'fact-tile static'"
+              :disabled="!t.clickable"
+              :title="t.clickable ? `查看「${t.k}」明细清单（新开标签页）` : ''"
+              @click="t.clickable && openDetailWindow(t.signal_id, t.k)">
               <span class="fact-k">{{ t.k }}</span>
-              <b class="fact-v">{{ t.v }}<i v-if="t.drillable" class="drill-mark">›</i></b>
+              <b class="fact-v">{{ t.v }}<i v-if="t.clickable" class="drill-mark">›</i></b>
             </button>
           </div>
         </div>
@@ -231,16 +232,18 @@ const latestRefs = computed<AdviceEvidenceRef[]>(() => {
   return []
 })
 
-/** 数据要素速览：最近引用的 facts 键值，带来源信号；可下钻数字直达明细清单 */
+/** 数据要素速览：最近引用的 facts 键值；可下钻且非零的数字才可点击，
+    聚合/判定值与零值渲染为静态背景信息（一种视觉=一种行为） */
 const factTiles = computed(() => {
-  const tiles: { k: string; v: string; signal_id: string; headline: string; drillable: boolean }[] = []
+  const tiles: { k: string; v: string; signal_id: string; clickable: boolean }[] = []
   const seen = new Set<string>()
   for (const r of latestRefs.value) {
     for (const [k, v] of Object.entries(r.facts || {})) {
       if (seen.has(k)) continue
       seen.add(k)
-      tiles.push({ k, v, signal_id: r.signal_id, headline: r.headline,
-        drillable: (r.drillable_facts || []).includes(k) })
+      const drillable = (r.drillable_facts || []).includes(k)
+      const nonzero = !/^0(?!\d)/.test(String(v).trim())
+      tiles.push({ k, v, signal_id: r.signal_id, clickable: drillable && nonzero })
       if (tiles.length >= 6) return tiles
     }
   }
@@ -525,6 +528,9 @@ onMounted(init)
 .fact-tile:hover { border-color: #c7d2fe; background: #eef2ff; }
 .fact-k { font-size: 11px; color: #909399; }
 .fact-v { font-size: 15px; color: #4f46e5; }
+.fact-tile.static { border-color: transparent; background: transparent; cursor: default; }
+.fact-tile.static:hover { border-color: transparent; background: transparent; }
+.fact-tile.static .fact-v { color: #94a3b8; }
 .fact-tile.drillable { border-color: #a5b4fc; background: #eef2ff; }
 .fact-tile.drillable:hover { border-color: #4f46e5; background: #e0e7ff; }
 .fact-tile.drillable .fact-v { text-decoration: underline; text-underline-offset: 3px; }
