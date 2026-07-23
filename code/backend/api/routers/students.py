@@ -219,10 +219,21 @@ def analysis(semester: Optional[str] = None, grade: Optional[str] = None,
         "SELECT course_id, first_pass_rate, final_pass_rate FROM agg_course_term "
         "WHERE first_pass_rate IS NOT NULL GROUP BY course_id"):
         cr_map[cr["course_id"]] = (cr["first_pass_rate"], cr["final_pass_rate"])
-    # M1：三分层通过率与课程类别改读 V2 agg_course_pass_stat（全学期累计加权，
-    # 与总览/课程质量专题同口径）；V2 未构建时字段为 None，前端渲染"—"。
+    # M1：三分层通过率与课程类别改读 V2 agg_course_pass_stat。
+    # 与总览保持“明确学期 + 当前学生范围”口径；V2 未构建时字段为 None。
     from .dashboard import _rate as _v2_rate, _v2_pass_stats
-    v2_courses = (_v2_pass_stats() or {}).get("courses", {})
+    pass_semester = (
+        semester
+        or (sorted(sem_ids)[-1] if sem_ids else CURRENT_SEMESTER)
+    )
+    pass_student_ids = (
+        [row["student_id"] for row in dbm.query(
+            conn, f"SELECT student_id FROM dim_student{swhere}", tuple(sparams))]
+        if scond else None
+    )
+    v2_courses = (
+        _v2_pass_stats(pass_semester, pass_student_ids) or {}
+    ).get("courses", {})
     failCourses = []
     for r in dbm.query(conn, f"""
         SELECT g.course_id, co.name cname, co.dept, COUNT(*) total,
@@ -370,9 +381,6 @@ def student_list(semester: Optional[str] = None, grade: Optional[str] = None,
         kw = f"%{keyword}%"
         scond.append("(student_id LIKE ? OR name LIKE ?)")
         sparams += [kw, kw]
-    if course:
-        scond.append("student_id IN (SELECT DISTINCT student_id FROM fact_grade WHERE course_id=?)")
-        sparams.append(course)
     # 学期过滤
     sem_ids = None
     if semester:
@@ -380,6 +388,19 @@ def student_list(semester: Optional[str] = None, grade: Optional[str] = None,
     elif year:
         sem_ids = [r["semester_id"] for r in dbm.query(
             conn, "SELECT semester_id FROM dim_semester WHERE year=?", (year,))]
+
+    # 课程下钻必须与所选学期/学年取交集；未选周期时才表示历史修读。
+    if course:
+        course_sql = """student_id IN (
+            SELECT DISTINCT student_id FROM fact_grade
+            WHERE source='real' AND course_id=?"""
+        course_params = [course]
+        if sem_ids:
+            course_sql += " AND semester_id IN (" + ",".join("?" * len(sem_ids)) + ")"
+            course_params.extend(sem_ids)
+        course_sql += ")"
+        scond.append(course_sql)
+        sparams.extend(course_params)
 
     def _sem_cond(alias="g"):
         if not sem_ids:
@@ -551,6 +572,12 @@ def student_list(semester: Optional[str] = None, grade: Optional[str] = None,
 
     pop_gpas = list(stu_gpa.values())
     return ok({"total": total, "page": page, "pageSize": page_size, "students": students,
+               "appliedFilters": {
+                   "semester": semester, "year": year, "college": college,
+                   "major": major, "grade": grade, "classId": class_id,
+                   "course": course, "retake": retake, "required": required,
+                   "pattern": pattern, "migration": migration,
+               },
                "summary": {"withGpa": len(pop_gpas),
                            "avgGpa": round(sum(pop_gpas) / len(pop_gpas), 2) if pop_gpas else None}})
 

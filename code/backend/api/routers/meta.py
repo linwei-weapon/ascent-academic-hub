@@ -196,6 +196,8 @@ def college_comparison(
                 THEN g.score*g.credits END)
               / NULLIF(SUM(CASE WHEN g.score IS NOT NULL AND g.credits>0
                 THEN g.credits END),0) avg_score,
+            COUNT(DISTINCT CASE WHEN g.is_pass IS NOT NULL
+              THEN g.student_id END) result_students,
             COUNT(DISTINCT CASE WHEN g.is_pass=0 THEN g.student_id END) failed_students
           FROM fact_grade g JOIN dim_student s ON s.student_id=g.student_id
           WHERE g.source='real' AND g.semester_id=?
@@ -214,6 +216,7 @@ def college_comparison(
           WHERE COALESCE(a.is_active,1)=1 GROUP BY s.college_id
         )
         SELECT b.college_id,b.name,b.students,sc.avg_score,gp.avg_gpa,
+          COALESCE(sc.result_students,0) result_students,
           COALESCE(sc.failed_students,0) failed_students,
           COALESCE(a.alert_students,0) alert_students
         FROM base b LEFT JOIN score sc ON sc.college_id=b.college_id
@@ -224,6 +227,7 @@ def college_comparison(
     items = []
     for row in rows:
         students = row["students"] or 0
+        result_students = row["result_students"] or 0
         can_drill = detail.get("type") == "all" or row["college_id"] in own_ids
         items.append({
             "collegeId": row["college_id"],
@@ -236,10 +240,14 @@ def college_comparison(
                 round(row["avg_gpa"], 2) if row["avg_gpa"] is not None else None
             ),
             "currentFailStudentRate": round(
-                row["failed_students"] * 100 / students, 1
-            ) if students else None,
+                row["failed_students"] * 100 / result_students, 1
+            ) if result_students else None,
             "activeAlertStudentRate": round(
                 row["alert_students"] * 100 / students, 1
+            ) if students else None,
+            "studentsWithValidResults": result_students,
+            "validResultCoverageRate": round(
+                result_students * 100 / students, 1
             ) if students else None,
             "canDrillDown": can_drill,
             "detailRoute": (
@@ -253,8 +261,11 @@ def college_comparison(
         "definition": {
             "weightedAverageScore": "当前学期有效成绩按课程学分加权后的学院平均分。",
             "averageGpa": "先计算每名学生当前学期课程GPA均值，再对学院学生求平均，避免课程门数不同造成偏移。",
-            "currentFailStudentRate": "当前学期至少一门未通过的去重学生数÷学院在籍学生数。",
+            "currentFailStudentRate": "当前学期至少一门未通过的去重学生数÷当前学期有有效成绩的去重学生数。",
             "activeAlertStudentRate": "当前有效预警去重学生数÷学院在籍学生数。",
+            "validResultCoverageRate": "当前学期有有效成绩的去重学生数÷学院在籍学生数，用于判断成绩指标是否具备解释条件。",
             "boundary": "其他学院仅返回达到最小群体规模的聚合结果，不返回学生标识、名单、档案或明细路由。",
         },
+        "period": {"semester": semester},
+        "definitionVersion": "dashboard-v2",
     })

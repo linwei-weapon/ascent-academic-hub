@@ -3,6 +3,7 @@
 固定种子合成业务表并在接口和页面显式披露。默认学期为 CURRENT_SEMESTER。
 """
 import sqlite3
+import time
 from typing import Optional
 
 from fastapi import APIRouter, Depends
@@ -19,10 +20,24 @@ CUR = CURRENT_SEMESTER
 _GPA_BANDS = [("<2.0", "<2.0", 0.0), ("2.0-2.5", "2.0-2.5", 2.0),
               ("2.5-3.0", "2.5-3.0", 2.5), ("3.0-3.5", "3.0-3.5", 3.0),
               ("3.5-4.0", "≥3.5", 3.5)]
+_DASHBOARD_CACHE: dict[tuple[str, str], tuple[float, dict]] = {}
+_DASHBOARD_CACHE_TTL_SECONDS = 90
 
 
 def _pct(x, nd=1):
     return f"{round((x or 0) * 100, nd)}%"
+
+
+def _pct_value(numerator, denominator, nd=1):
+    """可展示百分比；分母为空时返回“—”，不把无数据伪装成 0%。"""
+    if not denominator:
+        return "—"
+    return f"{round((numerator or 0) * 100 / denominator, nd)}%"
+
+
+def _pct_number(numerator, denominator, nd=1):
+    """数值百分比；分母为空时返回 None。"""
+    return round((numerator or 0) * 100 / denominator, nd) if denominator else None
 
 
 def _gpa_bucket(value: float) -> str:
@@ -37,11 +52,14 @@ def _rate(passed, attempts):
     return round(passed * 100.0 / attempts, 1) if attempts else None
 
 
-def _v2_pass_stats():
-    """读取 V2 agg_course_pass_stat（M1 课程通过率三分层，全学期累计加权）。
+def _v2_pass_stats(semester: str, student_ids: Optional[list[str]] = None):
+    """读取所选学期的 V2 课程通过率三分层。
 
     V2 库或聚合表缺失时返回 None：总览其余指标仍走 V1 正常输出，
     三分层字段输出 None 并在 coursePassRates.source 中说明，不静默混用口径。
+
+    全校范围直接读取课程×学期聚合表；受限范围按授权学生从 grade_attempt
+    重新聚合，确保学院、班级和导师身份不会看到或引用全校通过率。
     """
     try:
         conn = dbm.get_v2_conn()
@@ -51,20 +69,59 @@ def _v2_pass_stats():
         if not dbm.scalar(conn, """SELECT 1 FROM sqlite_master
             WHERE type='table' AND name='agg_course_pass_stat'"""):
             return None
-        courses = {r["course_id"]: r for r in dbm.query(conn, """
-            SELECT course_id, MAX(course_group) course_group,
-              SUM(first_attempts) fa, SUM(first_pass) fp,
-              SUM(makeup_attempts) ma, SUM(makeup_pass) mp,
-              SUM(retake_attempts) ra, SUM(retake_pass) rp
-            FROM agg_course_pass_stat GROUP BY course_id""")}
-        overall = dbm.query_one(conn, """
-            SELECT SUM(first_attempts) fa, SUM(first_pass) fp,
-              SUM(makeup_attempts) ma, SUM(makeup_pass) mp,
-              SUM(retake_attempts) ra, SUM(retake_pass) rp
-            FROM agg_course_pass_stat""") or {}
-        public = dbm.query_one(conn, """
-            SELECT SUM(first_attempts) fa, SUM(first_pass) fp
-            FROM agg_course_pass_stat WHERE course_group='公共必修'""") or {}
+        groups = {r["course_id"]: r["course_group"] for r in dbm.query(conn, """
+            SELECT course_id,MAX(course_group) course_group
+            FROM agg_course_pass_stat WHERE semester_id=? GROUP BY course_id
+        """, (semester,))}
+        if student_ids is None:
+            courses = {r["course_id"]: r for r in dbm.query(conn, """
+                SELECT course_id, MAX(course_group) course_group,
+                  SUM(first_attempts) fa, SUM(first_pass) fp,
+                  SUM(makeup_attempts) ma, SUM(makeup_pass) mp,
+                  SUM(retake_attempts) ra, SUM(retake_pass) rp
+                FROM agg_course_pass_stat WHERE semester_id=? GROUP BY course_id
+            """, (semester,))}
+        else:
+            courses = {}
+            ids = sorted({sid for sid in student_ids if sid})
+            # 单批不超过 800，兼容 SQLite 变量数量限制。
+            for start in range(0, len(ids), 800):
+                batch = ids[start:start + 800]
+                marks = ",".join("?" * len(batch))
+                for row in dbm.query(conn, f"""
+                    SELECT course_id,
+                      SUM(CASE WHEN attempt_type IS NULL OR attempt_type NOT IN ('makeup','retake')
+                          THEN 1 ELSE 0 END) fa,
+                      SUM(CASE WHEN (attempt_type IS NULL OR attempt_type NOT IN ('makeup','retake'))
+                          AND is_pass=1 THEN 1 ELSE 0 END) fp,
+                      SUM(CASE WHEN attempt_type='makeup' THEN 1 ELSE 0 END) ma,
+                      SUM(CASE WHEN attempt_type='makeup' AND is_pass=1 THEN 1 ELSE 0 END) mp,
+                      SUM(CASE WHEN attempt_type='retake' THEN 1 ELSE 0 END) ra,
+                      SUM(CASE WHEN attempt_type='retake' AND is_pass=1 THEN 1 ELSE 0 END) rp
+                    FROM grade_attempt
+                    WHERE semester_id=? AND is_published=1 AND is_void=0
+                      AND is_pass IS NOT NULL AND student_id IN ({marks})
+                    GROUP BY course_id
+                """, tuple([semester] + batch)):
+                    current = courses.setdefault(row["course_id"], {
+                        "course_id": row["course_id"],
+                        "course_group": groups.get(row["course_id"], "其他"),
+                        "fa": 0, "fp": 0, "ma": 0, "mp": 0, "ra": 0, "rp": 0,
+                    })
+                    for key in ("fa", "fp", "ma", "mp", "ra", "rp"):
+                        current[key] += row[key] or 0
+        overall = {
+            key: sum((row.get(key) or 0) for row in courses.values())
+            for key in ("fa", "fp", "ma", "mp", "ra", "rp")
+        }
+        public_courses = [
+            row for row in courses.values()
+            if row.get("course_group") == "公共必修"
+        ]
+        public = {
+            "fa": sum((row.get("fa") or 0) for row in public_courses),
+            "fp": sum((row.get("fp") or 0) for row in public_courses),
+        }
         return {"courses": courses, "overall": overall, "public_required": public}
     except Exception:
         return None
@@ -110,14 +167,66 @@ def dashboard(semester: Optional[str] = None,
     cur = semester or CUR
     if not dbm.scalar(conn, "SELECT 1 FROM dim_semester WHERE semester_id=?", (cur,)):
         raise ApiError("学期不存在", code=400, status_code=400)
+    previous_semester = dbm.scalar(
+        conn, "SELECT MAX(semester_id) FROM dim_semester WHERE semester_id<?", (cur,))
+    permission_context = user.get("permission_context") or {}
+    scope_fingerprint = (
+        permission_context.get("scopeFingerprint")
+        or f"{user.get('username', '')}:{permission_context.get('activeIdentityId', user.get('role_id', ''))}"
+    )
+    cache_key = (cur, scope_fingerprint)
+    cached = _DASHBOARD_CACHE.get(cache_key)
+    if cached and time.monotonic() - cached[0] < _DASHBOARD_CACHE_TTL_SECONDS:
+        return ok(cached[1])
 
     # 所有大屏指标统一使用同一学生授权范围，避免院级/专业/班级角色看到全校聚合。
     student_scope, scope_params = student_data_scope(user, conn, "s")
     student_where = f" WHERE {student_scope}" if student_scope else ""
     student_and = f" AND {student_scope}" if student_scope else ""
     restricted = bool(student_scope)
+    scoped_student_ids = (
+        [row["student_id"] for row in dbm.query(
+            conn, f"SELECT s.student_id FROM dim_student s{student_where}",
+            tuple(scope_params))]
+        if restricted else None
+    )
 
     students = dbm.scalar(conn, f"SELECT COUNT(*) FROM dim_student s{student_where}", scope_params) or 0
+    students_with_results = dbm.scalar(conn, f"""
+        SELECT COUNT(DISTINCT g.student_id)
+        FROM fact_grade g JOIN dim_student s ON g.student_id=s.student_id
+        WHERE g.source='real' AND g.semester_id=? AND g.is_pass IS NOT NULL{student_and}
+    """, tuple([cur] + scope_params)) or 0
+    comparable_semesters = [value for value in (cur, previous_semester) if value]
+    semester_marks = ",".join("?" * len(comparable_semesters))
+    term_summary = {row["semester_id"]: row for row in dbm.query(conn, f"""
+        WITH student_term AS (
+          SELECT g.semester_id,g.student_id,AVG(g.gpa) student_gpa,
+            MAX(CASE WHEN g.is_pass=0 THEN 1 ELSE 0 END) failed
+          FROM fact_grade g JOIN dim_student s ON g.student_id=s.student_id
+          WHERE g.source='real' AND g.is_pass IS NOT NULL
+            AND g.semester_id IN ({semester_marks}){student_and}
+          GROUP BY g.semester_id,g.student_id)
+        SELECT semester_id,COUNT(*) result_students,AVG(student_gpa) avg_gpa,
+          SUM(failed) failed_students
+        FROM student_term GROUP BY semester_id
+    """, tuple(comparable_semesters + scope_params))}
+    current_term = term_summary.get(cur, {})
+    previous_term = term_summary.get(previous_semester, {}) if previous_semester else {}
+    current_fail_rate_value = _pct_number(
+        current_term.get("failed_students"), current_term.get("result_students"))
+    previous_fail_rate_value = _pct_number(
+        previous_term.get("failed_students"), previous_term.get("result_students"))
+    current_avg_gpa = (
+        round(current_term.get("avg_gpa"), 2)
+        if current_term.get("avg_gpa") is not None else None
+    )
+    previous_avg_gpa = (
+        round(previous_term.get("avg_gpa"), 2)
+        if previous_term.get("avg_gpa") is not None else None
+    )
+    previous_coverage_rate = _pct_number(
+        previous_term.get("result_students"), students)
     if restricted:
         courses_cur = dbm.scalar(conn, f"""SELECT COUNT(DISTINCT g.course_id)
             FROM fact_grade g JOIN dim_student s ON g.student_id=s.student_id
@@ -137,6 +246,27 @@ def dashboard(semester: Optional[str] = None,
         f"SELECT COUNT(DISTINCT a.student_id) FROM fact_alert a "
         f"JOIN dim_student s ON a.student_id=s.student_id "
         f"WHERE COALESCE(a.is_active,1)=1{alert_scope}", scope_params) or 0
+    new_alert_students = dbm.scalar(conn, f"""
+        SELECT COUNT(*) FROM (
+          SELECT a.student_id,MIN(a.semester_id) first_semester
+          FROM fact_alert a JOIN dim_student s ON a.student_id=s.student_id
+          WHERE COALESCE(a.is_active,1)=1{alert_scope}
+          GROUP BY a.student_id
+          HAVING first_semester=?
+        )""", tuple(scope_params + [cur])) or 0
+    persistent_alert_students = max(alert_stu - new_alert_students, 0)
+    previous_alert_students = (
+        dbm.scalar(conn, f"""
+            SELECT COUNT(DISTINCT a.student_id)
+            FROM fact_alert a JOIN dim_student s ON a.student_id=s.student_id
+            WHERE a.semester_id=?{alert_scope}
+        """, tuple([previous_semester] + scope_params)) or 0
+        if previous_semester else 0
+    )
+    alert_history_comparable = previous_alert_students > 0
+    if not alert_history_comparable:
+        new_alert_students = None
+        persistent_alert_students = None
 
     grad = dbm.query_one(conn, f"""SELECT COUNT(*) total,
         SUM(CASE WHEN f.graduated=1 THEN 1 ELSE 0 END) grad_count,
@@ -154,12 +284,8 @@ def dashboard(semester: Optional[str] = None,
         {"id": "course_count", "label": "本学期开课门数", "value": f"{courses_cur:,}", "formula": "当前学期授权学生范围内修读课程去重；全校视角按教学任务去重", "trend": "", "up": True, "group": "在校生"},
         {"id": "teacher_count", "label": teacher_label, "value": f"{teachers:,}", "formula": "授权学生范围内有授课关系的教师去重；全校视角为教师维表去重", "trend": "", "up": True, "group": "在校生"},
         {"id": "alert_count", "label": "当前预警", "value": f"{alert_stu}人", "formula": "处于预警状态的学生数", "trend": "", "up": False, "group": "在校生"},
-        {"id": "current_fail_rate", "label": "当前挂科率", "value": "—", "formula": "当前学期有未通过课程的去重学生数÷在籍学生数", "trend": "", "up": False, "group": "在校生"},
+        {"id": "current_fail_rate", "label": "当前挂科学生率", "value": "—", "formula": "当前学期至少一门未通过的去重学生数÷当前学期有有效成绩的去重学生数", "trend": "", "up": False, "group": "在校生"},
         {"id": "history_fail_rate", "label": "历史挂科经历率", "value": "—", "formula": "在校期间曾出现过未通过记录的去重学生数÷在籍学生数（包含后续补考或重修通过）", "trend": "", "up": False, "group": "在校生"},
-        {"id": "grad_rate", "label": "应届毕业率", "value": f"{_pct(grad_rate)}（{grad.get('grad_count') or 0}/{grad.get('total') or 0}）",
-         "formula": "合成毕业业务表：按期毕业生÷毕业届总数", "trend": "", "up": True, "group": "毕业生", "sub": "2022级毕业届（合成）"},
-        {"id": "degree_rate", "label": "学位授予率", "value": f"{_pct(degree_rate)}（{grad.get('degree_count') or 0}/{grad.get('total') or 0}）",
-         "formula": "合成毕业业务表：授予学位人数÷毕业届总数", "trend": "", "up": True, "group": "毕业生", "sub": "2022级毕业届（合成）"},
     ]
 
     rows = dbm.query(conn, f"""SELECT c.college_id,c.name,COUNT(s.student_id) students
@@ -174,42 +300,118 @@ def dashboard(semester: Optional[str] = None,
         FROM fact_grade g JOIN dim_student s ON g.student_id=s.student_id
         WHERE g.source='real' AND g.semester_id=? AND g.is_pass IS NOT NULL{student_and}
         GROUP BY s.college_id""", tuple([cur] + scope_params))}
-    gpa_by_col = {r["college_id"]: r["avg_gpa"] for r in dbm.query(conn, f"""
-        WITH student_gpa AS (
-          SELECT s.college_id,g.student_id,AVG(g.gpa) student_gpa
+    # 当前与上一学期的学院 GPA、有效成绩学生数、挂科学生数一次扫描完成，
+    # 避免为每个指标重复扫描大成绩表。
+    college_term_rows = dbm.query(conn, f"""
+        WITH student_term AS (
+          SELECT g.semester_id,s.college_id,g.student_id,
+            AVG(g.gpa) student_gpa,
+            MAX(CASE WHEN g.is_pass=0 THEN 1 ELSE 0 END) failed
           FROM fact_grade g JOIN dim_student s ON g.student_id=s.student_id
-          WHERE g.source='real' AND g.semester_id=? AND g.gpa IS NOT NULL{student_and}
-          GROUP BY s.college_id,g.student_id)
-        SELECT college_id,AVG(student_gpa) avg_gpa FROM student_gpa GROUP BY college_id
-    """, tuple([cur] + scope_params))}
+          WHERE g.source='real' AND g.is_pass IS NOT NULL
+            AND g.semester_id IN ({semester_marks}){student_and}
+          GROUP BY g.semester_id,s.college_id,g.student_id)
+        SELECT semester_id,college_id,COUNT(*) result_students,
+          AVG(student_gpa) avg_gpa,SUM(failed) failed_students
+        FROM student_term GROUP BY semester_id,college_id
+    """, tuple(comparable_semesters + scope_params))
+    gpa_by_col = {
+        r["college_id"]: r["avg_gpa"]
+        for r in college_term_rows if r["semester_id"] == cur
+    }
     alert_by_col = {r["college_id"]: r["n"] for r in dbm.query(conn, f"""
         SELECT s.college_id, COUNT(DISTINCT a.student_id) AS n
         FROM fact_alert a JOIN dim_student s ON a.student_id=s.student_id
         WHERE COALESCE(a.is_active,1)=1{student_and}
         GROUP BY s.college_id""", tuple(scope_params))}
-    cur_fail_by_col = {r["college_id"]: r["n"] for r in dbm.query(conn, f"""
-        SELECT s.college_id, COUNT(DISTINCT g.student_id) AS n
-        FROM fact_grade g JOIN dim_student s ON g.student_id=s.student_id
-        WHERE g.is_pass=0 AND g.source='real' AND g.semester_id=?{student_and}
-        GROUP BY s.college_id""", tuple([cur] + scope_params))}
+    cur_fail_by_col = {
+        r["college_id"]: r["failed_students"] or 0
+        for r in college_term_rows if r["semester_id"] == cur
+    }
+    result_students_by_col = {
+        r["college_id"]: r["result_students"] or 0
+        for r in college_term_rows if r["semester_id"] == cur
+    }
+    previous_fail_by_col = {
+        r["college_id"]: r["failed_students"] or 0
+        for r in college_term_rows if r["semester_id"] == previous_semester
+    }
+    previous_results_by_col = {
+        r["college_id"]: r["result_students"] or 0
+        for r in college_term_rows if r["semester_id"] == previous_semester
+    }
+    previous_gpa_by_col = {
+        r["college_id"]: r["avg_gpa"]
+        for r in college_term_rows if r["semester_id"] == previous_semester
+    }
     hist_fail_by_col = {r["college_id"]: r["n"] for r in dbm.query(conn, f"""
         SELECT s.college_id, COUNT(DISTINCT g.student_id) AS n
         FROM fact_grade g JOIN dim_student s ON g.student_id=s.student_id
         WHERE g.is_pass=0 AND g.source='real'{student_and}
         GROUP BY s.college_id""", tuple(scope_params))}
     colleges = []
+    scope_alert_rate = _pct_number(alert_stu, students)
     for r in rows:
         a = term_by_col.get(r["college_id"], {})
         attempted = a.get("attempted_credits") or 0
+        college_result_students = result_students_by_col.get(r["college_id"], 0)
+        college_current_fail_rate = _pct_number(
+            cur_fail_by_col.get(r["college_id"], 0), college_result_students)
+        college_previous_fail_rate = _pct_number(
+            previous_fail_by_col.get(r["college_id"], 0),
+            previous_results_by_col.get(r["college_id"], 0))
+        college_gpa = (
+            round(gpa_by_col.get(r["college_id"]), 2)
+            if gpa_by_col.get(r["college_id"]) is not None else None
+        )
+        college_alert_rate = _pct_number(
+            alert_by_col.get(r["college_id"], 0), r["students"])
         colleges.append({
             "id": r["college_id"], "name": r["name"], "students": r["students"],
             "avgScore": round(a.get("avg_score"), 1) if a.get("avg_score") is not None else None,
-            "avgGpa": round(gpa_by_col.get(r["college_id"]), 2) if gpa_by_col.get(r["college_id"]) is not None else None,
+            "avgGpa": college_gpa,
             "failRate": _pct(hist_fail_by_col.get(r["college_id"], 0) / r["students"]),
-            "currentFailRate": _pct(cur_fail_by_col.get(r["college_id"], 0) / r["students"]),
-            "alertRate": _pct(alert_by_col.get(r["college_id"], 0) / r["students"]),
+            "currentFailRate": _pct_value(
+                cur_fail_by_col.get(r["college_id"], 0),
+                college_result_students),
+            "currentFailRateValue": college_current_fail_rate,
+            "currentFailChangePp": (
+                round(college_current_fail_rate - college_previous_fail_rate, 1)
+                if college_current_fail_rate is not None
+                and college_previous_fail_rate is not None else None),
+            "currentFailVsScopePp": (
+                round(college_current_fail_rate - current_fail_rate_value, 1)
+                if college_current_fail_rate is not None
+                and current_fail_rate_value is not None else None),
+            "avgGpaChange": (
+                round(college_gpa - previous_gpa_by_col[r["college_id"]], 2)
+                if college_gpa is not None
+                and previous_gpa_by_col.get(r["college_id"]) is not None else None),
+            "avgGpaVsScope": (
+                round(college_gpa - current_avg_gpa, 2)
+                if college_gpa is not None and current_avg_gpa is not None else None),
+            "alertRate": _pct_value(alert_by_col.get(r["college_id"], 0), r["students"]),
+            "alertRateValue": college_alert_rate,
+            "alertRateVsScopePp": (
+                round(college_alert_rate - scope_alert_rate, 1)
+                if college_alert_rate is not None and scope_alert_rate is not None else None),
             "creditDone": round((a.get("passed_credits") or 0) / attempted * 100) if attempted else None,
+            "studentsWithResults": college_result_students,
+            "resultCoverageRate": _pct_number(
+                college_result_students, r["students"]),
         })
+    ranked_fail = sorted(
+        [row for row in colleges if row["currentFailRateValue"] is not None],
+        key=lambda row: (-row["currentFailRateValue"], row["name"]))
+    ranked_gpa = sorted(
+        [row for row in colleges if row["avgGpa"] is not None],
+        key=lambda row: (-row["avgGpa"], row["name"]))
+    fail_ranks = {row["id"]: index + 1 for index, row in enumerate(ranked_fail)}
+    gpa_ranks = {row["id"]: index + 1 for index, row in enumerate(ranked_gpa)}
+    for row in colleges:
+        row["currentFailRank"] = fail_ranks.get(row["id"])
+        row["avgGpaRank"] = gpa_ranks.get(row["id"])
+        row["comparisonCount"] = max(len(ranked_fail), len(ranked_gpa))
     scope_label = "全校"
     if restricted:
         if (
@@ -242,41 +444,88 @@ def dashboard(semester: Optional[str] = None,
     failCourses = []
     rate_map = {r["course_id"]: r for r in dbm.query(conn, """SELECT course_id,
         first_pass_rate,final_pass_rate FROM agg_course_term WHERE semester_id=?""", (cur,))}
-    # M1：首次通过率改读 V2 agg_course_pass_stat（attempt_type 三分层，全学期累计加权）；
+    # 三分层通过率按所选学期读取；受限身份按授权学生重新聚合。
     # finalPassRate 仍取 V1 agg_course_term（deprecated，保留一个版本周期）。
-    v2pass = _v2_pass_stats()
+    v2pass = _v2_pass_stats(cur, scoped_student_ids)
     v2_courses = (v2pass or {}).get("courses", {})
+    previous_course_stats = {}
+    if previous_semester:
+        previous_course_stats = {r["course_id"]: r for r in dbm.query(conn, f"""
+            SELECT g.course_id,COUNT(*) total,
+              SUM(CASE WHEN g.is_pass=0 THEN 1 ELSE 0 END) fail_count
+            FROM fact_grade g JOIN dim_student s ON g.student_id=s.student_id
+            WHERE g.source='real' AND g.is_pass IS NOT NULL
+              AND g.semester_id=?{student_and}
+            GROUP BY g.course_id
+        """, tuple([previous_semester] + scope_params))}
+    course_candidates = []
     for r in dbm.query(conn, f"""SELECT g.course_id,co.name,co.dept,COUNT(*) total,
         SUM(CASE WHEN g.is_pass=0 THEN 1 ELSE 0 END) fail_count,
+        COUNT(DISTINCT CASE WHEN g.is_pass=0 THEN g.student_id END) affected_students,
         AVG(g.score) avg_score,
         AVG(CASE WHEN g.score>=90 THEN 1.0 ELSE 0 END) excellent_rate
         FROM fact_grade g JOIN dim_student s ON g.student_id=s.student_id
         LEFT JOIN dim_course co ON g.course_id=co.course_id
         WHERE g.source='real' AND g.is_pass IS NOT NULL AND g.semester_id=?{student_and}
-        GROUP BY g.course_id HAVING total>=30
-        ORDER BY (fail_count*1.0/total) DESC LIMIT 8""", tuple([cur] + scope_params)):
+        GROUP BY g.course_id HAVING total>=30 AND fail_count>0
+        """, tuple([cur] + scope_params)):
         rates = rate_map.get(r["course_id"], {})
         v2c = v2_courses.get(r["course_id"]) or {}
-        failCourses.append({
+        current_rate = round(r["fail_count"] / r["total"] * 100, 1)
+        previous_row = previous_course_stats.get(r["course_id"], {})
+        previous_rate = _pct_number(
+            previous_row.get("fail_count"), previous_row.get("total"))
+        change_pp = (
+            round(current_rate - previous_rate, 1)
+            if previous_rate is not None else None
+        )
+        reasons = [f"影响 {r['affected_students']} 名学生"]
+        if v2c.get("course_group") == "公共必修":
+            reasons.append("公共必修")
+        if change_pp is not None and change_pp >= 3:
+            reasons.append(f"较上期上升 {change_pp} 个百分点")
+        elif previous_rate is not None and previous_rate >= 10 and current_rate >= 10:
+            reasons.append("连续两期未通过率较高")
+        elif current_rate >= 10:
+            reasons.append(f"当前未通过率 {current_rate}%")
+        course_candidates.append({
             "id": r["course_id"], "name": r["name"] or r["course_id"],
             "college": r["dept"] or "—",
             "failCount": r["fail_count"], "totalCount": r["total"],
-            "failRate": str(round(r["fail_count"] / r["total"] * 100, 1)),
+            "affectedStudents": r["affected_students"],
+            "failRate": str(current_rate),
+            "failRateValue": current_rate,
+            "previousFailRate": previous_rate,
+            "changePp": change_pp,
             "avgScore": round(r["avg_score"] or 0, 1),
             "excellentRate": str(round((r["excellent_rate"] or 0) * 100, 1)),
-            "firstPassRate": None if restricted else _rate(v2c.get("fp"), v2c.get("fa")),
-            "makeupPassRate": None if restricted else _rate(v2c.get("mp"), v2c.get("ma")),
-            "retakePassRate": None if restricted else _rate(v2c.get("rp"), v2c.get("ra")),
-            "courseGroup": None if restricted else v2c.get("course_group"),
+            "firstPassRate": _rate(v2c.get("fp"), v2c.get("fa")),
+            "makeupPassRate": _rate(v2c.get("mp"), v2c.get("ma")),
+            "retakePassRate": _rate(v2c.get("rp"), v2c.get("ra")),
+            "courseGroup": v2c.get("course_group"),
+            "selectionReason": "；".join(reasons),
             # deprecated：V1 末次通过率口径，保留一个版本周期后移除。
             "finalPassRate": None if restricted else round((rates.get("final_pass_rate") or 0) * 100, 1),
         })
+    failCourses = sorted(
+        course_candidates,
+        key=lambda row: (
+            -row["affectedStudents"],
+            -(1 if row.get("courseGroup") == "公共必修" else 0),
+            -(row.get("changePp") or 0),
+            -row["failRateValue"],
+            row["name"],
+        ),
+    )[:10]
+    for index, row in enumerate(failCourses, start=1):
+        row["priorityRank"] = index
 
     course_pass_rates = None
-    if not restricted:
+    if v2pass is not None:
         overall, public = (v2pass or {}).get("overall") or {}, (v2pass or {}).get("public_required") or {}
-        final_v1 = dbm.scalar(conn, """SELECT SUM(final_pass_rate*total)/SUM(total)
-            FROM agg_course_term WHERE total>0""")
+        final_v1 = None if restricted else dbm.scalar(conn, """
+            SELECT SUM(final_pass_rate*total)/SUM(total)
+            FROM agg_course_term WHERE total>0 AND semester_id=?""", (cur,))
         course_pass_rates = {
             "firstPassRate": _rate(overall.get("fp"), overall.get("fa")),
             "makeupPassRate": _rate(overall.get("mp"), overall.get("ma")),
@@ -286,30 +535,152 @@ def dashboard(semester: Optional[str] = None,
                          "retake": overall.get("ra") or 0},
             # deprecated：V1 agg_course_term 末次通过率，保留一个版本周期。
             "finalPassRate": round(final_v1 * 100, 1) if final_v1 is not None else None,
-            "source": ("V2 agg_course_pass_stat（grade_attempt attempt_type 三分层，"
-                       "全学期累计加权，SUM(pass)/SUM(attempts)）"
+            "source": (f"V2 agg_course_pass_stat（{cur}，grade_attempt attempt_type 三分层，"
+                       f"{'授权学生范围重新聚合' if restricted else '全校聚合'}，SUM(pass)/SUM(attempts)）"
                        if v2pass else "V2 agg_course_pass_stat 未构建，三分层指标暂缺"),
             "deprecatedFields": ["finalPassRate"],
         }
 
     total_cur = sum(cur_fail_by_col.values()) if cur_fail_by_col else 0
     total_hist = sum(hist_fail_by_col.values()) if hist_fail_by_col else 0
-    kpi[4]["value"] = _pct(total_cur / students if students else 0)
-    kpi[5]["value"] = _pct(total_hist / students if students else 0)
+    kpi[4]["value"] = _pct_value(total_cur, students_with_results)
+    kpi[5]["value"] = _pct_value(total_hist, students)
     kpi, kpi_config_applied = _apply_kpi_config(conn, kpi)
+    current_coverage_rate = _pct_number(students_with_results, students)
 
-    return ok({"kpi": kpi, "colleges": colleges, "gpaDist": gpaDist,
+    def _change(current_value, previous_value, digits=1):
+        if current_value is None or previous_value is None:
+            return None
+        return round(current_value - previous_value, digits)
+
+    management_summary = [
+        {
+            "id": "result_coverage",
+            "label": "有效成绩覆盖率",
+            "value": current_coverage_rate,
+            "unit": "%",
+            "change": _change(current_coverage_rate, previous_coverage_rate),
+            "changeUnit": "个百分点",
+            "betterDirection": "up",
+            "formula": "所选学期至少一条有效成绩的去重学生数÷当前授权范围在籍学生数",
+            "managementUse": "先判断当前成绩数据是否足以支持学院和课程比较；覆盖不足时优先核查成绩发布进度。",
+            "actionLabel": "查看学院覆盖",
+            "actionTarget": "college-compare",
+        },
+        {
+            "id": "current_fail_rate",
+            "label": "当前挂科学生率",
+            "value": current_fail_rate_value,
+            "unit": "%",
+            "change": _change(current_fail_rate_value, previous_fail_rate_value),
+            "changeUnit": "个百分点",
+            "betterDirection": "down",
+            "formula": "所选学期至少一门未通过的去重学生数÷所选学期有有效成绩的去重学生数",
+            "managementUse": "判断当前受学业失败影响的学生范围，并下钻定位偏离学院和重点课程。",
+            "actionLabel": "定位偏离学院",
+            "actionTarget": "college-compare",
+        },
+        {
+            "id": "average_gpa",
+            "label": "学生平均 GPA",
+            "value": current_avg_gpa,
+            "unit": "",
+            "change": _change(current_avg_gpa, previous_avg_gpa, 2),
+            "changeUnit": "",
+            "betterDirection": "up",
+            "formula": "先计算每名学生所选学期课程 GPA 均值，再对有 GPA 学生求平均",
+            "managementUse": "观察总体学业水平变化，并与挂科学生率结合判断是否出现整体下移。",
+            "actionLabel": "查看学院差异",
+            "actionTarget": "college-compare",
+        },
+        {
+            "id": "active_alert_rate",
+            "label": "当前有效预警学生率",
+            "value": scope_alert_rate,
+            "unit": "%",
+            "change": None,
+            "changeUnit": "",
+            "betterDirection": "down",
+            "formula": "当前有效预警去重学生数÷当前授权范围在籍学生数",
+            "managementUse": "衡量当前需要关注的预警覆盖；结合新增与持续人数安排核查优先级。",
+            "supplement": (
+                f"当前 {alert_stu} 人 · 新增 {new_alert_students} 人 · 持续 {persistent_alert_students} 人"
+                if alert_history_comparable
+                else f"当前 {alert_stu} 人 · 历史预警尚无可比基线"
+            ),
+            "comparisonAvailable": alert_history_comparable,
+            "actionLabel": "进入学业预警",
+            "actionTarget": "alert",
+        },
+    ]
+    leading_college = next(
+        (row for row in ranked_fail if row.get("currentFailVsScopePp") is not None
+         and row["currentFailVsScopePp"] > 0),
+        None,
+    )
+    management_focus = []
+    if leading_college:
+        management_focus.append({
+            "level": "warning",
+            "title": f"{leading_college['name']}当前挂科学生率高于范围均值",
+            "detail": (
+                f"高 {leading_college['currentFailVsScopePp']} 个百分点，"
+                f"在 {leading_college['comparisonCount']} 个可比学院中风险排序第 "
+                f"{leading_college['currentFailRank']}。"
+            ),
+            "targetType": "college",
+            "targetId": leading_college["id"],
+        })
+    if failCourses:
+        top_course = failCourses[0]
+        management_focus.append({
+            "level": "danger",
+            "title": f"优先核查课程：{top_course['name']}",
+            "detail": top_course["selectionReason"],
+            "targetType": "course",
+            "targetId": top_course["id"],
+        })
+
+    payload = {"kpi": kpi, "colleges": colleges, "gpaDist": gpaDist,
                "gpaDistByCollege": gpaDistByCollege, "failCourses": failCourses,
                "coursePassRates": course_pass_rates,
+               "scopeBackground": {
+                   "students": students,
+                   "courses": courses_cur,
+                   "teachers": teachers,
+                   "teacherLabel": teacher_label,
+               },
+               "managementSummary": management_summary,
+               "managementFocus": management_focus,
                "kpiConfigApplied": kpi_config_applied,
                "scope": {"restricted": restricted,
                          "label": scope_label,
                          "studentCount": students},
+               "period": {"semester": cur, "previousSemester": previous_semester},
+               "coverage": {
+                   "rosterStudents": students,
+                   "studentsWithValidResults": students_with_results,
+                   "validResultCoverageRate": _pct_number(students_with_results, students),
+               },
+               "definitionVersion": "dashboard-v3",
+               "prototypeMetrics": {
+                   "officialConclusion": False,
+                   "graduationRate": (
+                       round(grad_rate * 100, 1) if grad.get("total") else None),
+                   "degreeAwardRate": (
+                       round(degree_rate * 100, 1) if grad.get("total") else None),
+                   "graduated": grad.get("grad_count") or 0,
+                   "degreeAwarded": grad.get("degree_count") or 0,
+                   "cohortTotal": grad.get("total") or 0,
+                   "source": "固定种子合成业务表",
+               },
                "evidence": {
                    "real": ["学籍、成绩、GPA、课程、教师授课关系、当前有效预警"],
                    "simulated": ["毕业结果、学位授予结果"],
                    "limitation": "毕业率和学位授予率来自固定种子合成业务表；课程学分通过占比是本学期已通过学分人次÷修读学分人次，不代表培养方案完成度。"
-               }})
+               }}
+    _DASHBOARD_CACHE[cache_key] = (time.monotonic(), payload)
+    return ok(payload)
 
 
 # ------------------------------------------------------------------ college
@@ -326,12 +697,25 @@ def college_detail(college_id: str, semester: Optional[str] = None,
     student_scope, scope_params = student_data_scope(user, conn, "s")
     scope_and = f" AND {student_scope}" if student_scope else ""
     restricted = bool(student_scope)
+    scoped_student_ids = (
+        [row["student_id"] for row in dbm.query(conn, f"""
+            SELECT s.student_id FROM dim_student s
+            WHERE s.college_id=?{scope_and}
+        """, tuple([college_id] + scope_params))]
+        if restricted else None
+    )
     allowed = dbm.scalar(conn, f"SELECT 1 FROM dim_student s WHERE s.college_id=?{scope_and} LIMIT 1",
                          tuple([college_id] + scope_params))
     if not allowed:
         raise ApiError("无权限查看该学院", code=403, status_code=403)
     students = dbm.scalar(conn, f"SELECT COUNT(*) FROM dim_student s WHERE s.college_id=?{scope_and}",
                           tuple([college_id] + scope_params)) or 0
+    students_with_results = dbm.scalar(conn, f"""
+        SELECT COUNT(DISTINCT g.student_id)
+        FROM fact_grade g JOIN dim_student s ON g.student_id=s.student_id
+        WHERE s.college_id=? AND g.source='real' AND g.semester_id=?
+          AND g.is_pass IS NOT NULL{scope_and}
+    """, tuple([college_id, cur] + scope_params)) or 0
     courses_cur = dbm.scalar(conn, f"""
         SELECT COUNT(DISTINCT g.course_id) FROM fact_grade g
         JOIN dim_student s ON g.student_id=s.student_id
@@ -354,13 +738,38 @@ def college_detail(college_id: str, semester: Optional[str] = None,
         FROM dim_student s LEFT JOIN fact_grade g
           ON s.student_id=g.student_id AND g.is_pass=0 AND g.source='real'
         WHERE s.college_id=?{scope_and}""", tuple([college_id] + scope_params)) or 0
+    college_term_summary = dbm.query_one(conn, f"""
+        WITH student_term AS (
+          SELECT g.student_id, AVG(g.gpa) gpa,
+            MAX(CASE WHEN g.is_pass=0 THEN 1 ELSE 0 END) failed
+          FROM fact_grade g JOIN dim_student s ON g.student_id=s.student_id
+          WHERE s.college_id=? AND g.semester_id=? AND g.source='real'
+            AND g.is_pass IS NOT NULL{scope_and}
+          GROUP BY g.student_id)
+        SELECT COUNT(*) result_students, AVG(gpa) avg_gpa,
+          SUM(failed) failed_students
+        FROM student_term
+    """, tuple([college_id, cur] + scope_params)) or {}
+    college_failed_students = college_term_summary.get("failed_students") or 0
+    college_avg_gpa = college_term_summary.get("avg_gpa")
     kpi = [
-        {"label": "范围内学生" if restricted else "本院学生", "value": str(students), "formula": "学院条件与当前角色授权范围内的在籍学生数"},
-        {"label": "本学期开课", "value": str(courses_cur), "formula": "当前学期开课门数"},
-        {"label": "相关授课教师", "value": str(teachers) if teachers else "—", "formula": "当前学期为范围内学生授课的教师去重"},
-        {"label": "预警学生", "value": str(alert_stu), "formula": "当前预警人数"},
-        {"label": "历史挂科经历率", "value": f"{hist_fail_college}%", "formula": "在校期间曾出现过未通过记录的学生÷本院学生（包含后续补考或重修通过）"},
-        {"label": "学位率", "value": _pct(degree_rate), "formula": "合成学位业务表：授予学位/范围内毕业届"},
+        {"label": "有效成绩覆盖率",
+         "value": _pct_value(students_with_results, students),
+         "formula": "当前学期至少有一条有效成绩的去重学生数÷本院范围内在籍学生数",
+         "detail": f"{students_with_results}/{students}人"},
+        {"label": "当前挂科学生率",
+         "value": _pct_value(college_failed_students, students_with_results),
+         "formula": "当前学期至少一门未通过的去重学生数÷当前学期有有效成绩的去重学生数",
+         "detail": f"{college_failed_students}/{students_with_results}人"},
+        {"label": "平均GPA",
+         "value": f"{round(college_avg_gpa, 2)}" if college_avg_gpa is not None else "—",
+         "formula": "先计算每名学生当前学期课程GPA均值，再对有GPA学生求平均"},
+        {"label": "有效预警学生率",
+         "value": _pct_value(alert_stu, students),
+         "formula": "当前有效预警去重学生数÷本院范围内在籍学生数",
+         "detail": f"{alert_stu}/{students}人"},
+        {"label": "优先核查专业", "value": "0个",
+         "formula": "当前挂科学生率高于学院均值3个百分点，或有效成绩覆盖率低于70%的专业数"},
     ]
 
     # 专业横向
@@ -385,87 +794,197 @@ def college_detail(college_id: str, semester: Optional[str] = None,
         tuple([college_id] + scope_params)):
         mid = r["major_id"]
         stat = dbm.query_one(conn, f"""
-            SELECT AVG(g.gpa) gpa, AVG(CASE WHEN g.is_pass=0 THEN 1.0 ELSE 0 END) fr
-            FROM fact_grade g JOIN dim_student s ON g.student_id=s.student_id
-            WHERE s.major_id=? AND g.semester_id=?{scope_and}""",
+            WITH student_term AS (
+              SELECT g.student_id,AVG(g.gpa) gpa
+              FROM fact_grade g JOIN dim_student s ON g.student_id=s.student_id
+              WHERE s.major_id=? AND g.semester_id=? AND g.source='real'
+                AND g.gpa IS NOT NULL{scope_and}
+              GROUP BY g.student_id)
+            SELECT AVG(gpa) gpa FROM student_term""",
             tuple([mid, cur] + scope_params)) or {}
+        result_students = dbm.scalar(conn, f"""
+            SELECT COUNT(DISTINCT g.student_id)
+            FROM fact_grade g JOIN dim_student s ON g.student_id=s.student_id
+            WHERE s.major_id=? AND g.semester_id=? AND g.source='real'
+              AND g.is_pass IS NOT NULL{scope_and}""",
+            tuple([mid, cur] + scope_params)) or 0
         acnt = dbm.scalar(conn, f"""
             SELECT COUNT(DISTINCT a.student_id) FROM fact_alert a
             JOIN dim_student s ON a.student_id=s.student_id WHERE s.major_id=?
             AND COALESCE(a.is_active,1)=1{scope_and}""", tuple([mid] + scope_params)) or 0
         majors.append({
             "id": mid, "name": r["name"], "students": r["students"],
-            "gpa": round(stat.get("gpa") or 0, 2),
+            "gpa": round(stat.get("gpa"), 2) if stat.get("gpa") is not None else None,
             "failRate": _pct(hist_fail_by_major.get(mid, 0) / r["students"]),
-            "currentFailRate": _pct(cur_fail_by_major.get(mid, 0) / r["students"]),
+            "currentFailRate": _pct_value(cur_fail_by_major.get(mid, 0), result_students),
             "alertCount": acnt,
+            "alertRate": _pct_value(acnt, r["students"]),
+            "studentsWithResults": result_students,
+            "resultCoverageRate": _pct_number(result_students, r["students"]),
             "trend": "up" if (cur_fail_by_major.get(mid, 0) / max(r["students"],1)) > 0.06 else "down",
         })
     # 全院挂科率均值，修正各专业趋势
-    col_avg_fail = sum(v for v in cur_fail_by_major.values()) / max(sum(m["students"] for m in majors), 1)
+    col_avg_fail = sum(v for v in cur_fail_by_major.values()) / max(
+        sum(m["studentsWithResults"] for m in majors), 1)
     for m in majors:
-        m["trend"] = "up" if (cur_fail_by_major.get(m["id"], 0) / max(m["students"],1)) > col_avg_fail else "down"
+        current_rate = (
+            cur_fail_by_major.get(m["id"], 0) / m["studentsWithResults"]
+            if m["studentsWithResults"] else None
+        )
+        m["trend"] = (
+            None if current_rate is None
+            else "up" if current_rate > col_avg_fail else "down"
+        )
+        m["currentFailVsCollegePp"] = (
+            round((current_rate - col_avg_fail) * 100, 1)
+            if current_rate is not None else None
+        )
+        reasons = []
+        if m["currentFailVsCollegePp"] is not None and m["currentFailVsCollegePp"] >= 3:
+            reasons.append(f"挂科学生率高于学院{m['currentFailVsCollegePp']}个百分点")
+        if (m["resultCoverageRate"] is not None
+                and m["resultCoverageRate"] < 70):
+            reasons.append(f"有效成绩覆盖率仅{m['resultCoverageRate']}%")
+        m["priorityReason"] = "；".join(reasons) if reasons else "未达到优先核查阈值"
+        m["needsPriorityReview"] = bool(reasons)
+    majors.sort(key=lambda item: (
+        not item["needsPriorityReview"],
+        -(item["currentFailVsCollegePp"] or -999),
+        item["name"],
+    ))
+    for rank, major in enumerate(majors, start=1):
+        major["priorityRank"] = rank
+    priority_major_count = sum(1 for m in majors if m["needsPriorityReview"])
+    kpi[-1]["value"] = f"{priority_major_count}个"
+    kpi[-1]["detail"] = f"共{len(majors)}个专业"
 
     # 年级对比（按当前学期成绩）
     gradeCompare = []
     for r in dbm.query(conn, f"""
-        SELECT s.grade,
-               AVG(CASE WHEN g.is_pass=1 THEN g.credits ELSE 0 END)/NULLIF(AVG(g.credits),0) AS cd,
-               AVG(g.gpa) gpa, AVG(CASE WHEN g.is_pass=0 THEN 1.0 ELSE 0 END) fr
-        FROM fact_grade g JOIN dim_student s ON g.student_id=s.student_id
-        WHERE s.college_id=? AND g.semester_id=? AND s.grade IS NOT NULL{scope_and}
-        GROUP BY s.grade ORDER BY s.grade DESC""", tuple([college_id, cur] + scope_params)):
+        WITH student_term AS (
+          SELECT s.grade,g.student_id,AVG(g.gpa) gpa,
+            MAX(CASE WHEN g.is_pass=0 THEN 1 ELSE 0 END) failed,
+            SUM(CASE WHEN g.is_pass=1 THEN COALESCE(g.credits,0) ELSE 0 END) passed_credits,
+            SUM(COALESCE(g.credits,0)) attempted_credits
+          FROM fact_grade g JOIN dim_student s ON g.student_id=s.student_id
+          WHERE s.college_id=? AND g.semester_id=? AND g.source='real'
+            AND g.is_pass IS NOT NULL AND s.grade IS NOT NULL{scope_and}
+          GROUP BY s.grade,g.student_id)
+        SELECT grade,COUNT(*) result_students,
+          SUM(passed_credits)/NULLIF(SUM(attempted_credits),0) cd,
+          AVG(gpa) gpa,SUM(failed)*1.0/COUNT(*) fr
+        FROM student_term GROUP BY grade ORDER BY grade DESC
+    """, tuple([college_id, cur] + scope_params)):
         gradeCompare.append({
             "grade": f"{r['grade']}级", "creditDone": round((r["cd"] or 0) * 100),
-            "gpaAvg": f"{round(r['gpa'] or 0, 2)}", "failRate": _pct(r["fr"]),
+            "gpaAvg": round(r["gpa"], 2) if r["gpa"] is not None else None,
+            "failRate": _pct(r["fr"]),
+            "studentsWithResults": r["result_students"],
         })
 
-    failCourses = _college_fail_courses(conn, college_id, cur, scope_and, scope_params, restricted=restricted)
+    failCourses = _college_fail_courses(
+        conn, college_id, cur, scope_and, scope_params,
+        restricted=restricted, scoped_student_ids=scoped_student_ids)
     return ok({"name": col["name"], "kpi": kpi, "majors": majors,
                "gradeCompare": gradeCompare, "failCourses": failCourses,
                "scope": {"restricted": restricted,
                          "label": "当前角色授权范围" if restricted else "全院"},
+               "period": {"semester": cur},
+               "coverage": {
+                   "rosterStudents": students,
+                   "studentsWithValidResults": students_with_results,
+                   "validResultCoverageRate": _pct_number(students_with_results, students),
+               },
+               "definitionVersion": "dashboard-v3",
+               "prototypeMetrics": {
+                   "officialConclusion": False,
+                   "degreeAwardRate": round(degree_rate * 100, 1) if degree_rate is not None else None,
+                   "source": "固定种子合成业务表",
+               },
                "evidence": {"real": ["真实学籍、成绩、课程、教师授课关系、当前有效预警"],
                             "simulated": ["学位授予结果"],
                             "limitation": "学位率来自固定种子合成业务表；年级课程学分通过占比不等同于培养方案完成度。"}})
 
 
 def _college_fail_courses(conn, college_id, cur, scope_and="", scope_params=None,
-                          limit=6, restricted=False):
+                          limit=6, restricted=False, scoped_student_ids=None):
     scope_params = scope_params or []
+    previous_semester = dbm.scalar(
+        conn,
+        "SELECT semester_id FROM dim_semester WHERE semester_id<? "
+        "ORDER BY semester_id DESC LIMIT 1",
+        (cur,),
+    )
+    previous_rates = {}
+    if previous_semester:
+        previous_rates = {
+            row["course_id"]: row["fail_rate"]
+            for row in dbm.query(conn, f"""
+                SELECT g.course_id,
+                  SUM(CASE WHEN g.is_pass=0 THEN 1 ELSE 0 END)*100.0/
+                    NULLIF(COUNT(*),0) fail_rate
+                FROM fact_grade g JOIN dim_student s
+                  ON g.student_id=s.student_id
+                WHERE g.source='real' AND s.college_id=?
+                  AND g.semester_id=? AND g.is_pass IS NOT NULL{scope_and}
+                GROUP BY g.course_id
+            """, tuple([college_id, previous_semester] + scope_params))
+        }
     cr_map = {}
     for r in dbm.query(conn,
         "SELECT course_id, first_pass_rate, final_pass_rate FROM agg_course_term "
         "WHERE semester_id=? AND first_pass_rate IS NOT NULL", (cur,)):
         cr_map[r["course_id"]] = (r["first_pass_rate"], r["final_pass_rate"])
-    # M1：firstPassRate 改读 V2 agg_course_pass_stat 三分层（全学期累计加权）；
+    # 三分层通过率按所选学期读取；受限身份按授权学生重新聚合。
     # finalPassRate 仍取 V1（deprecated，保留一个版本周期）。
-    v2_courses = (_v2_pass_stats() or {}).get("courses", {})
+    v2_courses = (
+        _v2_pass_stats(cur, scoped_student_ids if restricted else None) or {}
+    ).get("courses", {})
     out = []
     for r in dbm.query(conn, f"""
         SELECT g.course_id, co.name, co.credits,
                COUNT(*) total, SUM(CASE WHEN g.is_pass=0 THEN 1 ELSE 0 END) fc,
+               COUNT(DISTINCT CASE WHEN g.is_pass=0 THEN g.student_id END) affected,
                AVG(g.score) av
         FROM fact_grade g JOIN dim_student s ON g.student_id=s.student_id
         JOIN dim_course co ON g.course_id=co.course_id
         WHERE g.source='real' AND s.college_id=? AND g.semester_id=?{scope_and}
         GROUP BY g.course_id HAVING total>=15
-        ORDER BY (fc*1.0/total) DESC LIMIT ?""",
+        ORDER BY affected DESC, (fc*1.0/total) DESC LIMIT ?""",
         tuple([college_id, cur] + scope_params + [limit])):
         fpr, lpr = cr_map.get(r["course_id"], (None, None))
         v2c = v2_courses.get(r["course_id"]) or {}
+        current_rate = round(r["fc"] / r["total"] * 100, 1)
+        previous_rate = previous_rates.get(r["course_id"])
+        change_pp = (
+            round(current_rate - previous_rate, 1)
+            if previous_rate is not None else None
+        )
+        reason_parts = [f"影响{r['affected']}名学生"]
+        if change_pp is not None:
+            reason_parts.append(
+                f"较上学期{'上升' if change_pp >= 0 else '下降'}{abs(change_pp)}个百分点")
+        else:
+            reason_parts.append("上学期无可比记录")
         out.append({
             "id": r["course_id"], "name": r["name"] or r["course_id"],
             "failCount": r["fc"], "totalCount": r["total"],
-            "failRate": str(round(r["fc"] / r["total"] * 100, 1)),
+            "affectedStudents": r["affected"],
+            "failRate": str(current_rate),
+            "previousFailRate": (
+                round(previous_rate, 1) if previous_rate is not None else None),
+            "changePp": change_pp,
+            "selectionReason": "；".join(reason_parts),
             "avgScore": round(r["av"] or 0, 1), "credits": r["credits"],
-            "firstPassRate": None if restricted else _rate(v2c.get("fp"), v2c.get("fa")),
-            "makeupPassRate": None if restricted else _rate(v2c.get("mp"), v2c.get("ma")),
-            "retakePassRate": None if restricted else _rate(v2c.get("rp"), v2c.get("ra")),
-            "courseGroup": None if restricted else v2c.get("course_group"),
+            "firstPassRate": _rate(v2c.get("fp"), v2c.get("fa")),
+            "makeupPassRate": _rate(v2c.get("mp"), v2c.get("ma")),
+            "retakePassRate": _rate(v2c.get("rp"), v2c.get("ra")),
+            "courseGroup": v2c.get("course_group"),
             # deprecated：V1 末次通过率口径，保留一个版本周期后移除。
             "finalPassRate": None if restricted else (round((lpr or 0) * 100, 1) if lpr is not None else None),
         })
+    for rank, row in enumerate(out, start=1):
+        row["priorityRank"] = rank
     return out
 
 
@@ -494,6 +1013,18 @@ def major_detail(major_id: str, semester: Optional[str] = None,
         SELECT COUNT(DISTINCT a.student_id) FROM fact_alert a
         JOIN dim_student s ON a.student_id=s.student_id WHERE s.major_id=?
         AND COALESCE(a.is_active,1)=1{scope_and}""", tuple([major_id] + scope_params)) or 0
+    term_summary = dbm.query_one(conn, f"""
+        WITH student_term AS (
+          SELECT g.student_id,AVG(g.gpa) gpa,
+            MAX(CASE WHEN g.is_pass=0 THEN 1 ELSE 0 END) failed
+          FROM fact_grade g JOIN dim_student s ON g.student_id=s.student_id
+          WHERE s.major_id=? AND g.semester_id=? AND g.source='real'
+            AND g.is_pass IS NOT NULL{scope_and}
+          GROUP BY g.student_id)
+        SELECT COUNT(*) result_students,AVG(gpa) avg_gpa,SUM(failed) failed_students
+        FROM student_term
+    """, tuple([major_id, cur] + scope_params)) or {}
+    students_with_results = term_summary.get("result_students") or 0
     total_req = dbm.scalar(conn, "SELECT total_req FROM fact_major_req WHERE major_id=?", (major_id,))
     earned_avg = dbm.scalar(conn, f"""SELECT AVG(f.earned_credits)
         FROM fact_graduation f JOIN dim_student s ON f.student_id=s.student_id
@@ -506,10 +1037,16 @@ def major_detail(major_id: str, semester: Optional[str] = None,
     grad_rate = gr.get("grad_rate")
     kpi = [
         {"label": "范围内学生" if restricted else "在校生", "value": str(students), "formula": "专业条件与当前角色授权范围内的学生数"},
-        {"label": "培养方案完成率", "value": _pct(cd), "formula": "合成毕业业务表已修学分/真实培养方案应修总学分；无方案时不可精确解释"},
+        {"label": "有效成绩覆盖率", "value": _pct_value(students_with_results, students),
+         "formula": "当前学期至少一条有效成绩的去重学生数÷本专业范围内学生数"},
+        {"label": "平均GPA",
+         "value": (f"{round(term_summary['avg_gpa'], 2)}"
+                   if term_summary.get("avg_gpa") is not None else "—"),
+         "formula": "先计算每名学生当前学期课程GPA均值，再对有GPA学生求平均"},
+        {"label": "当前挂科学生率",
+         "value": _pct_value(term_summary.get("failed_students"), students_with_results),
+         "formula": "当前学期至少一门未通过的去重学生数÷当前学期有有效成绩的去重学生数"},
         {"label": "预警学生", "value": str(alert_stu), "formula": "当前预警人数"},
-        {"label": "毕业率", "value": _pct(grad_rate) if grad_rate is not None else "—",
-         "formula": "合成毕业业务表：按期毕业/范围内毕业届"},
     ]
 
     gradeDetail = []
@@ -518,12 +1055,19 @@ def major_detail(major_id: str, semester: Optional[str] = None,
         GROUP BY s.grade ORDER BY s.grade DESC""", tuple([major_id] + scope_params))
     for base in grade_rows:
         grade = base["grade"]
-        r = dbm.query_one(conn, f"""SELECT AVG(g.gpa) gpa,
-            COUNT(DISTINCT CASE WHEN g.is_pass=0 THEN g.student_id END) failed_students,
-            SUM(CASE WHEN g.is_pass=1 THEN COALESCE(g.credits,0) ELSE 0 END) passed_credits,
-            SUM(COALESCE(g.credits,0)) attempted_credits
-            FROM fact_grade g JOIN dim_student s ON g.student_id=s.student_id
-            WHERE g.source='real' AND s.major_id=? AND s.grade=? AND g.semester_id=?{scope_and}""",
+        r = dbm.query_one(conn, f"""
+            WITH student_term AS (
+              SELECT g.student_id,AVG(g.gpa) gpa,
+                MAX(CASE WHEN g.is_pass=0 THEN 1 ELSE 0 END) failed,
+                SUM(CASE WHEN g.is_pass=1 THEN COALESCE(g.credits,0) ELSE 0 END) passed_credits,
+                SUM(COALESCE(g.credits,0)) attempted_credits
+              FROM fact_grade g JOIN dim_student s ON g.student_id=s.student_id
+              WHERE g.source='real' AND s.major_id=? AND s.grade=? AND g.semester_id=?
+                AND g.is_pass IS NOT NULL{scope_and}
+              GROUP BY g.student_id)
+            SELECT COUNT(*) result_students,AVG(gpa) gpa,SUM(failed) failed_students,
+              SUM(passed_credits) passed_credits,SUM(attempted_credits) attempted_credits
+            FROM student_term""",
             tuple([major_id, grade, cur] + scope_params)) or {}
         acnt = dbm.scalar(conn, f"""
             SELECT COUNT(DISTINCT a.student_id) FROM fact_alert a
@@ -541,15 +1085,46 @@ def major_detail(major_id: str, semester: Optional[str] = None,
             courses.append({"id": cr["course_id"], "name": cr["name"], "failCount": cr["fc"],
                             "totalCount": cr["total"],
                             "failRate": str(round(cr["fc"] / cr["total"] * 100, 1))})
+        result_students = r.get("result_students") or 0
+        failed_students = r.get("failed_students") or 0
+        fail_rate_value = (
+            round(failed_students * 100 / result_students, 1)
+            if result_students else None
+        )
         gradeDetail.append({
             "grade": f"{grade}级", "students": base["students"],
-            "gpaAvg": f"{round(r.get('gpa') or 0, 2)}",
-            "failRate": _pct((r.get("failed_students") or 0) / max(base["students"], 1)),
-            "failedStudents": r.get("failed_students") or 0,
+            "gpaAvg": round(r["gpa"], 2) if r.get("gpa") is not None else None,
+            "failRate": _pct_value(failed_students, result_students),
+            "failRateValue": fail_rate_value,
+            "failedStudents": failed_students,
             "alertCount": acnt,
-            "creditDone": round((r.get("passed_credits") or 0) * 100 / (r.get("attempted_credits") or 1)),
+            "creditDone": _pct_number(
+                r.get("passed_credits"), r.get("attempted_credits")),
+            "studentsWithResults": r.get("result_students") or 0,
+            "resultCoverageRate": _pct_number(
+                r.get("result_students"), base["students"]),
             "courses": courses,
         })
+    gradeDetail.sort(key=lambda item: (
+        -(item["failRateValue"] if item["failRateValue"] is not None else -1),
+        item["resultCoverageRate"] if item["resultCoverageRate"] is not None else 101,
+        -item["alertCount"],
+        item["grade"],
+    ))
+    for rank, grade_row in enumerate(gradeDetail, start=1):
+        grade_row["riskRank"] = rank
+        reasons = []
+        if grade_row["failedStudents"]:
+            reasons.append(
+                f"{grade_row['failedStudents']}名学生本学期至少一门未通过")
+        if (grade_row["resultCoverageRate"] is not None
+                and grade_row["resultCoverageRate"] < 70):
+            reasons.append(
+                f"有效成绩覆盖率仅{grade_row['resultCoverageRate']}%")
+        if grade_row["alertCount"]:
+            reasons.append(f"{grade_row['alertCount']}名学生处于有效预警")
+        grade_row["priorityReason"] = (
+            "；".join(reasons) if reasons else "未发现需优先核查的集中问题")
 
     goalDistribution = {"升学读研": 0, "签约就业": 0, "灵活就业": 0, "待业": 0}
     for r in dbm.query(conn, f"""SELECT f.goal, COUNT(*) n FROM fact_graduation f
@@ -561,6 +1136,20 @@ def major_detail(major_id: str, semester: Optional[str] = None,
                "kpi": kpi, "gradeDetail": gradeDetail, "goalDistribution": goalDistribution,
                "scope": {"restricted": restricted,
                          "label": "当前角色授权范围" if restricted else "本专业"},
+               "period": {"semester": cur},
+               "coverage": {
+                   "rosterStudents": students,
+                   "studentsWithValidResults": students_with_results,
+                   "validResultCoverageRate": _pct_number(students_with_results, students),
+               },
+               "prototypeMetrics": {
+                   "syntheticPlanCompletionRate": _pct_number(earned_avg, total_req),
+                   "syntheticGraduationRate": (
+                       round(grad_rate * 100, 1) if grad_rate is not None else None),
+                   "syntheticGoalDistribution": goalDistribution,
+                   "officialConclusion": False,
+               },
+               "definitionVersion": "dashboard-v3",
                "evidence": {"real": ["真实学籍、成绩、课程、当前有效预警、培养方案要求（仅覆盖专业）"],
                             "simulated": ["毕业结果、就业去向、毕业表已修学分"],
                             "limitation": "毕业率、就业去向和毕业表已修学分来自固定种子合成业务表；年级课程学分通过占比不等同于培养方案完成度。"}})
@@ -569,6 +1158,9 @@ def major_detail(major_id: str, semester: Optional[str] = None,
 # ------------------------------------------------------------------ course
 @router.get("/course/{course_id}")
 def course_detail(course_id: str, semester: Optional[str] = None,
+                  college_id: Optional[str] = None,
+                  major_id: Optional[str] = None,
+                  grade: Optional[str] = None,
                   conn: sqlite3.Connection = Depends(get_db),
                   user: dict = Depends(get_current_user)):
     cur = semester or CUR
@@ -580,29 +1172,81 @@ def course_detail(course_id: str, semester: Optional[str] = None,
     if not co:
         raise ApiError("课程不存在", code=404, status_code=404)
     student_scope, scope_params = student_data_scope(user, conn, "s")
-    scope_and = f" AND {student_scope}" if student_scope else ""
     restricted = bool(student_scope)
+    detail_conditions, detail_params = [], []
+    if student_scope:
+        detail_conditions.append(student_scope)
+        detail_params.extend(scope_params)
+    analysis_labels = []
+    if college_id:
+        college = dbm.query_one(
+            conn, "SELECT name FROM dim_college WHERE college_id=?", (college_id,))
+        if not college:
+            raise ApiError("学院不存在", code=404, status_code=404)
+        detail_conditions.append("s.college_id=?")
+        detail_params.append(college_id)
+        analysis_labels.append(college["name"])
+    if major_id:
+        major = dbm.query_one(
+            conn, "SELECT name FROM dim_major WHERE major_id=?", (major_id,))
+        if not major:
+            raise ApiError("专业不存在", code=404, status_code=404)
+        detail_conditions.append("s.major_id=?")
+        detail_params.append(major_id)
+        analysis_labels.append(major["name"])
+    if grade:
+        detail_conditions.append("s.grade=?")
+        detail_params.append(grade)
+        analysis_labels.append(f"{grade}级")
+    detail_scope = " AND ".join(detail_conditions)
+    detail_and = f" AND {detail_scope}" if detail_scope else ""
+    scoped_student_ids = (
+        [row["student_id"] for row in dbm.query(
+            conn, f"SELECT s.student_id FROM dim_student s WHERE {detail_scope}",
+            tuple(detail_params))]
+        if detail_scope else None
+    )
+    if restricted and analysis_labels and not scoped_student_ids:
+        raise ApiError("无权限查看该分析范围", code=403, status_code=403)
     if restricted:
         authorized = dbm.scalar(conn, f"""SELECT 1 FROM fact_grade g
             JOIN dim_student s ON g.student_id=s.student_id
-            WHERE g.course_id=?{scope_and} LIMIT 1""", tuple([course_id] + scope_params))
+            WHERE g.course_id=? AND {student_scope} LIMIT 1""",
+            tuple([course_id] + scope_params))
         if not authorized:
             raise ApiError("无权限查看该课程范围", code=403, status_code=403)
     cur_row = dbm.query_one(conn, f"""
-        SELECT COUNT(*) total, AVG(g.score) av,
+        SELECT COUNT(*) total,
+               SUM(CASE WHEN g.score IS NOT NULL THEN 1 ELSE 0 END) scored,
+               AVG(g.score) av,
                SUM(CASE WHEN g.score>=90 THEN 1 ELSE 0 END) exc,
                SUM(CASE WHEN g.is_pass=0 THEN 1 ELSE 0 END) fc
         FROM fact_grade g JOIN dim_student s ON g.student_id=s.student_id
-        WHERE g.source='real' AND g.course_id=? AND g.semester_id=?{scope_and}""",
-        tuple([course_id, cur] + scope_params)) or {}
+        WHERE g.source='real' AND g.course_id=? AND g.semester_id=?
+          AND g.is_pass IS NOT NULL{detail_and}""",
+        tuple([course_id, cur] + detail_params)) or {}
     total = cur_row.get("total") or 0
+    scored = cur_row.get("scored") or 0
+    v2_course = (
+        (_v2_pass_stats(cur, scoped_student_ids) or {}).get("courses", {})
+    ).get(course_id, {})
+    first_fail_rate = (
+        round(100 - _rate(v2_course.get("fp"), v2_course.get("fa")), 1)
+        if _rate(v2_course.get("fp"), v2_course.get("fa")) is not None else None
+    )
     kpi = [
-        {"label": "修读人数", "value": str(total), "formula": "当前学期修读学生数"},
-        {"label": "平均分", "value": f"{round(cur_row.get('av') or 0, 1)}", "formula": "加权平均分", "detail": "满分100"},
-        {"label": "优秀率", "value": _pct((cur_row.get("exc") or 0) / total if total else 0),
-         "formula": "≥90分占比", "detail": f"{cur_row.get('exc') or 0}人≥90分"},
-        {"label": "挂科率", "value": _pct((cur_row.get("fc") or 0) / total if total else 0),
-         "formula": "<60分占比", "detail": f"{cur_row.get('fc') or 0}人挂科"},
+        {"label": "有效成绩人次", "value": str(total),
+         "formula": "当前学期已发布且具有通过判定的有效成绩人次"},
+        {"label": "平均分",
+         "value": f"{round(cur_row['av'], 1)}" if cur_row.get("av") is not None else "—",
+         "formula": "当前学期有百分制成绩记录的算术平均分", "detail": f"{scored}人次有分数"},
+        {"label": "优秀率", "value": _pct_value(cur_row.get("exc"), scored),
+         "formula": "当前学期成绩≥90分人次÷有百分制成绩人次",
+         "detail": f"{cur_row.get('exc') or 0}人次≥90分"},
+        {"label": "首次未通过率",
+         "value": f"{first_fail_rate}%" if first_fail_rate is not None else "—",
+         "formula": "所选学期首次修读未通过人次÷首次修读人次",
+         "detail": f"{v2_course.get('fa') or 0}次首次修读"},
     ]
     bands = [("90-100", "优秀", 90, 101), ("80-89", "良好", 80, 90), ("70-79", "中等", 70, 80),
              ("60-69", "及格", 60, 70), ("0-59", "不及格", 0, 60)]
@@ -611,17 +1255,18 @@ def course_detail(course_id: str, semester: Optional[str] = None,
         c = dbm.scalar(conn, f"""SELECT COUNT(*) FROM fact_grade g
             JOIN dim_student s ON g.student_id=s.student_id
             WHERE g.source='real' AND g.course_id=? AND g.semester_id=?
-            AND g.score>=? AND g.score<?{scope_and}""",
-            tuple([course_id, cur, lo, hi] + scope_params)) or 0
+            AND g.is_pass IS NOT NULL AND g.score>=? AND g.score<?{detail_and}""",
+            tuple([course_id, cur, lo, hi] + detail_params)) or 0
         scoreDistribution.append({"range": rng, "label": label, "count": c,
-                                  "pct": round(c / total * 100, 1) if total else 0})
+                                  "pct": _pct_number(c, scored)})
     history = []
     for r in dbm.query(conn, f"""
         SELECT g.semester_id, AVG(g.score) av,
                AVG(CASE WHEN g.is_pass=0 THEN 1.0 ELSE 0 END) fr, COUNT(*) total
         FROM fact_grade g JOIN dim_student s ON g.student_id=s.student_id
-        WHERE g.source='real' AND g.course_id=?{scope_and} GROUP BY g.semester_id
-        ORDER BY g.semester_id DESC LIMIT 6""", tuple([course_id] + scope_params)):
+        WHERE g.source='real' AND g.course_id=? AND g.is_pass IS NOT NULL{detail_and}
+        GROUP BY g.semester_id
+        ORDER BY g.semester_id DESC LIMIT 6""", tuple([course_id] + detail_params)):
         history.append({"semester": r["semester_id"], "avgScore": round(r["av"] or 0, 1),
                         "failRate": _pct(r["fr"]), "totalStudents": r["total"]})
     history.reverse()
@@ -634,19 +1279,46 @@ def course_detail(course_id: str, semester: Optional[str] = None,
         JOIN dim_class cl ON s.class_id=cl.class_id
         LEFT JOIN fact_lesson l ON g.lesson_id=l.lesson_id AND g.semester_id=l.semester_id
         LEFT JOIN dim_teacher t ON l.teacher_id=t.teacher_id
-        WHERE g.source='real' AND g.course_id=? AND g.semester_id=?{scope_and}
-        GROUP BY s.class_id ORDER BY total DESC LIMIT 6""",
-        tuple([course_id, cur] + scope_params)):
+        WHERE g.source='real' AND g.course_id=? AND g.semester_id=?
+          AND g.is_pass IS NOT NULL{detail_and}
+        GROUP BY s.class_id
+        ORDER BY fr DESC, total DESC""",
+        tuple([course_id, cur] + detail_params)):
         classDetail.append({"className": r["cls"], "students": r["total"],
                             "avgScore": round(r["av"] or 0, 1), "failRate": _pct(r["fr"]),
                             "teacher": (r["teachers"] or "—").replace(",", "、")})
+    for index, row in enumerate(classDetail, start=1):
+        row["riskRank"] = index
     nature = "专业必修" if co["is_required"] == 1 else "选修"
     return ok({"name": co["name"], "credits": co["credits"], "type": nature,
                "college": co["dept"] or "—", "kpi": kpi,
                "scoreDistribution": scoreDistribution, "history": history,
                "classDetail": classDetail,
+               "classSummary": {
+                   "totalAdministrativeClasses": len(classDetail),
+                   "defaultDisplayLimit": 10,
+                   "sort": "按未通过人次率降序，同率按有效成绩人次降序",
+               },
                "scope": {"restricted": restricted,
                          "label": "当前角色授权范围" if restricted else "全校"},
+               "analysisScope": {
+                   "collegeId": college_id,
+                   "majorId": major_id,
+                   "grade": grade,
+                   "label": (
+                       " / ".join(analysis_labels) + "修读范围"
+                       if analysis_labels
+                       else ("当前角色授权范围" if restricted else "全校该课程")
+                   ),
+                   "canExpandToSchool": not restricted and bool(analysis_labels),
+               },
+               "period": {"semester": cur},
+               "coverage": {
+                   "validResultAttempts": total,
+                   "scoredAttempts": scored,
+                   "scoreCoverageRate": _pct_number(scored, total),
+               },
+               "definitionVersion": "dashboard-v2",
                "evidence": {"real": ["真实成绩、学籍班级、教学任务与教师"],
                             "simulated": [],
                             "limitation": "课程可跨学院修读；本页全部成绩、趋势和班级明细均按当前角色可见学生范围统计。"}})

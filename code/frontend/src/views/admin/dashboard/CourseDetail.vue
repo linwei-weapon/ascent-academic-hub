@@ -1,5 +1,5 @@
 <template>
-  <div>
+  <div v-loading="pageLoading && !!data.name" element-loading-text="正在更新课程分析，当前结果暂时保留…" :aria-busy="pageLoading">
     <el-breadcrumb separator="›">
       <el-breadcrumb-item v-if="route.query.returnTo" :to="String(route.query.returnTo)">{{ route.query.returnLabel || '返回来源' }}</el-breadcrumb-item>
       <el-breadcrumb-item v-else :to="{path:'/admin/dashboard',query:semLabel?{semester:semLabel}:{}}">教学数据总览</el-breadcrumb-item>
@@ -13,8 +13,19 @@
       <span v-else>成绩分布、历年趋势与各教学班通过情况。</span>
       <span v-if="semLabel" style="margin-left:10px;padding:1px 8px;border-radius:10px;background:#EEF2FF;color:#4F46E5;font-size:12px">数据周期：{{ semLabel }}</span>
       <span v-if="data.scope?.restricted" style="margin-left:8px;padding:1px 8px;border-radius:10px;background:#FFF7ED;color:#C2410C;font-size:12px">仅当前角色授权学生范围</span>
+      <span v-if="data.analysisScope?.label" style="margin-left:8px;padding:1px 8px;border-radius:10px;background:#ECFDF5;color:#047857;font-size:12px">
+        分析范围：{{ data.analysisScope.label }}
+      </span>
     </p>
 
+    <el-alert v-if="loadError" type="error" :closable="false" show-icon style="margin-bottom:12px"
+      title="课程数据加载失败" :description="loadError">
+      <template #default><el-button size="small" @click="loadData">重新加载</el-button></template>
+    </el-alert>
+    <div v-if="pageLoading && !data.name" class="sa-card">
+      <el-skeleton :rows="10" animated />
+    </div>
+    <template v-if="data.name">
     <el-alert v-if="data.evidence?.limitation" type="info" :closable="false" show-icon style="margin-bottom:12px"
       title="统计范围说明" :description="data.evidence.limitation" />
 
@@ -32,7 +43,7 @@
       </el-col>
       <el-col :span="12">
         <div class="sa-card">
-          <div class="sa-card-title">历年趋势 <span class="extra">平均分 / 挂科率</span></div>
+          <div class="sa-card-title">历年趋势 <span class="extra">平均分 / 未通过人次率</span></div>
           <EChart v-if="data.history.length" :option="historyOption" :height="240" />
           <div v-else class="sa-faint" style="font-size:12px">暂无历年数据</div>
         </div>
@@ -41,31 +52,59 @@
 
     <div class="sa-card">
       <div class="sa-card-title">
-        各班级详情
-        <KpiLabel label="" formula="按教学班统计该课程的通过率、平均分。挂科率=该班不及格人次÷该班修读人次×100%" />
+        高风险行政班 TOP10
+        <span class="extra">共 {{ data.classSummary?.totalAdministrativeClasses || 0 }} 个行政班；{{ data.classSummary?.sort }}</span>
+        <KpiLabel label="" formula="当前数据按修读学生所属行政班聚合，并非教学班。未通过人次率=该行政班未通过有效成绩人次÷有效成绩人次×100%" />
       </div>
-      <el-table :data="data.classDetail" size="small">
-        <el-table-column prop="className" label="班级" width="150" />
-        <el-table-column prop="students" label="人数" width="70" align="right" />
-        <el-table-column prop="avgScore" label="平均分" width="80" align="right"><template #default="{row}"><b class="tnum" :style="{color:row.avgScore<60?'#E11D48':'#1E293B'}">{{ row.avgScore }}</b></template></el-table-column>
-        <el-table-column prop="failRate" label="挂科率" width="90" align="right"><template #default="{row}"><span class="tnum" :style="{color:parseFloat(row.failRate)>25?'#E11D48':'#D97706',fontWeight:600}">{{ row.failRate }}</span></template></el-table-column>
-        <el-table-column prop="teacher" label="任课教师" min-width="120" />
-      </el-table>
+      <DataTable :columns="classCols" :data="topClassRows"
+        storage-key="dashboard:course-class-distribution" :max-business-columns="4"
+        :config-version="2" size="small">
+        <template #col-riskRank="{row}"><span class="rank" :class="{hot:row.riskRank<=3}">{{ row.riskRank }}</span></template>
+        <template #col-avgScore="{row}"><b class="tnum" :style="{color:row.avgScore<60?'#E11D48':'#1E293B'}">{{ row.avgScore }}</b></template>
+        <template #col-failRate="{row}"><span class="tnum" :style="{color:parseFloat(row.failRate)>25?'#E11D48':'#D97706',fontWeight:600}">{{ row.failRate }}</span></template>
+      </DataTable>
+      <div v-if="data.classDetail.length>10" class="table-actions">
+        <el-button size="small" @click="classDrawer=true">查看全部 {{ data.classDetail.length }} 个行政班</el-button>
+      </div>
     </div>
     <div style="margin-top:16px"><el-button type="primary" @click="goStudents">查看全部修读学生 →</el-button></div>
+    </template>
+
+    <el-drawer v-model="classDrawer" title="全部行政班修读结果" size="72%">
+      <p class="sa-page-sub">课程：{{ data.name }} · {{ data.analysisScope?.label }} · {{ data.classSummary?.sort }}</p>
+      <DataTable :columns="classCols" :data="data.classDetail"
+        storage-key="dashboard:course-class-distribution-all" :max-business-columns="4"
+        :config-version="1" :pagination="true" :default-page-size="20" size="small">
+        <template #col-riskRank="{row}"><span class="rank" :class="{hot:row.riskRank<=3}">{{ row.riskRank }}</span></template>
+        <template #col-avgScore="{row}"><b class="tnum" :style="{color:row.avgScore<60?'#E11D48':'#1E293B'}">{{ row.avgScore }}</b></template>
+        <template #col-failRate="{row}"><span class="tnum" :style="{color:parseFloat(row.failRate)>25?'#E11D48':'#D97706',fontWeight:600}">{{ row.failRate }}</span></template>
+      </DataTable>
+    </el-drawer>
   </div>
 </template>
 
 <script setup lang="ts">
 import { http } from '@/utils/http'
-import { reactive, onMounted, computed } from 'vue';
+import { reactive, onMounted, computed, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import KpiLabel from '@/components/KpiLabel.vue';
 import KpiCard from '@/components/KpiCard.vue';
 import EChart from '@/components/EChart.vue';
+import DataTable, { type DataTableColumn } from '@/components/DataTable.vue';
 const route = useRoute(); const router = useRouter();
 const semLabel = (route.query.semester as string) || '';
-const data = reactive<any>({ name:'', credits:0, type:'', college:'', kpi:[], scoreDistribution:[], classDetail:[], history:[], scope:{restricted:false}, evidence:{} });
+const pageLoading = ref(false);
+const loadError = ref('');
+const classDrawer = ref(false);
+const data = reactive<any>({ name:'', credits:0, type:'', college:'', kpi:[], scoreDistribution:[], classDetail:[], classSummary:{}, history:[], scope:{restricted:false}, analysisScope:{}, evidence:{} });
+const classCols: DataTableColumn[] = [
+  { key: 'riskRank', label: '序', width: 48, fixed: 'left', region: 'identity', required: true },
+  { key: 'className', label: '行政班', width: 150, fixed: 'left', region: 'identity', required: true },
+  { key: 'students', label: '人数', width: 70, align: 'right' },
+  { key: 'avgScore', label: '平均分', width: 80, align: 'right' },
+  { key: 'failRate', label: '未通过人次率', width: 112, align: 'right', required: true },
+  { key: 'teacher', label: '任课教师', minWidth: 120 },
+];
 
 function barColor(label: string) {
   if (label === '不及格') return '#E11D48';
@@ -73,11 +112,28 @@ function barColor(label: string) {
   return '#4F46E5';
 }
 
-onMounted(async () => {
-  const qs = semLabel ? '?semester=' + encodeURIComponent(semLabel) : '';
-  const d = await http.get('/admin/course/' + (route.params.id || '100101C003') + qs);
-  if (d) Object.assign(data, d);
-});
+async function loadData() {
+  pageLoading.value = true;
+  loadError.value = '';
+  const params = new URLSearchParams();
+  if (semLabel) params.set('semester', semLabel);
+  if (route.query.collegeId) params.set('college_id', String(route.query.collegeId));
+  if (route.query.majorId) params.set('major_id', String(route.query.majorId));
+  if (route.query.grade) params.set('grade', String(route.query.grade));
+  const qs = params.toString() ? `?${params.toString()}` : '';
+  try {
+    const d = await http.get('/admin/course/' + (route.params.id || '100101C003') + qs);
+    if (d) Object.assign(data, d);
+  } catch (error:any) {
+    loadError.value = error?.message || '数据加载失败，请稍后重试';
+  } finally {
+    pageLoading.value = false;
+  }
+}
+onMounted(loadData);
+watch(() => route.fullPath, () => loadData());
+
+const topClassRows = computed(() => (data.classDetail || []).slice(0, 10));
 
 const scoreOption = computed(() => {
   const sd = data.scoreDistribution || [];
@@ -85,7 +141,7 @@ const scoreOption = computed(() => {
     grid: { left: 6, right: 12, top: 24, bottom: 4, containLabel: true },
     tooltip: {
       trigger: 'axis', axisPointer: { type: 'shadow' },
-      formatter: (ps: any) => { const s = sd[ps[0].dataIndex]; return `${s.label}（${s.range}）<br/>人数 <b>${s.count}</b> · 占比 <b>${s.pct}%</b>`; },
+      formatter: (ps: any) => { const s = sd[ps[0].dataIndex]; return `${s.label}（${s.range}）<br/>人次 <b>${s.count}</b> · 占有分数记录 <b>${s.pct == null ? '—' : `${s.pct}%`}</b>`; },
     },
     xAxis: { type: 'category', data: sd.map((s: any) => s.label), axisLabel: { color: '#475569' }, axisLine: { lineStyle: { color: '#E2E8F0' } }, axisTick: { show: false } },
     yAxis: { type: 'value', name: '人数', nameTextStyle: { color: '#94A3B8', fontSize: 11 }, axisLabel: { color: '#94A3B8' }, splitLine: { lineStyle: { color: '#EEF1F5' } } },
@@ -102,15 +158,15 @@ const historyOption = computed(() => {
   return {
     grid: { left: 6, right: 6, top: 36, bottom: 4, containLabel: true },
     tooltip: { trigger: 'axis' },
-    legend: { data: ['平均分', '挂科率'], top: 0, textStyle: { color: '#64748B', fontSize: 12 }, itemWidth: 14, itemHeight: 8 },
+    legend: { data: ['平均分', '未通过人次率'], top: 0, textStyle: { color: '#64748B', fontSize: 12 }, itemWidth: 14, itemHeight: 8 },
     xAxis: { type: 'category', data: h.map((x: any) => x.semester), axisLabel: { color: '#475569', fontSize: 11 }, axisLine: { lineStyle: { color: '#E2E8F0' } }, axisTick: { show: false } },
     yAxis: [
       { type: 'value', name: '平均分', min: 40, max: 100, nameTextStyle: { color: '#94A3B8', fontSize: 11 }, axisLabel: { color: '#94A3B8' }, splitLine: { lineStyle: { color: '#EEF1F5' } } },
-      { type: 'value', name: '挂科率%', nameTextStyle: { color: '#94A3B8', fontSize: 11 }, axisLabel: { color: '#94A3B8', formatter: '{value}%' }, splitLine: { show: false } },
+      { type: 'value', name: '未通过率%', nameTextStyle: { color: '#94A3B8', fontSize: 11 }, axisLabel: { color: '#94A3B8', formatter: '{value}%' }, splitLine: { show: false } },
     ],
     series: [
       { name: '平均分', type: 'line', smooth: true, data: h.map((x: any) => x.avgScore), itemStyle: { color: '#4F46E5' }, lineStyle: { width: 3 }, symbolSize: 7 },
-      { name: '挂科率', type: 'line', smooth: true, yAxisIndex: 1, data: h.map((x: any) => parseFloat(x.failRate)), itemStyle: { color: '#E11D48' }, lineStyle: { width: 2, type: 'dashed' }, symbolSize: 6 },
+      { name: '未通过人次率', type: 'line', smooth: true, yAxisIndex: 1, data: h.map((x: any) => parseFloat(x.failRate)), itemStyle: { color: '#E11D48' }, lineStyle: { width: 2, type: 'dashed' }, symbolSize: 6 },
     ],
   };
 });
@@ -123,8 +179,19 @@ function kpiTone(label: string): 'primary'|'teal'|'danger'|'amber' {
 }
 function goStudents() {
   const query:any = { course:String(route.params.id), courseName:data.name, semester:semLabel, returnTo:route.fullPath, returnLabel:'返回课程详情' };
-  if (route.query.collegeId) { query.collegeId=route.query.collegeId; query.collegeName=route.query.collegeName; }
-  if (route.query.majorId) { query.majorId=route.query.majorId; query.majorName=route.query.majorName; }
+  if (route.query.collegeId) {
+    query.college=route.query.collegeId; query.collegeName=route.query.collegeName;
+  }
+  if (route.query.majorId) {
+    query.major=route.query.majorId; query.majorName=route.query.majorName;
+  }
+  if (route.query.grade) query.grade=route.query.grade;
   router.push({path:'/admin/students/list',query});
 }
 </script>
+
+<style scoped>
+.table-actions { margin-top:10px;text-align:right; }
+.rank { display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:7px;background:#f1f5f9;color:#64748b;font-weight:700; }
+.rank.hot { background:#fff1f2;color:#be123c; }
+</style>

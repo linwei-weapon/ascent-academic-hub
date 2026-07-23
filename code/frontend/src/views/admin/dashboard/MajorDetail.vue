@@ -1,147 +1,179 @@
 <template>
-  <div>
+  <div v-loading="pageLoading && !!data.name" element-loading-text="正在更新专业分析，当前结果暂时保留…" :aria-busy="pageLoading">
     <el-breadcrumb separator="›">
       <el-breadcrumb-item :to="{path:'/admin/dashboard',query:semLabel?{semester:semLabel}:{}}">教学数据总览</el-breadcrumb-item>
       <el-breadcrumb-item v-if="data.collegeId" :to="{path:'/admin/college/'+data.collegeId,query:semLabel?{semester:semLabel}:{}}">{{ data.college || '学院详情' }}</el-breadcrumb-item>
       <el-breadcrumb-item>{{ data.name || '专业详情' }}</el-breadcrumb-item>
     </el-breadcrumb>
+
     <h2 class="sa-page-title" style="margin-top:14px">{{ data.name || '加载中…' }} · 专业详情</h2>
     <p class="sa-page-sub">{{ data.college }} · {{ semLabel || '默认学期' }} · {{ data.scope?.restricted ? '当前角色授权范围' : '本专业全量' }}</p>
 
-    <el-alert v-if="data.evidence?.limitation" type="warning" :closable="false" show-icon style="margin-bottom:12px"
-      title="证据与口径说明" :description="data.evidence.limitation" />
-
-    <div class="sa-kpi-row">
-      <KpiCard v-for="k in data.kpi" :key="k.label" :label="k.label" :value="k.value" :tone="kpiTone(k.label)" :hint="k.formula" />
+    <el-alert v-if="loadError" type="error" :closable="false" show-icon title="专业数据加载失败" :description="loadError">
+      <template #default><el-button size="small" @click="loadData">重新加载</el-button></template>
+    </el-alert>
+    <div v-if="pageLoading && !data.name" class="sa-card">
+      <el-skeleton :rows="10" animated />
     </div>
 
-    <el-row :gutter="16">
-      <el-col :span="16">
-        <div class="sa-card">
-          <div class="sa-card-title">各年级详情</div>
-          <div v-if="!data.gradeDetail.length" class="sa-faint" style="font-size:12px">暂无年级数据</div>
-          <div v-for="g in data.gradeDetail" :key="g.grade" class="grade-block">
-            <div class="grade-head">
-              <span class="grade-name">{{ g.grade }}</span>
-              <span class="chip">{{ g.students }}人</span>
-              <span class="chip">GPA <b class="tnum">{{ g.gpaAvg }}</b></span>
-              <span class="chip">当前挂科学生率 <b class="tnum" style="color:#E11D48">{{ g.failRate }}</b></span>
-              <span class="chip">预警 <b class="tnum" style="color:#E11D48">{{ g.alertCount }}</b>人</span>
-              <span class="grade-credit">
-                <span class="sa-faint" style="font-size:11px">课程学分通过</span>
-                <el-progress :percentage="g.creditDone" :stroke-width="7" :color="g.creditDone>75?'#0D9488':'#D97706'" style="width:120px" />
-              </span>
-            </div>
-            <el-table v-if="g.courses && g.courses.length" :data="g.courses" size="small" @row-click="goCourse" row-class-name="course-row-clickable">
-              <el-table-column prop="name" label="挂科课程" width="160"><template #default="{row}"><span class="course-link">{{ row.name }}</span></template></el-table-column>
-              <el-table-column prop="failCount" label="不及格" width="80" align="right" />
-              <el-table-column prop="totalCount" label="修读人数" width="90" align="right" />
-              <el-table-column prop="failRate" label="挂科率" width="90" align="right"><template #default="{row}"><b style="color:#E11D48" class="tnum">{{ row.failRate }}%</b></template></el-table-column>
-            </el-table>
-            <div v-else class="sa-faint" style="font-size:12px;padding:2px 0 4px">该年级无集中挂科课程</div>
-          </div>
+    <template v-if="data.name">
+      <div class="sa-kpi-row">
+        <KpiCard v-for="k in data.kpi" :key="k.label" :label="k.label" :value="k.value"
+          :tone="kpiTone(k.label)" :hint="k.formula" :sub="k.detail" />
+      </div>
+
+      <div class="sa-card">
+        <div class="sa-card-title">
+          年级风险核查
+          <span class="extra">按当前挂科学生率、成绩覆盖率和预警人数排序；默认展开最需关注年级</span>
         </div>
-      </el-col>
-      <el-col :span="8">
-        <div class="sa-card">
-          <div class="sa-card-title">毕业去向分布（合成）</div>
-          <template v-if="goalRows.length">
-            <div class="goal-donut-wrap">
-              <EChart :option="goalOption" :height="200" />
-              <div class="goal-donut-center">
-                <div class="goal-donut-total tnum">{{ goalTotal.toLocaleString() }}</div>
-                <div class="goal-donut-cap">目标人次</div>
+        <div v-if="!data.gradeDetail.length" class="sa-faint">暂无年级数据</div>
+        <el-collapse v-else v-model="activeGrade" accordion class="grade-collapse">
+          <el-collapse-item v-for="g in data.gradeDetail" :key="g.grade" :name="String(g.riskRank)">
+            <template #title>
+              <div class="grade-title">
+                <span class="rank" :class="{hot:g.failedStudents || g.alertCount}">{{ g.riskRank }}</span>
+                <b>{{ g.grade }}</b>
+                <span class="priority-reason">{{ g.priorityReason }}</span>
+                <span class="grade-stat">有效成绩 {{ g.studentsWithResults }}/{{ g.students }}人</span>
+                <span class="grade-stat risk">挂科学生率 {{ g.failRate }}</span>
+                <span class="grade-stat">GPA {{ g.gpaAvg ?? '—' }}</span>
               </div>
-            </div>
-            <div class="goal-legend">
-              <div v-for="(g,i) in goalRows" :key="g.name" class="goal-legend-row">
-                <span class="dot" :style="{background: GOAL_COLORS[i % GOAL_COLORS.length]}"></span>
-                <span class="goal-legend-label">{{ g.name }}</span>
-                <span class="tnum goal-legend-val">{{ g.value }}</span>
-                <span class="tnum goal-legend-pct">{{ g.pct }}%</span>
+            </template>
+
+            <div class="grade-evidence">
+              <div>
+                <span>本学期课程学分通过占比</span>
+                <el-progress v-if="g.creditDone != null" :percentage="g.creditDone" :stroke-width="8"
+                  :color="g.creditDone>75?'#0D9488':'#D97706'" style="width:170px" />
+                <b v-else>—</b>
               </div>
+              <div><span>有效成绩覆盖率</span><b>{{ g.resultCoverageRate == null ? '—' : `${g.resultCoverageRate}%` }}</b></div>
+              <div><span>当前挂科学生</span><b class="risk-text">{{ g.failedStudents }}人</b></div>
+              <div><span>有效预警</span><b class="risk-text">{{ g.alertCount }}人</b></div>
             </div>
-          </template>
-          <div v-else class="sa-faint" style="font-size:12px">暂无毕业去向数据</div>
-        </div>
-      </el-col>
-    </el-row>
-    <div style="margin-top:16px"><el-button type="primary" @click="goStudents">查看{{ data.scope?.restricted ? '授权范围' : '本专业全部' }}学生 →</el-button></div>
+
+            <div class="course-caption">该年级当前未通过率较高课程 TOP3，点击课程查看趋势和行政班证据</div>
+            <DataTable v-if="g.courses && g.courses.length" :columns="gradeCourseCols"
+              :data="g.courses" :storage-key="`dashboard:major-grade-courses:${g.grade}`"
+              :max-business-columns="3" :config-version="2" size="small"
+              @row-click="row => goCourse(row, g)" row-class-name="course-row-clickable">
+              <template #col-name="{row}"><span class="course-link">{{ row.name }}</span></template>
+              <template #col-failRate="{row}"><b class="tnum risk-text">{{ row.failRate }}%</b></template>
+              <template #col-drill><span class="sa-faint">›</span></template>
+            </DataTable>
+            <div v-else class="sa-faint">该年级没有达到展示阈值的集中未通过课程</div>
+          </el-collapse-item>
+        </el-collapse>
+      </div>
+
+      <div class="actions">
+        <el-button type="primary" @click="goStudents">查看{{ data.scope?.restricted ? '授权范围' : '本专业全部' }}学生 →</el-button>
+      </div>
+
+      <el-collapse v-if="data.evidence?.limitation" class="evidence-collapse">
+        <el-collapse-item title="数据证据与适用边界" name="evidence">
+          <p class="sa-page-sub">{{ data.evidence.limitation }}</p>
+        </el-collapse-item>
+      </el-collapse>
+    </template>
   </div>
 </template>
 
 <script setup lang="ts">
 import { http } from '@/utils/http'
-import { reactive, onMounted, computed } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
-import KpiCard from '@/components/KpiCard.vue';
-import EChart from '@/components/EChart.vue';
-const route = useRoute(); const router = useRouter();
-const semLabel = (route.query.semester as string) || '';
-const data = reactive<any>({ name:'', college:'', collegeId:'', kpi:[], gradeDetail:[], goalDistribution:{}, scope:{restricted:false}, evidence:{} });
+import { reactive, onMounted, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import KpiCard from '@/components/KpiCard.vue'
+import DataTable, { type DataTableColumn } from '@/components/DataTable.vue'
 
-const GOAL_COLORS = ['#4F46E5', '#0D9488', '#D97706', '#6366F1', '#94A3B8', '#E11D48', '#0EA5E9', '#A855F7'];
+const route = useRoute()
+const router = useRouter()
+const semLabel = (route.query.semester as string) || ''
+const pageLoading = ref(false)
+const loadError = ref('')
+const activeGrade = ref('')
+const data = reactive<any>({
+  name:'', college:'', collegeId:'', kpi:[], gradeDetail:[],
+  scope:{restricted:false}, evidence:{},
+})
 
-onMounted(async () => {
-  const qs = semLabel ? '?semester=' + encodeURIComponent(semLabel) : '';
-  const d = await http.get('/admin/major/' + (route.params.id || 'M051') + qs);
-  if (d) Object.assign(data, d);
-});
+const gradeCourseCols: DataTableColumn[] = [
+  { key: 'name', label: '重点课程', width: 200, fixed: 'left', region: 'identity', required: true },
+  { key: 'failCount', label: '未通过人次', width: 100, align: 'right' },
+  { key: 'totalCount', label: '有效成绩人次', width: 112, align: 'right' },
+  { key: 'failRate', label: '未通过人次率', width: 118, align: 'right', required: true },
+  { key: 'drill', label: '详情', width: 52, fixed: 'right', region: 'action', required: true },
+]
 
-const goalRows = computed(() => {
-  const gd = data.goalDistribution || {};
-  const entries = Object.entries(gd).filter(([, v]) => Number(v) > 0);
-  const total = entries.reduce((s, [, v]) => s + Number(v), 0) || 1;
-  return entries.map(([name, v]) => ({ name, value: Number(v), pct: Math.round(Number(v) / total * 100) }));
-});
-const goalTotal = computed(() => goalRows.value.reduce((s, g) => s + g.value, 0));
+async function loadData() {
+  pageLoading.value = true
+  loadError.value = ''
+  try {
+    const qs = semLabel ? '?semester=' + encodeURIComponent(semLabel) : ''
+    const d = await http.get('/admin/major/' + (route.params.id || 'M051') + qs)
+    if (d) {
+      Object.assign(data, d)
+      activeGrade.value = d.gradeDetail?.length ? String(d.gradeDetail[0].riskRank) : ''
+    }
+  } catch (error:any) {
+    loadError.value = error?.message || '数据加载失败，请稍后重试'
+  } finally {
+    pageLoading.value = false
+  }
+}
 
-const goalOption = computed(() => ({
-  tooltip: { trigger: 'item', formatter: '{b}：{c} 人（{d}%）' },
-  series: [{
-    type: 'pie', radius: ['54%', '80%'], center: ['50%', '50%'],
-    avoidLabelOverlap: true,
-    itemStyle: { borderColor: '#fff', borderWidth: 2 },
-    label: { show: false },
-    emphasis: { scale: true, scaleSize: 4 },
-    data: goalRows.value.map((g, i) => ({ name: g.name, value: g.value, itemStyle: { color: GOAL_COLORS[i % GOAL_COLORS.length] } })),
-  }],
-}));
+onMounted(loadData)
 
 function kpiTone(label: string): 'primary'|'teal'|'danger'|'amber' {
-  if (label.includes('预警')) return 'danger';
-  if (label.includes('挂科')) return 'amber';
-  if (label.includes('毕业') || label.includes('学位')) return 'teal';
-  return 'primary';
+  if (label.includes('预警')) return 'danger'
+  if (label.includes('挂科')) return 'amber'
+  if (label.includes('覆盖')) return 'teal'
+  return 'primary'
 }
 function goStudents() {
-  const majorId = route.params.id as string;
-  router.push({ path:'/admin/students/list', query:{college:data.collegeId,collegeName:data.college,major:majorId,majorName:data.name,returnTo:`/admin/major/${majorId}`,returnLabel:'返回专业详情',...(semLabel?{semester:semLabel}:{})} });
+  const majorId = route.params.id as string
+  router.push({
+    path:'/admin/students/list',
+    query:{
+      college:data.collegeId, collegeName:data.college,
+      major:majorId, majorName:data.name,
+      returnTo:route.fullPath, returnLabel:'返回专业详情',
+      ...(semLabel?{semester:semLabel}:{}),
+    },
+  })
 }
-function goCourse(row: any) { router.push({ path:'/admin/course/'+row.id, query:{collegeId:data.collegeId,collegeName:data.college,majorId:String(route.params.id),majorName:data.name,...(semLabel?{semester:semLabel}:{})} }); }
+function goCourse(row: any, gradeRow: any) {
+  const grade = String(gradeRow?.grade || '').replace(/级$/, '')
+  router.push({
+    path:'/admin/course/'+row.id,
+    query:{
+      collegeId:data.collegeId, collegeName:data.college,
+      majorId:String(route.params.id), majorName:data.name,
+      ...(grade ? { grade } : {}),
+      ...(semLabel?{semester:semLabel}:{}),
+    },
+  })
+}
 </script>
 
 <style scoped>
-.grade-block { padding: 12px 0; border-top: 1px solid var(--sa-border); }
-.grade-block:first-of-type { border-top: none; padding-top: 4px; }
-.grade-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
-.grade-name { font-size: 14px; font-weight: 700; color: var(--sa-text); }
-.chip { font-size: 12px; color: var(--sa-muted); background: #f1f5f9; padding: 2px 9px; border-radius: 99px; }
-.grade-credit { display: flex; align-items: center; gap: 8px; margin-left: auto; }
-
-.goal-donut-wrap { position: relative; }
-.goal-donut-center {
-  position: absolute; inset: 0; display: flex; flex-direction: column;
-  align-items: center; justify-content: center; pointer-events: none;
+.grade-collapse { border-top:0; }
+.grade-title { display:flex;align-items:center;gap:10px;width:100%;padding-right:12px;min-width:0; }
+.rank { display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:7px;background:#f1f5f9;color:#64748b;font-weight:700;flex:none; }
+.rank.hot { background:#fff1f2;color:#be123c; }
+.priority-reason { flex:1;min-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#64748b;font-size:12px; }
+.grade-stat { white-space:nowrap;color:#475569;font-size:12px;background:#f8fafc;border-radius:10px;padding:2px 8px; }
+.grade-stat.risk,.risk-text { color:#dc2626;font-weight:600; }
+.grade-evidence { display:grid;grid-template-columns:1.5fr repeat(3,1fr);gap:10px;margin:4px 0 14px;padding:12px;background:#f8fafc;border-radius:10px; }
+.grade-evidence>div { display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;color:#64748b; }
+.course-caption { font-size:12px;color:#64748b;margin-bottom:8px; }
+.actions { margin-top:16px;text-align:right; }
+.evidence-collapse { margin-top:16px; }
+:deep(.course-row-clickable) { cursor:pointer; }
+.course-link { color:var(--sa-primary);font-weight:500; }
+@media (max-width: 1200px) {
+  .grade-stat { display:none; }
+  .grade-evidence { grid-template-columns:1fr 1fr; }
 }
-.goal-donut-total { font-family: var(--sa-font-head); font-size: 26px; font-weight: 700; color: var(--sa-text); line-height: 1; }
-.goal-donut-cap { font-size: 11px; color: var(--sa-muted); margin-top: 4px; }
-.goal-legend { margin-top: 10px; }
-.goal-legend-row { display: flex; align-items: center; gap: 8px; padding: 4px 2px; font-size: 12px; }
-.goal-legend-row .dot { width: 9px; height: 9px; border-radius: 3px; flex-shrink: 0; }
-.goal-legend-label { color: var(--sa-text); flex: 1; }
-.goal-legend-val { color: var(--sa-text); font-weight: 600; }
-.goal-legend-pct { color: var(--sa-muted); width: 38px; text-align: right; }
-:deep(.course-row-clickable) { cursor: pointer; }
-.course-link { color: var(--sa-primary); font-weight: 500; }
 </style>

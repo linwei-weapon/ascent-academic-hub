@@ -40,6 +40,10 @@ export interface DataTableColumn {
   sortable?: boolean | 'custom'
   /** false 时默认隐藏（用户可在列设置中打开） */
   defaultVisible?: boolean
+  /** 必选列不可隐藏；业务对象识别列、首要管理指标和操作列应设为 true */
+  required?: boolean
+  /** 列区域：左侧识别列 / 中间可配置业务列 / 右侧操作列 */
+  region?: 'identity' | 'business' | 'action'
   /** show-overflow-tooltip */
   tooltip?: boolean
   formatter?: (row: any, column: any, cellValue: any, index: number) => any
@@ -48,7 +52,8 @@ export interface DataTableColumn {
 
 <script setup lang="ts">
 import { computed, onMounted, ref, useAttrs, watch } from 'vue'
-import { ArrowDown, ArrowUp, Setting } from '@element-plus/icons-vue'
+import { ArrowDown, ArrowUp, Rank, Setting } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
 import { authStore } from '@/store/auth'
 
 type Density = 'compact' | 'default' | 'loose'
@@ -65,12 +70,18 @@ const props = withDefaults(defineProps<{
   defaultPageSize?: number
   /** 外部分页模式：页面传 v-model:page-size 联动自带分页 */
   pageSize?: number
+  /** 中间业务列允许同时显示的硬上限，不含左侧识别列和右侧操作列 */
+  maxBusinessColumns?: number
+  /** 表格字段变化时提升版本，防止不兼容旧偏好污染新布局 */
+  configVersion?: string | number
 }>(), {
   data: () => [],
   pagination: false,
   pageSizes: () => [10, 20, 50, 100],
   defaultPageSize: 10,
   pageSize: undefined,
+  maxBusinessColumns: 10,
+  configVersion: 1,
 })
 
 const emit = defineEmits<{ (e: 'update:pageSize', value: number): void }>()
@@ -84,9 +95,23 @@ const colHidden = ref<string[]>(props.columns.filter(c => c.defaultVisible === f
 const density = ref<Density>('default')
 const pageSizeInner = ref<number>(props.defaultPageSize)
 const currentPage = ref(1)
+const draggingKey = ref('')
+
+function columnRegion(column: DataTableColumn): 'identity' | 'business' | 'action' {
+  if (column.region) return column.region
+  if (column.fixed === 'left') return 'identity'
+  if (column.fixed === 'right') return 'action'
+  return 'business'
+}
 
 function prefStorageKey(): string {
-  return `bi_table_pref:${authStore.user?.username || 'anonymous'}:${props.storageKey}`
+  const user = authStore.user
+  const identity = user?.activeIdentityId
+    || user?.permissionContext?.activeIdentityId
+    || user?.permissionContext?.activeRole
+    || user?.role
+    || 'anonymous-role'
+  return `bi_table_pref:${user?.username || 'anonymous'}:${identity}:${props.storageKey}:v${props.configVersion}`
 }
 function readPref(): TablePref | null {
   try {
@@ -99,9 +124,35 @@ function readPref(): TablePref | null {
   }
 }
 
+function enforceColumnRules(): void {
+  const requiredKeys = new Set(props.columns.filter(c => c.required).map(c => c.key))
+  colHidden.value = colHidden.value.filter(k => !requiredKeys.has(k))
+  const business = colOrder.value
+    .map(k => props.columns.find(c => c.key === k))
+    .filter((c): c is DataTableColumn => !!c && columnRegion(c) === 'business')
+  const requiredBusinessCount = business.filter(c => c.required).length
+  const limit = Math.max(props.maxBusinessColumns, requiredBusinessCount)
+  const visible = business.filter(c => !colHidden.value.includes(c.key))
+  if (visible.length > limit) {
+    const overflow = visible
+      .filter(c => !c.required)
+      .slice(Math.max(limit - requiredBusinessCount, 0))
+      .map(c => c.key)
+    colHidden.value = Array.from(new Set([...colHidden.value, ...overflow]))
+  }
+}
+
 // 恢复偏好：无效键、已删除列、非法值全部防御性忽略
-const savedPref = readPref()
-if (savedPref) {
+function applyPref(pref: TablePref | null): void {
+  colOrder.value = props.columns.map(c => c.key)
+  colHidden.value = props.columns.filter(c => c.defaultVisible === false).map(c => c.key)
+  density.value = 'default'
+  pageSizeInner.value = props.defaultPageSize
+  const savedPref = pref
+  if (!savedPref) {
+    enforceColumnRules()
+    return
+  }
   if (Array.isArray(savedPref.order)) {
     const known = new Set(props.columns.map(c => c.key))
     const kept = savedPref.order.filter(k => known.has(k))
@@ -118,7 +169,18 @@ if (savedPref) {
   if (typeof savedPref.pageSize === 'number' && savedPref.pageSize > 0) {
     pageSizeInner.value = savedPref.pageSize
   }
+  enforceColumnRules()
 }
+applyPref(readPref())
+watch(
+  () => [
+    authStore.user?.username,
+    authStore.user?.activeIdentityId,
+    authStore.user?.permissionContext?.activeIdentityId,
+    props.configVersion,
+  ],
+  () => applyPref(readPref()),
+)
 
 function savePref(): void {
   try {
@@ -133,10 +195,24 @@ function savePref(): void {
 
 // ── 列渲染 ──
 const colMap = computed(() => new Map(props.columns.map(c => [c.key, c])))
-const orderedColumns = computed(() =>
-  colOrder.value.map(k => colMap.value.get(k)).filter(Boolean) as DataTableColumn[])
+const orderedColumns = computed(() => {
+  const ordered = colOrder.value.map(k => colMap.value.get(k)).filter(Boolean) as DataTableColumn[]
+  return [
+    ...ordered.filter(c => columnRegion(c) === 'identity'),
+    ...ordered.filter(c => columnRegion(c) === 'business'),
+    ...ordered.filter(c => columnRegion(c) === 'action'),
+  ]
+})
 const visibleColumns = computed(() =>
   orderedColumns.value.filter(c => !colHidden.value.includes(c.key)))
+const businessColumns = computed(() =>
+  orderedColumns.value.filter(c => columnRegion(c) === 'business'))
+const visibleBusinessCount = computed(() =>
+  businessColumns.value.filter(c => !colHidden.value.includes(c.key)).length)
+const effectiveBusinessLimit = computed(() => Math.max(
+  props.maxBusinessColumns,
+  businessColumns.value.filter(c => c.required).length,
+))
 
 // ── 行密度：默认档沿用页面自身 size，保持迁移前视觉一致 ──
 const tableSize = computed(() => {
@@ -175,16 +251,48 @@ watch(() => props.data, () => { currentPage.value = 1 })
 
 // ── 列设置面板 ──
 function toggleCol(key: string, visible: boolean): void {
-  if (visible) colHidden.value = colHidden.value.filter(k => k !== key)
-  else if (!colHidden.value.includes(key)) colHidden.value = [...colHidden.value, key]
+  const column = colMap.value.get(key)
+  if (!column || (column.required && !visible)) return
+  if (visible) {
+    if (columnRegion(column) === 'business'
+        && colHidden.value.includes(key)
+        && visibleBusinessCount.value >= effectiveBusinessLimit.value) {
+      ElMessage.warning(`为保证可读性，当前最多显示 ${effectiveBusinessLimit.value} 个业务列`)
+      return
+    }
+    colHidden.value = colHidden.value.filter(k => k !== key)
+  } else if (!colHidden.value.includes(key)) {
+    colHidden.value = [...colHidden.value, key]
+  }
   savePref()
 }
-function moveCol(index: number, dir: -1 | 1): void {
+function moveCol(key: string, dir: -1 | 1): void {
+  const businessKeys = businessColumns.value.map(c => c.key)
+  const index = businessKeys.indexOf(key)
   const target = index + dir
-  if (target < 0 || target >= colOrder.value.length) return
+  if (index < 0 || target < 0 || target >= businessKeys.length) return
   const arr = [...colOrder.value]
-  const [item] = arr.splice(index, 1)
-  arr.splice(target, 0, item)
+  const fromIndex = arr.indexOf(key)
+  const targetIndex = arr.indexOf(businessKeys[target])
+  const [item] = arr.splice(fromIndex, 1)
+  arr.splice(targetIndex, 0, item)
+  colOrder.value = arr
+  savePref()
+}
+function startDrag(column: DataTableColumn): void {
+  if (columnRegion(column) !== 'business') return
+  draggingKey.value = column.key
+}
+function dropColumn(target: DataTableColumn): void {
+  const sourceKey = draggingKey.value
+  draggingKey.value = ''
+  if (!sourceKey || sourceKey === target.key || columnRegion(target) !== 'business') return
+  const arr = [...colOrder.value]
+  const fromIndex = arr.indexOf(sourceKey)
+  const targetIndex = arr.indexOf(target.key)
+  if (fromIndex < 0 || targetIndex < 0) return
+  const [item] = arr.splice(fromIndex, 1)
+  arr.splice(targetIndex, 0, item)
   colOrder.value = arr
   savePref()
 }
@@ -198,6 +306,7 @@ function resetPref(): void {
   density.value = 'default'
   pageSizeInner.value = props.defaultPageSize
   currentPage.value = 1
+  enforceColumnRules()
   try { localStorage.removeItem(prefStorageKey()) } catch { /* ignore */ }
   if (isExternalPageSize.value) emit('update:pageSize', props.defaultPageSize)
 }
@@ -234,18 +343,30 @@ function resetPref(): void {
           </template>
           <div class="data-table__col-panel">
             <div class="data-table__col-head">
-              <span>列显示与顺序</span>
+              <span>业务列 {{ visibleBusinessCount }} / 最多 {{ effectiveBusinessLimit }}</span>
               <el-button link type="primary" size="small" @click="resetPref">恢复默认</el-button>
             </div>
-            <div v-for="(c, i) in orderedColumns" :key="c.key" class="data-table__col-row">
+            <div
+              v-for="c in orderedColumns"
+              :key="c.key"
+              class="data-table__col-row"
+              :class="{ 'is-fixed': columnRegion(c) !== 'business' }"
+              :draggable="columnRegion(c) === 'business'"
+              @dragstart="startDrag(c)"
+              @dragover.prevent
+              @drop="dropColumn(c)"
+            >
+              <el-icon v-if="columnRegion(c) === 'business'" class="data-table__drag"><Rank /></el-icon>
+              <span v-else class="data-table__fixed-mark">{{ columnRegion(c) === 'identity' ? '识别' : '操作' }}</span>
               <el-checkbox
                 :model-value="!colHidden.includes(c.key)"
+                :disabled="c.required"
                 size="small"
                 @change="(v: string | number | boolean) => toggleCol(c.key, !!v)"
-              >{{ c.label || c.key }}</el-checkbox>
-              <span class="data-table__col-moves">
-                <el-button link size="small" :icon="ArrowUp" :disabled="i === 0" aria-label="上移" @click="moveCol(i, -1)" />
-                <el-button link size="small" :icon="ArrowDown" :disabled="i === orderedColumns.length - 1" aria-label="下移" @click="moveCol(i, 1)" />
+              >{{ c.label || c.key }}<span v-if="c.required" class="data-table__required">（必选）</span></el-checkbox>
+              <span v-if="columnRegion(c) === 'business'" class="data-table__col-moves">
+                <el-button link size="small" :icon="ArrowUp" :disabled="businessColumns[0]?.key === c.key" aria-label="上移" @click="moveCol(c.key, -1)" />
+                <el-button link size="small" :icon="ArrowDown" :disabled="businessColumns[businessColumns.length - 1]?.key === c.key" aria-label="下移" @click="moveCol(c.key, 1)" />
               </span>
             </div>
           </div>
@@ -311,9 +432,25 @@ function resetPref(): void {
 .data-table__col-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 1px 0;
+  gap: 6px;
+  min-height: 30px;
+  padding: 2px 0;
+  border-bottom: 1px solid #f1f5f9;
 }
-.data-table__col-moves { display: inline-flex; }
+.data-table__col-row:not(.is-fixed) { cursor: grab; }
+.data-table__col-row:not(.is-fixed):active { cursor: grabbing; }
+.data-table__col-row .el-checkbox { flex: 1; min-width: 0; }
+.data-table__drag { color: #94a3b8; }
+.data-table__fixed-mark {
+  min-width: 30px;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: #f1f5f9;
+  color: #64748b;
+  font-size: 10px;
+  text-align: center;
+}
+.data-table__required { color: #94a3b8; font-size: 11px; }
+.data-table__col-moves { display: inline-flex; margin-left: auto; }
 .data-table__pager { display: flex; justify-content: flex-end; margin-top: 12px; }
 </style>

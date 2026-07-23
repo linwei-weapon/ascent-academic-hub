@@ -8,6 +8,9 @@ const AdminLayout = () => import('@/views/admin/Layout.vue')
 
 export const router = createRouter({
   history: createWebHashHistory(),
+  scrollBehavior(_to, _from, savedPosition) {
+    return savedPosition || { top: 0 }
+  },
   routes: [
     { path: '/login', component: () => import('@/views/Login.vue') },
     // 查证窗口（R2）：独立只读证据页，不挂 Layout，专供新开浏览器窗口

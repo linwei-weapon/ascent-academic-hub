@@ -232,10 +232,6 @@ const router = useRouter()
 
 // 返回溯源：根据 from 参数判断来源页面
 const backLink = computed(() => {
-  const returnTo = route.query.returnTo as string
-  if (returnTo) {
-    return { label: (route.query.returnLabel as string) || '返回来源页面', action: () => router.push(returnTo) }
-  }
   const from = route.query.from as string
   if (from === 'alert') {
     return { label: '返回预警列表', action: () => router.push('/admin/alert') }
@@ -243,9 +239,13 @@ const backLink = computed(() => {
   if (from === 'list') {
     // 保留筛选上下文
     const qs = new URLSearchParams()
-    const keys = ['college', 'collegeId', 'collegeName', 'major', 'majorId', 'majorName', 'grade', 'class', 'semester', 'course', 'courseName', 'returnTo', 'returnLabel']
+    const keys = ['college', 'collegeId', 'collegeName', 'major', 'majorId', 'majorName', 'grade', 'class', 'semester', 'course', 'courseName', 'returnTo', 'returnLabel', 'page', 'scrollY']
     keys.forEach(k => { const v = route.query[k]; if (v) qs.set(k, v as string) })
     return { label: '返回学生清单', action: () => router.push('/admin/students/list?' + qs.toString()) }
+  }
+  const returnTo = route.query.returnTo as string
+  if (returnTo) {
+    return { label: (route.query.returnLabel as string) || '返回来源页面', action: () => router.push(returnTo) }
   }
   if (from === 'analysis') {
     return { label: '返回学业分析', action: () => router.push('/admin/students/analysis') }

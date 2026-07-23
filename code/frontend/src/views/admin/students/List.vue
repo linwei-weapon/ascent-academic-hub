@@ -68,7 +68,9 @@
     <!-- 学生表格 -->
     <div class="sa-card student-table-card">
       <div class="sa-card-title list-title"><span>学生明细</span><span class="extra">点击姓名或“详情”在当前页面核查，筛选条件不会丢失</span></div>
-      <DataTable :columns="studentCols" :data="students" storage-key="students:list" stripe v-loading="loading" class="student-table" v-model:page-size="pageSize">
+      <DataTable :columns="studentCols" :data="students" storage-key="students:list"
+        :max-business-columns="8" :config-version="2" stripe v-loading="loading"
+        class="student-table" v-model:page-size="pageSize">
         <template #col-sid="{row}"><span class="tnum sid">{{ row.sid }}</span></template>
         <template #col-name="{row}"><el-button link type="primary" class="name-link" @click.stop="openReview(row)">{{ row.name }}</el-button></template>
         <template #col-major="{row}"><span>{{ row.majorName || row.major }}</span></template>
@@ -107,13 +109,21 @@
         <div class="review-kpis"><KpiCard v-for="k in review.kpis || []" :key="k.label" :label="k.label" :value="k.value" :hint="k.formula" :tone="reviewTone(k.label,k.value)" /></div>
         <el-tabs v-model="reviewTab" class="review-tabs">
           <el-tab-pane label="学期变化" name="semester">
-            <el-table :data="review.semesterSummary || []" size="small"><el-table-column prop="semester" label="学期" width="150" /><el-table-column prop="gpa" label="GPA" width="90" align="right" /><el-table-column label="GPA变化" width="100" align="right"><template #default="{row,$index}">{{ deltaText(review.semesterSummary,$index,'gpa') }}</template></el-table-column><el-table-column prop="failCount" label="挂科门次" width="100" align="right" /><el-table-column label="挂科变化" width="100" align="right"><template #default="{row,$index}">{{ deltaText(review.semesterSummary,$index,'failCount') }}</template></el-table-column><el-table-column prop="earnedCredits" label="获得学分" width="100" align="right" /></el-table>
+            <DataTable :columns="reviewSemesterCols" :data="review.semesterSummary || []"
+              storage-key="students:review-semesters" :max-business-columns="5" :config-version="1" size="small">
+              <template #col-gpaDelta="{row,$index}">{{ deltaText(review.semesterSummary,$index,'gpa') }}</template>
+              <template #col-failDelta="{row,$index}">{{ deltaText(review.semesterSummary,$index,'failCount') }}</template>
+            </DataTable>
           </el-tab-pane>
           <el-tab-pane :label="`挂科分析 (${(review.failTrace || []).length})`" name="failure">
-            <el-table :data="review.failTrace || []" size="small"><el-table-column prop="courseName" label="课程" min-width="190" /><el-table-column prop="failCount" label="挂科次数" width="90" align="right" /><el-table-column label="发生学期" min-width="180"><template #default="{row}">{{ (row.semesters || []).join('、') }}</template></el-table-column><el-table-column prop="teacherName" label="授课教师" width="110" /><el-table-column prop="college" label="开课单位" min-width="150" /></el-table>
+            <DataTable :columns="reviewFailureCols" :data="review.failTrace || []"
+              storage-key="students:review-failures" :max-business-columns="4" :config-version="1" size="small">
+              <template #col-semesters="{row}">{{ (row.semesters || []).join('、') }}</template>
+            </DataTable>
           </el-tab-pane>
           <el-tab-pane :label="`预警记录 (${(review.alertHistory || []).length})`" name="alert">
-            <el-table :data="review.alertHistory || []" size="small"><el-table-column prop="time" label="时间" width="150" /><el-table-column prop="level" label="等级" width="76" /><el-table-column prop="type" label="预警类型" width="130" /><el-table-column prop="changeType" label="与上次相比" width="100" /><el-table-column prop="workflowStatusLabel" label="处置状态" width="100" /><el-table-column prop="detail" label="触发证据" min-width="210" show-overflow-tooltip /></el-table>
+            <DataTable :columns="reviewAlertCols" :data="review.alertHistory || []"
+              storage-key="students:review-alerts" :max-business-columns="5" :config-version="1" size="small" />
           </el-tab-pane>
         </el-tabs>
         <div class="drawer-actions">
@@ -128,7 +138,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { http } from '@/utils/http'
 import { getStudentAIInsight } from '@/utils/ai'
@@ -153,21 +163,50 @@ const keyword = ref('')
 const page = ref(1)
 // M6：每页行数由 DataTable 偏好驱动（v-model:page-size），变化时回到第一页重查
 const pageSize = ref(20)
-watch(pageSize, () => { page.value = 1; loadPage(1) })
+const initialized = ref(false)
+let requestSeq = 0
+watch(pageSize, () => {
+  if (!initialized.value) return
+  page.value = 1
+  loadPage(1)
+})
 
 // 学生明细表列定义（M6 DataTable）
 const studentCols: DataTableColumn[] = [
-  { key: 'sid', label: '学号', width: 130 },
-  { key: 'name', label: '姓名', width: 100 },
+  { key: 'sid', label: '学号', width: 130, fixed: 'left', region: 'identity', required: true },
+  { key: 'name', label: '姓名', width: 100, fixed: 'left', region: 'identity', required: true },
   { key: 'college', label: '学院', minWidth: 160, tooltip: true },
   { key: 'major', label: '专业', minWidth: 140, tooltip: true },
   { key: 'class', label: '班级', minWidth: 120, tooltip: true },
   { key: 'grade', label: '年级', width: 82, align: 'center' },
-  { key: 'gpa', label: 'GPA', width: 72, align: 'right' },
-  { key: 'failCount', label: '挂科门数', width: 80, align: 'right' },
+  { key: 'gpa', label: '筛选期GPA', width: 96, align: 'right', required: true },
+  { key: 'failCount', label: '筛选期未通过', width: 104, align: 'right' },
   { key: 'alertLevel', label: '预警', width: 100 },
   { key: 'attention', label: '管理关注', width: 105, align: 'center' },
-  { key: 'actions', label: '操作', width: 88, align: 'center', fixed: 'right' },
+  { key: 'actions', label: '操作', width: 88, align: 'center', fixed: 'right', region: 'action', required: true },
+]
+const reviewSemesterCols: DataTableColumn[] = [
+  { key: 'semester', label: '学期', width: 150, fixed: 'left', region: 'identity', required: true },
+  { key: 'gpa', label: 'GPA', width: 90, align: 'right', required: true },
+  { key: 'gpaDelta', label: 'GPA变化', width: 100, align: 'right' },
+  { key: 'failCount', label: '挂科门次', width: 100, align: 'right' },
+  { key: 'failDelta', label: '挂科变化', width: 100, align: 'right' },
+  { key: 'earnedCredits', label: '获得学分', width: 100, align: 'right' },
+]
+const reviewFailureCols: DataTableColumn[] = [
+  { key: 'courseName', label: '课程', minWidth: 190, fixed: 'left', region: 'identity', required: true },
+  { key: 'failCount', label: '挂科次数', width: 90, align: 'right', required: true },
+  { key: 'semesters', label: '发生学期', minWidth: 180 },
+  { key: 'teacherName', label: '授课教师', width: 110 },
+  { key: 'college', label: '开课单位', minWidth: 150 },
+]
+const reviewAlertCols: DataTableColumn[] = [
+  { key: 'time', label: '时间', width: 150, fixed: 'left', region: 'identity', required: true },
+  { key: 'level', label: '等级', width: 76, required: true },
+  { key: 'type', label: '预警类型', width: 130 },
+  { key: 'changeType', label: '与上次相比', width: 100 },
+  { key: 'workflowStatusLabel', label: '处置状态', width: 100 },
+  { key: 'detail', label: '触发证据', minWidth: 210, tooltip: true },
 ]
 
 // ── URL 参数预填 ──
@@ -190,6 +229,7 @@ const loading = ref(false)
 const students = ref<any[]>([])
 const total = ref(0)
 const avgGpa = ref<number | null>(null)
+const appliedFilters = ref<Record<string, any>>({})
 const reviewVisible = ref(false)
 const reviewLoading = ref(false)
 const reviewTab = ref('semester')
@@ -223,7 +263,7 @@ const pageTitle = computed(() => {
   if (patternKey.value) parts.push(patternLabel.value || '挂科模式')
   if (migrationKey.value) parts.push((migrationLabel.value || '画像迁移') + '学生')
   if (route.query.collegeName) parts.push(route.query.collegeName as string)
-  else if (route.query.majorName) parts.push(route.query.majorName as string)
+  if (route.query.majorName) parts.push(route.query.majorName as string)
   parts.push('学生学业画像')
   return parts.join(' · ')
 })
@@ -248,7 +288,15 @@ onMounted(async () => {
   if (route.query.required) fRequired.value = route.query.required as string
   if (route.query.course) courseId.value = route.query.course as string
   if (route.query.courseName) courseName.value = route.query.courseName as string
-  loadPage(1)
+  const restoredPage = Math.max(1, Number(route.query.page || 1) || 1)
+  page.value = restoredPage
+  initialized.value = true
+  await loadPage(restoredPage)
+  const restoredScroll = Math.max(0, Number(route.query.scrollY || 0) || 0)
+  if (restoredScroll) {
+    await nextTick()
+    window.scrollTo({ top: restoredScroll, behavior: 'auto' })
+  }
 })
 
 // ── 筛选联动 ──
@@ -259,6 +307,7 @@ function onYear() { if (fYear.value) fSemester.value = '' }
 
 // ── 数据加载 ──
 async function loadPage(p: number) {
+  const currentRequest = ++requestSeq
   loading.value = true
   try {
     const params: Record<string, any> = { page: p, page_size: pageSize.value }
@@ -284,15 +333,19 @@ async function loadPage(p: number) {
 
     const qs = Object.entries(params).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&')
     const data = await http.get<any>(`/admin/students/list?${qs}`)
+    if (currentRequest !== requestSeq) return
 
     students.value = data.students || []
     total.value = data.total || 0
     page.value = data.page || p
+    appliedFilters.value = data.appliedFilters || {}
 
     // 使用后端对完整筛选群体计算的均值，不能只计算当前分页。
     avgGpa.value = data.summary?.avgGpa ?? null
   } catch { /* http 工具已 toast */ }
-  finally { loading.value = false }
+  finally {
+    if (currentRequest === requestSeq) loading.value = false
+  }
 }
 
 // ── 操作 ──
@@ -350,6 +403,8 @@ function goStudent(row: any) {
   if (fSemester.value) qs.set('semester', fSemester.value)
   if (courseId.value) qs.set('course', courseId.value)
   if (courseName.value) qs.set('courseName', courseName.value)
+  qs.set('page', String(page.value))
+  qs.set('scrollY', String(Math.round(window.scrollY)))
   router.push(`/admin/student/${row.sid}?${qs.toString()}`)
 }
 

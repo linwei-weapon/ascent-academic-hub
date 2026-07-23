@@ -1,5 +1,5 @@
 <template>
-  <div>
+  <div v-loading="pageLoading && !!data.name" element-loading-text="正在更新学院分析，当前结果暂时保留…" :aria-busy="pageLoading">
     <el-breadcrumb separator="›"><el-breadcrumb-item :to="{path:'/admin/dashboard',query:{semester:fSemester}}">教学数据总览</el-breadcrumb-item><el-breadcrumb-item>{{ data.name || '学院详情' }}</el-breadcrumb-item></el-breadcrumb>
     <div style="display:flex;justify-content:space-between;align-items:center">
       <div>
@@ -11,22 +11,40 @@
       </el-select>
     </div>
 
+    <el-alert v-if="loadError" type="error" :closable="false" show-icon style="margin:12px 0"
+      title="学院数据加载失败" :description="loadError">
+      <template #default><el-button size="small" @click="loadData">重新加载</el-button></template>
+    </el-alert>
+    <div v-if="pageLoading && !data.name" class="sa-card" style="margin:12px 0">
+      <el-skeleton :rows="10" animated />
+    </div>
+    <template v-if="data.name">
     <el-alert v-if="data.evidence?.limitation" type="warning" :closable="false" show-icon style="margin:12px 0"
       title="证据与口径说明" :description="data.evidence.limitation" />
 
     <div class="sa-kpi-row">
-      <KpiCard v-for="k in data.kpi" :key="k.label" :label="k.label" :value="k.value" :tone="kpiTone(k.label)" :hint="k.formula" />
+      <KpiCard v-for="k in data.kpi" :key="k.label" :label="k.label" :value="k.value" :tone="kpiTone(k.label)" :hint="k.formula" :sub="k.detail" />
     </div>
 
     <!-- 各专业数据（全宽）-->
     <div class="sa-card" style="margin-bottom:16px">
-      <div class="sa-card-title">各专业数据 <span class="extra">点击专业行下钻</span></div>
-      <DataTable :columns="majorCols" :data="data.majors" storage-key="dashboard:college-majors" size="small" @row-click="goMajor" row-class-name="row-clickable">
+      <div class="sa-card-title">专业偏离与优先核查 <span class="extra">优先项置顶；点击专业查看年级与课程证据</span></div>
+      <DataTable :columns="majorCols" :data="data.majors" storage-key="dashboard:college-majors"
+        :max-business-columns="6" :config-version="2" size="small"
+        @row-click="goMajor" row-class-name="row-clickable">
         <template #col-name="{row}"><span class="link">{{ row.name }}</span></template>
-        <template #col-gpa="{row}"><b class="tnum">{{ row.gpa }}</b></template>
+        <template #col-priorityRank="{row}"><span class="rank" :class="{hot:row.needsPriorityReview}">{{ row.priorityRank }}</span></template>
+        <template #col-gpa="{row}"><b v-if="row.gpa != null" class="tnum">{{ row.gpa }}</b><span v-else class="sa-faint">—</span></template>
         <template #col-currentFailRate="{row}"><span class="tnum" :style="{color:parseFloat(row.currentFailRate||'0')>10?'#DC2626':'#6B7280'}">{{ row.currentFailRate || '—' }}</span></template>
-        <template #col-trend="{row}"><span :style="{color:row.trend==='up'?'#E11D48':row.trend==='down'?'#0D9488':'#94A3B8',fontSize:'14px'}">{{ row.trend==='up'?'▲':'▼' }}</span></template>
-        <template #header-trend><span>对比全院<KpiLabel label="" formula="当前挂科率高于全院均值为▲(红)，低于为▼(绿)" /></span></template>
+        <template #col-currentFailVsCollegePp="{row}">
+          <span v-if="row.currentFailVsCollegePp != null" class="tnum" :class="row.currentFailVsCollegePp>=3?'risk-text':'muted-text'">
+            {{ row.currentFailVsCollegePp > 0 ? '+' : '' }}{{ row.currentFailVsCollegePp }}pp
+          </span><span v-else class="sa-faint">—</span>
+        </template>
+        <template #col-priorityReason="{row}">
+          <el-tag v-if="row.needsPriorityReview" type="danger" effect="plain" size="small">{{ row.priorityReason }}</el-tag>
+          <span v-else class="sa-faint">{{ row.priorityReason }}</span>
+        </template>
         <template #col-drill><span style="color:var(--sa-faint)">›</span></template>
       </DataTable>
       <div style="margin-top:8px;text-align:right">
@@ -38,34 +56,41 @@
     <el-row :gutter="16" style="margin-bottom:16px">
       <el-col :span="12">
         <div class="sa-card">
-          <div class="sa-card-title">各年级课程学分通过占比 <KpiLabel label="" formula="当前学期已通过课程学分人次÷修读课程学分人次×100%，不等同于培养方案完成度" /></div>
+          <div class="sa-card-title">各年级本学期修读结果 <KpiLabel label="" formula="柱形为当前学期已通过课程学分人次÷修读课程学分人次；同时核对有效成绩人数、GPA与挂科学生率，不代表培养方案完成度" /></div>
           <EChart v-if="data.gradeCompare.length" :option="gradeOption" :height="Math.max(150, data.gradeCompare.length*46)" />
           <div v-else class="sa-faint" style="font-size:12px">暂无年级数据</div>
         </div>
       </el-col>
       <el-col :span="12">
         <div class="sa-card">
-          <div class="sa-card-title">挂科集中课程 TOP6 <span class="extra">点击课程查看详情</span></div>
-          <el-table :data="failCourses" size="small" @row-click="goCourse" row-class-name="row-clickable">
-            <el-table-column prop="name" label="课程" min-width="140"><template #default="{row}"><span class="link">{{ row.name }}</span></template></el-table-column>
-            <el-table-column :formatter="() => data.name" label="开课学院" width="110" />
-            <el-table-column label="挂科率" min-width="130"><template #default="{row}">
+          <div class="sa-card-title">优先核查课程 TOP6 <span class="extra">按受影响学生数优先；点击课程查看趋势和班级证据</span></div>
+          <DataTable :columns="collegeFailCourseCols" :data="failCourses"
+            storage-key="dashboard:college-focus-courses" :max-business-columns="6"
+            :config-version="1" size="small" @row-click="goCourse" row-class-name="row-clickable">
+            <template #col-name="{row}"><span class="link">{{ row.name }}</span></template>
+            <template #col-priorityRank="{row}"><span class="rank hot">{{ row.priorityRank }}</span></template>
+            <template #col-college>{{ data.name }}</template>
+            <template #col-currentFailRate="{row}">
               <div style="display:flex;align-items:center;gap:6px">
                 <el-progress :percentage="Math.min(parseFloat(row.failRate)*5,100)" :show-text="false" :stroke-width="8" :color="parseFloat(row.failRate)>15?'#E11D48':'#D97706'" style="flex:1" />
                 <span class="tnum" :style="{color:parseFloat(row.failRate)>15?'#E11D48':'#D97706',fontWeight:600,minWidth:'40px',textAlign:'right'}">{{ row.failRate }}%</span>
               </div>
-            </template></el-table-column>
-            <el-table-column prop="failCount" label="不及格" width="64" align="right" />
-            <el-table-column prop="totalCount" label="修读人数" width="80" align="right" />
-            <el-table-column prop="avgScore" label="平均分" width="70" align="right"><template #default="{row}"><b class="tnum">{{ row.avgScore }}</b></template></el-table-column>
-            <el-table-column label="类别" width="82" align="center"><template #default="{row}"><el-tag v-if="row.courseGroup" size="small" effect="plain" :type="row.courseGroup==='公共必修'?'warning':'info'">{{ row.courseGroup }}</el-tag><span v-else class="sa-faint">—</span></template></el-table-column>
-            <el-table-column label="首次通过率" width="86" align="right"><template #default="{row}">{{ row.firstPassRate ?? '—' }}{{ row.firstPassRate != null ? '%' : '' }}</template></el-table-column>
-            <el-table-column label="补考通过率" width="86" align="right"><template #default="{row}">{{ row.makeupPassRate ?? '—' }}{{ row.makeupPassRate != null ? '%' : '' }}</template></el-table-column>
-            <el-table-column label="重修通过率" width="86" align="right"><template #default="{row}">{{ row.retakePassRate ?? '—' }}{{ row.retakePassRate != null ? '%' : '' }}</template></el-table-column>
-          </el-table>
+            </template>
+            <template #col-avgScore="{row}"><b class="tnum">{{ row.avgScore }}</b></template>
+            <template #col-courseGroup="{row}"><el-tag v-if="row.courseGroup" size="small" effect="plain" :type="row.courseGroup==='公共必修'?'warning':'info'">{{ row.courseGroup }}</el-tag><span v-else class="sa-faint">—</span></template>
+            <template #col-firstPassRate="{row}">{{ row.firstPassRate ?? '—' }}{{ row.firstPassRate != null ? '%' : '' }}</template>
+            <template #col-makeupPassRate="{row}">{{ row.makeupPassRate ?? '—' }}{{ row.makeupPassRate != null ? '%' : '' }}</template>
+            <template #col-retakePassRate="{row}">{{ row.retakePassRate ?? '—' }}{{ row.retakePassRate != null ? '%' : '' }}</template>
+            <template #col-changePp="{row}">
+              <span v-if="row.changePp != null" :class="row.changePp>0?'risk-text':'good-text'">{{ row.changePp>0?'+':'' }}{{ row.changePp }}pp</span>
+              <span v-else class="sa-faint">无基线</span>
+            </template>
+            <template #col-drill><span style="color:var(--sa-faint)">›</span></template>
+          </DataTable>
         </div>
       </el-col>
     </el-row>
+    </template>
   </div>
 </template>
 
@@ -84,26 +109,56 @@ const data = reactive<any>({ name:'', kpi:[], majors:[], gradeCompare:[], scope:
 const failCourses = reactive([] as any[]);
 const semesters = ref<SemesterOpt[]>([]);
 const fSemester = ref('');
+const pageLoading = ref(false);
+const loadError = ref('');
+let requestSeq = 0;
 
 // 各专业数据表列定义（M6 DataTable；自定义渲染见模板 col-* / header-* 插槽）
 const majorCols: DataTableColumn[] = [
-  { key: 'name', label: '专业', minWidth: 140 },
+  { key: 'priorityRank', label: '序', width: 48, fixed: 'left', region: 'identity', required: true },
+  { key: 'name', label: '专业', minWidth: 140, fixed: 'left', region: 'identity', required: true },
   { key: 'students', label: '人数', width: 70, align: 'right' },
+  { key: 'resultCoverageRate', label: '成绩覆盖率', width: 98, align: 'right' },
   { key: 'gpa', label: '平均GPA', width: 80, align: 'right' },
-  { key: 'currentFailRate', label: '当前挂科率', width: 90, align: 'right' },
-  { key: 'failRate', label: '历史挂科经历率', width: 120, align: 'right' },
-  { key: 'alertCount', label: '预警人数', width: 80, align: 'right' },
-  { key: 'trend', label: '对比全院', width: 72, align: 'center' },
-  { key: 'drill', label: '下钻', width: 36 },
+  { key: 'currentFailRate', label: '当前挂科学生率', width: 118, align: 'right', required: true },
+  { key: 'currentFailVsCollegePp', label: '较学院', width: 88, align: 'right', required: true },
+  { key: 'alertRate', label: '预警学生率', width: 98, align: 'right' },
+  { key: 'priorityReason', label: '优先核查原因', minWidth: 260, required: true },
+  { key: 'drill', label: '详情', width: 52, fixed: 'right', region: 'action', required: true },
+];
+const collegeFailCourseCols: DataTableColumn[] = [
+  { key: 'priorityRank', label: '序', width: 46, fixed: 'left', region: 'identity', required: true },
+  { key: 'name', label: '课程', minWidth: 140, fixed: 'left', region: 'identity', required: true },
+  { key: 'college', label: '开课学院', width: 110, defaultVisible: false },
+  { key: 'currentFailRate', label: '当前未通过率', minWidth: 130, required: true },
+  { key: 'failCount', label: '不及格', width: 64, align: 'right' },
+  { key: 'affectedStudents', label: '影响学生', width: 80, align: 'right', required: true },
+  { key: 'changePp', label: '较上学期', width: 86, align: 'right' },
+  { key: 'selectionReason', label: '入选原因', minWidth: 190 },
+  { key: 'avgScore', label: '平均分', width: 70, align: 'right' },
+  { key: 'courseGroup', label: '类别', width: 82, align: 'center', defaultVisible: false },
+  { key: 'firstPassRate', label: '首次通过率', width: 86, align: 'right' },
+  { key: 'makeupPassRate', label: '补考通过率', width: 86, align: 'right', defaultVisible: false },
+  { key: 'retakePassRate', label: '重修通过率', width: 86, align: 'right' },
+  { key: 'drill', label: '详情', width: 52, fixed: 'right', region: 'action', required: true },
 ];
 
 async function loadData() {
+  const currentRequest = ++requestSeq;
+  pageLoading.value = true;
+  loadError.value = '';
   const id = route.params.id as string || 'C05';
   const qs = fSemester.value ? `?semester=${fSemester.value}` : '';
-  const d = await http.get('/admin/college/'+id+qs);
-  if (d) {
-    Object.assign(data, d);
-    if (d.failCourses) { failCourses.length=0; failCourses.push(...d.failCourses.slice(0,6)); }
+  try {
+    const d = await http.get('/admin/college/'+id+qs);
+    if (d && currentRequest === requestSeq) {
+      Object.assign(data, d);
+      if (d.failCourses) { failCourses.length=0; failCourses.push(...d.failCourses.slice(0,6)); }
+    }
+  } catch (error:any) {
+    if (currentRequest === requestSeq) loadError.value = error?.message || '数据加载失败，请稍后重试';
+  } finally {
+    if (currentRequest === requestSeq) pageLoading.value = false;
   }
 }
 
@@ -120,7 +175,7 @@ const gradeOption = computed(() => {
     grid: { left: 8, right: 36, top: 8, bottom: 4, containLabel: true },
     tooltip: {
       trigger: 'axis', axisPointer: { type: 'shadow' },
-      formatter: (ps: any) => { const g = gc[ps[0].dataIndex]; return `${g.grade}<br/>学分完成 <b>${g.creditDone}%</b><br/>GPA ${g.gpaAvg} · 挂科率 ${g.failRate}`; },
+      formatter: (ps: any) => { const g = gc[ps[0].dataIndex]; return `${g.grade}<br/>本学期课程学分通过占比 <b>${g.creditDone}%</b><br/>有效成绩 ${g.studentsWithResults}人 · GPA ${g.gpaAvg ?? '—'} · 挂科学生率 ${g.failRate}`; },
     },
     xAxis: { type: 'value', max: 100, axisLabel: { color: '#94A3B8', formatter: '{value}%' }, splitLine: { lineStyle: { color: '#EEF1F5' } } },
     yAxis: { type: 'category', data: gc.map((g: any) => g.grade), axisLabel: { color: '#475569' }, axisLine: { lineStyle: { color: '#E2E8F0' } }, axisTick: { show: false } },
@@ -140,11 +195,16 @@ function kpiTone(label: string): 'primary'|'teal'|'danger'|'amber' {
 function drillQuery(extra:Record<string,string>={}) { return { semester:fSemester.value, collegeId, collegeName:data.name, ...extra } }
 function goMajor(row: any) { router.push({ path:'/admin/major/'+row.id, query:drillQuery({majorId:row.id,majorName:row.name}) }); }
 function goCourse(row: any) { router.push({ path:'/admin/course/'+row.id, query:drillQuery() }); }
-function goStudents() { router.push({ path:'/admin/students/list', query:{college:collegeId,collegeName:data.name,semester:fSemester.value,returnTo:`/admin/college/${collegeId}`,returnLabel:'返回学院详情'} }); }
+function goStudents() { router.push({ path:'/admin/students/list', query:{college:collegeId,collegeName:data.name,semester:fSemester.value,returnTo:route.fullPath,returnLabel:'返回学院详情'} }); }
 </script>
 <style scoped>
 :deep(.row-clickable) { cursor: pointer; }
 :deep(.row-clickable:hover) { background: #eef2ff !important; }
 .link { color: var(--sa-primary); cursor: pointer; font-weight: 500; }
 .link:hover { text-decoration: underline; }
+.rank { display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:7px;background:#f1f5f9;color:#64748b;font-weight:700; }
+.rank.hot { background:#fff1f2;color:#be123c; }
+.risk-text { color:#dc2626;font-weight:600; }
+.good-text { color:#0d9488;font-weight:600; }
+.muted-text { color:#64748b; }
 </style>

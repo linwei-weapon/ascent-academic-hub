@@ -126,14 +126,18 @@ def main():
           sum(x["students"] for x in d["colleges"]))
     check("大屏 模拟毕业证据可见", True,
           "毕业结果" in "、".join(d["evidence"]["simulated"]))
-    # 毕业率/学位率：现算自合成真表 fact_graduation（不再是估算）
+    # 合成毕业/学位数据只保留在 prototypeMetrics，不进入正式 KPI。
     grad_total = scalar(c, "SELECT COUNT(*) FROM fact_graduation")
     grad_count = scalar(c, "SELECT SUM(graduated) FROM fact_graduation")
     degree_count = scalar(c, "SELECT SUM(degree) FROM fact_graduation")
-    exp_grad = f"{round(grad_count / grad_total * 100, 1)}%（{grad_count}/{grad_total}）"
-    exp_deg = f"{round(degree_count / grad_total * 100, 1)}%（{degree_count}/{grad_total}）"
-    check("应届毕业率", exp_grad, kpi_val(d, "应届毕业率"))
-    check("学位授予率", exp_deg, kpi_val(d, "学位授予率"))
+    check("合成毕业率不进入正式KPI", None,
+          next((x for x in d["kpi"] if x["label"] == "应届毕业率"), None))
+    check("合成学位率不进入正式KPI", None,
+          next((x for x in d["kpi"] if x["label"] == "学位授予率"), None))
+    check("原型毕业率证据", round(grad_count / grad_total * 100, 1),
+          d["prototypeMetrics"]["graduationRate"])
+    check("原型学位率证据", round(degree_count / grad_total * 100, 1),
+          d["prototypeMetrics"]["degreeAwardRate"])
     dashboard_college_token = http(base, "/api/auth/login", "POST",
         {"username": "college_dean", "password": DEMO_PASSWORD})["data"]["token"]
     scoped_cid_dash = scalar(c,
@@ -165,7 +169,7 @@ def main():
     print("\n[4] 学院详情 C01")
     col = http(base, "/api/admin/college/C01")["data"]
     exp_stu = scalar(c, "SELECT COUNT(*) FROM dim_student WHERE college_id='C01'")
-    check("C01 本院学生", str(exp_stu), kpi_val(col, "本院学生"))
+    check("C01 本院学生", exp_stu, col["coverage"]["rosterStudents"])
     exp_majors = scalar(c, "SELECT COUNT(DISTINCT major_id) FROM dim_student WHERE college_id='C01'")
     check("C01 专业数", exp_majors, len(col["majors"]))
     director_token = http(base, "/api/auth/login", "POST",
@@ -177,8 +181,8 @@ def main():
                         token=director_token)["data"]
     director_students = scalar(c, "SELECT COUNT(*) FROM dim_student WHERE major_id=?",
                                director_major)
-    check("学院详情 系主任学生范围", str(director_students),
-          kpi_val(director_col, "范围内学生"))
+    check("学院详情 系主任学生范围", director_students,
+          director_col["coverage"]["rosterStudents"])
     check("学院详情 系主任仅本专业", [director_major],
           [x["id"] for x in director_col["majors"]])
     other_college = scalar(c, "SELECT college_id FROM dim_college WHERE college_id<>? LIMIT 1",
@@ -230,7 +234,7 @@ def main():
         "SELECT course_id, COUNT(*) n FROM fact_grade WHERE semester_id=? "
         "GROUP BY course_id ORDER BY n DESC LIMIT 1", (CUR,)).fetchone()
     co = http(base, f"/api/admin/course/{cid}")["data"]
-    check(f"{cid} 修读人数", str(exp_total), kpi_val(co, "修读人数"))
+    check(f"{cid} 有效成绩人次", str(exp_total), kpi_val(co, "有效成绩人次"))
     check(f"{cid} 成绩分布合计", exp_total, sum(b["count"] for b in co["scoreDistribution"]))
     scoped_course_id = scalar(c, """SELECT g.course_id FROM fact_grade g
         JOIN dim_student s ON g.student_id=s.student_id
@@ -242,8 +246,8 @@ def main():
         scoped_course_id, CUR, scoped_cid_dash)
     scoped_course = http(base, f"/api/admin/course/{scoped_course_id}",
                          token=dashboard_college_token)["data"]
-    check("课程详情 学院角色修读范围", str(scoped_course_total),
-          kpi_val(scoped_course, "修读人数"))
+    check("课程详情 学院角色有效成绩范围", str(scoped_course_total),
+          kpi_val(scoped_course, "有效成绩人次"))
     check("课程详情 学院角色成绩分布范围", scoped_course_total,
           sum(x["count"] for x in scoped_course["scoreDistribution"]))
     check("课程详情 学院角色范围标记", True, scoped_course["scope"]["restricted"])
