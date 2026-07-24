@@ -1,32 +1,33 @@
 <template>
-  <div>
+  <div v-loading="loading && hasResults" element-loading-text="正在按新条件更新开课供给，当前结果暂时保留…">
     <div class="sa-head-row">
       <div>
         <h2 class="sa-page-title">开课与排课结果统计</h2>
         <p class="sa-page-sub">数据来源：教学任务表(T_LESSONS) + 排课结果表 · {{ selectedSemesterLabel }}</p>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">
-        <el-input v-model="fKeyword" size="small" clearable placeholder="课程代码/名称" style="width:170px" @keyup.enter="load" @clear="load" />
-        <el-select v-model="fCampus" size="small" style="width:120px" clearable placeholder="全部校区" @change="load">
+        <el-input v-model="fKeyword" size="small" clearable placeholder="课程代码/名称" style="width:170px" @keyup.enter="applyFilters" />
+        <el-select v-model="fCampus" size="small" style="width:120px" clearable placeholder="全部校区">
           <el-option v-for="c in campuses" :key="c" :label="c" :value="c" />
         </el-select>
-        <el-select v-model="fNature" size="small" style="width:130px" clearable placeholder="课程性质" @change="load">
+        <el-select v-model="fNature" size="small" style="width:130px" clearable placeholder="课程性质">
           <el-option v-for="n in courseNatures" :key="n" :label="n" :value="n" />
         </el-select>
-        <el-select v-model="fCategory" size="small" style="width:130px" clearable placeholder="课程类别" @change="load">
+        <el-select v-model="fCategory" size="small" style="width:130px" clearable placeholder="课程类别">
           <el-option v-for="c in categories" :key="c" :label="c" :value="c" />
         </el-select>
-        <el-select v-model="fSize" size="small" style="width:140px" clearable placeholder="班额档" @change="load">
+        <el-select v-model="fSize" size="small" style="width:140px" clearable placeholder="班额档">
           <el-option v-for="s in sizeBuckets" :key="s" :label="s" :value="s" />
         </el-select>
-        <el-select v-model="fSemester" size="small" style="width:170px" clearable placeholder="全部学期" @change="onSemesterChange">
-          <el-option v-for="s in semesters" :key="s.value" :label="s.label" :value="s.value" />
-        </el-select>
-        <el-select v-model="fYear" size="small" style="width:130px" clearable placeholder="全部学年" @change="onYearChange">
-          <el-option v-for="y in years" :key="y" :label="y + '学年'" :value="y" />
-        </el-select>
+        <el-button type="primary" size="small" :loading="loading" @click="applyFilters">查询</el-button>
+        <el-button size="small" @click="resetFilters">重置</el-button>
       </div>
     </div>
+    <el-alert v-if="loadError" type="error" :closable="false" show-icon style="margin-bottom:12px"
+      title="开课供给加载失败" :description="loadError">
+      <template #default><el-button link type="primary" @click="load">重新加载</el-button></template>
+    </el-alert>
+    <div v-else-if="loading && !hasResults" class="sa-card" style="margin-bottom:12px"><el-skeleton :rows="8" animated /></div>
 
     <el-alert v-if="data.dataQuality.excludedLessons" type="warning" :closable="false" show-icon style="margin-bottom:12px"
       :title="`数据质量排除：${data.dataQuality.excludedTeachers} 名异常教师、${data.dataQuality.excludedLessons} 条排课记录未计入统计`"
@@ -40,13 +41,8 @@
           <el-table-column prop="detail" label="问题说明" min-width="210" />
           <el-table-column prop="recommendation" label="处置建议" min-width="250" />
           <el-table-column label="状态" width="90"><template #default="{row}"><el-tag size="small" :type="qualityStatusType(row.status)">{{ qualityStatusLabel(row.status) }}</el-tag></template></el-table-column>
-          <el-table-column label="处置" width="220"><template #default="{row}">
+          <el-table-column label="核查" width="100"><template #default="{row}">
             <el-button link @click="showQualityAudit(row)">处置轨迹</el-button>
-            <template v-if="qualityManage">
-            <el-button v-if="row.status==='open'" link type="primary" @click="changeQuality(row,'reviewing')">开始复核</el-button>
-            <template v-if="row.status==='reviewing'"><el-button link type="success" @click="changeQuality(row,'closed')">确认关闭</el-button><el-button link @click="changeQuality(row,'open')">退回</el-button></template>
-            <el-button v-if="row.status==='closed'" link type="warning" @click="changeQuality(row,'open')">重新打开</el-button>
-            </template>
           </template></el-table-column>
         </el-table>
       </el-collapse-item>
@@ -67,10 +63,16 @@
       <el-button size="small" type="primary" text @click="clearCollegeFilter">← 返回全院视图</el-button>
     </div>
 
-    <el-alert type="success" :closable="false" show-icon style="margin-bottom:12px"
+    <el-alert v-if="v2OfferingError" type="error" :closable="false" show-icon style="margin-bottom:12px"
+      title="结构化开课供给加载失败" :description="v2OfferingError">
+      <template #default><el-button link type="primary" @click="loadV2Offering">重新加载</el-button></template>
+    </el-alert>
+    <el-alert v-else-if="v2OfferingLoading" type="info" :closable="false" show-icon style="margin-bottom:12px"
+      title="正在读取当前身份可见的结构化教学任务，请稍候…" />
+    <el-alert v-else type="success" :closable="false" show-icon style="margin-bottom:12px"
       title="V2 真实教学任务证据"
-      :description="`已关联 ${v2Offering.total} 门课程的真实教学任务；首页显示需优先核查的10门，其中仅管理排序前3门进入AI重点，完整清单可分页查询。`" />
-    <div class="sa-card" style="margin-bottom:16px">
+      :description="`${v2Offering.semester}已关联 ${v2Offering.total} 门课程的真实教学任务；该证据期可能与上方页面统计学期不同。首页显示需优先核查的10门，完整清单可分页查询。`" />
+    <div v-if="!v2OfferingError && !v2OfferingLoading" class="sa-card" style="margin-bottom:16px">
       <div class="sa-card-title">
         <span>开课保障关注 TOP10 <span class="extra">按大班额、单一教师多班覆盖和单班集中供给排序，不是课程质量排名</span></span>
         <el-button size="small" type="primary" plain @click="openOfferingDrawer">查看全部 {{ v2Offering.total }} 门</el-button>
@@ -82,7 +84,7 @@
       </DataTable>
     </div>
 
-    <div class="sa-kpi-row">
+    <div v-if="!v2OfferingError && !v2OfferingLoading" class="sa-kpi-row">
       <KpiCard v-for="k in realKpis" :key="k.label" :label="k.label" :value="k.value" :hint="k.formula" :tone="k.tone" />
     </div>
 
@@ -90,19 +92,20 @@
       <el-col :span="14">
         <div class="sa-card">
           <div class="sa-card-title">学院教学供给规模 <span class="extra">用于观察教学任务承载与资源配置，不评价学院教学质量</span></div>
-          <el-table :data="data.deptCourses" size="small" @row-click="goCollege" row-class-name="row-clickable">
-            <el-table-column prop="name" label="学院" width="150"><template #default="{row}"><span class="link">{{ row.name }}</span></template></el-table-column>
-            <el-table-column label="开课门数" width="130"><template #default="{row}">
+          <DataTable :columns="deptCourseCols" :data="data.deptCourses" storage-key="operation:courses-college"
+            size="small" :max-business-columns="2" @row-click="goCollege" row-class-name="row-clickable">
+            <template #col-name="{row}"><span class="link">{{ row.name }}</span></template>
+            <template #col-courseCount="{row}">
               <div class="tnum" style="font-weight:700;font-size:14px;color:#1E293B">{{ row.courseCount }} <span style="font-size:12px;font-weight:400">门</span></div>
               <div class="sa-faint" style="font-size:11px">{{ row.lessonCount }} 个教学班</div>
-            </template></el-table-column>
-            <el-table-column label="教学班占全校比例" min-width="240"><template #default="{row}">
+            </template>
+            <template #col-pct="{row}">
               <div style="display:flex;align-items:center;gap:10px">
                 <el-progress :percentage="row.pct" :stroke-width="10" :color="pctColor(row.pct)" style="flex:1" />
                 <span class="tnum" style="font-weight:700;font-size:13px;min-width:34px;text-align:right">{{ row.pct }}%</span>
               </div>
-            </template></el-table-column>
-          </el-table>
+            </template>
+          </DataTable>
           <div class="table-foot">
             <span style="width:150px">合计</span>
             <span style="width:130px;font-weight:700;color:#1E293B" class="tnum">{{ totalCourses }} 门</span>
@@ -136,18 +139,13 @@
         <span>共 {{ offeringDrawer.total }} 门课程 · {{ offeringDrawer.semester }}</span>
       </div>
       <el-alert type="info" :closable="false" show-icon style="margin-bottom:12px" title="完整清单按教学班数和选课人次排序，可搜索并分页；首页TOP10使用管理关注规则单独排序。" />
-      <el-table :data="offeringDrawer.items" size="small" stripe v-loading="offeringDrawer.loading" max-height="620">
-        <el-table-column prop="course_id" label="课程代码" width="140" />
-        <el-table-column prop="course_name" label="课程名称" min-width="200" />
-        <el-table-column prop="category" label="类别" width="110" />
-        <el-table-column prop="nature" label="性质" width="110" />
-        <el-table-column prop="lesson_count" label="教学班" width="80" align="right" />
-        <el-table-column prop="teacher_count" label="教师" width="70" align="right" />
-        <el-table-column prop="enrolled" label="选课人次" width="90" align="right" />
-        <el-table-column label="平均班额" width="90" align="right"><template #default="{row}">{{ row.lesson_count ? Math.round(row.enrolled/row.lesson_count) : 0 }}</template></el-table-column>
-        <el-table-column label="管理关注" width="95"><template #default="{row}"><el-tag size="small" :type="offeringAttentionLevel(row).type">{{ offeringAttentionLevel(row).label }}</el-tag></template></el-table-column>
-        <el-table-column label="操作" width="88"><template #default="{row}"><el-button link type="primary" @click="openOfferingReview(row)">详情</el-button></template></el-table-column>
-      </el-table>
+      <DataTable :columns="offeringAllCols" :data="offeringDrawer.items" storage-key="operation:courses-all"
+        size="small" stripe v-loading="offeringDrawer.loading" max-height="620" :page-size="offeringDrawer.pageSize"
+        :default-page-size="20" :max-business-columns="6" @update:page-size="onOfferingPageSize">
+        <template #col-avgClassSize="{row}">{{ row.lesson_count ? Math.round(row.enrolled/row.lesson_count) : 0 }}</template>
+        <template #col-attention="{row}"><el-tag size="small" :type="offeringAttentionLevel(row).type">{{ offeringAttentionLevel(row).label }}</el-tag></template>
+        <template #col-actions="{row}"><el-button link type="primary" @click="openOfferingReview(row)">详情</el-button></template>
+      </DataTable>
       <el-pagination v-model:current-page="offeringDrawer.page" :page-size="offeringDrawer.pageSize" :total="offeringDrawer.total" layout="total,prev,pager,next" style="justify-content:flex-end;margin-top:14px" @current-change="loadOfferingPage" />
     </el-drawer>
     <el-drawer v-model="offeringReviewVisible" :title="`${selectedOffering.course_name || '课程'}｜开课保障核查`" size="720px">
@@ -185,7 +183,6 @@ import KpiCard from '@/components/KpiCard.vue'
 import EChart from '@/components/EChart.vue'
 import { COLLEGE_MAP } from '@/constants/colleges'
 import { getFilterMeta, type SemesterOpt } from '@/utils/meta'
-import { ElMessageBox } from 'element-plus'
 import { getV2TeachingSemester } from '@/utils/v2meta'
 import AIInsightDrawer from '@/components/AIInsightDrawer.vue'
 import DataTable, { type DataTableColumn } from '@/components/DataTable.vue'
@@ -194,7 +191,6 @@ const router = useRouter()
 const route = useRoute()
 
 const fSemester = inject<Ref<string>>('operationSemester', ref(''))
-const fYear = ref('')
 const fCampus = ref('')
 const fNature = ref('')
 const fCategory = ref('')
@@ -212,24 +208,24 @@ function clearCollegeFilter() { router.replace({ query: {} }) }
 function goCollege(row: any) { router.push({ query: { college: row.id } }) }
 
 const semesters = ref<SemesterOpt[]>([])
-const years = ref<string[]>([])
 const campuses = ref<string[]>([])
 const courseNatures = ref<string[]>([])
 const categories = ref<string[]>([])
 const sizeBuckets = ref<string[]>([])
-const selectedSemesterLabel = computed(() => semesters.value.find(s => s.value === fSemester.value)?.label || (fYear.value ? fYear.value + '学年' : '全部学期'))
-function onSemesterChange() { if (fSemester.value) fYear.value = ''; load() }
-function onYearChange() { if (fYear.value) fSemester.value = ''; load() }
+const selectedSemesterLabel = computed(() => semesters.value.find(s => s.value === fSemester.value)?.label || fSemester.value || '未选择学期')
 
 const kpis = ref<any[]>([])
 const data = reactive<{deptCourses:any[];typeDist:any[];sizeDist:any[];trend:any[];totalCourses:number;courseList:any[];dataQuality:any}>({
   deptCourses: [], typeDist: [], sizeDist: [], trend: [], totalCourses: 0, courseList: [], dataQuality: {},
 })
 const qualityIssues = ref<any[]>([])
-const qualityManage = ref(false)
+const loading = ref(false)
+const loadError = ref('')
 const auditVisible = ref(false)
 const qualityAudit = ref<any[]>([])
 const v2Offering = reactive<any>({ items: [], total: 0, semester: '' })
+const v2OfferingLoading = ref(false)
+const v2OfferingError = ref('')
 const offeringDrawer = reactive<any>({ visible:false, loading:false, items:[], total:0, semester:'', keyword:'', page:1, pageSize:20 })
 const offeringReviewVisible = ref(false)
 const selectedOffering = ref<any>({})
@@ -258,18 +254,36 @@ const decisionOfferings = computed(() => (v2Offering.items || [])
   .map(offeringWithAttention)
   .sort((a:any,b:any) => b.attention.length-a.attention.length || b.enrolled-a.enrolled)
   .map((row:any,index:number) => ({ ...row, aiPriority:index < 3 })))
+const hasResults = computed(() => !!kpis.value.length || !!data.totalCourses || !!v2Offering.total)
 
 // 开课保障关注 TOP10 表列定义（M6 DataTable）
 const offeringTopCols: DataTableColumn[] = [
-  { key: 'course_id', label: '课程代码', width: 140 },
-  { key: 'course_name', label: '课程名称', minWidth: 190 },
-  { key: 'lesson_count', label: '教学班', width: 85, align: 'right' },
+  { key: 'course_id', label: '课程代码', width: 140, region:'identity', fixed:'left' },
+  { key: 'course_name', label: '课程名称', minWidth: 190, required:true, region:'identity', fixed:'left' },
+  { key: 'lesson_count', label: '教学班', width: 85, align: 'right', required:true },
   { key: 'teacher_count', label: '教师数', width: 80, align: 'right' },
-  { key: 'enrolled', label: '选课人次', width: 90, align: 'right' },
-  { key: 'avgClassSize', label: '平均班额', width: 90, align: 'right' },
-  { key: 'attention', label: '管理关注', width: 95 },
+  { key: 'enrolled', label: '选课人次', width: 90, align: 'right', required:true },
+  { key: 'avgClassSize', label: '平均班额', width: 90, align: 'right', required:true },
+  { key: 'attention', label: '管理关注', width: 95, required:true },
   { key: 'reasons', label: '优先核查原因', minWidth: 250 },
-  { key: 'actions', label: '操作', width: 88 },
+  { key: 'actions', label: '操作', width: 88, required:true, region:'action', fixed:'right' },
+]
+const deptCourseCols:DataTableColumn[] = [
+  {key:'name',label:'学院',width:150,required:true,region:'identity',fixed:'left'},
+  {key:'courseCount',label:'开课门数',width:130,required:true},
+  {key:'pct',label:'教学班占全校比例',minWidth:240,required:true},
+]
+const offeringAllCols:DataTableColumn[] = [
+  {key:'course_id',label:'课程代码',width:140,region:'identity',fixed:'left'},
+  {key:'course_name',label:'课程名称',minWidth:200,required:true,region:'identity',fixed:'left'},
+  {key:'category',label:'类别',width:110},
+  {key:'nature',label:'性质',width:110},
+  {key:'lesson_count',label:'教学班',width:80,align:'right',required:true},
+  {key:'teacher_count',label:'教师',width:70,align:'right'},
+  {key:'enrolled',label:'选课人次',width:90,align:'right',required:true},
+  {key:'avgClassSize',label:'平均班额',width:90,align:'right',required:true},
+  {key:'attention',label:'管理关注',width:95,required:true},
+  {key:'actions',label:'操作',width:88,required:true,region:'action',fixed:'right'},
 ]
 const realKpis = computed(() => {
   const lessons = v2Offering.summary?.lesson_count || 0
@@ -290,9 +304,33 @@ async function loadOfferingPage() {
     Object.assign(offeringDrawer,{items:result?.items||[],total:result?.total||0})
   } finally { offeringDrawer.loading = false }
 }
+function onOfferingPageSize(value:number) {
+  offeringDrawer.pageSize = value
+  offeringDrawer.page = 1
+  loadOfferingPage()
+}
 async function openOfferingDrawer() {
   offeringDrawer.visible = true; offeringDrawer.semester = v2Offering.semester; offeringDrawer.page = 1; offeringDrawer.keyword = ''
   await loadOfferingPage()
+}
+async function loadV2Offering() {
+  v2OfferingLoading.value = true
+  v2OfferingError.value = ''
+  try {
+    const realSemester = await getV2TeachingSemester()
+    if (!realSemester) {
+      Object.assign(v2Offering, { items: [], total: 0, semester: '' })
+      v2OfferingError.value = '当前工作身份没有已接入的结构化教学任务学期；这不等同于开课数为0。'
+      return
+    }
+    const result = await http.get<any>(`/v2/courses/offerings?semester=${encodeURIComponent(realSemester)}&limit=10&sort=attention`)
+    Object.assign(v2Offering, result)
+  } catch (error:any) {
+    Object.assign(v2Offering, { items: [], total: 0, semester: '' })
+    v2OfferingError.value = error?.message || '结构化开课供给加载失败，请稍后重试。'
+  } finally {
+    v2OfferingLoading.value = false
+  }
 }
 async function searchOfferings() { offeringDrawer.page = 1; await loadOfferingPage() }
 function openOfferingReview(row:any) {
@@ -315,20 +353,25 @@ async function showQualityAudit(row:any) {
   qualityAudit.value = await http.get(`/admin/operation/data-quality/${encodeURIComponent(row.issue_id)}/audit`) || []
   auditVisible.value = true
 }
-async function changeQuality(row:any,status:string) {
-  const action:any={reviewing:'开始复核',closed:'确认关闭',open:'重新打开/退回'}
-  const r=await ElMessageBox.prompt('请填写处置说明',action[status]||'更新状态',{inputPlaceholder:'说明核查结果或处置依据'})
-  await http.put(`/admin/operation/data-quality/${encodeURIComponent(row.issue_id)}/status`,{status,comment:r.value})
-  await load()
-}
 const totalCourses = computed(() => data.totalCourses)
+function applyFilters() { load() }
+function resetFilters() {
+  fCampus.value = ''
+  fNature.value = ''
+  fCategory.value = ''
+  fSize.value = ''
+  fKeyword.value = ''
+  load()
+}
 
 async function load() {
+  loading.value = true
+  loadError.value = ''
+  try {
   const cid = route.query.college as string
   const params = new URLSearchParams()
   if (cid && collegeMap[cid]) params.set('college', cid)
   if (fSemester.value) params.set('semester', fSemester.value)
-  else if (fYear.value) params.set('year', fYear.value)
   if (fCampus.value) params.set('campus', fCampus.value)
   if (fNature.value) params.set('course_nature', fNature.value)
   if (fCategory.value) params.set('category', fCategory.value)
@@ -341,12 +384,12 @@ async function load() {
   if (fSemester.value) qParams.set('semester', fSemester.value)
   const q = await http.get<any>('/admin/operation/data-quality?' + qParams.toString())
   qualityIssues.value = q?.list || []
-  qualityManage.value = !!q?.permissions?.manage
-  const realSemester = await getV2TeachingSemester()
-  if (realSemester) {
-    const v2 = await http.get<any>(`/v2/courses/offerings?semester=${encodeURIComponent(realSemester)}&limit=10&sort=attention`)
-    if (v2) Object.assign(v2Offering, v2)
-  } else Object.assign(v2Offering, { items: [], total: 0, semester: '暂无真实教学任务学期' })
+  await loadV2Offering()
+  } catch (error:any) {
+    loadError.value = error?.message || '开课供给数据加载失败，请稍后重试。'
+  } finally {
+    loading.value = false
+  }
 }
 onMounted(async () => {
   const meta = await getFilterMeta()
@@ -355,9 +398,11 @@ onMounted(async () => {
   courseNatures.value = meta.courseNature || []
   categories.value = meta.categories || []
   sizeBuckets.value = meta.sizeBuckets || []
-  years.value = (meta.years || []).slice().reverse()
   if (!fSemester.value) fSemester.value = meta.current
   await load()
+})
+watch(fSemester, (value, oldValue) => {
+  if (oldValue && value !== oldValue) load()
 })
 
 function pctColor(p: number) { return p >= 12 ? '#4F46E5' : p >= 6 ? '#6366F1' : '#0D9488' }

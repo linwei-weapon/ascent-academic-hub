@@ -11,7 +11,8 @@ from .. import db as dbm, settings
 from ..deps import get_current_user, get_v2_db
 from ..envelope import ApiError, ok
 from ..permission_context import (
-    ALL_SCOPE_ROLES, SCOPED_ROLE_TYPES, v2_student_scope,
+    ALL_SCOPE_ROLES, SCOPED_ROLE_TYPES, v2_organization_scope,
+    v2_student_scope,
 )
 
 router = APIRouter(prefix="/api/v2", tags=["v2"])
@@ -550,6 +551,31 @@ def _student_scope(user: dict, conn: sqlite3.Connection, alias: str = "s") -> tu
     return f"{alias}.{field} IN ({','.join('?' for _ in values)})", values
 
 
+def _organization_scope(user: dict, conn: sqlite3.Connection,
+                        alias: str = "o",
+                        column: str = "organization_id") -> tuple[str, list]:
+    """教学业务对象按开课/责任组织过滤；兼容尚未携带统一上下文的测试调用。"""
+    context = user.get("permission_context")
+    if context:
+        return v2_organization_scope(context, conn, alias, column)
+    role = user.get("role_id")
+    if role in V2_ALL_SCOPE_ROLES:
+        return "", []
+    mappings = dbm.query(
+        conn,
+        """SELECT source_scope_id,organization_id FROM access_scope_mapping
+           WHERE role_id=? AND scope_type='college' AND mapping_status='mapped'
+           ORDER BY source_scope_id""",
+        (role,),
+    )
+    values = sorted({
+        row["organization_id"] for row in mappings if row.get("organization_id")
+    })
+    if not values:
+        return "1=0", []
+    return f"{alias}.{column} IN ({','.join('?' for _ in values)})", values
+
+
 def _assert_student_access(student_id: str, user: dict, conn: sqlite3.Connection) -> None:
     fragment, params = _student_scope(user, conn, "s")
     sql = "SELECT 1 FROM dim_student s WHERE s.student_id=?" + (f" AND {fragment}" if fragment else "")
@@ -564,12 +590,17 @@ def health(conn: sqlite3.Connection = Depends(get_v2_db), user: dict = Depends(r
 
 
 @router.get("/meta/teaching-semesters")
-def teaching_semesters(conn: sqlite3.Connection = Depends(get_v2_db), user: dict = Depends(require_v2_all_reader)):
-    rows = dbm.query(conn, """SELECT s.semester_id,s.name,s.academic_year,s.season,COUNT(DISTINCT l.lesson_id) lesson_count
+def teaching_semesters(conn: sqlite3.Connection = Depends(get_v2_db),
+                       user: dict = Depends(require_v2_reader)):
+    scope, scope_params = _organization_scope(user, conn, "l")
+    scope_where = f"WHERE {scope}" if scope else ""
+    rows = dbm.query(conn, f"""SELECT s.semester_id,s.name,s.academic_year,s.season,COUNT(DISTINCT l.lesson_id) lesson_count
         FROM dim_semester s JOIN teaching_lesson l ON l.semester_id=s.semester_id
-        GROUP BY s.semester_id,s.name,s.academic_year,s.season ORDER BY s.semester_id DESC""")
+        {scope_where}
+        GROUP BY s.semester_id,s.name,s.academic_year,s.season ORDER BY s.semester_id DESC""",
+        tuple(scope_params))
     return ok({"items": rows, "current": rows[0]["semester_id"] if rows else None,
-               "scope": "仅返回已接入真实教学任务的学期"})
+               "scope": "仅返回当前工作身份可见且已接入真实教学任务的学期"})
 
 
 @router.get("/students/difficult")
@@ -831,7 +862,8 @@ def course_quality_topic(course_id: Optional[str] = None, course_group: Optional
                          semester_from: Optional[str] = None,
                          semester_to: Optional[str] = None, min_sample: int = Query(30, ge=10, le=500),
                          limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0),
-                         conn: sqlite3.Connection = Depends(get_v2_db), user: dict = Depends(require_v2_all_reader)):
+                         conn: sqlite3.Connection = Depends(get_v2_db),
+                         user: dict = Depends(require_v2_reader)):
     """跨学期课程结果与教学供给专题，不用于教师个人评价。
 
     M1 起通过率统一走 agg_course_pass_stat（grade_attempt attempt_type 三分层）：
@@ -844,8 +876,11 @@ def course_quality_topic(course_id: Optional[str] = None, course_group: Optional
         raise ApiError("课程通过率聚合表未构建，请先执行 scripts/migrate_course_pass_stat.py",
                        code=503, status_code=503)
     cond, params = ["1=1"], []
+    organization_scope, organization_params = _organization_scope(user, conn, "c")
+    if organization_scope:
+        cond.append(organization_scope)
+        params.extend(organization_params)
     if course_id: cond.append("a.course_id=?"); params.append(course_id)
-    if course_group: cond.append("a.course_group=?"); params.append(course_group)
     if semester_from: cond.append("a.semester_id>=?"); params.append(semester_from)
     if semester_to: cond.append("a.semester_id<=?"); params.append(semester_to)
     where = " AND ".join(cond)
@@ -894,21 +929,52 @@ def course_quality_topic(course_id: Optional[str] = None, course_group: Optional
           "max_fail_rate": max(first_fail_rates) if first_fail_rates else None,
           "volatility": round(max(first_fail_rates) - min(first_fail_rates), 1) if first_fail_rates else None,
           "attention_reasons": reasons})
-    attention = [x for x in all_courses if x["attention_reasons"]]
+    # 公共必修关注区与当前课程类别筛选共用一次聚合查询；页面主体再按类别过滤，
+    # 避免前端为公共必修区重复触发同一组跨学期重聚合。
+    filtered_courses = (
+        [course for course in all_courses if course["course_group"] == course_group]
+        if course_group else all_courses
+    )
+    attention = [x for x in filtered_courses if x["attention_reasons"]]
     attention.sort(key=lambda x: (-len(x["attention_reasons"]), -x["failures"], -(x["fail_rate"] or 0)))
     total = len(attention); courses = attention[offset:offset + limit]
-    attempts = sum(x["attempts"] for x in all_courses); failures = sum(x["failures"] for x in all_courses)
-    fa = sum(x["first_attempts"] for x in all_courses); fp = sum(x["first_pass"] for x in all_courses)
-    summary = {"observed_courses": len(all_courses), "attempts": attempts, "failures": failures,
+    attempts = sum(x["attempts"] for x in filtered_courses); failures = sum(x["failures"] for x in filtered_courses)
+    fa = sum(x["first_attempts"] for x in filtered_courses); fp = sum(x["first_pass"] for x in filtered_courses)
+    summary = {"observed_courses": len(filtered_courses), "attempts": attempts, "failures": failures,
       "overall_fail_rate": round(failures * 100.0 / attempts, 1) if attempts else 0,
       "overall_first_pass_rate": round(fp * 100.0 / fa, 1) if fa else None,
-      "public_required_courses": sum(1 for x in all_courses if x["course_group"] == "公共必修"),
-      "persistent_high_courses": sum("persistent_high" in x["attention_reasons"] for x in all_courses),
-      "volatile_courses": sum("volatile" in x["attention_reasons"] for x in all_courses),
-      "wide_impact_courses": sum("wide_impact" in x["attention_reasons"] for x in all_courses),
-      "retake_attempts": sum(x["retake_attempts"] for x in all_courses)}
-    semesters = dbm.query(conn, f"SELECT DISTINCT a.semester_id FROM agg_course_pass_stat a WHERE {where} ORDER BY a.semester_id", tuple(params))
+      "public_required_courses": sum(1 for x in filtered_courses if x["course_group"] == "公共必修"),
+      "persistent_high_courses": sum("persistent_high" in x["attention_reasons"] for x in filtered_courses),
+      "volatile_courses": sum("volatile" in x["attention_reasons"] for x in filtered_courses),
+      "wide_impact_courses": sum("wide_impact" in x["attention_reasons"] for x in filtered_courses),
+      "retake_attempts": sum(x["retake_attempts"] for x in filtered_courses)}
+    public_all = [
+        course for course in all_courses if course["course_group"] == "公共必修"
+    ]
+    public_required = [
+        course for course in public_all if course["attention_reasons"]
+    ]
+    public_required.sort(key=lambda course: (
+        course["first_pass_rate"] is None,
+        course["first_pass_rate"] if course["first_pass_rate"] is not None else 999,
+        -course["student_term_count"],
+    ))
+    public_first_attempts = sum(course["first_attempts"] for course in public_all)
+    public_first_pass = sum(course["first_pass"] for course in public_all)
+    public_required_summary = {
+        "courses": len(public_all),
+        "attentionCourses": len(public_required),
+        "overall_first_pass_rate": (
+            round(public_first_pass * 100.0 / public_first_attempts, 1)
+            if public_first_attempts else None
+        ),
+    }
+    semesters = dbm.query(conn, f"""SELECT DISTINCT a.semester_id
+        FROM agg_course_pass_stat a LEFT JOIN dim_course c ON c.course_id=a.course_id
+        WHERE {where} ORDER BY a.semester_id""", tuple(params))
     return ok({"summary": summary, "courses": courses,
+               "publicRequiredTop": public_required[:10],
+               "publicRequiredSummary": public_required_summary,
                "semesters": [x["semester_id"] for x in semesters], "total": total, "limit": limit, "offset": offset,
                "definition": {"sample": f"至少有一个学期达到{min_sample}条有效成绩记录的去重课程数；有效记录=已发布且未作废且is_pass非空。",
                  "first_pass_rate": "首次修读（attempt_type=regular，含缓考）通过人次数÷首次修读人次数，分母为0时不输出（null）。",
@@ -925,7 +991,14 @@ def course_quality_topic(course_id: Optional[str] = None, course_group: Optional
 
 @router.get("/topics/course-quality/{course_id}/detail")
 def course_quality_detail(course_id: str, semester_from: Optional[str] = None, semester_to: Optional[str] = None,
-                          conn: sqlite3.Connection = Depends(get_v2_db), user: dict = Depends(require_v2_all_reader)):
+                          conn: sqlite3.Connection = Depends(get_v2_db),
+                          user: dict = Depends(require_v2_reader)):
+    organization_scope, organization_params = _organization_scope(user, conn, "c")
+    access_where = f" AND {organization_scope}" if organization_scope else ""
+    if not dbm.query_one(conn, f"""SELECT 1 FROM dim_course c
+        WHERE c.course_id=?{access_where} LIMIT 1""",
+        tuple([course_id] + organization_params)):
+        raise ApiError("课程不存在或不在当前开课组织范围", code=404, status_code=404)
     cond, params = ["g.course_id=?", "g.is_published=1", "g.is_void=0", "g.is_pass IS NOT NULL"], [course_id]
     if semester_from: cond.append("g.semester_id>=?"); params.append(semester_from)
     if semester_to: cond.append("g.semester_id<=?"); params.append(semester_to)
@@ -985,12 +1058,17 @@ def faculty_resource_risk(semester: str = "2023-2024-1", limit: int = Query(100,
 
 @router.get("/topics/schedule-strategy")
 def schedule_strategy(semester: str = "2023-2024-1",
-                      conn: sqlite3.Connection = Depends(get_v2_db), user: dict = Depends(require_v2_all_reader)):
-    cells = dbm.query(conn, """SELECT m.weekday,CASE WHEN m.period_start<=4 THEN '上午' WHEN m.period_start<=8 THEN '下午' ELSE '晚上' END day_part,
+                      conn: sqlite3.Connection = Depends(get_v2_db),
+                      user: dict = Depends(require_v2_reader)):
+    lesson_scope, lesson_scope_params = _organization_scope(user, conn, "l")
+    lesson_where = "l.semester_id=?" + (f" AND {lesson_scope}" if lesson_scope else "")
+    lesson_params = tuple([semester] + lesson_scope_params)
+    cells = dbm.query(conn, f"""SELECT m.weekday,CASE WHEN m.period_start<=4 THEN '上午' WHEN m.period_start<=8 THEN '下午' ELSE '晚上' END day_part,
       COUNT(DISTINCT m.meeting_id) meeting_count,COUNT(DISTINCT l.lesson_id) lesson_count,
       COUNT(DISTINCT l.course_id) course_count,COUNT(DISTINCT m.room_id) room_count
-      FROM course_meeting m JOIN teaching_lesson l ON l.lesson_id=m.lesson_id WHERE l.semester_id=?
-      GROUP BY m.weekday,CASE WHEN m.period_start<=4 THEN '上午' WHEN m.period_start<=8 THEN '下午' ELSE '晚上' END ORDER BY m.weekday,day_part""",(semester,))
+      FROM course_meeting m JOIN teaching_lesson l ON l.lesson_id=m.lesson_id WHERE {lesson_where}
+      GROUP BY m.weekday,CASE WHEN m.period_start<=4 THEN '上午' WHEN m.period_start<=8 THEN '下午' ELSE '晚上' END ORDER BY m.weekday,day_part""",
+      lesson_params)
     group_case = """CASE WHEN COALESCE(c.category,'') LIKE '%体育%' OR COALESCE(l.course_name,'') LIKE '%体育%' THEN '体育课'
       WHEN COALESCE(c.category,'') LIKE '%思政%' OR COALESCE(l.course_name,'') LIKE '%思想%' OR COALESCE(l.course_name,'') LIKE '%形势与政策%' OR COALESCE(l.course_name,'') LIKE '%马克思%' OR COALESCE(l.course_name,'') LIKE '%毛泽东%' THEN '思政课'
       WHEN COALESCE(l.course_name,'') LIKE '%数学%' OR COALESCE(l.course_name,'') LIKE '%高等数学%' OR COALESCE(l.course_name,'') LIKE '%线性代数%' OR COALESCE(l.course_name,'') LIKE '%概率论%' THEN '数学类'
@@ -998,30 +1076,43 @@ def schedule_strategy(semester: str = "2023-2024-1",
     focus = dbm.query(conn, f"""SELECT {group_case} course_group,
       m.weekday,CASE WHEN m.period_start<=4 THEN '上午' WHEN m.period_start<=8 THEN '下午' ELSE '晚上' END day_part,
       COUNT(DISTINCT m.meeting_id) meeting_count FROM course_meeting m JOIN teaching_lesson l ON l.lesson_id=m.lesson_id
-      LEFT JOIN dim_course c ON c.course_id=l.course_id WHERE l.semester_id=? GROUP BY course_group,m.weekday,day_part HAVING course_group<>'其他'""",(semester,))
+      LEFT JOIN dim_course c ON c.course_id=l.course_id WHERE {lesson_where}
+      GROUP BY course_group,m.weekday,day_part HAVING course_group<>'其他'""", lesson_params)
     course_rows = dbm.query(conn, f"""WITH lesson_base AS (
       SELECT {group_case} course_group,l.course_id,COALESCE(MAX(c.name),MAX(l.course_name),l.course_id) course_name,
         COUNT(DISTINCT l.lesson_id) lesson_count,SUM(COALESCE(l.enrolled,0)) student_visits,
         ROUND(AVG(NULLIF(l.enrolled,0)),1) avg_class_size
       FROM teaching_lesson l LEFT JOIN dim_course c ON c.course_id=l.course_id
-      WHERE l.semester_id=? GROUP BY l.course_id),
+      WHERE {lesson_where} GROUP BY l.course_id),
     meeting_base AS (SELECT l.course_id,COUNT(DISTINCT m.meeting_id) meeting_count,
         COUNT(DISTINCT CASE WHEN m.period_start>8 THEN m.meeting_id END) evening_meetings,
         COUNT(DISTINCT m.weekday) weekday_coverage
       FROM teaching_lesson l JOIN course_meeting m ON m.lesson_id=l.lesson_id
-      WHERE l.semester_id=? GROUP BY l.course_id),
+      WHERE {lesson_where} GROUP BY l.course_id),
     teacher_base AS (SELECT l.course_id,COUNT(DISTINCT lt.staff_id) teacher_count
       FROM teaching_lesson l LEFT JOIN lesson_teacher lt ON lt.lesson_id=l.lesson_id
-      WHERE l.semester_id=? GROUP BY l.course_id)
+      WHERE {lesson_where} GROUP BY l.course_id)
     SELECT b.*,COALESCE(m.meeting_count,0) meeting_count,COALESCE(t.teacher_count,0) teacher_count,
       COALESCE(m.evening_meetings,0) evening_meetings,COALESCE(m.weekday_coverage,0) weekday_coverage
     FROM lesson_base b LEFT JOIN meeting_base m ON m.course_id=b.course_id
       LEFT JOIN teacher_base t ON t.course_id=b.course_id WHERE b.course_group<>'其他'
-    ORDER BY meeting_count DESC,student_visits DESC""",(semester,semester,semester))
-    prefs = dbm.query(conn, """WITH ranked AS (SELECT staff_id,weekday,day_part,meeting_count,
+    ORDER BY meeting_count DESC,student_visits DESC""",
+      tuple(list(lesson_params) * 3))
+    preference_scope = ""
+    preference_params: list = [semester]
+    if lesson_scope:
+        preference_scope = f""" AND EXISTS (
+          SELECT 1 FROM lesson_teacher scoped_lt
+          JOIN teaching_lesson l ON l.lesson_id=scoped_lt.lesson_id
+          WHERE scoped_lt.staff_id=p.staff_id AND l.semester_id=p.semester_id
+            AND {lesson_scope})"""
+        preference_params.extend(lesson_scope_params)
+    prefs = dbm.query(conn, f"""WITH ranked AS (SELECT p.staff_id,p.weekday,p.day_part,p.meeting_count,
       ROW_NUMBER() OVER(PARTITION BY staff_id ORDER BY meeting_count DESC,weekday,day_part) rn,
-      SUM(meeting_count) OVER(PARTITION BY staff_id) total FROM agg_teacher_schedule_preference WHERE semester_id=?)
-      SELECT staff_id,weekday,day_part,meeting_count,total,ROUND(meeting_count*100.0/total,1) share FROM ranked WHERE rn=1 ORDER BY share DESC LIMIT 100""",(semester,))
+      SUM(p.meeting_count) OVER(PARTITION BY p.staff_id) total
+      FROM agg_teacher_schedule_preference p WHERE p.semester_id=?{preference_scope})
+      SELECT staff_id,weekday,day_part,meeting_count,total,ROUND(meeting_count*100.0/total,1) share
+      FROM ranked WHERE rn=1 ORDER BY share DESC LIMIT 100""", tuple(preference_params))
     total_meetings=sum(x["meeting_count"] for x in cells); peak=max(cells,key=lambda x:x["meeting_count"]) if cells else None
     evening_meetings=sum(x["meeting_count"] for x in cells if x["day_part"] == "晚上")
     focus_summary=[]
@@ -1036,9 +1127,11 @@ def schedule_strategy(semester: str = "2023-2024-1",
           "peakSlot":f"周{group_peak['weekday']}·{group_peak['day_part']}" if group_peak else "—",
           "peakShare":round(group_peak["meeting_count"]*100/group_total,1) if group_peak and group_total else 0,
           "eveningShare":round(sum(x["meeting_count"] for x in group_cells if x["day_part"]=="晚上")*100/group_total,1) if group_total else 0})
-    return ok({"semester":semester,"summary":{"lessons":dbm.scalar(conn,"SELECT COUNT(*) FROM teaching_lesson WHERE semester_id=?",(semester,)) or 0,
-      "courses":dbm.scalar(conn,"SELECT COUNT(DISTINCT course_id) FROM teaching_lesson WHERE semester_id=?",(semester,)) or 0,
-      "teachers":dbm.scalar(conn,"SELECT COUNT(DISTINCT lt.staff_id) FROM teaching_lesson l JOIN lesson_teacher lt ON lt.lesson_id=l.lesson_id WHERE l.semester_id=?",(semester,)) or 0,
+    return ok({"semester":semester,"summary":{
+      "lessons":dbm.scalar(conn, f"SELECT COUNT(*) FROM teaching_lesson l WHERE {lesson_where}", lesson_params) or 0,
+      "courses":dbm.scalar(conn, f"SELECT COUNT(DISTINCT l.course_id) FROM teaching_lesson l WHERE {lesson_where}", lesson_params) or 0,
+      "teachers":dbm.scalar(conn, f"""SELECT COUNT(DISTINCT lt.staff_id) FROM teaching_lesson l
+        JOIN lesson_teacher lt ON lt.lesson_id=l.lesson_id WHERE {lesson_where}""", lesson_params) or 0,
       "meetings":total_meetings,"eveningMeetings":evening_meetings,"eveningShare":round(evening_meetings*100/total_meetings,1) if total_meetings else 0,
       "peakShare":round(peak["meeting_count"]*100/total_meetings,1) if peak and total_meetings else 0,
       "preference_teachers":len(prefs),"peak":peak},"cells":cells,"focus":focus,"focusSummary":focus_summary,"focusCourses":course_rows,"preferences":prefs,
@@ -1215,7 +1308,10 @@ def course_offerings(semester: str = "2023-2024-1", category: Optional[str] = No
                      keyword: Optional[str] = None,
                      sort: str = Query("scale", pattern="^(scale|attention)$"),
                      limit: int = Query(100, ge=1, le=500), offset: int = Query(0, ge=0),
-                     conn: sqlite3.Connection = Depends(get_v2_db), user: dict = Depends(require_v2_all_reader)):
+                     conn: sqlite3.Connection = Depends(get_v2_db),
+                     user: dict = Depends(require_v2_reader)):
+    lesson_scope, lesson_scope_params = _organization_scope(user, conn, "l")
+    lesson_scope_sql = f" AND {lesson_scope}" if lesson_scope else ""
     cond, params = ["r.semester_id=?"], [semester]
     if category:
         cond.append("c.category=?"); params.append(category)
@@ -1223,7 +1319,7 @@ def course_offerings(semester: str = "2023-2024-1", category: Optional[str] = No
         cond.append("(r.course_id LIKE ? OR c.name LIKE ?)")
         term = f"%{keyword.strip()}%"; params.extend([term, term])
     where = " AND ".join(cond)
-    base_cte = """
+    base_cte = f"""
         WITH raw AS (
           SELECT l.semester_id,l.course_id,
                  COUNT(DISTINCT l.lesson_id) lesson_count,
@@ -1231,18 +1327,18 @@ def course_offerings(semester: str = "2023-2024-1", category: Optional[str] = No
                  SUM(COALESCE(l.capacity,0)) capacity,
                  SUM(COALESCE(l.total_hours,0)) total_hours
           FROM teaching_lesson l
-          WHERE l.semester_id=?
+          WHERE l.semester_id=?{lesson_scope_sql}
           GROUP BY l.semester_id,l.course_id
         ),
         teachers AS (
           SELECT l.semester_id,l.course_id,COUNT(DISTINCT lt.staff_id) teacher_count
           FROM teaching_lesson l
           LEFT JOIN lesson_teacher lt ON lt.lesson_id=l.lesson_id
-          WHERE l.semester_id=?
+          WHERE l.semester_id=?{lesson_scope_sql}
           GROUP BY l.semester_id,l.course_id
         )
     """
-    cte_params = [semester, semester]
+    cte_params = [semester] + lesson_scope_params + [semester] + lesson_scope_params
     total = dbm.scalar(conn, base_cte + f"""SELECT COUNT(*)
         FROM raw r
         LEFT JOIN teachers t ON t.semester_id=r.semester_id AND t.course_id=r.course_id

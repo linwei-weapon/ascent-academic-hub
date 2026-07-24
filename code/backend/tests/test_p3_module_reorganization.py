@@ -32,9 +32,17 @@ class P3ModuleReorganizationTest(unittest.TestCase):
         self.assertIn("<EarlySetback", alert)
         self.assertIn('label="毕业准备核查"', curriculum)
         self.assertIn("<GraduationReadiness", curriculum)
-        self.assertIn('label="课程质量核查"', operation)
+        self.assertIn('label="课程结果"', operation)
         self.assertIn("<CourseQuality", operation)
         self.assertIn("provide('operationSemester', sharedSemester)", operation)
+        self.assertIn("provide('operationDataContext', dataContext)", operation)
+        self.assertNotIn("contentKey", operation)
+        labels = [
+            'label="开课供给"', 'label="排课结构"', 'label="教室占用"',
+            'label="教师负荷"', 'label="调停课分析"', 'label="课程结果"',
+        ]
+        positions = [operation.index(label) for label in labels]
+        self.assertEqual(sorted(positions), positions)
 
     def test_ai_evidence_routes_do_not_point_to_legacy_topics(self):
         ai = self.read("backend/api/routers/ai.py")
@@ -67,6 +75,43 @@ class P3ModuleReorganizationTest(unittest.TestCase):
         self.assertIn("/admin/meta/college-comparison", dashboard)
         self.assertIn("if (!row.canDrillDown) return", dashboard)
         self.assertIn("仅可比较", dashboard)
+
+    def test_operation_formal_tables_follow_public_table_contract(self):
+        expected_storage_keys = {
+            "frontend/src/views/admin/operation/Courses.vue": (
+                "operation:courses-top10", "operation:courses-college", "operation:courses-all",
+            ),
+            "frontend/src/views/admin/operation/ScheduleAnalysis.vue": (
+                "operation:schedule-focus",
+            ),
+            "frontend/src/views/admin/operation/Classroom.vue": (
+                "operation:classroom-buildings",
+            ),
+            "frontend/src/views/admin/operation/TeacherLoad.vue": (
+                "operation:teacher-load-title", "operation:teacher-load-review",
+                "operation:teacher-load-college",
+            ),
+            "frontend/src/views/admin/operation/ScheduleChanges.vue": (
+                "operation:schedule-changes-dept", "operation:schedule-changes-teachers",
+            ),
+            "frontend/src/views/admin/reports/CourseQuality.vue": (
+                "reports:course-quality-public", "reports:course-quality",
+            ),
+        }
+        for page, storage_keys in expected_storage_keys.items():
+            source = self.read(page)
+            self.assertIn("DataTable", source, page)
+            for storage_key in storage_keys:
+                self.assertIn(storage_key, source, page)
+
+    def test_course_quality_uses_one_summary_request_and_drawer_detail(self):
+        frontend = self.read("frontend/src/views/admin/reports/CourseQuality.vue")
+        backend = self.read("backend/api/routers/v2.py")
+        self.assertNotIn("loadPublic", frontend)
+        self.assertIn("publicRequiredTop", frontend)
+        self.assertIn("<el-drawer", frontend)
+        self.assertIn('"publicRequiredTop": public_required[:10]', backend)
+        self.assertIn("filtered_courses", backend)
 
 
 if __name__ == "__main__":

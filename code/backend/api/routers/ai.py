@@ -154,8 +154,8 @@ TRACEABILITY_BY_SCENARIO = {
     "operation_teacher_load": {
         "dataSources": ["teaching_lesson", "lesson_teacher", "dim_staff", "dim_course"],
         "calculationLogic": "按教师、学院、职称汇总教学学时、课程数、教学班数和学生覆盖，识别负荷集中与结构性压力。",
-        "rules": ["学时和教学班来自教学任务", "职称与组织来自教师主数据", "异常高负荷先进入数据质量核查"],
-        "formula": "教师负荷关注度 = 学时 + 课程数 + 教学班数 + 学生覆盖 + 学院/职称结构集中度",
+        "rules": ["学时和教学班来自教学任务", "职称与组织来自教师主数据", "数据异常先排除", "按当前范围P90形成有限核查队列"],
+        "formula": "教师负荷核查顺序 = 当前范围学时分位 + 课程数 + 教学班数 + 学生覆盖",
         "boundary": "用于管理核查排序，不替代学校正式工作量核算、超工作量认定或绩效结论。",
     },
     "operation_teacher_load_teacher": {
@@ -236,14 +236,13 @@ EVIDENCE_MANAGEMENT_VALUE = {
     "主要原因": "将文本原因归类为可治理问题，支持区分校历因素、临时冲突和可提前优化事项。",
     "高峰月份": "定位调停课集中时段，便于结合校历、考试周和实践周解释异常。",
     "集中月份": "判断单个教师调停课是否集中在特定月份，支持排课冲突核查。",
-    "自动审核": "观察调课审批方式结构，为后续检查审批规则与人工复核范围提供依据。",
     "授课教师": "说明当前负荷分析覆盖教师规模，作为学院和职称结构比较的分母。",
     "人均学时": "反映总体任务强度，用于比较学院、职称和教师个体是否存在结构性集中。",
-    "高负荷对象": "形成需要先核查任务映射和任务分担的候选教师清单。",
-    "最高负荷教师": "定位最需要先核实教学任务、合班与跨学院承担情况的个体，不等同绩效评价。",
+    "P90核查对象": "总学时不低于当前筛选范围第90百分位的教师，仅形成优先核查清单。",
+    "学时最高教师": "定位最需要先核实教学任务、合班与跨学院承担情况的个体，不等同绩效评价。",
     "已排除异常": "说明异常数据未进入真实负荷排序，避免错误任务映射影响管理结论。",
     "最高职称层": "观察不同职称层的平均负荷差异，为师资结构与任务分担分析提供线索。",
-    "总学时": "反映教师任务总量，为核查超高负荷、任务拆分和备份教师安排提供依据。",
+    "总学时": "反映教学任务表中的学时总量，为核查任务拆分和备份教师安排提供依据；不是正式工作量。",
     "课程/教学班": "同时观察备课种类和授课班级数，避免只用总学时判断实际压力。",
     "学生覆盖": "反映教师或课程团队影响学生规模，用于识别高影响单点。",
     "学院内排名": "用于学院内部确定核查先后，不作为教师绩效排名。",
@@ -293,8 +292,8 @@ THRESHOLDS_BY_SCENARIO = {
     "operation_classroom_occupancy": ["晚间记录按数据中的晚间标记统计", "待映射或重叠记录进入待核查清单", "缺少正式可用教室分母时不输出学校正式利用率"],
     "operation_schedule_changes": ["原因文本按语义词典归类", "教师和月份集中只作为运行核查线索，不归因个人责任"],
     "operation_schedule_teacher": ["教师调停课次数、原因集中度和月份集中度共同用于排序", "不作为教师评价或绩效结论"],
-    "operation_teacher_load": ["高负荷阈值沿用当前教师负荷专题口径", "先排除异常任务映射，再判断任务集中"],
-    "operation_teacher_load_teacher": ["个人负荷超过专题阈值时先核查任务映射与合班关系", "高负荷不等同教学质量问题"],
+    "operation_teacher_load": ["先排除异常任务映射", "按当前范围P90形成有限核查队列", "未配置学校工作量办法时不输出超负荷认定"],
+    "operation_teacher_load_teacher": ["个人处于当前范围学时P90时进入优先核查", "统计上位不等同超负荷或教学质量问题"],
     "faculty_resource_risk": ["单教师承担、职称信息不完整或无高职称线索时进入候选池", "高影响单点=当期仅1名实际授课教师且累计选课人次不少于100；100人为原型核查阈值"],
     "faculty_resource_course": ["单教师且覆盖学生较多优先", "职称缺失先按主数据问题处理"],
     "management_briefing": ["管理要情优先展示本次新增、升级、变化或退出重点的管理事项", "专题排序依据影响范围、紧迫性和可行动性，不代表正式审批顺序"],
@@ -1684,8 +1683,7 @@ def operation_schedule_changes_insight(semester: Optional[str] = None,
                COUNT(CASE WHEN s.kind='调课' THEN 1 END) change_count,
                COUNT(CASE WHEN s.kind='停课' THEN 1 END) stop_count,
                COALESCE(SUM(s.affected),0) affected,
-               AVG(s.auto_approved) auto_approved,
-               AVG(s.review_days) avg_review_days
+               COUNT(DISTINCT s.teacher_id) teacher_count
         FROM fact_schedule_change s WHERE {where}
     """, tuple(params)) or {}
     raw_reasons = dbm.query(conn, f"""
@@ -1727,7 +1725,6 @@ def operation_schedule_changes_insight(semester: Optional[str] = None,
     stop_count = stats.get("stop_count") or 0
     affected = stats.get("affected") or 0
     stop_share = round(stop_count * 100 / total, 1) if total else 0
-    auto_rate = round((stats.get("auto_approved") or 0) * 100, 1)
     risk = "critical" if stop_share >= 25 or affected >= 3000 or (teacher_rows and teacher_rows[0]["count"] >= 8) else "warning" if total >= 50 or stop_count or (top_semantic.get("count") or 0) >= total * 0.35 else "info"
     enhanced = risk in {"critical", "warning"}
     target_name = f"{college_name}调停课" if college_name else "当前调停课切片"
@@ -1737,7 +1734,7 @@ def operation_schedule_changes_insight(semester: Optional[str] = None,
     )
     reasons = [
         f"停课占比为 {stop_share}%，停课通常比调课更需要关注教学进度补偿和学生通知到达。",
-        f"院系自动审核占比约 {auto_rate}%，可用于判断是否存在大量短时长、低风险调课。",
+        f"本切片涉及 {stats.get('teacher_count') or 0} 名教师，用于判断事件是否集中于少数人员。",
     ]
     if top_semantic:
         reasons.append(f"原因文本经语义归类后，“{top_semantic['name']}”占 {top_semantic['count']} 条，是本切片最主要的管理解释线索。")
@@ -1765,7 +1762,7 @@ def operation_schedule_changes_insight(semester: Optional[str] = None,
             {"label": "影响学生", "value": f"{affected} 人次", "detail": "调停课教学班关联学生人次", "tone": "danger" if affected >= 3000 else "warning" if affected else "info"},
             {"label": "主要原因", "value": top_semantic.get("name") or "暂无", "detail": f"{top_semantic.get('count') or 0} 条记录", "tone": top_semantic.get("tone") or "info"},
             {"label": "高峰月份", "value": f"{top_month.get('month')}月" if top_month else "暂无", "detail": f"{top_month.get('count') or 0} 条记录", "tone": "warning" if top_month else "info"},
-            {"label": "自动审核", "value": f"{auto_rate}%", "detail": "院系自动审核占比", "tone": "success" if auto_rate >= 70 else "info"},
+            {"label": "涉及教师", "value": f"{stats.get('teacher_count') or 0} 人", "detail": "调停课源事件中的去重教师数", "tone": "info"},
         ],
         "reasons": reasons,
         "suggestions": [
@@ -1780,8 +1777,8 @@ def operation_schedule_changes_insight(semester: Optional[str] = None,
         ],
         "focusItems": {"reasons": semantic_rows[:5], "teachers": teacher_rows, "monthly": monthly},
         "limitations": [
-            "当前原型使用规则证据与AI辅助文案解释原因文本，未调用外部大模型。",
-            "生产系统应接入真实调课申请、审批记录、补课安排和通知到达证据，以支持闭环治理。",
+            "当前使用历史调停课源事件和原始原因文本；语义分类由可解释规则完成，未调用外部大模型。",
+            "审批层级、审核时长、补课安排和通知到达证据尚未接入，因此不输出相关判断。",
         ],
     })
 
@@ -1801,7 +1798,7 @@ def operation_schedule_teacher_insight(teacher_id: str, semester: Optional[str] 
     teacher = dbm.query_one(conn, "SELECT teacher_id,name,dept,title FROM dim_teacher WHERE teacher_id=?", (teacher_id,)) or {"teacher_id": teacher_id, "name": teacher_id}
     stats = dbm.query_one(conn, f"""
         SELECT COUNT(*) total,COUNT(CASE WHEN s.kind='停课' THEN 1 END) stop_count,
-               COALESCE(SUM(s.affected),0) affected,AVG(s.review_days) avg_review_days
+               COALESCE(SUM(s.affected),0) affected
         FROM fact_schedule_change s WHERE {where}
     """, tuple(params)) or {}
     total = stats.get("total") or 0
@@ -1895,6 +1892,14 @@ def _teacher_title_map(conn: sqlite3.Connection) -> dict:
     return {r["teacher_id"]: prof.get(r["teacher_id"]) or normalize_title(r.get("title")) for r in rows}
 
 
+def _teacher_load_percentile(rows: list[dict], percentile: float) -> float:
+    values = sorted(float(row.get("hours") or 0) for row in rows)
+    if not values:
+        return 0
+    index = max(0, min(len(values) - 1, int(len(values) * percentile + .999999) - 1))
+    return values[index]
+
+
 def _teacher_load_quality_issues(conn: sqlite3.Connection, semester: str) -> dict[str, dict]:
     rows = dbm.query(conn, """
         SELECT entity_id,affected_rows,severity,status,detail,recommendation
@@ -1957,6 +1962,12 @@ def operation_teacher_load_insight(semester: Optional[str] = None,
     college_id, college_name = _teacher_scope_filter(college, user, conn)
     anomaly_ids = _teacher_load_anomaly_ids(conn, sem)
     rows = _teacher_load_rows(conn, sem, college_name, title)
+    scoped_teacher_ids = {
+        row["teacher_id"] for row in _teacher_load_rows(
+            conn, sem, college_name, title, include_quality_issues=True,
+        )
+    }
+    scoped_anomaly_ids = anomaly_ids & scoped_teacher_ids
     if not rows:
         raise ApiError("暂无教师负荷数据", code=404, status_code=404)
     total = len(rows)
@@ -1966,50 +1977,66 @@ def operation_teacher_load_insight(semester: Optional[str] = None,
     avg_hours = round(sum_hours / total, 1) if total else 0
     avg_courses = round(sum_courses / total, 1) if total else 0
     avg_classes = round(sum_classes / total, 1) if total else 0
-    overloaded = [r for r in rows if r["hours"] > 280 or r["courses"] > 5]
+    median_hours = round(_teacher_load_percentile(rows, .5), 1)
+    p90_hours = round(_teacher_load_percentile(rows, .9), 1)
+    review_candidates = [r for r in rows if r["hours"] >= p90_hours][:10]
     top = rows[0]
     title_map: dict[str, dict] = {}
     for row in rows:
-        item = title_map.setdefault(row["norm_title"] or "其他", {"title": row["norm_title"] or "其他", "teachers": 0, "hours": 0.0, "courses": 0.0, "overloaded": 0})
+        item = title_map.setdefault(row["norm_title"] or "其他", {"title": row["norm_title"] or "其他", "teachers": 0, "hours": 0.0, "hourRows": [], "courses": 0.0, "reviewCandidates": 0})
         item["teachers"] += 1
         item["hours"] += row["hours"]
+        item["hourRows"].append(row)
         item["courses"] += row["courses"]
-        if row in overloaded:
-            item["overloaded"] += 1
+        if row in review_candidates:
+            item["reviewCandidates"] += 1
     title_rows = []
     for item in title_map.values():
         n = item["teachers"] or 1
-        title_rows.append({**item, "avgHours": round(item["hours"] / n, 1), "avgCourses": round(item["courses"] / n, 1)})
-    title_rows.sort(key=lambda x: x["avgHours"], reverse=True)
+        title_rows.append({
+            **{key: value for key, value in item.items() if key != "hourRows"},
+            "avgHours": round(item["hours"] / n, 1),
+            "medianHours": round(_teacher_load_percentile(item["hourRows"], .5), 1),
+            "p90Hours": round(_teacher_load_percentile(item["hourRows"], .9), 1),
+            "avgCourses": round(item["courses"] / n, 1),
+        })
+    title_rows.sort(key=lambda x: (x["p90Hours"], x["medianHours"]), reverse=True)
     dept_map: dict[str, dict] = {}
     for row in rows:
-        item = dept_map.setdefault(row["dept"], {"dept": row["dept"], "teachers": 0, "hours": 0.0, "courses": 0.0})
+        item = dept_map.setdefault(row["dept"], {"dept": row["dept"], "teachers": 0, "hours": 0.0, "hourRows": [], "courses": 0.0})
         item["teachers"] += 1
         item["hours"] += row["hours"]
+        item["hourRows"].append(row)
         item["courses"] += row["courses"]
     dept_rows = []
     for item in dept_map.values():
         n = item["teachers"] or 1
-        dept_rows.append({**item, "avgHours": round(item["hours"] / n, 1), "avgCourses": round(item["courses"] / n, 1)})
-    dept_rows.sort(key=lambda x: x["avgHours"], reverse=True)
-    overload_share = round(len(overloaded) * 100 / total, 1) if total else 0
-    risk = "critical" if len(overloaded) >= 3 or top["hours"] >= 320 or avg_hours >= 220 else "warning" if overloaded or avg_hours >= 180 else "info"
+        dept_rows.append({
+            **{key: value for key, value in item.items() if key != "hourRows"},
+            "avgHours": round(item["hours"] / n, 1),
+            "medianHours": round(_teacher_load_percentile(item["hourRows"], .5), 1),
+            "p90Hours": round(_teacher_load_percentile(item["hourRows"], .9), 1),
+            "avgCourses": round(item["courses"] / n, 1),
+        })
+    dept_rows.sort(key=lambda x: (x["p90Hours"], x["medianHours"]), reverse=True)
+    top_share = round(top["hours"] * 100 / sum_hours, 1) if sum_hours else 0
+    risk = "warning" if review_candidates and (top_share >= 10 or top["courses"] >= 5) else "info"
     target_name = f"{college_name}教师负荷" if college_name else "当前教师负荷切片"
     if title:
         target_name += f" · {title}"
     summary = (
-        f"{target_name}在 {sem} 学期共覆盖 {total} 名授课教师，人均 {avg_hours} 学时、"
-        f"{avg_courses} 门课程、{avg_classes} 个教学班。当前识别 {len(overloaded)} 名高负荷核查对象，"
-        f"最高负荷教师为 {top['name']}（{top['hours']} 学时、{top['courses']} 门课）。"
+        f"{target_name}在 {sem} 学期共覆盖 {total} 名授课教师，中位 {median_hours} 学时、人均 {avg_hours} 学时、"
+        f"{avg_courses} 门课程、{avg_classes} 个教学班。按当前范围P90（{p90_hours}学时）形成 "
+        f"{len(review_candidates)} 名优先核查对象，学时最高教师为 {top['name']}（{top['hours']} 学时、{top['courses']} 门课）。"
     )
     reasons = [
-        "教师负荷研判用于定位需要优先人工核查的对象，不直接等同于学校正式超工作量认定。",
-        f"当前高负荷核查对象占 {overload_share}%，建议结合学校工作量办法、合讲拆分、减免规则和课程团队实际承担情况判断。",
+        "教师负荷研判按当前筛选范围的统计分布定位优先核查对象，不直接等同于学校正式超工作量认定。",
+        f"学时最高教师占当前范围总学时 {top_share}%，建议结合学校工作量办法、合讲拆分、减免规则和课程团队实际承担情况判断。",
     ]
     if title_rows:
-        reasons.append(f"按职称看，{title_rows[0]['title']} 人均学时最高，为 {title_rows[0]['avgHours']} 学时，可作为结构性投入核查线索。")
+        reasons.append(f"按职称看，{title_rows[0]['title']} 的P90学时最高，为 {title_rows[0]['p90Hours']} 学时，可作为结构性投入核查线索。")
     if dept_rows and not college_name:
-        reasons.append(f"按学院看，{dept_rows[0]['dept']} 人均学时最高，为 {dept_rows[0]['avgHours']} 学时，建议核查是否存在师资结构或公共课承担压力。")
+        reasons.append(f"按学院看，{dept_rows[0]['dept']} 的P90学时最高，为 {dept_rows[0]['p90Hours']} 学时，建议核查是否存在师资结构或公共课承担压力。")
     return ai_ok({
         "targetType": "operationTeacherLoad",
         "targetId": college_id or title or "current-teacher-load-filter",
@@ -2027,25 +2054,25 @@ def operation_teacher_load_insight(semester: Optional[str] = None,
         "profile": {"college": college_name or "全校/当前权限", "major": title or "全部职称", "semester": sem},
         "evidence": [
             {"label": "授课教师", "value": f"{total} 人", "detail": "当前筛选范围内有教学负荷记录的教师", "tone": "info"},
-            {"label": "人均学时", "value": f"{avg_hours}", "detail": "总学时 ÷ 授课教师数", "tone": "danger" if avg_hours >= 220 else "warning" if avg_hours >= 180 else "success"},
-            {"label": "高负荷对象", "value": f"{len(overloaded)} 人", "detail": "学时>280 或课程数>5 的优先核查对象", "tone": "danger" if overloaded else "success"},
-            {"label": "最高负荷教师", "value": top["name"], "detail": f"{top['hours']} 学时；{top['courses']} 门课；{top['classes']} 个班", "tone": "danger" if top["hours"] >= 320 else "warning"},
-            {"label": "已排除异常", "value": f"{len(anomaly_ids)} 人", "detail": "命中教师负荷异常或数据质量问题，未计入AI真实负荷排序", "tone": "warning" if anomaly_ids else "success"},
-            {"label": "最高职称层", "value": title_rows[0]["title"] if title_rows else "暂无", "detail": f"人均 {title_rows[0]['avgHours']} 学时" if title_rows else "无职称统计", "tone": "info"},
+            {"label": "中位学时", "value": f"{median_hours}", "detail": "当前范围教师学时第50百分位；同时保留人均学时作为规模参考", "tone": "info"},
+            {"label": "P90核查对象", "value": f"{len(review_candidates)} 人", "detail": f"当前范围总学时不低于P90（{p90_hours}学时），最多10人", "tone": "warning" if review_candidates else "success"},
+            {"label": "学时最高教师", "value": top["name"], "detail": f"{top['hours']} 学时；{top['courses']} 门课；{top['classes']} 个班", "tone": "warning"},
+            {"label": "已排除异常", "value": f"{len(scoped_anomaly_ids)} 人", "detail": "当前筛选范围内命中教师负荷异常或数据质量问题，未计入AI负荷排序", "tone": "warning" if scoped_anomaly_ids else "success"},
+            {"label": "最高P90职称层", "value": title_rows[0]["title"] if title_rows else "暂无", "detail": f"中位 {title_rows[0]['medianHours']} 学时；P90 {title_rows[0]['p90Hours']} 学时" if title_rows else "无职称统计", "tone": "info"},
         ],
         "reasons": reasons,
         "suggestions": [
-            {"role": "教务处", "priority": "high" if risk == "critical" else "medium", "action": "核查高负荷教师清单", "detail": "优先查看学时高、课程数多、教学班多且学生覆盖人次大的教师，确认是否存在工作量口径差异或拆分规则。"},
-            {"role": "二级学院", "priority": "high" if overloaded else "medium", "action": "评估课程团队保障", "detail": "结合课程团队、青年教师储备、职称结构和替补教师情况，判断高负荷是否会带来教学运行风险。"},
-            {"role": "排课人员", "priority": "medium", "action": "优化下一轮授课分配", "detail": "将高负荷教师、公共课承担和多班连排情况作为下一轮教学任务安排和排课优化输入。"},
+            {"role": "教务处", "priority": "medium", "action": "核查P90教师清单", "detail": "优先查看学时统计上位且课程数、教学班数或学生覆盖较大的教师，确认是否存在工作量口径差异或拆分规则。"},
+            {"role": "二级学院", "priority": "high" if review_candidates else "medium", "action": "评估课程团队保障", "detail": "结合课程团队、青年教师储备、职称结构和替补教师情况，判断统计集中是否会带来教学运行风险。"},
+            {"role": "排课人员", "priority": "medium", "action": "优化下一轮授课分配", "detail": "将P90核查对象、公共课承担和多班连排情况作为下一轮教学任务安排和排课优化输入。"},
         ],
         "nextActions": [
-            "打开 TOP10 高负荷教师的 AI 研判，核查课程构成和学生覆盖人次。",
-            "按学院和职称切换筛选，判断高负荷是个体问题还是结构性师资压力。",
-            "对高负荷且课程团队薄弱的课程，进入师资保障分析核查课程团队风险。",
+            "打开P90负荷核查队列中的教师研判，核查课程构成和学生覆盖人次。",
+            "按学院和职称切换筛选，判断任务集中是个体线索还是结构性师资压力。",
+            "对统计上位且课程团队薄弱的课程，进入师资保障分析核查课程团队风险。",
         ],
-        "focusItems": {"topTeachers": rows[:10], "titleLoad": title_rows, "deptLoad": dept_rows[:8]},
-        "limitations": ["本研判用于管理核查排序，不替代学校正式工作量核算、超工作量认定或绩效结论。"],
+        "focusItems": {"topTeachers": review_candidates, "titleLoad": title_rows, "deptLoad": dept_rows[:8]},
+        "limitations": ["P90是当前筛选范围的统计位置，不是学校工作量标准；本研判不替代正式工作量核算、超工作量认定或绩效结论。"],
     })
 
 
@@ -2124,8 +2151,10 @@ def operation_teacher_load_teacher_insight(teacher_id: str, semester: Optional[s
     avg_class = round(student_visits / class_count, 1) if class_count else 0
     all_rows = _teacher_load_rows(conn, sem, teacher_dept)
     rank = next((i + 1 for i, r in enumerate(all_rows) if r["teacher_id"] == teacher_id), None)
+    p90_hours = round(_teacher_load_percentile(all_rows, .9), 1)
+    in_review_queue = hours >= p90_hours if all_rows else False
     top_course = courses[0] if courses else {}
-    risk = "critical" if hours > 280 or course_count > 5 or class_count >= 12 else "warning" if hours >= 180 or course_count >= 4 else "info"
+    risk = "warning" if in_review_queue else "info"
     summary = (
         f"{teacher.get('name') or teacher_id}在 {sem} 学期承担 {hours} 学时、{course_count} 门课程、"
         f"{class_count} 个教学班，覆盖 {student_visits} 学生人次。"
@@ -2152,25 +2181,25 @@ def operation_teacher_load_teacher_insight(teacher_id: str, semester: Optional[s
         "confidence": "中高",
         "profile": {"college": teacher_dept, "major": norm_title, "semester": sem},
         "evidence": [
-            {"label": "总学时", "value": f"{hours}", "detail": "来自教学任务学时汇总", "tone": "danger" if hours > 280 else "warning" if hours >= 180 else "success"},
-            {"label": "课程/教学班", "value": f"{course_count} 门 / {class_count} 班", "detail": "课程数和教学班数共同反映备课与授课压力", "tone": "danger" if course_count > 5 or class_count >= 12 else "info"},
+            {"label": "总学时", "value": f"{hours}", "detail": f"来自教学任务学时汇总；当前学院P90为{p90_hours}", "tone": "warning" if in_review_queue else "success"},
+            {"label": "课程/教学班", "value": f"{course_count} 门 / {class_count} 班", "detail": "课程数和教学班数共同反映任务构成", "tone": "warning" if in_review_queue else "info"},
             {"label": "学生覆盖", "value": f"{student_visits} 人次", "detail": f"平均班额 {avg_class}", "tone": "warning" if student_visits >= 800 else "info"},
             {"label": "学院内排名", "value": f"第 {rank or '-'}", "detail": "按当前学院总学时降序", "tone": "warning" if rank and rank <= 3 else "info"},
             {"label": "重点课程", "value": top_course.get("course_name") or "暂无", "detail": f"{top_course.get('hours') or 0} 学时；{top_course.get('studentVisits') or 0} 人次", "tone": "info"},
         ],
         "reasons": reasons,
         "suggestions": [
-            {"role": "二级学院", "priority": "high" if risk == "critical" else "medium", "action": "核查课程团队和替补安排", "detail": "确认高负荷课程是否有课程团队、助教或替补教师支撑，避免形成高影响单点。"},
+            {"role": "二级学院", "priority": "high" if in_review_queue else "medium", "action": "核查课程团队和替补安排", "detail": "确认任务集中课程是否有课程团队、助教或替补教师支撑，避免形成高影响单点。"},
             {"role": "教务处", "priority": "medium", "action": "核对工作量口径", "detail": "结合学校工作量办法、合讲拆分、实验实践折算和减免规则，避免仅凭原始学时下结论。"},
             {"role": "排课人员", "priority": "medium", "action": "优化排课节奏", "detail": "核查是否存在多班连排、跨校区移动或高峰时段集中，必要时调整下一轮教学任务安排。"},
         ],
         "nextActions": [
-            "查看课程构成证据，确认高学时是否集中在少数课程或多个小课程。",
+            "查看课程构成证据，确认统计上位学时是否集中在少数课程或多个小课程。",
             "进入师资保障分析，核查相关课程团队是否存在年龄/职称结构风险。",
             "如同时存在频繁调课，结合调课 AI 研判判断是否为负荷压力的外显信号。",
         ],
         "focusItems": {"courseBreakdown": courses},
-        "limitations": ["教师个人负荷研判只用于管理支持和核查排序，不直接评价教师教学质量或绩效。"],
+        "limitations": [f"当前学院P90为{p90_hours}学时，仅代表统计位置，不是学校工作量标准；本研判不直接评价教师教学质量或绩效。"],
     })
 
 

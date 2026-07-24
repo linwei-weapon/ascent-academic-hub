@@ -11,9 +11,12 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from .. import db as dbm
-from ..deps import get_db, get_db_rw, get_current_user, student_data_scope, college_data_scope
+from ..deps import (
+    get_db, get_db_rw, get_current_user, get_v2_db,
+    student_data_scope, college_data_scope,
+)
 from ..envelope import ok, ApiError
-from ..permission_context import has_action
+from ..permission_context import has_action, v2_organization_scope
 from ..util import normalize_title, clean_dept
 from ..settings import LATEST_REAL_SEMESTER, CURRENT_SEMESTER
 
@@ -63,12 +66,212 @@ def _anomaly_summary(conn, sem_ids: list) -> dict:
             "threshold": _TEACHER_CAP, "reason": "单教师单学期教学班数超过质量阈值"}
 
 
+def _teacher_anomaly_ids(conn: sqlite3.Connection, sem_ids: list[str]) -> set[str]:
+    """统一教师负荷异常集合：已登记质量问题 + 防漏启发式阈值。"""
+    if not sem_ids:
+        return set()
+    placeholders = ",".join("?" * len(sem_ids))
+    ids = {
+        row["entity_id"] for row in dbm.query(conn, f"""
+            SELECT entity_id FROM data_quality_issue
+            WHERE domain='operation' AND issue_type='teacher_lesson_overflow'
+              AND status IN ('open','reviewing')
+              AND semester_id IN ({placeholders})
+        """, tuple(sem_ids))
+    }
+    ids.update(
+        row["teacher_id"] for row in dbm.query(conn, f"""
+            SELECT teacher_id FROM agg_teacher_load
+            WHERE semester_id IN ({placeholders})
+              AND (COALESCE(classes,0)>200 OR COALESCE(hours,0)>1000
+                   OR COALESCE(courses,0)>20)
+        """, tuple(sem_ids))
+    )
+    return ids
+
+
+def _nearest_rank(values: list[float], percentile: float) -> float:
+    if not values:
+        return 0
+    ordered = sorted(values)
+    index = max(0, min(len(ordered) - 1, int(len(ordered) * percentile + .999999) - 1))
+    return float(ordered[index])
+
+
 def _college_name(conn, college_id: Optional[str]) -> Optional[str]:
     """学院码(C01-C16)→学院名；无效/缺省返回 None（=全校口径）。"""
     if not college_id:
         return None
     return dbm.scalar(
         conn, "SELECT name FROM dim_college WHERE college_id=?", (college_id,))
+
+
+def _period_coverage(conn: sqlite3.Connection, sql: str,
+                     params: tuple = ()) -> dict:
+    rows = dbm.query(conn, sql, params)
+    periods = [row["semester_id"] for row in rows if row.get("semester_id")]
+    return {
+        "available": bool(periods),
+        "periods": periods,
+        "periodFrom": periods[0] if periods else None,
+        "periodTo": periods[-1] if periods else None,
+        "periodCount": len(periods),
+    }
+
+
+@router.get("/data-context")
+def operation_data_context(user: dict = Depends(get_current_user),
+                           conn: sqlite3.Connection = Depends(get_db),
+                           v2_conn: sqlite3.Connection = Depends(get_v2_db)):
+    """返回各教学运行数据域的真实覆盖、证据级别和当前身份范围。
+
+    页面必须先读取该上下文，再决定学期控件、空状态和口径提示；没有数据、
+    未接入和无权访问不得继续统一显示为0。
+    """
+    context = user.get("permission_context") or {}
+    detail_scope = context.get("detailScope") or {}
+    college_scope, college_params = college_data_scope(user, conn)
+    visible_colleges = dbm.query(
+        conn,
+        "SELECT college_id,name FROM dim_college" +
+        (f" WHERE {college_scope}" if college_scope else "") +
+        " ORDER BY name",
+        tuple(college_params),
+    )
+    college_ids = [row["college_id"] for row in visible_colleges]
+    college_names = [row["name"] for row in visible_colleges]
+
+    lesson_where, lesson_params = ["1=1"], []
+    teacher_where, teacher_params = ["1=1"], []
+    change_where, change_params = ["1=1"], []
+    if college_scope:
+        if college_names:
+            placeholders = ",".join("?" * len(college_names))
+            lesson_where.append(f"co.dept IN ({placeholders})")
+            lesson_params.extend(college_names)
+            teacher_where.append(f"t.dept IN ({placeholders})")
+            teacher_params.extend(college_names)
+        else:
+            lesson_where.append("1=0")
+            teacher_where.append("1=0")
+        if college_ids:
+            placeholders = ",".join("?" * len(college_ids))
+            change_where.append(f"s.college_id IN ({placeholders})")
+            change_params.extend(college_ids)
+        else:
+            change_where.append("1=0")
+
+    lesson_coverage = _period_coverage(conn, f"""
+        SELECT DISTINCT l.semester_id
+        FROM fact_lesson l LEFT JOIN dim_course co ON co.course_id=l.course_id
+        WHERE {' AND '.join(lesson_where)}
+        ORDER BY l.semester_id
+    """, tuple(lesson_params))
+    room_coverage = _period_coverage(conn, """
+        SELECT DISTINCT semester_id FROM fact_room_occupancy
+        ORDER BY semester_id
+    """) if dbm.scalar(conn, """
+        SELECT 1 FROM sqlite_master
+        WHERE type='table' AND name='fact_room_occupancy'
+    """) else {"available": False, "periods": [], "periodFrom": None,
+               "periodTo": None, "periodCount": 0}
+    teacher_coverage = _period_coverage(conn, f"""
+        SELECT DISTINCT a.semester_id FROM agg_teacher_load a
+        JOIN dim_teacher t ON t.teacher_id=a.teacher_id
+        WHERE {' AND '.join(teacher_where)}
+        ORDER BY a.semester_id
+    """, tuple(teacher_params))
+    change_coverage = _period_coverage(conn, f"""
+        SELECT DISTINCT s.semester_id FROM fact_schedule_change s
+        WHERE {' AND '.join(change_where)}
+        ORDER BY s.semester_id
+    """, tuple(change_params))
+
+    organization_scope, organization_params = v2_organization_scope(
+        context, v2_conn, "l",
+    )
+    organization_where = (
+        f"WHERE {organization_scope}" if organization_scope else ""
+    )
+    schedule_coverage = _period_coverage(v2_conn, f"""
+        SELECT DISTINCT l.semester_id FROM teaching_lesson l
+        {organization_where}
+        ORDER BY l.semester_id
+    """, tuple(organization_params))
+    result_scope, result_params = v2_organization_scope(
+        context, v2_conn, "c",
+    )
+    result_where = f"WHERE {result_scope}" if result_scope else ""
+    result_coverage = _period_coverage(v2_conn, f"""
+        SELECT DISTINCT a.semester_id FROM agg_course_pass_stat a
+        LEFT JOIN dim_course c ON c.course_id=a.course_id
+        {result_where}
+        ORDER BY a.semester_id
+    """, tuple(result_params)) if dbm.scalar(v2_conn, """
+        SELECT 1 FROM sqlite_master
+        WHERE type='table' AND name='agg_course_pass_stat'
+    """) else {"available": False, "periods": [], "periodFrom": None,
+               "periodTo": None, "periodCount": 0}
+
+    domains = {
+        "courseSupply": {
+            **lesson_coverage,
+            "source": "fact_lesson",
+            "evidenceLevel": "actual_teaching_task",
+            "scopeBasis": "开课学院",
+            "timeControl": "single_term",
+        },
+        "scheduleStructure": {
+            **schedule_coverage,
+            "source": "teaching_lesson + course_meeting",
+            "evidenceLevel": "actual_schedule_snapshot",
+            "scopeBasis": "开课组织",
+            "timeControl": "single_term",
+        },
+        "classroomOccupancy": {
+            **room_coverage,
+            "source": "fact_room_occupancy",
+            "evidenceLevel": "actual_occupancy",
+            "scopeBasis": "学校共享空间聚合",
+            "timeControl": "single_term",
+        },
+        "teacherLoad": {
+            **teacher_coverage,
+            "source": "agg_teacher_load",
+            "evidenceLevel": "actual_task_derived_hours",
+            "scopeBasis": "教师所属学院",
+            "timeControl": "single_term",
+        },
+        "scheduleChanges": {
+            **change_coverage,
+            "source": "fact_schedule_change",
+            "evidenceLevel": "actual_source_event",
+            "scopeBasis": "申请学院",
+            "timeControl": "single_term",
+        },
+        "courseResults": {
+            **result_coverage,
+            "source": "agg_course_pass_stat + grade_attempt",
+            "evidenceLevel": "actual_grade_record",
+            "scopeBasis": "课程责任学院",
+            "timeControl": "independent_period_window",
+        },
+    }
+    return ok({
+        "identity": {
+            "roleId": context.get("activeRole") or user.get("role_id"),
+            "roleName": context.get("activeRoleName"),
+            "detailScope": detail_scope.get("type") or "denied",
+            "visibleColleges": visible_colleges,
+        },
+        "domains": domains,
+        "defaultSingleTerm": lesson_coverage["periodTo"],
+        "rules": {
+            "zeroState": "仅在数据域可用且查询成功时显示0；未接入、无权限和请求失败使用独立状态。",
+            "sharedSpace": "教室占用按学校共享资源聚合展示，不提供其他学院人员或课程明细。",
+            "courseResults": "课程结果使用独立多学期观察窗口，不跟随页面顶部单学期切换。",
+        },
+    })
 
 
 @router.get("/data-quality")
@@ -579,19 +782,24 @@ def schedule_changes(college: Optional[str] = None, semester: Optional[str] = No
     chg = dbm.scalar(conn, f"SELECT COUNT(*) FROM fact_schedule_change{w}{' AND' if w else ' WHERE'} kind='调课'", p) or 0
     stop = dbm.scalar(conn, f"SELECT COUNT(*) FROM fact_schedule_change{w}{' AND' if w else ' WHERE'} kind='停课'", p) or 0
     affected = dbm.scalar(conn, f"SELECT SUM(affected) FROM fact_schedule_change{w}", p) or 0
-    auto = dbm.scalar(conn, f"SELECT AVG(auto_approved) FROM fact_schedule_change{w}", p) or 0
-    avg_review = dbm.scalar(conn, f"SELECT AVG(review_days) FROM fact_schedule_change{w}", p) or 0
+    teachers = dbm.scalar(conn, f"SELECT COUNT(DISTINCT teacher_id) FROM fact_schedule_change{w}", p) or 0
+    reason_coverage = dbm.scalar(conn, f"""SELECT AVG(
+        CASE WHEN NULLIF(TRIM(reason),'') IS NOT NULL THEN 1.0 ELSE 0 END
+        ) FROM fact_schedule_change{w}""", p) or 0
+    stop_share = round(stop * 100 / total, 1) if total else 0
     kpis = [
-        {"label": "调课次数", "value": str(chg), "color": "#1E3A5F", "formula": "本学期调课记录数"},
-        {"label": "停课次数", "value": str(stop), "color": "#DC2626", "formula": "直接停课不补课"},
-        {"label": "受影响学生", "value": f"{affected:,}人次", "color": "#EA580C",
-         "formula": "调停课教学班学生人次"},
-        {"label": "院系自动审核", "value": f"{_pct(auto)}%", "color": "#16A34A",
-         "formula": "≤4学时自动通过比例"},
-        {"label": "教务审核", "value": f"{_pct(1 - auto)}%", "color": "#2563EB",
-         "formula": ">4学时需教务审核比例"},
-        {"label": "平均审核时间", "value": f"{round(avg_review, 1)}天", "color": "#888",
-         "formula": "提交到通过平均天数"},
+        {"label": "调课记录", "value": str(chg), "color": "#1E3A5F",
+         "formula": "当前筛选学期内kind=调课的源事件记录数"},
+        {"label": "停课记录", "value": str(stop), "color": "#DC2626",
+         "formula": "当前筛选学期内kind=停课的源事件记录数；不推断是否已补课"},
+        {"label": "停课记录占比", "value": f"{stop_share}%", "color": "#EA580C",
+         "formula": "停课记录数÷全部调停课记录数"},
+        {"label": "影响学生人次", "value": f"{affected:,}人次", "color": "#EA580C",
+         "formula": "源事件affected字段合计；同一学生多次受影响会重复计数"},
+        {"label": "涉及教师", "value": f"{teachers}人", "color": "#2563EB",
+         "formula": "调停课源事件中的去重教师数"},
+        {"label": "原因文本覆盖率", "value": f"{_pct(reason_coverage)}%", "color": "#16A34A",
+         "formula": "原因文本非空记录数÷全部调停课记录数"},
     ]
 
     # 各学院调课率：调课次数 / 该院教学班数(course.dept=college.name)
@@ -648,9 +856,14 @@ def schedule_changes(college: Optional[str] = None, semester: Optional[str] = No
             "reasonBreakdown": [{**item, "semanticCategory": _classify_schedule_reason(item["reason"])["category"]}
                                 for item in teacher_reasons]})
 
-    mmap = {r["month"]: r["n"] for r in dbm.query(
-        conn, f"SELECT month, COUNT(*) n FROM fact_schedule_change{w} GROUP BY month", p)}
-    monthlyTrend = [{"month": f"{m}月", "count": mmap.get(m, 0)} for m in (3, 4, 5, 6)]
+    monthlyTrend = [
+        {"month": f"{row['month']}月", "monthIndex": row["month"],
+         "count": row["n"], "affected": row["affected"]}
+        for row in dbm.query(conn, f"""SELECT month,COUNT(*) n,
+            COALESCE(SUM(affected),0) affected
+            FROM fact_schedule_change{w}
+            GROUP BY month ORDER BY month""", p)
+    ]
 
     return ok({
         "kpis": kpis, "deptRanks": deptRanks, "reasonDist": reasonDist,
@@ -660,8 +873,10 @@ def schedule_changes(college: Optional[str] = None, semester: Optional[str] = No
             "unclassifiedRecords": semantic_map.get("其他待核验", {}).get("count", 0),
             "explanation": "先按可解释关键词规则对原因文本预分类并保留原文；未调用外部AI，生产环境可在匿名化和审核机制明确后替换为受控模型。"},
         "frequentTeachers": frequentTeachers, "monthlyTrend": monthlyTrend,
-        "evidenceLevel": "scenario_simulation",
-        "dataLimitation": "当前原型调停课记录为固定种子构造数据，仅用于验证分类和核查交互；生产系统必须接入真实调课申请、原始原因文本和审批记录。"})
+        "evidenceLevel": "actual_source_event",
+        "derivedFieldsExcluded": ["auto_approved", "review_days"],
+        "dataSource": "历史调停课源事件及原始原因文本",
+        "dataLimitation": "当前事件可用于统计调课、停课、原因、月份、涉及教师和影响人次；审批层级、审核时长、补课安排与学生通知证据未接入，不输出相关结论。"})
 
 
 # ------------------------------------------------------------------ 教师负荷
@@ -697,68 +912,57 @@ def teacher_load(college: Optional[str] = None, semester: Optional[str] = None,
             in_college &= {tid for tid, t in title_of.items() if t == title}
     else:
         in_college = None
+    anomaly_ids = _teacher_anomaly_ids(conn, [sem])
+    scoped_anomaly_ids = {
+        teacher_id for teacher_id in anomaly_ids
+        if in_college is None or teacher_id in in_college
+    }
     load = {r["teacher_id"]: r for r in dbm.query(
         conn, "SELECT teacher_id, hours, courses, classes FROM agg_teacher_load WHERE semester_id=?",
         (sem,))
-        if in_college is None or r["teacher_id"] in in_college}
+        if (in_college is None or r["teacher_id"] in in_college)
+        and r["teacher_id"] not in anomaly_ids}
 
     order = ["教授", "副教授", "讲师", "助教", "其他"]
-    by_title: dict = {k: {"count": 0, "teach": 0, "hours": 0.0, "courses": 0.0,
-                          "classes": 0.0} for k in order}
-    for tid, title in title_of.items():
-        if in_college is not None and tid not in in_college:
-            continue
+    by_title: dict = {k: {"count": 0, "hours": 0.0, "hourValues": [],
+                          "courses": 0.0, "classes": 0.0} for k in order}
+    for tid, rec in load.items():
+        title = title_of.get(tid, "其他")
         b = by_title[title]
         b["count"] += 1
-        if tid in load:
-            b["teach"] += 1
-            b["hours"] += load[tid]["hours"] or 0
-            b["courses"] += load[tid]["courses"] or 0
-            b["classes"] += load[tid]["classes"] or 0
+        b["hours"] += rec["hours"] or 0
+        b["hourValues"].append(float(rec["hours"] or 0))
+        b["courses"] += rec["courses"] or 0
+        b["classes"] += rec["classes"] or 0
     titleLoad = []
     for k in order:
         b = by_title[k]
         if b["count"] == 0:
             continue
-        teach = b["teach"] or 1
-        rate = round(b["teach"] / b["count"] * 100)
-        if k == "教授":
-            note, status = ("✓达标" if rate >= 85 else "↓未达标(需≥85%)"), ("ok" if rate >= 85 else "warn")
-        else:
-            note, status = ("✓达标" if rate >= 85 else "上课率偏低"), ("ok" if rate >= 85 else "warn")
+        count = b["count"] or 1
         titleLoad.append({
             "title": k, "count": b["count"],
-            "avgHours": round(b["hours"] / teach), "avgCourses": round(b["courses"] / teach, 1),
-            "avgClasses": round(b["classes"] / teach, 1), "teachingRate": rate,
-            "note": note, "status": status})
+            "avgHours": round(b["hours"] / count),
+            "medianHours": round(_nearest_rank(b["hourValues"], .5), 1),
+            "p90Hours": round(_nearest_rank(b["hourValues"], .9), 1),
+            "avgCourses": round(b["courses"] / count, 1),
+            "avgClasses": round(b["classes"] / count, 1),
+            "note": "仅统计有教学任务教师", "status": "info"})
 
-    # 负荷分布（按授课教师总学时）
+    # 学时分布仅描述数据区间，不套用未经学校确认的正常/过载结论。
     hrs = [load[t]["hours"] or 0 for t in load]
-    dbk = [("低负荷", 0, 80, "#94A3B8"), ("正常", 80, 180, "#16A34A"),
-           ("高负荷", 180, 280, "#EA580C"), ("过载", 280, 1e9, "#DC2626")]
+    dbk = [("<80学时", 0, 80, "#94A3B8"), ("80—179学时", 80, 180, "#16A34A"),
+           ("180—279学时", 180, 280, "#EA580C"), ("≥280学时", 280, 1e9, "#DC2626")]
     nload = len(hrs) or 1
     loadDist = []
     for label, lo, hi, color in dbk:
         c = sum(1 for h in hrs if lo <= h < hi)
         loadDist.append({"label": label, "count": c, "pct": round(c / nload * 100), "color": color})
 
-    overloaded = []
-    for r in dbm.query(conn, """
-        SELECT a.teacher_id, t.name, t.dept, a.hours, a.courses FROM agg_teacher_load a
-        JOIN dim_teacher t ON a.teacher_id=t.teacher_id
-        WHERE a.semester_id=? AND (a.hours>280 OR a.courses>5)
-        ORDER BY a.hours DESC LIMIT 50""", (sem,)):
-        if in_college is not None and r["teacher_id"] not in in_college:
-            continue
-        overloaded.append({
-            "id": r["teacher_id"], "name": r["name"] or r["teacher_id"],
-            "title": title_of.get(r["teacher_id"], "—"),
-            "dept": clean_dept(r["dept"]) or "—", "hours": round(r["hours"] or 0),
-            "courses": r["courses"]})
-        if len(overloaded) >= 10:
-            break
+    p90_hours = round(_nearest_rank([float(h) for h in hrs], .9), 1)
+    median_hours = round(_nearest_rank([float(h) for h in hrs], .5), 1)
 
-    # 高负荷核查 TOP10：按可审计的总学时排序，不使用不透明综合分，也不直接认定“超负荷”。
+    # 负荷核查队列：按当前范围P90形成有限统计线索，不直接认定“超负荷”。
     # 学生覆盖人次、教学班数、课程数与平均班额作为管理核查证据。
     teacher_load_rows = dbm.query(conn, """
         SELECT l.teacher_id, COALESCE(MAX(t.name), l.teacher_id) name,
@@ -774,8 +978,12 @@ def teacher_load(college: Optional[str] = None, semester: Optional[str] = None,
         GROUP BY l.teacher_id
         ORDER BY total_hours DESC, student_visits DESC, lesson_count DESC
     """, (sem,))
-    teacher_load_rows = [r for r in teacher_load_rows
-                         if in_college is None or r["teacher_id"] in in_college][:10]
+    teacher_load_rows = [
+        r for r in teacher_load_rows
+        if (in_college is None or r["teacher_id"] in in_college)
+        and r["teacher_id"] not in anomaly_ids
+        and float(r["total_hours"] or 0) >= p90_hours
+    ][:10]
     topTeachers = []
     for rank, r in enumerate(teacher_load_rows, 1):
         courses = dbm.query(conn, """
@@ -799,7 +1007,10 @@ def teacher_load(college: Optional[str] = None, semester: Optional[str] = None,
             "lessons": r["lesson_count"] or 0,
             "studentVisits": r["student_visits"] or 0,
             "avgClassSize": r["avg_class_size"] or 0,
-            "reviewReason": f"总学时位列当前范围第{rank}，需结合教学班、学生覆盖与课程构成核查",
+            "reviewReason": (
+                f"总学时不低于当前范围P90（{p90_hours:g}学时），"
+                "需结合教学班、学生覆盖与课程构成核查"
+            ),
             "courseBreakdown": [{
                 "courseId": x["course_id"], "courseName": x["course_name"],
                 "lessons": x["lesson_count"], "hours": x["total_hours"] or 0,
@@ -816,9 +1027,11 @@ def teacher_load(college: Optional[str] = None, semester: Optional[str] = None,
         cid = name2cid.get(dept_of.get(tid))
         if not cid:
             continue
-        a = col_acc.setdefault(cid, {"teachers": 0, "hours": 0.0, "courses": 0.0})
+        a = col_acc.setdefault(cid, {"teachers": 0, "hours": 0.0, "hourValues": [],
+                                     "courses": 0.0})
         a["teachers"] += 1
         a["hours"] += rec["hours"] or 0
+        a["hourValues"].append(float(rec["hours"] or 0))
         a["courses"] += rec["courses"] or 0
     cname = {r["college_id"]: r["name"] for r in dbm.query(
         conn, "SELECT college_id,name FROM dim_college")}
@@ -827,39 +1040,53 @@ def teacher_load(college: Optional[str] = None, semester: Optional[str] = None,
         n = a["teachers"] or 1
         avg_h = round(a["hours"] / n)
         deptLoad.append({"id": cid, "dept": cname.get(cid, cid), "teacherCount": a["teachers"],
-                         "avgHours": avg_h, "avgCourses": round(a["courses"] / n, 1),
-                         "loadLevel": min(round(avg_h / 200 * 100), 100)})
-    deptLoad.sort(key=lambda x: -x["avgHours"])
+                         "avgHours": avg_h,
+                         "medianHours": round(_nearest_rank(a["hourValues"], .5), 1),
+                         "p90Hours": round(_nearest_rank(a["hourValues"], .9), 1),
+                         "avgCourses": round(a["courses"] / n, 1)})
+    deptLoad.sort(key=lambda x: (-x["p90Hours"], -x["medianHours"]))
+    max_dept_hours = max((row["p90Hours"] for row in deptLoad), default=0)
+    for row in deptLoad:
+        row["loadLevel"] = (
+            round(row["p90Hours"] * 100 / max_dept_hours)
+            if max_dept_hours else 0
+        )
 
-    n_teach = len(load) or 1
+    n_teach = len(load)
     sum_h = sum(load[t]["hours"] or 0 for t in load)
     sum_c = sum(load[t]["courses"] or 0 for t in load)
-    sum_cl = sum(load[t]["classes"] or 0 for t in load)
-    prof_rate = next((x["teachingRate"] for x in titleLoad if x["title"] == "教授"), 0)
-    assoc_rate = next((x["teachingRate"] for x in titleLoad if x["title"] == "副教授"), 0)
-    overload_n = sum(1 for h in hrs if h > 280)
     kpis = [
-        {"label": "人均学时", "value": str(round(sum_h / n_teach)), "color": "#1E3A5F",
-         "formula": "SUM(学时)÷授课教师数"},
-        {"label": "人均课程门数", "value": str(round(sum_c / n_teach, 1)), "color": "#2563EB",
-         "formula": "SUM(课程)÷授课教师数"},
-        {"label": "人均教学班", "value": str(round(sum_cl / n_teach, 1)), "color": "#1E3A5F",
-         "formula": "SUM(教学班)÷授课教师数"},
-        {"label": "教授上课率", "value": f"{prof_rate}%",
-         "color": "#16A34A" if prof_rate >= 85 else "#DC2626",
-         "formula": "授课教授÷教授总数"},
-        {"label": "副教授上课率", "value": f"{assoc_rate}%", "color": "#16A34A",
-         "formula": "授课副教授÷副教授总数"},
-        {"label": "过载教师", "value": f"{overload_n}人", "color": "#DC2626",
-         "formula": "学时>280"},
+        {"label": "有效授课教师", "value": f"{n_teach}人", "color": "#1E3A5F",
+         "formula": "排除当前开放/复核中数据质量问题后，有有效教学任务的去重教师数"},
+        {"label": "人均学时", "value": str(round(sum_h / n_teach) if n_teach else 0), "color": "#1E3A5F",
+         "formula": "有效教学任务总学时÷有效授课教师数；不是学校正式工作量"},
+        {"label": "中位学时", "value": f"{median_hours:g}", "color": "#2563EB",
+         "formula": "有效授课教师学时的第50百分位，降低极端值对均值的影响"},
+        {"label": "P90学时", "value": f"{p90_hours:g}", "color": "#EA580C",
+         "formula": "有效授课教师学时的第90百分位，仅用于形成有限核查队列"},
+        {"label": "人均课程门数", "value": str(round(sum_c / n_teach, 1) if n_teach else 0), "color": "#2563EB",
+         "formula": "有效教学任务课程门数合计÷有效授课教师数"},
+        {"label": "已排除异常教师", "value": f"{len(scoped_anomaly_ids)}人", "color": "#DC2626",
+         "formula": "命中教学班>200、学时>1000、课程>20或已登记质量问题的教师数"},
     ]
     return ok({
         "kpis": kpis, "titleLoad": titleLoad, "loadDist": loadDist,
-        "overloaded": overloaded, "topTeachers": topTeachers, "deptLoad": deptLoad,
+        "reviewCandidates": topTeachers, "topTeachers": topTeachers,
+        "deptLoad": deptLoad,
+        "dataQuality": {
+            "excludedTeachers": len(scoped_anomaly_ids),
+            "excludedTeacherIds": sorted(scoped_anomaly_ids),
+            "policy": "开放或复核中的质量问题以及启发式异常不进入统计、排名和AI研判",
+        },
+        "workloadPolicy": {
+            "configured": False,
+            "statement": "尚未配置学校正式工作量办法，本页不输出达标、未达标或超负荷认定。",
+        },
+        "evidenceLevel": "actual_task_derived_hours",
         "topTeacherPolicy": {
-            "title": "高负荷核查 TOP10",
-            "ranking": "按当前筛选范围内总学时降序；同学时按学生覆盖人次、教学班数排序",
-            "boundary": "仅用于定位优先核查对象，不等同于教师超负荷认定；最终结论需结合学校工作量办法、合讲拆分及减免规则。"
+            "title": "负荷核查队列",
+            "ranking": f"仅纳入当前范围总学时不低于P90（{p90_hours:g}学时）的教师，最多10人；同学时按学生覆盖人次、教学班数排序",
+            "boundary": "这是统计分布形成的核查顺序，不等同于教师超负荷认定；最终结论需结合学校工作量办法、合讲拆分及减免规则。"
         }})
 
 

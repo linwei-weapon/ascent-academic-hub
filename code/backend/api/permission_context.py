@@ -352,16 +352,52 @@ def v2_student_scope(context: dict, conn: sqlite3.Connection,
 def v2_lesson_scope(context: dict, conn: sqlite3.Connection,
                     alias: str = "tl") -> tuple[str, list]:
     """教学任务按开课组织授权；其他受限类型默认返回空范围。"""
+    return v2_organization_scope(context, conn, alias)
+
+
+def v2_organization_scope(context: dict, conn: sqlite3.Connection,
+                          alias: str = "o",
+                          column: str = "organization_id") -> tuple[str, list]:
+    """按V2组织机构限定教学业务对象；非学院受限身份默认返回空范围。
+
+    该范围用于教学任务、课程责任组织和课程结果等不直接包含学生维度的
+    业务对象。学院身份必须完成全部源范围映射，避免映射缺失时扩大为全校。
+    """
     require_authorized_context(context)
     detail = context.get("detailScope") or {}
     if detail.get("type") == "all":
         return "", []
     if detail.get("type") != "college":
         return "1=0", []
-    student_scope, params = v2_student_scope(context, conn, "scope_student")
-    if ".organization_id IN (" not in student_scope:
-        return "1=0", []
-    return (
-        f"{alias}.organization_id IN ({','.join('?' * len(params))})",
-        params,
-    )
+    source_ids = detail.get("sourceScopeIds") or []
+    if not source_ids:
+        raise ApiError("当前身份没有可映射的V2学院范围", code=403, status_code=403)
+    role_id = context.get("activeRole")
+    placeholders = ",".join("?" * len(source_ids))
+    mappings = dbm.query(conn, f"""
+        SELECT source_scope_id,organization_id
+        FROM access_scope_mapping
+        WHERE role_id=? AND scope_type='college' AND mapping_status='mapped'
+          AND source_scope_id IN ({placeholders})
+        ORDER BY source_scope_id
+    """, tuple([role_id] + source_ids))
+    mapped_sources = {
+        row["source_scope_id"] for row in mappings if row.get("organization_id")
+    }
+    values = sorted({
+        row["organization_id"] for row in mappings if row.get("organization_id")
+    })
+    if mapped_sources != set(source_ids) or not values:
+        raise ApiError("当前身份的V2学院范围未完整映射", code=403, status_code=403)
+    # 部分历史教学任务把organization_id落成了学院名称，而课程、学生维度使用
+    # 组织代码。只扩展同一权威组织表中的代码—名称等价值，不做模糊匹配。
+    if _table_exists(conn, "dim_organization"):
+        placeholders = ",".join("?" * len(values))
+        names = [
+            row["name"] for row in dbm.query(conn, f"""
+                SELECT name FROM dim_organization
+                WHERE organization_id IN ({placeholders})
+            """, tuple(values)) if row.get("name")
+        ]
+        values = sorted(set(values + names))
+    return f"{alias}.{column} IN ({','.join('?' * len(values))})", values

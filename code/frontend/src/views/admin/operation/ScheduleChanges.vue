@@ -1,23 +1,24 @@
 <template>
-  <div>
+  <div v-loading="loading && !!kpis.length" element-loading-text="正在按新条件更新调停课分析，当前结果暂时保留…">
     <div class="sa-head-row">
       <div>
         <h2 class="sa-page-title">调停课趋势分析</h2>
         <p class="sa-page-sub">数据来源：调停课记录表(CL_ROOM_APPLIES) · {{ selectedSemesterLabel }}</p>
       </div>
-      <el-select v-model="fSemester" size="small" style="width:200px" @change="load">
-        <el-option v-for="s in semesters" :key="s.value" :label="s.label" :value="s.value" />
-      </el-select>
+      <el-tag type="info" effect="plain">{{ selectedSemesterLabel }}</el-tag>
     </div>
 
     <div v-if="collegeFilter" class="filter-banner">
       <span>当前学院视图：<b>{{ collegeFilter.name }}</b></span>
       <el-button size="small" type="primary" text @click="clearCollegeFilter">← 返回全院视图</el-button>
     </div>
+    <el-alert v-if="loadError" type="error" :closable="false" show-icon title="调停课分析加载失败"
+      :description="loadError" style="margin-bottom:12px"><template #default><el-button link type="primary" @click="load">重新加载</el-button></template></el-alert>
+    <div v-else-if="loading && !kpis.length" class="sa-card" style="margin-bottom:12px"><el-skeleton :rows="8" animated /></div>
 
-    <el-alert type="warning" :closable="false" show-icon style="margin-bottom:12px"
-      title="当前为调课分析交互原型"
-      :description="data.dataLimitation || '生产系统需接入真实调课申请和原始原因文本。'" />
+    <el-alert type="info" :closable="false" show-icon style="margin-bottom:12px"
+      title="当前使用历史调停课源事件和原始原因文本"
+      :description="data.dataLimitation || '审批层级、审核时长、补课安排与通知证据未接入，不输出相关结论。'" />
 
     <div class="sa-kpi-row">
       <KpiCard v-for="k in kpis" :key="k.label" :label="k.label" :value="k.value" :hint="k.formula" :tone="kpiTone(k.label)" />
@@ -76,7 +77,6 @@
       <div class="drawer-actions">
         <span v-if="!teacherNeedsAi(selectedTeacher)" class="sa-faint">当前频次未达到 AI 重点阈值，核对原始原因即可。</span>
         <el-button v-else type="primary" plain @click="openTeacherAi(selectedTeacher)">查看 AI 调课研判</el-button>
-        <el-button type="primary" plain @click="goTeacher(selectedTeacher)">查看教师教学档案</el-button>
       </div>
     </el-drawer>
     <AIInsightDrawer v-model="aiDrawerVisible" :insight="aiInsight" :loading="aiLoading" title="调课治理AI研判" />
@@ -91,7 +91,7 @@ import KpiLabel from '@/components/KpiLabel.vue'
 import KpiCard from '@/components/KpiCard.vue'
 import EChart from '@/components/EChart.vue'
 import { COLLEGE_MAP } from '@/constants/colleges'
-import { getFilterMeta, type SemesterOpt } from '@/utils/meta'
+import { getFilterMeta } from '@/utils/meta'
 import AIInsightDrawer from '@/components/AIInsightDrawer.vue'
 import DataTable, { type DataTableColumn } from '@/components/DataTable.vue'
 import { getScheduleChangesAIInsight, getScheduleTeacherAIInsight } from '@/utils/ai'
@@ -99,17 +99,17 @@ const router = useRouter(); const route = useRoute()
 
 // 按学院调课率排名 / 教师调课 TOP10 表列定义（M6 DataTable）
 const deptRankCols: DataTableColumn[] = [
-  { key: 'name', label: '学院', width: 130 },
-  { key: 'totalLessons', label: '教学班数', width: 84, align: 'right' },
-  { key: 'changeCount', label: '调课次数', width: 84, align: 'right' },
-  { key: 'attention', label: '管理关注', width: 100 },
-  { key: 'pct', label: '调课率', minWidth: 150 },
+  { key: 'name', label: '学院', width: 130, required:true, region:'identity', fixed:'left' },
+  { key: 'totalLessons', label: '教学班数', width: 84, align: 'right', required:true },
+  { key: 'changeCount', label: '调课次数', width: 84, align: 'right', required:true },
+  { key: 'attention', label: '管理关注', width: 100, required:true },
+  { key: 'pct', label: '调课率', minWidth: 150, required:true },
 ]
 const teacherTopCols: DataTableColumn[] = [
-  { key: 'name', label: '教师', width: 80 },
+  { key: 'name', label: '教师', width: 80, required:true, region:'identity', fixed:'left' },
   { key: 'dept', label: '学院', width: 120 },
-  { key: 'count', label: '次数', width: 60, align: 'right' },
-  { key: 'attention', label: '管理关注', width: 100 },
+  { key: 'count', label: '次数', width: 60, align: 'right', required:true },
+  { key: 'attention', label: '管理关注', width: 100, required:true },
   { key: 'reason', label: '主要原因', minWidth: 110 },
 ]
 const collegeFilter = ref<{id:string;name:string}|null>(null)
@@ -118,13 +118,13 @@ function applyCollegeFilter() { const cid = route.query.college as string; colle
 applyCollegeFilter(); watch(() => route.query.college, () => { applyCollegeFilter(); load() })
 function clearCollegeFilter() { collegeFilter.value = null; router.replace({ query: {} }) }
 function goCollege(row: any) { router.push({ query: { college: row.id } }) }
-function goTeacher(row: any) { router.push({ path: '/admin/faculty/' + row.id, query: fSemester.value ? { semester: fSemester.value } : {} }) }
 
 const fSemester = inject<Ref<string>>('operationSemester', ref(''))
-const semesters = ref<SemesterOpt[]>([])
-const selectedSemesterLabel = computed(() => semesters.value.find(s => s.value === fSemester.value)?.label || '')
+const selectedSemesterLabel = computed(() => fSemester.value || '未选择学期')
 
 const kpis = ref<any[]>([])
+const loading = ref(false)
+const loadError = ref('')
 const data = reactive<any>({
   deptRanks: [], reasonDist: [], semanticReasonDist: [], frequentTeachers: [], monthlyTrend: [], classification: {}, dataLimitation: '',
 })
@@ -160,6 +160,9 @@ async function openTeacherAi(row: any) {
 }
 
 async function load() {
+  loading.value = true
+  loadError.value = ''
+  try {
   const cid = route.query.college as string
   const params = new URLSearchParams()
   if (cid && collegeMap[cid]) params.set('college', cid)
@@ -168,17 +171,24 @@ async function load() {
   const d = await http.get('/admin/operation/schedule-changes' + qs)
   kpis.value = (d && d.kpis) || []
   Object.assign(data, { deptRanks: [], reasonDist: [], semanticReasonDist: [], frequentTeachers: [], monthlyTrend: [], classification: {}, dataLimitation: '' }, d || {})
+  } catch (error:any) {
+    loadError.value = error?.message || '调停课分析加载失败，请稍后重试。'
+  } finally {
+    loading.value = false
+  }
 }
 onMounted(async () => {
   const meta = await getFilterMeta()
-  semesters.value = meta.semesters.slice().reverse()
   if (!fSemester.value) fSemester.value = meta.current
   await load()
+})
+watch(fSemester, (value, oldValue) => {
+  if (oldValue && value !== oldValue) load()
 })
 
 function kpiTone(label: string): 'primary'|'teal'|'danger'|'amber' {
   if (label.includes('停课') || label.includes('受影响')) return 'danger'
-  if (label.includes('自动审核')) return 'teal'
+  if (label.includes('覆盖率')) return 'teal'
   return 'primary'
 }
 

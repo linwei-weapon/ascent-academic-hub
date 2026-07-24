@@ -9,14 +9,15 @@
         <el-select v-model="fBuilding" size="small" clearable filterable placeholder="全部楼宇" style="width:160px" @change="load">
           <el-option v-for="b in buildingOptions" :key="b" :label="b" :value="b" />
         </el-select>
-        <el-select v-model="fSemester" size="small" style="width:180px" @change="load">
-          <el-option v-for="s in semesters" :key="s.value" :label="s.label" :value="s.value" />
-        </el-select>
         <div class="evening-switch">
           <span>包含晚间</span><el-switch v-model="includeEvening" @change="load" />
         </div>
       </div>
     </div>
+    <el-alert v-if="loadError" type="error" :closable="false" show-icon class="boundary"
+      title="教室占用数据加载失败" :description="loadError">
+      <template #default><el-button link type="primary" @click="load">重新加载</el-button></template>
+    </el-alert>
 
     <el-alert class="boundary" type="info" :closable="false" show-icon
       title="当前展示实际占用强度，不等于全校教室利用率"
@@ -51,22 +52,12 @@
     <div class="sa-card">
       <div class="sa-card-title">楼宇实际占用负荷 <KpiLabel label="" formula="楼宇负荷=已占用教室日节次÷该楼宇已观测教室数×实际采集日期数×纳入节次数" /></div>
       <div class="chart-note">优先关注占用负荷高且记录量大的楼宇；“待映射”表示源教室名称尚不能可靠归属楼宇。</div>
-      <el-table :data="data.buildings" size="small" stripe max-height="430">
-        <el-table-column prop="name" label="楼宇" min-width="170" />
-        <el-table-column prop="observedRooms" label="已观测教室" width="120" align="right" />
-        <el-table-column prop="observedDates" label="采集日期" width="105" align="right" />
-        <el-table-column prop="occupancyRecords" label="占用记录" width="120" align="right" />
-        <el-table-column prop="occupiedRoomSlots" label="占用教室日节次" width="145" align="right" />
-        <el-table-column label="观测负荷" min-width="220">
-          <template #default="{ row }">
-            <el-progress :percentage="row.observedLoadPct" :stroke-width="9" :color="loadColor(row.observedLoadPct)" />
-          </template>
-        </el-table-column>
-        <el-table-column label="管理关注" width="100"><template #default="{row}"><el-tag size="small" :type="buildingAttention(row).type">{{ buildingAttention(row).label }}</el-tag></template></el-table-column>
-        <el-table-column label="操作" width="80">
-          <template #default="{ row }"><el-button link type="primary" @click="openBuildingReview(row)">核查</el-button></template>
-        </el-table-column>
-      </el-table>
+      <DataTable :columns="buildingCols" :data="data.buildings" storage-key="operation:classroom-buildings"
+        size="small" stripe max-height="430" :max-business-columns="5">
+        <template #col-observedLoadPct="{row}"><el-progress :percentage="row.observedLoadPct" :stroke-width="9" :color="loadColor(row.observedLoadPct)" /></template>
+        <template #col-attention="{row}"><el-tag size="small" :type="buildingAttention(row).type">{{ buildingAttention(row).label }}</el-tag></template>
+        <template #col-actions="{row}"><el-button link type="primary" @click="openBuildingReview(row)">核查</el-button></template>
+      </DataTable>
     </div>
 
     <el-alert v-if="data.summary.overlapRecords || data.summary.pendingMappingRecords" class="quality" type="warning" :closable="false" show-icon
@@ -82,20 +73,21 @@
 </template>
 
 <script setup lang="ts">
-import { computed, inject, onMounted, reactive, ref, type Ref } from 'vue'
+import { computed, inject, onMounted, reactive, ref, watch, type Ref } from 'vue'
 import { http } from '@/utils/http'
-import { getFilterMeta, type SemesterOpt } from '@/utils/meta'
+import { getFilterMeta } from '@/utils/meta'
 import EChart from '@/components/EChart.vue'
 import KpiCard from '@/components/KpiCard.vue'
 import KpiLabel from '@/components/KpiLabel.vue'
 import AIInsightDrawer from '@/components/AIInsightDrawer.vue'
+import DataTable, { type DataTableColumn } from '@/components/DataTable.vue'
 import { getClassroomOccupancyAIInsight } from '@/utils/ai'
 
 const loading = ref(false)
+const loadError = ref('')
 const fSemester = inject<Ref<string>>('operationSemester', ref(''))
 const fBuilding = ref('')
 const includeEvening = ref(true)
-const semesters = ref<SemesterOpt[]>([])
 const buildingOptions = ref<string[]>([])
 const data = reactive<any>({ summary: {}, heatmap: [], buildings: [], activityTypes: [] })
 const aiDrawerVisible = ref(false)
@@ -108,6 +100,16 @@ const activityLabels: Record<string,string> = {
   course:'课程教学', exam:'考试考务', self_study:'自习使用', admission_review:'招生复试',
   teaching_other:'其他教学', event:'会议活动', other:'其他占用',
 }
+const buildingCols:DataTableColumn[] = [
+  {key:'name',label:'楼宇',minWidth:170,required:true,region:'identity',fixed:'left'},
+  {key:'observedRooms',label:'已观测教室',width:120,align:'right',required:true},
+  {key:'observedDates',label:'采集日期',width:105,align:'right'},
+  {key:'occupancyRecords',label:'占用记录',width:120,align:'right',required:true},
+  {key:'occupiedRoomSlots',label:'占用教室日节次',width:145,align:'right'},
+  {key:'observedLoadPct',label:'观测负荷',minWidth:220,required:true},
+  {key:'attention',label:'管理关注',width:100},
+  {key:'actions',label:'操作',width:80,required:true,region:'action',fixed:'right'},
+]
 
 function fmt(value: number) { return Number(value || 0).toLocaleString('zh-CN') }
 function loadColor(value: number) { return value >= 50 ? '#DC2626' : value >= 30 ? '#D97706' : '#0D9488' }
@@ -155,6 +157,7 @@ const activityOption = computed(() => ({
 
 async function load() {
   loading.value = true
+  loadError.value = ''
   try {
     const params = new URLSearchParams({ include_evening:String(includeEvening.value) })
     if (fSemester.value) params.set('semester', fSemester.value)
@@ -162,6 +165,8 @@ async function load() {
     const result = await http.get<any>('/admin/operation/classroom-occupancy?' + params.toString())
     Object.assign(data, result || { summary:{}, heatmap:[], buildings:[], activityTypes:[] })
     if (!fBuilding.value) buildingOptions.value = (result?.buildings || []).map((x:any)=>x.name).filter((x:string)=>x && x !== '待映射')
+  } catch (error:any) {
+    loadError.value = error?.message || '教室占用数据加载失败，请稍后重试。'
   } finally { loading.value = false }
 }
 
@@ -180,9 +185,11 @@ async function openClassroomAi(row?: any) {
 
 onMounted(async () => {
   const meta = await getFilterMeta()
-  semesters.value = meta.semesters.slice().reverse()
   if (!fSemester.value) fSemester.value = meta.current
   await load()
+})
+watch(fSemester, (value, oldValue) => {
+  if (oldValue && value !== oldValue) load()
 })
 </script>
 

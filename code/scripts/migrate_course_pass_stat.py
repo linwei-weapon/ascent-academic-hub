@@ -44,7 +44,19 @@ KPI_ROWS = [
 
 
 def migrate(v2_db_path: Path | None = None, v1_db_path: Path | None = None) -> dict:
+    v2_path = Path(v2_db_path or config.V2_DB_PATH)
+    conn = sqlite3.connect(v2_path)
+    try:
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_grade_attempt_course_term_valid_student "
+            "ON grade_attempt(course_id,semester_id,is_published,is_void,is_pass,student_id)"
+        )
+        conn.execute("ANALYZE grade_attempt")
+        conn.commit()
+    finally:
+        conn.close()
     v2_report = build_course_pass_stat(v2_db_path, v1_db_path)
+    v2_report["course_result_index"] = "idx_grade_attempt_course_term_valid_student"
 
     v1_path = Path(v1_db_path or config.DB_PATH)
     kpi_report = {"inserted_or_kept": 0, "skipped": "sys_kpi_config 不存在"}

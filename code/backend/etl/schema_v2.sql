@@ -550,6 +550,9 @@ CREATE TABLE IF NOT EXISTS access_scope_mapping (
 CREATE INDEX IF NOT EXISTS idx_grade_attempt_student_course ON grade_attempt(student_id, course_id);
 CREATE INDEX IF NOT EXISTS idx_grade_attempt_student_term_valid
     ON grade_attempt(student_id, semester_id, is_published, is_void, is_pass);
+-- 课程结果专题按课程×学期统计去重学生；没有该索引会在每次查询时全表分组。
+CREATE INDEX IF NOT EXISTS idx_grade_attempt_course_term_valid_student
+    ON grade_attempt(course_id, semester_id, is_published, is_void, is_pass, student_id);
 CREATE INDEX IF NOT EXISTS idx_student_plan ON dim_student(plan_id, student_id);
 CREATE INDEX IF NOT EXISTS idx_student_org_major_grade
     ON dim_student(organization_id, major_code, entry_grade, student_id);
