@@ -117,6 +117,22 @@ def health():
     return ok({"status": "up"})
 
 
+@app.on_event("startup")
+def warm_management_analysis_cache():
+    """服务启动时预热高频管理总览，避免首位用户承担全量历史计算等待。"""
+    try:
+        conn = dbm.get_conn()
+        try:
+            faculty._cached_faculty_analysis(
+                conn, settings.CURRENT_SEMESTER, None,
+            )
+        finally:
+            conn.close()
+    except Exception:
+        # 预热失败不影响服务启动；首次请求仍会按正常链路计算并记录异常。
+        access_logger.exception("faculty_assurance_cache_warm_failed")
+
+
 app.include_router(auth.router)
 app.include_router(dashboard.router)
 app.include_router(alert.router)

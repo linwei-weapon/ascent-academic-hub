@@ -48,10 +48,23 @@ export const router = createRouter({
         { path: 'curriculum/course-objectives/:id', redirect: to => ({ path:'/admin/curriculum', query:{ tab:'plan', plan_id:String(to.params.id) } }) },
         { path: 'curriculum/graduate-requirements/:id', redirect: to => ({ path:'/admin/curriculum', query:{ tab:'plan', plan_id:String(to.params.id) } }) },
 
-        // ====== 师资结构分析 ======
+        // ====== 师资保障分析（旧团队/教师链接统一恢复为主页面抽屉） ======
         { path: 'faculty', component: () => import('@/views/admin/faculty/Index.vue') },
-        { path: 'faculty/team', component: () => import('@/views/admin/faculty/Team.vue') },
-        { path: 'faculty/:id', component: () => import('@/views/admin/faculty/Detail.vue') },
+        { path: 'faculty/team', redirect: to => ({
+          path: '/admin/faculty',
+          query: {
+            semester: to.query.semester,
+            course: to.query.courseId,
+            courseName: to.query.courseName,
+          },
+        }) },
+        { path: 'faculty/:id', redirect: to => ({
+          path: '/admin/faculty',
+          query: {
+            semester: to.query.semester,
+            teacher: String(to.params.id),
+          },
+        }) },
 
         // ====== 学生学业分析 ======
         { path: 'students/analysis', component: () => import('@/views/admin/students/Analysis.vue') },
