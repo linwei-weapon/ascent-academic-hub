@@ -62,11 +62,21 @@ def migrate(conn: sqlite3.Connection, v2_conn: sqlite3.Connection) -> dict:
         if existing:
             stats["accountsSkipped"] += 1
         else:
-            dbm.execute(conn, """INSERT INTO sys_user
-                (username,password_hash,name,role_id,status)
-                VALUES (?,?,?,?,'active')""",
-                (username, hash_password(DEMO_PASSWORD),
-                 staff["display_name"] or username, role_id))
+            columns = {
+                row["name"] for row in dbm.query(conn, "PRAGMA table_info(sys_user)")
+            }
+            if "account_source" in columns:
+                dbm.execute(conn, """INSERT INTO sys_user
+                    (username,password_hash,name,role_id,status,account_source)
+                    VALUES (?,?,?,?,'active','school_sync')""",
+                    (username, hash_password(DEMO_PASSWORD),
+                     staff["display_name"] or username, role_id))
+            else:
+                dbm.execute(conn, """INSERT INTO sys_user
+                    (username,password_hash,name,role_id,status)
+                    VALUES (?,?,?,?,'active')""",
+                    (username, hash_password(DEMO_PASSWORD),
+                     staff["display_name"] or username, role_id))
             stats["accountsCreated"] += 1
             key = "mentorAccounts" if role_id == "mentor" else "classAdviserAccounts"
             stats[key] += 1

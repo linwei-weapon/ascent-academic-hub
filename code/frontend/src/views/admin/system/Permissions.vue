@@ -7,7 +7,12 @@
           管理“账号—工作身份—人员—数据范围”，并核验用户实际可见的数据，不改变教务系统中的业务关系。
         </p>
       </div>
-      <el-button size="small" @click="loadUsers">刷新权限状态</el-button>
+      <div class="head-actions">
+        <el-button v-if="returnPath" size="small" @click="router.push(returnPath)">
+          返回账号管理
+        </el-button>
+        <el-button size="small" @click="loadUsers">刷新权限状态</el-button>
+      </div>
     </div>
 
     <el-alert
@@ -349,12 +354,17 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { http } from '@/utils/http'
 
 type AnyRow = Record<string, any>
 
 const route = useRoute()
+const router = useRouter()
+const returnPath = computed(() => {
+  const value = typeof route.query.returnTo === 'string' ? route.query.returnTo : ''
+  return value.startsWith('/admin/system/accounts') ? value : ''
+})
 const activeTab = ref('accounts')
 const keyword = ref('')
 const users = ref<AnyRow[]>([])
@@ -582,6 +592,7 @@ onMounted(async () => {
 <style scoped>
 .permission-page { min-width: 920px; }
 .sa-head-row { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:14px; }
+.head-actions { display:flex; gap:8px; }
 .scope-alert { margin-bottom:14px; }
 .summary-grid { display:grid; grid-template-columns:repeat(4, 1fr); gap:12px; margin-bottom:14px; }
 .summary-card { background:#fff; border:1px solid var(--sa-border); border-radius:12px; padding:16px 18px; }

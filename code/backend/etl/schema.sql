@@ -431,8 +431,15 @@ CREATE TABLE sys_user (
     password_hash  TEXT NOT NULL,
     name           TEXT,
     role_id        TEXT,            -- → sys_role
-    status         TEXT DEFAULT 'active'
+    status         TEXT DEFAULT 'active',
+    account_source TEXT NOT NULL DEFAULT 'local',
+    disabled_reason TEXT,
+    archived_at    TEXT,
+    created_at     TEXT DEFAULT (datetime('now','localtime')),
+    updated_at     TEXT DEFAULT (datetime('now','localtime'))
 );
+CREATE INDEX IF NOT EXISTS idx_sys_user_governance
+ON sys_user(status,account_source,archived_at,username);
 
 CREATE TABLE IF NOT EXISTS sys_login_attempt (
     attempt_id  INTEGER PRIMARY KEY AUTOINCREMENT,

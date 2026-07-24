@@ -21,6 +21,7 @@ from ..security_governance import ensure_security_tables, write_audit
 router = APIRouter(prefix="/api/admin/rbac", tags=["rbac"])
 
 VALID_STATUS = {"active", "disabled"}
+VALID_ACCOUNT_SOURCES = {"local", "school_sync", "service"}
 VALID_SCOPE_TYPES = {"all", "college", "major", "class", "teacher", "staff_relation"}
 AUTH_IDENTITY_DDL = """
 CREATE TABLE IF NOT EXISTS sys_auth_identity (
@@ -42,6 +43,85 @@ ON sys_auth_identity(username,status);
 
 def _ensure_auth_identity_table(conn: sqlite3.Connection) -> None:
     conn.executescript(AUTH_IDENTITY_DDL)
+
+
+def _ensure_account_governance(conn: sqlite3.Connection) -> None:
+    """补齐账号治理字段；正式环境仍由幂等迁移脚本预先执行。"""
+    _ensure_auth_identity_table(conn)
+    if not dbm.query_one(
+        conn, "SELECT 1 FROM sqlite_master WHERE type='table' AND name='sys_user'",
+    ):
+        return
+    columns = {
+        row["name"] for row in dbm.query(conn, "PRAGMA table_info(sys_user)")
+    }
+    additions = {
+        "account_source": "TEXT NOT NULL DEFAULT 'local'",
+        "disabled_reason": "TEXT",
+        "archived_at": "TEXT",
+        "created_at": "TEXT",
+        "updated_at": "TEXT",
+    }
+    for name, ddl in additions.items():
+        if name not in columns:
+            dbm.execute(conn, f"ALTER TABLE sys_user ADD COLUMN {name} {ddl}")
+    dbm.execute(conn, """
+        UPDATE sys_user
+        SET created_at=COALESCE(created_at,datetime('now','localtime')),
+            updated_at=COALESCE(updated_at,datetime('now','localtime'))
+    """)
+    if dbm.query_one(
+        conn,
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='sys_user_staff'",
+    ):
+        dbm.execute(conn, """
+            UPDATE sys_user AS u
+            SET account_source='school_sync'
+            WHERE COALESCE(account_source,'local')='local'
+              AND EXISTS (
+                SELECT 1 FROM sys_user_staff ss
+                WHERE ss.username=u.username
+                  AND COALESCE(ss.source,'manual')<>'manual'
+              )
+        """)
+    if _permission_tables_ready(conn):
+        # 历史迁移中部分账号只有一个有效身份但未标为默认；这是确定性修复，
+        # 多身份账号仍必须由管理员明确选择，不能自动猜测。
+        dbm.execute(conn, """
+            UPDATE sys_user_role
+            SET is_default=1
+            WHERE user_role_id IN (
+              SELECT MIN(user_role_id)
+              FROM sys_user_role
+              WHERE status='active'
+              GROUP BY username
+              HAVING COUNT(*)=1 AND SUM(CASE WHEN is_default=1 THEN 1 ELSE 0 END)=0
+            )
+        """)
+        dbm.execute(conn, """
+            UPDATE sys_user AS u
+            SET role_id=(
+              SELECT ur.role_id FROM sys_user_role ur
+              WHERE ur.username=u.username AND ur.status='active' AND ur.is_default=1
+              ORDER BY ur.user_role_id LIMIT 1
+            )
+            WHERE EXISTS (
+              SELECT 1 FROM sys_user_role ur
+              WHERE ur.username=u.username AND ur.status='active' AND ur.is_default=1
+            )
+        """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_sys_user_governance
+        ON sys_user(status,account_source,archived_at,username)
+    """)
+    if dbm.query_one(
+        conn,
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='sys_security_audit'",
+    ):
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_security_audit_account
+            ON sys_security_audit(action,target_id,created_at)
+        """)
 
 
 def _permission_tables_ready(conn: sqlite3.Connection) -> bool:
@@ -102,12 +182,14 @@ class UserIn(BaseModel):
     role_id: str = Field(min_length=1, max_length=80)
     status: str = "active"
     password: str = Field(min_length=12, max_length=128)
+    account_source: str = "local"
 
 
 class UserUpdateIn(BaseModel):
     name: str | None = None
     role_id: str | None = None
     status: str | None = None
+    change_reason: str | None = Field(default=None, max_length=300)
 
 
 class ResetPwdIn(BaseModel):
@@ -120,46 +202,384 @@ class AuthIdentityIn(BaseModel):
     status: str = "active"
 
 
-@router.get("/users")
-def list_users(_: dict = Depends(require_admin),
-               conn: sqlite3.Connection = Depends(get_db_rw)):
-    _ensure_auth_identity_table(conn)
-    rows = dbm.query(conn, """
-        SELECT u.user_id, u.username, u.name, u.role_id, u.status,
-               r.name AS role_name,
-               COALESCE(identity_stats.identity_count,0) identity_count,
-               staff.staff_id,
-               auth.provider auth_provider,auth.subject_id auth_subject_id,
-               auth.status auth_status
+class AccountStatusIn(BaseModel):
+    status: str
+    reason: str = Field(min_length=2, max_length=300)
+
+
+def _account_permission_issue_sql(user_alias: str = "u") -> str:
+    active_identity = """
+        ur.status='active'
+        AND (ur.valid_from IS NULL OR ur.valid_from<=date('now'))
+        AND (ur.valid_to IS NULL OR ur.valid_to>=date('now'))
+    """
+    active_staff = f"""
+        ss.username={user_alias}.username AND ss.status='active'
+        AND ss.valid_from<=date('now')
+        AND (ss.valid_to IS NULL OR ss.valid_to>=date('now'))
+    """
+    active_scope = """
+        us.user_role_id=ur.user_role_id AND us.status='active'
+        AND us.valid_from<=date('now')
+        AND (us.valid_to IS NULL OR us.valid_to>=date('now'))
+    """
+    return f"""(
+        (SELECT COUNT(*) FROM sys_user_role ur
+         WHERE ur.username={user_alias}.username AND {active_identity}
+           AND ur.is_default=1)<>1
+        OR
+        (SELECT COUNT(*) FROM sys_user_staff ss
+         WHERE {active_staff})>1
+        OR EXISTS (
+          SELECT 1
+          FROM sys_user_role ur
+          JOIN sys_role r ON r.role_id=ur.role_id
+          WHERE ur.username={user_alias}.username AND {active_identity}
+            AND (
+              (
+                r.data_scope_type='staff_relation'
+                AND NOT EXISTS (
+                  SELECT 1 FROM sys_user_staff ss WHERE {active_staff}
+                )
+              )
+              OR
+              (
+                r.data_scope_type IN ('college','major','class','teacher')
+                AND NOT EXISTS (
+                  SELECT 1 FROM sys_user_scope us WHERE {active_scope}
+                )
+              )
+            )
+        )
+    )"""
+
+
+def _account_issues(conn: sqlite3.Connection, username: str) -> list[str]:
+    today = date.today().isoformat()
+    identities = dbm.query(conn, """
+        SELECT ur.user_role_id,ur.role_id,ur.is_default,r.name role_name,
+               r.data_scope_type
+        FROM sys_user_role ur
+        LEFT JOIN sys_role r ON r.role_id=ur.role_id
+        WHERE ur.username=? AND ur.status='active'
+          AND (ur.valid_from IS NULL OR ur.valid_from<=?)
+          AND (ur.valid_to IS NULL OR ur.valid_to>=?)
+        ORDER BY ur.is_default DESC,ur.user_role_id
+    """, (username, today, today)) if _permission_tables_ready(conn) else []
+    staff = dbm.query(conn, """
+        SELECT staff_id FROM sys_user_staff
+        WHERE username=? AND status='active'
+          AND valid_from<=? AND (valid_to IS NULL OR valid_to>=?)
+    """, (username, today, today)) if _permission_tables_ready(conn) else []
+    issues: list[str] = []
+    default_count = sum(1 for item in identities if item["is_default"])
+    if not identities:
+        issues.append("没有有效工作身份")
+    elif default_count != 1:
+        issues.append("默认工作身份不是唯一有效值")
+    if len(staff) > 1:
+        issues.append("存在多个同时生效的人员关联")
+    for identity in identities:
+        scope_type = identity.get("data_scope_type")
+        if scope_type == "staff_relation" and not staff:
+            issues.append(f"{identity.get('role_name') or identity['role_id']}未关联教职工号")
+        elif scope_type in {"college", "major", "class", "teacher"}:
+            count = dbm.scalar(conn, """
+                SELECT COUNT(*) FROM sys_user_scope
+                WHERE user_role_id=? AND status='active'
+                  AND valid_from<=? AND (valid_to IS NULL OR valid_to>=?)
+            """, (identity["user_role_id"], today, today)) or 0
+            if not count:
+                issues.append(
+                    f"{identity.get('role_name') or identity['role_id']}未配置{scope_type}范围"
+                )
+    return list(dict.fromkeys(issues))
+
+
+def _account_summary(conn: sqlite3.Connection) -> dict:
+    issue_sql = _account_permission_issue_sql("u")
+    row = dbm.query_one(conn, f"""
+        SELECT
+          COUNT(*) total,
+          SUM(CASE WHEN u.status='active' AND u.archived_at IS NULL THEN 1 ELSE 0 END) active,
+          SUM(CASE WHEN EXISTS (
+            SELECT 1 FROM sys_auth_identity ai
+            WHERE ai.username=u.username AND ai.status='active'
+          ) THEN 1 ELSE 0 END) mapped,
+          SUM(CASE WHEN NOT EXISTS (
+            SELECT 1 FROM sys_auth_identity ai
+            WHERE ai.username=u.username AND ai.status='active'
+          ) THEN 1 ELSE 0 END) pending_auth,
+          SUM(CASE WHEN {issue_sql} THEN 1 ELSE 0 END) permission_issues,
+          SUM(CASE WHEN u.status<>'active' OR u.archived_at IS NOT NULL THEN 1 ELSE 0 END) disabled
         FROM sys_user u
-        LEFT JOIN sys_role r ON u.role_id = r.role_id
-        LEFT JOIN (
-          SELECT username,COUNT(*) identity_count FROM sys_user_role
-          WHERE status='active' GROUP BY username
-        ) identity_stats ON identity_stats.username=u.username
-        LEFT JOIN (
-          SELECT username,MIN(staff_id) staff_id FROM sys_user_staff
-          WHERE status='active' GROUP BY username
-        ) staff ON staff.username=u.username
-        LEFT JOIN sys_auth_identity auth
-          ON auth.username=u.username AND auth.status='active'
-        ORDER BY u.user_id""")
-    return ok(rows)
+    """) or {}
+    return {
+        "total": int(row.get("total") or 0),
+        "active": int(row.get("active") or 0),
+        "mapped": int(row.get("mapped") or 0),
+        "pendingAuth": int(row.get("pending_auth") or 0),
+        "permissionIssues": int(row.get("permission_issues") or 0),
+        "disabled": int(row.get("disabled") or 0),
+    }
+
+
+@router.get("/users/readiness")
+def account_readiness(_: dict = Depends(require_admin),
+                      conn: sqlite3.Connection = Depends(get_db_rw)):
+    _ensure_account_governance(conn)
+    summary = _account_summary(conn)
+    providers = dbm.query(conn, """
+        SELECT provider,
+               COUNT(*) mapping_count,
+               SUM(CASE WHEN status='active' THEN 1 ELSE 0 END) active_count,
+               MAX(updated_at) last_updated_at
+        FROM sys_auth_identity
+        GROUP BY provider ORDER BY provider
+    """)
+    orphan = dbm.scalar(conn, """
+        SELECT COUNT(*) FROM sys_auth_identity ai
+        LEFT JOIN sys_user u ON u.username=ai.username
+        WHERE u.username IS NULL
+    """) or 0
+    multiple = dbm.scalar(conn, """
+        SELECT COUNT(*) FROM (
+          SELECT username FROM sys_auth_identity
+          WHERE status='active'
+          GROUP BY username HAVING COUNT(*)>1
+        )
+    """) or 0
+    return ok({
+        **summary,
+        "orphanMappings": int(orphan),
+        "multipleProviderAccounts": int(multiple),
+        "providers": providers,
+        "implementationChecks": [
+            {
+                "key": "stable_subject",
+                "label": "稳定认证主体字段",
+                "status": "ready" if summary["mapped"] else "pending",
+                "description": "确认学校认证返回的subject/uid在人员生命周期内保持稳定。",
+            },
+            {
+                "key": "staff_mapping",
+                "label": "教职工号映射",
+                "status": "attention" if summary["permissionIssues"] else "ready",
+                "description": "使用权威教职工号关联工作身份、带班和导师关系。",
+            },
+            {
+                "key": "identity_conflict",
+                "label": "认证映射冲突",
+                "status": "attention" if orphan or multiple else "ready",
+                "description": "孤儿映射和多来源账号应在正式切换前完成核验。",
+            },
+            {
+                "key": "secret_boundary",
+                "label": "认证密钥边界",
+                "status": "ready",
+                "description": "客户端密钥、票据和回调密钥仅由部署环境管理。",
+            },
+        ],
+    })
+
+
+@router.get("/users")
+def list_users(page: int = 1, page_size: int = 20,
+               keyword: str | None = None, status: str | None = None,
+               role_id: str | None = None, auth_status: str | None = None,
+               permission_status: str | None = None,
+               account_source: str | None = None,
+               _: dict = Depends(require_admin),
+               conn: sqlite3.Connection = Depends(get_db_rw)):
+    _ensure_account_governance(conn)
+    _require_permission_tables(conn)
+    page = max(int(page or 1), 1)
+    page_size = min(max(int(page_size or 20), 10), 100)
+    params: list = []
+    where: list[str] = []
+    if keyword and keyword.strip():
+        token = f"%{keyword.strip()}%"
+        where.append(
+            "(u.username LIKE ? OR u.name LIKE ? OR EXISTS ("
+            "SELECT 1 FROM sys_user_staff ss "
+            "WHERE ss.username=u.username AND ss.staff_id LIKE ?))"
+        )
+        params.extend([token, token, token])
+    if status in VALID_STATUS:
+        where.append("u.status=?")
+        params.append(status)
+    if account_source in VALID_ACCOUNT_SOURCES:
+        where.append("u.account_source=?")
+        params.append(account_source)
+    if role_id:
+        where.append("""EXISTS (
+            SELECT 1 FROM sys_user_role ur
+            WHERE ur.username=u.username AND ur.role_id=? AND ur.status='active'
+              AND (ur.valid_from IS NULL OR ur.valid_from<=date('now'))
+              AND (ur.valid_to IS NULL OR ur.valid_to>=date('now'))
+        )""")
+        params.append(role_id)
+    if auth_status == "mapped":
+        where.append("""EXISTS (
+            SELECT 1 FROM sys_auth_identity ai
+            WHERE ai.username=u.username AND ai.status='active'
+        )""")
+    elif auth_status == "unmapped":
+        where.append("""NOT EXISTS (
+            SELECT 1 FROM sys_auth_identity ai
+            WHERE ai.username=u.username AND ai.status='active'
+        )""")
+    issue_sql = _account_permission_issue_sql("u")
+    if permission_status == "issue":
+        where.append(issue_sql)
+    elif permission_status == "ready":
+        where.append(f"NOT {issue_sql}")
+    where_sql = f"WHERE {' AND '.join(where)}" if where else ""
+    total = dbm.scalar(
+        conn, f"SELECT COUNT(*) FROM sys_user u {where_sql}", tuple(params),
+    ) or 0
+    rows = dbm.query(conn, f"""
+        SELECT
+          u.user_id,u.username,u.name,u.status,u.account_source,
+          u.disabled_reason,u.archived_at,u.created_at,u.updated_at,
+          (
+            SELECT ur.role_id FROM sys_user_role ur
+            WHERE ur.username=u.username AND ur.status='active' AND ur.is_default=1
+              AND (ur.valid_from IS NULL OR ur.valid_from<=date('now'))
+              AND (ur.valid_to IS NULL OR ur.valid_to>=date('now'))
+            ORDER BY ur.user_role_id LIMIT 1
+          ) role_id,
+          (
+            SELECT r.name FROM sys_user_role ur
+            LEFT JOIN sys_role r ON r.role_id=ur.role_id
+            WHERE ur.username=u.username AND ur.status='active' AND ur.is_default=1
+              AND (ur.valid_from IS NULL OR ur.valid_from<=date('now'))
+              AND (ur.valid_to IS NULL OR ur.valid_to>=date('now'))
+            ORDER BY ur.user_role_id LIMIT 1
+          ) role_name,
+          (
+            SELECT COUNT(*) FROM sys_user_role ur
+            WHERE ur.username=u.username AND ur.status='active'
+              AND (ur.valid_from IS NULL OR ur.valid_from<=date('now'))
+              AND (ur.valid_to IS NULL OR ur.valid_to>=date('now'))
+          ) identity_count,
+          (
+            SELECT MIN(ss.staff_id) FROM sys_user_staff ss
+            WHERE ss.username=u.username AND ss.status='active'
+              AND ss.valid_from<=date('now')
+              AND (ss.valid_to IS NULL OR ss.valid_to>=date('now'))
+          ) staff_id,
+          (
+            SELECT COUNT(*) FROM sys_auth_identity ai
+            WHERE ai.username=u.username AND ai.status='active'
+          ) auth_mapping_count,
+          (
+            SELECT ai.provider FROM sys_auth_identity ai
+            WHERE ai.username=u.username AND ai.status='active'
+            ORDER BY ai.provider LIMIT 1
+          ) auth_provider,
+          (
+            SELECT ai.subject_id FROM sys_auth_identity ai
+            WHERE ai.username=u.username AND ai.status='active'
+            ORDER BY ai.provider LIMIT 1
+          ) auth_subject_id,
+          (
+            SELECT MAX(sa.created_at) FROM sys_security_audit sa
+            WHERE sa.action='auth.login' AND sa.result='success'
+              AND sa.target_id=u.username
+          ) last_login_at
+        FROM sys_user u
+        {where_sql}
+        ORDER BY
+          CASE WHEN u.status='active' AND u.archived_at IS NULL THEN 0 ELSE 1 END,
+          u.user_id
+        LIMIT ? OFFSET ?
+    """, tuple([*params, page_size, (page - 1) * page_size]))
+    for row in rows:
+        issues = _account_issues(conn, row["username"])
+        row["issues"] = issues
+        row["permissionStatus"] = "ready" if not issues else "issue"
+        row["auth_status"] = "mapped" if row["auth_mapping_count"] else "unmapped"
+        row["can_reset_local_password"] = (
+            row["account_source"] in {"local", "service"}
+            or not row["auth_mapping_count"]
+        )
+    return ok({
+        "items": rows,
+        "total": int(total),
+        "page": page,
+        "pageSize": page_size,
+        "summary": _account_summary(conn),
+    })
+
+
+@router.get("/users/{user_id}")
+def get_user_detail(user_id: int, _: dict = Depends(require_admin),
+                    conn: sqlite3.Connection = Depends(get_db_rw)):
+    _ensure_account_governance(conn)
+    user = dbm.query_one(conn, """
+        SELECT user_id,username,name,status,account_source,disabled_reason,
+               archived_at,created_at,updated_at
+        FROM sys_user WHERE user_id=?
+    """, (user_id,))
+    if not user:
+        raise ApiError("账号不存在", code=404, status_code=404)
+    permission = _identity_detail(conn, user["username"])
+    mappings = dbm.query(conn, """
+        SELECT auth_identity_id,provider,subject_id,status,source,updated_by,updated_at
+        FROM sys_auth_identity
+        WHERE username=?
+        ORDER BY status='active' DESC,provider
+    """, (user["username"],))
+    audits = dbm.query(conn, """
+        SELECT audit_id,actor,action,result,detail_json,created_at
+        FROM sys_security_audit
+        WHERE target_type='user' AND target_id IN (?,?)
+          AND action LIKE 'rbac.user.%'
+        ORDER BY audit_id DESC LIMIT 20
+    """, (str(user_id), user["username"]))
+    issues = _account_issues(conn, user["username"])
+    last_login = dbm.scalar(conn, """
+        SELECT MAX(created_at) FROM sys_security_audit
+        WHERE action='auth.login' AND result='success' AND target_id=?
+    """, (user["username"],))
+    active_mapping_count = sum(1 for item in mappings if item["status"] == "active")
+    return ok({
+        **user,
+        "authMappings": mappings,
+        "staffBindings": permission.get("staffBindings") or [],
+        "identities": permission.get("identities") or [],
+        "issues": issues,
+        "permissionStatus": "ready" if not issues else "issue",
+        "lastLoginAt": last_login,
+        "auditTrail": audits,
+        "canResetLocalPassword": (
+            user["account_source"] in {"local", "service"}
+            or active_mapping_count == 0
+        ),
+    })
 
 
 @router.post("/users")
 def create_user(body: UserIn, admin: dict = Depends(require_admin),
                 conn: sqlite3.Connection = Depends(get_db_rw)):
+    _ensure_account_governance(conn)
     if dbm.query_one(conn, "SELECT 1 FROM sys_user WHERE username=?", (body.username,)):
         raise ApiError("用户名已存在")
     if not dbm.query_one(conn, "SELECT 1 FROM sys_role WHERE role_id=?", (body.role_id,)):
         raise ApiError("角色不存在")
+    if body.account_source not in VALID_ACCOUNT_SOURCES:
+        raise ApiError("账号来源无效", code=400, status_code=400)
     pwd = _validate_password(body.password, body.username)
     _validate_status(body.status)
     cur = dbm.execute(conn, """
-        INSERT INTO sys_user (username, password_hash, name, role_id, status)
-        VALUES (?,?,?,?,?)""",
-        (body.username, hash_password(pwd), body.name, body.role_id, body.status))
+        INSERT INTO sys_user (
+          username,password_hash,name,role_id,status,account_source,
+          created_at,updated_at
+        )
+        VALUES (?,?,?,?,?,?,datetime('now','localtime'),datetime('now','localtime'))""",
+        (body.username, hash_password(pwd), body.name, body.role_id,
+         body.status, body.account_source))
     identity_id = _ensure_default_identity(
         conn, body.username, body.role_id, "rbac_create",
     )
@@ -173,73 +593,154 @@ def create_user(body: UserIn, admin: dict = Depends(require_admin),
 @router.put("/users/{user_id}")
 def update_user(user_id: int, body: UserUpdateIn, admin: dict = Depends(require_admin),
                 conn: sqlite3.Connection = Depends(get_db_rw)):
-    user = dbm.query_one(conn, "SELECT user_id,username,role_id,status FROM sys_user WHERE user_id=?", (user_id,))
+    _ensure_account_governance(conn)
+    user = dbm.query_one(conn, """
+        SELECT user_id,username,role_id,status,archived_at
+        FROM sys_user WHERE user_id=?
+    """, (user_id,))
     if not user:
         raise ApiError("账号不存在", status_code=404)
     fields, params = [], []
     if body.name is not None:
         fields.append("name=?"); params.append(body.name)
     if body.role_id is not None:
-        if user["username"] == admin["username"] and body.role_id != user["role_id"]:
-            raise ApiError("不能修改当前登录账号的角色", code=400, status_code=400)
-        if not dbm.query_one(conn, "SELECT 1 FROM sys_role WHERE role_id=?", (body.role_id,)):
-            raise ApiError("角色不存在")
-        fields.append("role_id=?"); params.append(body.role_id)
+        if body.role_id != user["role_id"]:
+            raise ApiError(
+                "工作身份请在“数据权限”中调整，账号编辑不再直接修改角色",
+                code=400, status_code=400,
+            )
     if body.status is not None:
         _validate_status(body.status)
         if user["username"] == admin["username"] and body.status != "active":
             raise ApiError("不能停用当前登录账号", code=400, status_code=400)
+        if body.status != user["status"] and not (body.change_reason or "").strip():
+            raise ApiError("启用或停用账号必须填写原因", code=400, status_code=400)
         fields.append("status=?"); params.append(body.status)
+        fields.append("disabled_reason=?")
+        params.append(
+            None if body.status == "active" else body.change_reason.strip()
+        )
+        if body.status == "active":
+            fields.append("archived_at=NULL")
     if fields:
+        fields.append("updated_at=datetime('now','localtime')")
         params.append(user_id)
         dbm.execute(conn, f"UPDATE sys_user SET {','.join(fields)} WHERE user_id=?", params)
-        if body.role_id is not None:
-            _ensure_default_identity(
-                conn, user["username"], body.role_id, "rbac_update",
-            )
         write_audit(conn, admin["username"], "rbac.user.update", "user", str(user_id),
-                    detail={"fields": [f.split("=")[0] for f in fields]})
+                    detail={
+                        "fields": [f.split("=")[0] for f in fields],
+                        "reason": body.change_reason,
+                    })
     return ok(msg="账号已更新")
+
+
+@router.put("/users/{user_id}/status")
+def set_user_status(user_id: int, body: AccountStatusIn,
+                    admin: dict = Depends(require_admin),
+                    conn: sqlite3.Connection = Depends(get_db_rw)):
+    _ensure_account_governance(conn)
+    _validate_status(body.status)
+    user = dbm.query_one(
+        conn, "SELECT username,status FROM sys_user WHERE user_id=?", (user_id,),
+    )
+    if not user:
+        raise ApiError("账号不存在", code=404, status_code=404)
+    if user["username"] == admin["username"] and body.status != "active":
+        raise ApiError("不能停用当前登录账号", code=400, status_code=400)
+    dbm.execute(conn, """
+        UPDATE sys_user
+        SET status=?,disabled_reason=?,archived_at=CASE WHEN ?='active' THEN NULL ELSE archived_at END,
+            updated_at=datetime('now','localtime')
+        WHERE user_id=?
+    """, (
+        body.status,
+        None if body.status == "active" else body.reason.strip(),
+        body.status,
+        user_id,
+    ))
+    write_audit(
+        conn, admin["username"], "rbac.user.status_update", "user", str(user_id),
+        detail={"username": user["username"], "status": body.status,
+                "reason": body.reason.strip()},
+    )
+    return ok(msg="账号已启用" if body.status == "active" else "账号已停用")
+
+
+@router.post("/users/{user_id}/archive")
+def archive_user(user_id: int, body: AccountStatusIn,
+                 admin: dict = Depends(require_admin),
+                 conn: sqlite3.Connection = Depends(get_db_rw)):
+    _ensure_account_governance(conn)
+    user = dbm.query_one(
+        conn, "SELECT username FROM sys_user WHERE user_id=?", (user_id,),
+    )
+    if not user:
+        raise ApiError("账号不存在", status_code=404)
+    if user["username"] == admin["username"]:
+        raise ApiError("不能归档当前登录账号")
+    dbm.execute(conn, """
+        UPDATE sys_user
+        SET status='disabled',disabled_reason=?,archived_at=datetime('now','localtime'),
+            updated_at=datetime('now','localtime')
+        WHERE user_id=?
+    """, (body.reason.strip(), user_id))
+    dbm.execute(conn, """
+        UPDATE sys_auth_identity
+        SET status='inactive',updated_by=?,updated_at=datetime('now','localtime')
+        WHERE username=? AND status='active'
+    """, (admin["username"], user["username"]))
+    write_audit(
+        conn, admin["username"], "rbac.user.archive", "user", str(user_id),
+        detail={"username": user["username"], "reason": body.reason.strip()},
+    )
+    return ok(msg="账号已归档，历史身份与权限记录继续保留")
 
 
 @router.delete("/users/{user_id}")
 def delete_user(user_id: int, admin: dict = Depends(require_admin),
                 conn: sqlite3.Connection = Depends(get_db_rw)):
+    """兼容旧客户端：删除请求降级为安全归档，不再物理删除账号。"""
+    _ensure_account_governance(conn)
     user = dbm.query_one(conn, "SELECT username FROM sys_user WHERE user_id=?", (user_id,))
     if not user:
         raise ApiError("账号不存在", status_code=404)
     if user["username"] == admin["username"]:
         raise ApiError("不能删除当前登录账号")
-    if _permission_tables_ready(conn):
-        identity_ids = [
-            row["user_role_id"] for row in dbm.query(
-                conn, "SELECT user_role_id FROM sys_user_role WHERE username=?",
-                (user["username"],),
-            )
-        ]
-        if identity_ids:
-            placeholders = ",".join("?" * len(identity_ids))
-            dbm.execute(
-                conn,
-                f"DELETE FROM sys_user_scope WHERE user_role_id IN ({placeholders})",
-                tuple(identity_ids),
-            )
-        dbm.execute(conn, "DELETE FROM sys_user_role WHERE username=?",
-                    (user["username"],))
-        dbm.execute(conn, "DELETE FROM sys_user_staff WHERE username=?",
-                    (user["username"],))
-    dbm.execute(conn, "DELETE FROM sys_user WHERE user_id=?", (user_id,))
-    write_audit(conn, admin["username"], "rbac.user.delete", "user", str(user_id),
-                detail={"username": user["username"]})
-    return ok(msg="账号已删除")
+    dbm.execute(conn, """
+        UPDATE sys_user
+        SET status='disabled',disabled_reason='兼容删除请求转为归档',
+            archived_at=datetime('now','localtime'),
+            updated_at=datetime('now','localtime')
+        WHERE user_id=?
+    """, (user_id,))
+    dbm.execute(conn, """
+        UPDATE sys_auth_identity
+        SET status='inactive',updated_by=?,updated_at=datetime('now','localtime')
+        WHERE username=? AND status='active'
+    """, (admin["username"], user["username"]))
+    write_audit(conn, admin["username"], "rbac.user.archive", "user", str(user_id),
+                detail={"username": user["username"], "source": "legacy_delete"})
+    return ok(msg="账号已归档")
 
 
 @router.post("/users/{user_id}/reset-pwd")
 def reset_pwd(user_id: int, body: ResetPwdIn, admin: dict = Depends(require_admin),
               conn: sqlite3.Connection = Depends(get_db_rw)):
-    user = dbm.query_one(conn, "SELECT username FROM sys_user WHERE user_id=?", (user_id,))
+    _ensure_account_governance(conn)
+    user = dbm.query_one(conn, """
+        SELECT username,account_source FROM sys_user WHERE user_id=?
+    """, (user_id,))
     if not user:
         raise ApiError("账号不存在", status_code=404)
+    has_active_mapping = bool(dbm.query_one(conn, """
+        SELECT 1 FROM sys_auth_identity
+        WHERE username=? AND status='active' LIMIT 1
+    """, (user["username"],)))
+    if user["account_source"] == "school_sync" and has_active_mapping:
+        raise ApiError(
+            "学校同步且已接入统一认证的账号不能在本平台重置密码",
+            code=400, status_code=400,
+        )
     pwd = _validate_password(body.password, user["username"])
     dbm.execute(conn, "UPDATE sys_user SET password_hash=? WHERE user_id=?",
                 (hash_password(pwd), user_id))
@@ -250,7 +751,7 @@ def reset_pwd(user_id: int, body: ResetPwdIn, admin: dict = Depends(require_admi
 @router.get("/users/{user_id}/auth-identity")
 def get_auth_identity(user_id: int, _: dict = Depends(require_admin),
                       conn: sqlite3.Connection = Depends(get_db_rw)):
-    _ensure_auth_identity_table(conn)
+    _ensure_account_governance(conn)
     user = dbm.query_one(
         conn, "SELECT user_id,username,name FROM sys_user WHERE user_id=?",
         (user_id,),
@@ -268,13 +769,15 @@ def get_auth_identity(user_id: int, _: dict = Depends(require_admin),
 def set_auth_identity(user_id: int, body: AuthIdentityIn,
                       admin: dict = Depends(require_admin),
                       conn: sqlite3.Connection = Depends(get_db_rw)):
-    _ensure_auth_identity_table(conn)
+    _ensure_account_governance(conn)
     user = dbm.query_one(
-        conn, "SELECT user_id,username,name FROM sys_user WHERE user_id=?",
+        conn, "SELECT user_id,username,name,archived_at FROM sys_user WHERE user_id=?",
         (user_id,),
     )
     if not user:
         raise ApiError("账号不存在", status_code=404)
+    if user["archived_at"] and body.status == "active":
+        raise ApiError("归档账号不能新增有效认证映射，请先启用账号", code=400, status_code=400)
     if body.status not in {"active", "inactive"}:
         raise ApiError("统一身份映射状态无效", code=400, status_code=400)
     subject_id = body.subject_id.strip()

@@ -13,7 +13,10 @@ sys.stdout.reconfigure(encoding="utf-8")
 sys.path.insert(0, __file__.rsplit("scripts", 1)[0])
 
 from backend.ai_experts import get_expert
-from backend.api.routers.admin_rbac import AUTH_IDENTITY_DDL
+from backend.api.routers.admin_rbac import (
+    AUTH_IDENTITY_DDL,
+    _ensure_account_governance,
+)
 from backend.ai_experts.versions import ensure_tables as _ensure_tables
 from backend.api.routers.settings import _ensure_kpi_config
 from backend.api.routers.system_management import _ensure_system_tables
@@ -44,6 +47,7 @@ def harden_legacy_demo_admin(conn: sqlite3.Connection) -> int:
 def migrate(conn: sqlite3.Connection) -> dict:
     migrate_menu(conn)
     conn.executescript(AUTH_IDENTITY_DDL)
+    _ensure_account_governance(conn)
     _ensure_tables(conn)
     _ensure_kpi_config(conn)
     _ensure_system_tables(conn)
@@ -75,6 +79,15 @@ def migrate(conn: sqlite3.Connection) -> dict:
         "authMappings": conn.execute(
             "SELECT COUNT(*) FROM sys_auth_identity"
         ).fetchone()[0],
+        "governedAccounts": (
+            conn.execute(
+                "SELECT COUNT(*) FROM sys_user WHERE account_source IS NOT NULL"
+            ).fetchone()[0]
+            if conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='sys_user'"
+            ).fetchone()
+            else 0
+        ),
         "systemParameters": conn.execute(
             "SELECT COUNT(*) FROM sys_system_parameter"
         ).fetchone()[0],

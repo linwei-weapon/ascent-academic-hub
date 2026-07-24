@@ -63,6 +63,8 @@ TARGET_MENUS = [
      "/admin/system/audit", "Document", 307),
     ("/admin/settings", "/admin/system", "系统参数",
      "/admin/settings", "Setting", 308),
+    ("/admin/system/decision-config", "/admin/system", "决策配置",
+     "/admin/system/decision-config", "MagicStick", 309),
     ("/admin/system/data-collection", "/admin/system", "数据采集监控",
      "/admin/system/data-collection", "Monitor", 310),
 ]
