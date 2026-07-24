@@ -5,6 +5,7 @@ from backend.api.envelope import ApiError
 from backend.api.routers.admin_rbac import _assert_valid_parent, _leaf_menu_ids
 from backend.api.routers.auth import _menus_for_role
 from scripts.migrate_menu import LEAF_IDS, PARENT_IDS, TARGET_MENUS, migrate
+from scripts.migrate_my_scope_menu import migrate as migrate_student_workspace
 
 
 def make_conn() -> sqlite3.Connection:
@@ -93,6 +94,10 @@ class MenuStructureTest(unittest.TestCase):
             {(row["role_id"], row["menu_id"]) for row in first_grant},
         )
         self.assertIn(
+            ("school_leader", "/admin/students/analysis"),
+            {(row["role_id"], row["menu_id"]) for row in first_grant},
+        )
+        self.assertIn(
             ("counselor", "/admin/dashboard"),
             {(row["role_id"], row["menu_id"]) for row in first_grant},
         )
@@ -136,6 +141,52 @@ class MenuStructureTest(unittest.TestCase):
         with self.assertRaises(ApiError):
             _assert_valid_parent(
                 conn, "/admin/analysis", "/admin/system",
+            )
+        conn.close()
+
+    def test_student_workspace_migration_transfers_and_removes_legacy_menu(self):
+        conn = make_conn()
+        conn.execute(
+            "INSERT INTO sys_menu VALUES(?,?,?,?,?,?)",
+            (
+                "/admin/students/my", "/admin/analysis", "我的班级/学生",
+                "/admin/students/my", "User", 107,
+            ),
+        )
+        conn.executemany(
+            "INSERT INTO sys_role_menu VALUES(?,?)",
+            [
+                ("college_dean", "/admin/students/my"),
+                ("mentor", "/admin/students/my"),
+            ],
+        )
+
+        first = migrate_student_workspace(conn)
+        second = migrate_student_workspace(conn)
+
+        self.assertEqual(
+            ["college_dean", "mentor"],
+            first["transferredRoles"],
+        )
+        self.assertEqual([], second["transferredRoles"])
+        self.assertIsNone(conn.execute(
+            "SELECT 1 FROM sys_menu WHERE menu_id='/admin/students/my'",
+        ).fetchone())
+        grants = {
+            (row["role_id"], row["menu_id"])
+            for row in conn.execute(
+                "SELECT role_id,menu_id FROM sys_role_menu",
+            )
+        }
+        for role_id in (
+            "school_leader", "dean", "dept_operation", "dept_research",
+            "dept_practice", "quality_office", "college_dean",
+            "college_secretary", "dept_director", "counselor",
+            "class_adviser", "mentor",
+        ):
+            self.assertIn(
+                (role_id, "/admin/students/analysis"),
+                grants,
             )
         conn.close()
 

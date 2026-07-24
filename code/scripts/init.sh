@@ -24,6 +24,7 @@ PYTHONIOENCODING=utf-8 python -X utf8 scripts/migrate_alert_rules.py
 PYTHONIOENCODING=utf-8 python -X utf8 scripts/migrate_permission_context.py
 PYTHONIOENCODING=utf-8 python -X utf8 scripts/migrate_staff_relationships.py
 PYTHONIOENCODING=utf-8 python -X utf8 scripts/migrate_system_management.py
+PYTHONIOENCODING=utf-8 python -X utf8 scripts/migrate_student_growth_indexes.py
 
 echo
 echo "[OK] 分析库已生成: code/backend/db/analytics.sqlite"

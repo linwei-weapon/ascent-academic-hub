@@ -9,13 +9,150 @@ from typing import Optional
 from fastapi import APIRouter, Depends
 
 from .. import db as dbm
+from ..academic_metrics import (
+    earned_credit_map,
+    per_student_weighted_gpa,
+    term_grade_and_failed_students,
+    weighted_gpa_expression,
+)
 from ..deps import get_db, get_current_user, student_data_scope, _staff_student_ids
 from ..envelope import ApiError, ok
 from ..settings import CURRENT_SEMESTER
+from ..student_growth import build_growth_snapshot, filter_growth_rows
 
 router = APIRouter(prefix="/api/admin/students", tags=["students"])
 _ANALYSIS_CACHE: dict[tuple, tuple[float, dict]] = {}
 _ANALYSIS_CACHE_TTL = 900
+_GROWTH_CACHE: dict[tuple, tuple[float, dict]] = {}
+_GROWTH_CACHE_TTL = 900
+
+
+def _growth_snapshot(
+    conn: sqlite3.Connection,
+    user: dict,
+    from_semester: Optional[str],
+    to_semester: Optional[str],
+    college: Optional[str],
+    major: Optional[str],
+    grade: Optional[str],
+    class_id: Optional[str],
+) -> dict:
+    scope_fingerprint = (
+        (user.get("permission_context") or {}).get("scopeFingerprint")
+        or f"legacy:{user.get('username')}:{user.get('role_id')}"
+    )
+    key = (
+        scope_fingerprint, from_semester, to_semester,
+        college, major, grade, class_id,
+    )
+    cached = _GROWTH_CACHE.get(key)
+    if cached and time.monotonic() - cached[0] < _GROWTH_CACHE_TTL:
+        return cached[1]
+    snapshot = build_growth_snapshot(
+        conn, user, from_semester=from_semester, to_semester=to_semester,
+        college=college, major=major, grade=grade, class_id=class_id,
+    )
+    _GROWTH_CACHE[key] = (time.monotonic(), snapshot)
+    return snapshot
+
+
+@router.get("/growth/overview")
+def growth_overview(
+    from_semester: Optional[str] = None,
+    to_semester: Optional[str] = None,
+    college: Optional[str] = None,
+    major: Optional[str] = None,
+    grade: Optional[str] = None,
+    class_id: Optional[str] = None,
+    user: dict = Depends(get_current_user),
+    conn: sqlite3.Connection = Depends(get_db),
+):
+    """学生成长管理首屏：指标、关注分组和组织比较。"""
+    snapshot = _growth_snapshot(
+        conn, user, from_semester, to_semester,
+        college, major, grade, class_id,
+    )
+    return ok({
+        key: value for key, value in snapshot.items()
+        if key not in ("rows", "organizations", "organizationLabel")
+    })
+
+
+@router.get("/growth/organizations")
+def growth_organizations(
+    from_semester: Optional[str] = None,
+    to_semester: Optional[str] = None,
+    college: Optional[str] = None,
+    major: Optional[str] = None,
+    grade: Optional[str] = None,
+    class_id: Optional[str] = None,
+    user: dict = Depends(get_current_user),
+    conn: sqlite3.Connection = Depends(get_db),
+):
+    """按当前授权范围返回下一级组织比较，不包含学生明细。"""
+    snapshot = _growth_snapshot(
+        conn, user, from_semester, to_semester,
+        college, major, grade, class_id,
+    )
+    return ok({
+        "period": snapshot["period"],
+        "rule": snapshot["rule"],
+        "organizationLabel": snapshot["organizationLabel"],
+        "organizations": snapshot["organizations"],
+        "evidence": snapshot["evidence"],
+    })
+
+
+@router.get("/growth/list")
+def growth_priority_list(
+    from_semester: Optional[str] = None,
+    to_semester: Optional[str] = None,
+    college: Optional[str] = None,
+    major: Optional[str] = None,
+    grade: Optional[str] = None,
+    class_id: Optional[str] = None,
+    group: Optional[str] = None,
+    organization_id: Optional[str] = None,
+    keyword: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 20,
+    user: dict = Depends(get_current_user),
+    conn: sqlite3.Connection = Depends(get_db),
+):
+    """透明优先级学生名单；不返回或使用未披露的综合风险分。"""
+    if page < 1 or page_size < 1 or page_size > 100:
+        raise ApiError("分页参数超出允许范围", code=400, status_code=400)
+    snapshot = _growth_snapshot(
+        conn, user, from_semester, to_semester,
+        college, major, grade, class_id,
+    )
+    rows = filter_growth_rows(
+        snapshot, group=group, organization_id=organization_id,
+    )
+    if keyword:
+        value = keyword.strip().lower()
+        rows = [
+            row for row in rows
+            if value in row["sid"].lower() or value in row["name"].lower()
+        ]
+    total = len(rows)
+    offset = (page - 1) * page_size
+    return ok({
+        "period": snapshot["period"],
+        "rule": snapshot["rule"],
+        "group": group or "all",
+        "organizationId": organization_id,
+        "total": total, "page": page, "pageSize": page_size,
+        "students": rows[offset:offset + page_size],
+        "sorting": [
+            "同时命中连续受挫和重复未解决",
+            "低年级首次受挫",
+            "明确恶化且未通过课程增加",
+            "仅GPA明显下降",
+            "其他关注学生",
+        ],
+        "overlapNotice": snapshot["evidence"]["overlapNotice"],
+    })
 
 
 @router.get("/analysis")
@@ -89,7 +226,7 @@ def analysis(semester: Optional[str] = None, grade: Optional[str] = None,
 
     total_stu = dbm.scalar(conn, f"SELECT COUNT(*) FROM dim_student{swhere}", tuple(sparams)) or 0
 
-    # 每生平均绩点
+    # 每生学分加权 GPA；缺少有效学分的成绩不进入 GPA。
     gw, gp = ["gpa IS NOT NULL"], []
     gsem, gsemp = _sem("semester_id")
     if gsem:
@@ -102,12 +239,13 @@ def analysis(semester: Optional[str] = None, grade: Optional[str] = None,
         gw.append("is_required=1")
     elif required in ("选修", "0"):
         gw.append("is_required=0")
-    gpa_sql = f"SELECT student_id, AVG(gpa) g FROM fact_grade WHERE {' AND '.join(gw)}{stu_sub} GROUP BY student_id"
+    gpa_sql = f"""SELECT student_id,{weighted_gpa_expression()} g
+        FROM fact_grade WHERE {' AND '.join(gw)}{stu_sub} GROUP BY student_id"""
     stu_gpa = {r["student_id"]: r["g"] for r in dbm.query(conn, gpa_sql, tuple(gp + sparams))}
     gpa_vals = list(stu_gpa.values())
     gpa_avg = round(sum(gpa_vals) / len(gpa_vals), 2) if gpa_vals else 0
 
-    # 挂科率（真实）
+    # 未通过人次率（真实成绩记录口径）
     fw, fpms = _grade_clauses("g")
     rtot = dbm.scalar(conn, f"SELECT COUNT(*) FROM fact_grade g WHERE g.source='real' AND g.is_pass IS NOT NULL{fw}", tuple(fpms)) or 0
     rfail = dbm.scalar(conn, f"SELECT COUNT(*) FROM fact_grade g WHERE g.source='real' AND g.is_pass=0{fw}", tuple(fpms)) or 0
@@ -129,10 +267,10 @@ def analysis(semester: Optional[str] = None, grade: Optional[str] = None,
     studentKpis = [
         {"label": "在籍学生", "value": f"{total_stu:,}", "color": "#1E3A5F",
          "formula": "在籍本科生总数 COUNT(学籍)"},
-        {"label": "全校GPA均值", "value": str(gpa_avg), "color": "#2563EB",
-         "formula": "AVG(每生平均绩点)·5分制"},
-        {"label": "挂科率", "value": f"{fail_rate}%", "color": "#DC2626",
-         "formula": "不及格人次÷总修读人次（真实）"},
+        {"label": "范围GPA均值", "value": str(gpa_avg), "color": "#2563EB",
+         "formula": "AVG(每生学分加权GPA)·5分制"},
+        {"label": "未通过人次率", "value": f"{fail_rate}%", "color": "#DC2626",
+         "formula": "未通过课程记录数÷有效成绩记录数（真实）"},
         {"label": "预警率", "value": f"{alert_rate}%", "color": "#EA580C",
          "formula": "预警学生÷在籍学生"},
         {"label": "毕业率", "value": f"{round(grad_rate * 100, 1)}%", "color": "#16A34A",
@@ -152,7 +290,7 @@ def analysis(semester: Optional[str] = None, grade: Optional[str] = None,
         clusters.append({"label": label, "count": c, "pct": round(c / n_gpa * 100),
                          "color": color, "gpa": rng})
 
-    # 各年级 GPA（含挂科率/预警率）。年级过滤时仅该年级一行；学院过滤收口到本院学生。
+    # 各年级 GPA（含未通过人次率/预警学生率）。
     gradeGpa = []
     for r in dbm.query(conn, f"SELECT grade, COUNT(*) n FROM dim_student{swhere} GROUP BY grade ORDER BY grade DESC", tuple(sparams)):
         gr = r["grade"]
@@ -187,18 +325,22 @@ def analysis(semester: Optional[str] = None, grade: Optional[str] = None,
                          "failRate": f"{fr}%", "alertRate": f"{ar}%"})
 
     # 学分完成分布（已修÷应修）：对全体在校生现算，覆盖所有年级。
-    # 已修=该生通过课程累计学分（fact_grade.is_pass=1，不随学期过滤，取全部历史）；
+    # 已修=该生按课程去重后的通过学分（不随学期过滤，取全部历史）；
     # 应修=该生 (专业,年级) 在 fact_major_req 的 total_req。req 缺失则跳过该生（不计分母）。
     # 受学院/年级/专业/班级过滤（scond）限定参与统计的学生集合。
     cbuckets = [(">90%", 0.9, 9, "#16A34A"), ("80-90%", 0.8, 0.9, "#2563EB"),
                 ("60-80%", 0.6, 0.8, "#EA580C"), ("<60%", -1, 0.6, "#DC2626")]
     req_map = {(r["major_id"], r["grade"]): r["total_req"]
                for r in dbm.query(conn, "SELECT major_id, grade, total_req FROM fact_major_req WHERE total_req>0")}
-    earned_map = {r["student_id"]: r["e"] for r in dbm.query(conn, """
-        SELECT student_id, SUM(credits) e FROM fact_grade
-        WHERE is_pass=1 GROUP BY student_id""")}
+    scope_students = dbm.query(
+        conn, f"SELECT student_id,major_id,grade FROM dim_student{swhere}",
+        tuple(sparams),
+    )
+    earned_map = earned_credit_map(
+        conn, [student["student_id"] for student in scope_students]
+    )
     ratios = []
-    for s in dbm.query(conn, f"SELECT student_id, major_id, grade FROM dim_student{swhere}", tuple(sparams)):
+    for s in scope_students:
         req = req_map.get((s["major_id"], s["grade"]))
         if not req:
             continue
@@ -276,13 +418,15 @@ def analysis(semester: Optional[str] = None, grade: Optional[str] = None,
                  "improved": 0, "stable": 0, "declined": 0, "mixed": 0,
                  "insufficient": total_stu, "compared": 0, "avgDelta": None,
                  "avgFailDelta": None, "threshold": 0.3, "failThreshold": 1,
-                 "definition": "同时比较学期平均GPA和挂科门次；任一指标明显变化且另一指标未反向恶化，判为改善或恶化；两个指标方向冲突时列为变化分化。"}
+                 "definition": "同时比较学期学分加权GPA和未通过课程门数；任一指标明显变化且另一指标未反向恶化，判为改善或恶化；两个指标方向冲突时列为变化分化。"}
     if len(pair) == 2:
         ph = ",".join("?" * 2)
         mig_student = (" AND g.student_id IN (SELECT student_id FROM dim_student WHERE "
                        + " AND ".join(scond) + ")") if scond else ""
-        mig_rows = dbm.query(conn, f"""SELECT g.student_id,g.semester_id,AVG(g.gpa) gpa,
-            SUM(CASE WHEN g.is_pass=0 THEN 1 ELSE 0 END) fail_count,COUNT(*) grade_count
+        mig_rows = dbm.query(conn, f"""SELECT g.student_id,g.semester_id,
+            {weighted_gpa_expression('g')} gpa,
+            COUNT(DISTINCT CASE WHEN g.is_pass=0 THEN g.course_id END) fail_count,
+            COUNT(*) grade_count
             FROM fact_grade g WHERE g.semester_id IN ({ph}){mig_student}
             GROUP BY g.student_id,g.semester_id""", tuple(pair + sparams))
         by_student = {}
@@ -459,8 +603,10 @@ def student_list(semester: Optional[str] = None, grade: Optional[str] = None,
             raise ApiError("无效的画像迁移分类", code=400, status_code=400)
         if not from_semester or not to_semester or from_semester >= to_semester:
             raise ApiError("画像迁移下钻需要有效的起止学期", code=400, status_code=400)
-        mrows = dbm.query(conn, """SELECT student_id,semester_id,AVG(gpa) gpa,
-            SUM(CASE WHEN is_pass=0 THEN 1 ELSE 0 END) fail_count,COUNT(*) grade_count
+        mrows = dbm.query(conn, f"""SELECT student_id,semester_id,
+            {weighted_gpa_expression()} gpa,
+            COUNT(DISTINCT CASE WHEN is_pass=0 THEN course_id END) fail_count,
+            COUNT(*) grade_count
             FROM fact_grade WHERE semester_id IN (?,?)
             GROUP BY student_id,semester_id""", (from_semester, to_semester))
         mvalues = {}
@@ -489,9 +635,17 @@ def student_list(semester: Optional[str] = None, grade: Optional[str] = None,
 
     swhere = (" WHERE " + " AND ".join(scond)) if scond else ""
 
-    # 学生 GPA
+    # 学生 GPA：画像迁移下钻时固定展示目标学期，避免名单使用全历史
+    # GPA、抽屉使用最新学期 GPA 而与分组证据冲突。
+    metric_sem_ids = (
+        [to_semester] if migration and to_semester else (sem_ids or [])
+    )
     gw = ["gpa IS NOT NULL"]
-    gsem, gsemp = _sem_cond("")
+    if metric_sem_ids:
+        gsem = " AND semester_id IN (" + ",".join("?" * len(metric_sem_ids)) + ")"
+        gsemp = list(metric_sem_ids)
+    else:
+        gsem, gsemp = "", []
     if gsem:
         gw.append(gsem[5:])
     if retake in ("重修", "1"):
@@ -507,7 +661,8 @@ def student_list(semester: Optional[str] = None, grade: Optional[str] = None,
         stu_sub = (" AND student_id IN (SELECT student_id FROM dim_student WHERE "
                    + " AND ".join(scond) + ")")
     gw.append("1=1")  # ensures at least one condition before stu_sub
-    gpa_sql = f"SELECT student_id, AVG(gpa) g FROM fact_grade WHERE {' AND '.join(gw)}{stu_sub} GROUP BY student_id"
+    gpa_sql = f"""SELECT student_id,{weighted_gpa_expression()} g
+        FROM fact_grade WHERE {' AND '.join(gw)}{stu_sub} GROUP BY student_id"""
     stu_gpa = {r["student_id"]: r["g"] for r in dbm.query(conn, gpa_sql, tuple(gsemp + sparams))}
 
     # 挂科数
@@ -579,21 +734,24 @@ def student_list(semester: Optional[str] = None, grade: Optional[str] = None,
                    "pattern": pattern, "migration": migration,
                },
                "summary": {"withGpa": len(pop_gpas),
-                           "avgGpa": round(sum(pop_gpas) / len(pop_gpas), 2) if pop_gpas else None}})
+                           "avgGpa": round(sum(pop_gpas) / len(pop_gpas), 2) if pop_gpas else None,
+                           "metricSemester": metric_sem_ids[0] if len(metric_sem_ids) == 1 else None}})
 
 
 # ── M3：我的班级/我的学生（辅导员/班主任/导师群体视图） ──
 # 口径与 /api/admin/student/{sid}（alert.py）及本模块 analysis 保持一致：
-# GPA=每生 AVG(fact_grade.gpa) 再平均；挂科=真实成绩 is_pass=0；
-# 学分完成率=已通过学分 ÷ fact_major_req.total_req（req 缺失不计入中位数）；
+# GPA=本学期每生学分加权 GPA 再平均；
+# 本学期未通过学生率=本学期至少1门未通过学生÷本学期有有效成绩学生；
+# 学分完成率=按课程去重的已通过学分 ÷ fact_major_req.total_req
+# （req 缺失不计入中位数）；
 # 未解除预警=alert_event.workflow_status 未进入 resolved/closed。
 
 _MY_SCOPE_ROLES = ("counselor", "class_adviser", "mentor")
 
 _MY_SCOPE_EVIDENCE = {
-    "real": ["学籍、成绩、GPA、挂科记录", "未解除预警事件（alert_event 工作流状态）"],
+    "real": ["学籍、本学期成绩、学分加权GPA、本学期未通过记录", "未解除预警事件（alert_event 工作流状态）"],
     "simulated": ["非真实培养方案专业的学分要求（影响学分完成率）"],
-    "limitation": "学分完成率仅在真实培养方案覆盖的专业可精确解释；要求学分缺失的学生不计入学分完成率中位数。",
+    "limitation": "学分完成率按课程去重，但只有真实培养方案覆盖的专业可精确解释；要求学分缺失的学生不计入学分完成率中位数。",
 }
 
 
@@ -601,32 +759,14 @@ def _in_ph(ids) -> str:
     return ",".join("?" * len(ids))
 
 
-def _per_student_gpa(conn, ids) -> dict:
-    if not ids:
-        return {}
-    return {r["student_id"]: r["g"] for r in dbm.query(conn, f"""
-        SELECT student_id, AVG(gpa) g FROM fact_grade
-        WHERE gpa IS NOT NULL AND student_id IN ({_in_ph(ids)})
-        GROUP BY student_id""", tuple(ids))}
+def _per_student_gpa(conn, ids, semester=None) -> dict:
+    return per_student_weighted_gpa(
+        conn, ids, [semester] if semester else None
+    )
 
 
 def _earned_credit_map(conn, ids) -> dict:
-    if not ids:
-        return {}
-    return {r["student_id"]: r["e"] for r in dbm.query(conn, f"""
-        SELECT student_id, SUM(credits) e FROM fact_grade
-        WHERE is_pass=1 AND student_id IN ({_in_ph(ids)})
-        GROUP BY student_id""", tuple(ids))}
-
-
-def _failed_student_set(conn, ids) -> set:
-    """有任一真实未通过记录的学生（挂科率分子，与挂科集中课程同取 source='real'）。"""
-    if not ids:
-        return set()
-    return {r["student_id"] for r in dbm.query(conn, f"""
-        SELECT DISTINCT student_id FROM fact_grade
-        WHERE source='real' AND is_pass=0 AND student_id IN ({_in_ph(ids)})""",
-        tuple(ids))}
+    return earned_credit_map(conn, ids)
 
 
 def _term_fail_count_map(conn, ids, semester) -> dict:
@@ -634,7 +774,7 @@ def _term_fail_count_map(conn, ids, semester) -> dict:
     if not ids:
         return {}
     return {r["student_id"]: r["fc"] for r in dbm.query(conn, f"""
-        SELECT student_id, COUNT(*) fc FROM fact_grade
+        SELECT student_id, COUNT(DISTINCT course_id) fc FROM fact_grade
         WHERE source='real' AND is_pass=0 AND semester_id=?
           AND student_id IN ({_in_ph(ids)})
         GROUP BY student_id""", (semester, *ids))}
@@ -674,9 +814,9 @@ def _median(values) -> Optional[float]:
 def _scope_metrics(conn, students, semester) -> tuple[dict, list]:
     """对一组 dim_student 行计算群体汇总与每生明细行（数字全部后端算好）。"""
     ids = [s["student_id"] for s in students]
-    gpa = _per_student_gpa(conn, ids)
+    gpa = _per_student_gpa(conn, ids, semester)
     earned = _earned_credit_map(conn, ids)
-    failed = _failed_student_set(conn, ids)
+    graded, failed = term_grade_and_failed_students(conn, ids, semester)
     term_fail = _term_fail_count_map(conn, ids, semester)
     per_sid_alerts, alert_sids = _open_event_maps(conn, ids)
     reqs = _credit_req_map(conn)
@@ -704,7 +844,10 @@ def _scope_metrics(conn, students, semester) -> tuple[dict, list]:
     summary = {
         "studentCount": len(ids),
         "avgGpa": round(sum(gpa_vals) / len(gpa_vals), 2) if gpa_vals else None,
-        "failRate": round(len(failed) / len(ids) * 100, 1) if ids else None,
+        "gradedStudentCount": len(graded),
+        "gradeCoverageRate": round(len(graded) / len(ids) * 100, 1) if ids else None,
+        "failedStudentCount": len(failed),
+        "failRate": round(len(failed) / len(graded) * 100, 1) if graded else None,
         "creditMedian": _median(ratios),
         "withOpenAlerts": len(alert_sids),
         "openAlerts": sum(per_sid_alerts.values()),

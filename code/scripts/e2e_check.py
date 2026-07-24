@@ -269,6 +269,26 @@ def main():
     exp_scores = scalar(c, "SELECT COUNT(*) FROM fact_grade WHERE student_id=?", sid)
     check(f"{sid} 成绩条数", exp_scores, len(st["scores"]))
     check(f"{sid} 预警历史条数", exp_ac, len(st["alertHistory"]))
+    check(f"{sid} 学生证据来源完整", True, {
+        "dim_student", "fact_grade", "fact_alert", "alert_event",
+        "student_plan_progress_summary",
+    }.issubset(set(st["evidence"]["sources"])))
+    check(f"{sid} 课程有效结果状态可解释", True, all(
+        row["status"] in {"当前未解决", "历史已解决", "待核验"}
+        for row in st["failTrace"]))
+    check(f"{sid} 重复未解决属于当前未解决", True, all(
+        not row["repeatedUnresolved"] or row["status"] == "当前未解决"
+        for row in st["failTrace"]))
+    check(f"{sid} 当前有效预警可与历史区分", exp_ac,
+          sum(bool(row["active"]) for row in st["alertHistory"]))
+    check(f"{sid} 培养方案进度证据状态", True,
+          st["curriculumProgress"]["status"] in {
+              "matched", "binding_review", "unavailable"})
+    if st["curriculumProgress"]["status"] == "matched":
+        check(f"{sid} 培养方案进度复用结构化摘要", True,
+              st["curriculumProgress"]["ruleVersion"] == "growth-v1"
+              and st["curriculumProgress"]["assessableModules"] is not None
+              and st["curriculumProgress"]["ruleCoverageRate"] is not None)
 
     # 8. 预警总览（列表条数 == 全库预警条数）
     print("\n[8] 预警总览")
@@ -552,6 +572,73 @@ def main():
           scoped_sa["migration"]["compared"] + scoped_sa["migration"]["insufficient"])
     check("students 学院角色年级人数不越界",
           scoped_students, sum(x["students"] for x in scoped_sa["gradeGpa"]))
+
+    growth = http(base, "/api/admin/students/growth/overview")["data"]
+    growth_organizations = http(
+        base, "/api/admin/students/growth/organizations")["data"]
+    growth_metrics = {x["key"]: x for x in growth["metrics"]}
+    growth_groups = {x["key"]: x for x in growth["groups"]}
+    check("students 成长首屏五项管理指标",
+          {"comparable", "improved", "declined", "continuous", "first_setback"},
+          set(growth_metrics))
+    check("students 成长首屏四类关注分组",
+          {"declined", "continuous", "first_setback", "repeated_unresolved"},
+          set(growth_groups))
+    check("students 成长首屏不输出模拟毕业结论", False,
+          "毕业" in str(growth["evidence"]))
+    check("students 全校组织比较下钻到学院", "学院",
+          growth_organizations["organizationLabel"])
+    check("students 成长汇总刷新时间可追溯", True,
+          bool(growth["evidence"]["aggregateRefreshedAt"]))
+    check("students 成长汇总源成绩行数可追溯", True,
+          growth["evidence"]["sourceGradeRows"] > 0)
+    check("students 全校成长指标分母覆盖当前学生范围",
+          scalar(c, "SELECT COUNT(*) FROM dim_student"),
+          growth_metrics["comparable"]["denominator"])
+    for group_key, group_row in growth_groups.items():
+        growth_list = http(
+            base,
+            "/api/admin/students/growth/list?"
+            + urllib.parse.urlencode({
+                "group": group_key,
+                "from_semester": growth["period"]["fromSemester"],
+                "to_semester": growth["period"]["toSemester"],
+                "page": 1,
+                "page_size": 20,
+            }),
+        )["data"]
+        check(f"students 成长分组下钻 {group_key}",
+              group_row["count"], growth_list["total"])
+    growth_org = next(
+        (x for x in growth_organizations["organizations"]
+         if x["studentCount"] > 0), None)
+    check("students 成长组织比较存在可下钻行", True, bool(growth_org))
+    if growth_org:
+        org_list = http(
+            base,
+            "/api/admin/students/growth/list?"
+            + urllib.parse.urlencode({
+                "organization_id": growth_org["organizationId"],
+                "from_semester": growth["period"]["fromSemester"],
+                "to_semester": growth["period"]["toSemester"],
+                "page": 1,
+                "page_size": 20,
+            }),
+        )["data"]
+        check("students 成长组织行下钻不越过组织范围", True,
+              org_list["total"] <= growth_org["studentCount"])
+    scoped_growth = http(
+        base, "/api/admin/students/growth/overview",
+        token=college_token2)["data"]
+    scoped_growth_organizations = http(
+        base, "/api/admin/students/growth/organizations",
+        token=college_token2)["data"]
+    check("students 学院成长比较下钻到专业", "专业",
+          scoped_growth_organizations["organizationLabel"])
+    check("students 学院成长指标分母不越界", scoped_students,
+          {x["key"]: x for x in scoped_growth["metrics"]}[
+              "comparable"]["denominator"])
+
     migration = sa["migration"]
     check("students 迁移分类合计",
           migration["compared"],

@@ -701,9 +701,56 @@ ON sys_system_parameter_history(parameter_key,history_id);
 -- 索引（§4.5）
 -- ---------------------------------------------------------------------
 CREATE INDEX IF NOT EXISTS idx_grade_student   ON fact_grade(student_id);
+CREATE INDEX IF NOT EXISTS idx_grade_student_sem
+    ON fact_grade(student_id, semester_id);
+CREATE INDEX IF NOT EXISTS idx_grade_student_course_sem
+  ON fact_grade(student_id, course_id, semester_id);
+CREATE INDEX IF NOT EXISTS idx_grade_real_failed_student_sem_course
+  ON fact_grade(student_id, semester_id, course_id)
+  WHERE source='real' AND is_pass=0;
+CREATE INDEX IF NOT EXISTS idx_grade_real_effective_student_course_sem
+  ON fact_grade(student_id, course_id, semester_id)
+  WHERE source='real' AND is_pass IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_grade_course_sem ON fact_grade(course_id, semester_id);
 CREATE INDEX IF NOT EXISTS idx_grade_semester  ON fact_grade(semester_id);
 CREATE INDEX IF NOT EXISTS idx_grade_lesson    ON fact_grade(lesson_id, semester_id);
+
+-- 学生成长首屏物化事实：随ETL/初始化迁移重建，避免页面请求重复扫描完整成绩表。
+CREATE TABLE IF NOT EXISTS agg_student_term_growth (
+  student_id TEXT NOT NULL,
+  semester_id TEXT NOT NULL,
+  weighted_gpa REAL,
+  grade_count INTEGER NOT NULL DEFAULT 0,
+  fail_count INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY(student_id, semester_id)
+);
+CREATE INDEX IF NOT EXISTS idx_student_term_growth_semester
+  ON agg_student_term_growth(semester_id, student_id);
+
+CREATE TABLE IF NOT EXISTS agg_student_course_outcome (
+  student_id TEXT NOT NULL,
+  course_id TEXT NOT NULL,
+  fail_count INTEGER NOT NULL DEFAULT 0,
+  fail_semesters TEXT,
+  latest_semester TEXT,
+  latest_is_pass INTEGER,
+  latest_credits REAL,
+  latest_score REAL,
+  latest_gpa REAL,
+  PRIMARY KEY(student_id, course_id)
+);
+CREATE INDEX IF NOT EXISTS idx_student_course_outcome_unresolved
+  ON agg_student_course_outcome(latest_is_pass, student_id);
+
+CREATE TABLE IF NOT EXISTS agg_student_growth_meta (
+  singleton_id INTEGER PRIMARY KEY CHECK(singleton_id=1),
+  refreshed_at TEXT NOT NULL,
+  source_grade_rows INTEGER NOT NULL DEFAULT 0,
+  source_student_count INTEGER NOT NULL DEFAULT 0,
+  semester_min TEXT,
+  semester_max TEXT,
+  rule_version TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_alert_student   ON fact_alert(student_id);
 CREATE INDEX IF NOT EXISTS idx_alert_level_st  ON fact_alert(level, status);
 CREATE INDEX IF NOT EXISTS idx_lesson_course   ON fact_lesson(course_id, semester_id);

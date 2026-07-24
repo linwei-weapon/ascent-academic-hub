@@ -72,6 +72,7 @@ declare module 'vue' {
     KpiLabel: typeof import('./../../components/KpiLabel.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
+    StudentEvidenceDrawer: typeof import('./../../components/StudentEvidenceDrawer.vue')['default']
   }
   export interface GlobalDirectives {
     vLoading: typeof import('element-plus/es')['ElLoadingDirective']

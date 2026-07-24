@@ -28,6 +28,7 @@ python -X utf8 scripts\migrate_alert_rules.py
 python -X utf8 scripts\migrate_permission_context.py
 python -X utf8 scripts\migrate_staff_relationships.py
 python -X utf8 scripts\migrate_system_management.py
+python -X utf8 scripts\migrate_student_growth_indexes.py
 
 echo.
 echo [OK] 分析库已生成: code\backend\db\analytics.sqlite

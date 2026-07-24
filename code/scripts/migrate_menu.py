@@ -16,6 +16,12 @@ sys.path.insert(0, __file__.rsplit("scripts", 1)[0])  # 让 backend 包可导入
 from backend.etl import config
 
 ADMIN_ROLE = "dean"
+STUDENT_WORKSPACE_ROLES = (
+    "school_leader", "dean", "dept_operation", "dept_research",
+    "dept_practice", "quality_office", "college_dean",
+    "college_secretary", "dept_director", "counselor",
+    "class_adviser", "mentor",
+)
 
 # menu_id, parent_id, title, path, icon, sort_order
 TARGET_MENUS = [
@@ -35,8 +41,6 @@ TARGET_MENUS = [
      "/admin/faculty", "User", 105),
     ("/admin/students/analysis", "/admin/analysis", "学生成长与学业分析",
      "/admin/students/analysis", "DataLine", 106),
-    ("/admin/students/my", "/admin/analysis", "我的班级/学生",
-     "/admin/students/my", "User", 107),
 
     ("/admin/reports/management-briefing", "/admin/decision", "管理要情",
      "/admin/reports/management-briefing", "Bell", 201),
@@ -77,6 +81,7 @@ LEGACY_GRANT_TRANSFER = {
     "/admin/operation/teacher-load": ("/admin/operation/courses",),
     "/admin/operation/schedule-analysis": ("/admin/operation/courses",),
     "/admin/students/list": ("/admin/students/analysis",),
+    "/admin/students/my": ("/admin/students/analysis",),
     "/admin/reports": (
         "/admin/reports/management-briefing",
         "/admin/reports/decision-simulation",
@@ -133,13 +138,15 @@ def migrate(conn: sqlite3.Connection) -> None:
     for leaf_id in LEAF_IDS:
         cur.execute("""INSERT OR IGNORE INTO sys_role_menu(role_id,menu_id)
                        VALUES(?,?)""", (ADMIN_ROLE, leaf_id))
-    # 关系型学生管理角色可进入同一教学数据总览，接口仍按带班/带生范围过滤。
+    # 学生成长工作区按当前工作身份呈现全校、学院、班级或导师范围。
+    # 菜单授权只决定入口可见性，接口仍按当前身份重新校验明细范围。
+    for role_id in STUDENT_WORKSPACE_ROLES:
+        cur.execute("""INSERT OR IGNORE INTO sys_role_menu(role_id,menu_id)
+                       VALUES(?, '/admin/students/analysis')""", (role_id,))
+    # 关系型学生管理角色也可进入教学数据总览，接口仍按带班/带生范围过滤。
     for role_id in ("counselor", "class_adviser", "mentor"):
         cur.execute("""INSERT OR IGNORE INTO sys_role_menu(role_id,menu_id)
                        VALUES(?, '/admin/dashboard')""", (role_id,))
-        # M3：三类带班/带生角色的「我的班级/学生」群体视图入口。
-        cur.execute("""INSERT OR IGNORE INTO sys_role_menu(role_id,menu_id)
-                       VALUES(?, '/admin/students/my')""", (role_id,))
     for leaf_id in SYSTEM_LEAF_IDS:
         cur.execute("""DELETE FROM sys_role_menu
                        WHERE menu_id=? AND role_id<>?""",

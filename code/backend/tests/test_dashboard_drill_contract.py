@@ -26,7 +26,8 @@ def make_conn() -> sqlite3.Connection:
         );
         CREATE TABLE fact_grade(
           student_id TEXT, course_id TEXT, semester_id TEXT, source TEXT,
-          gpa REAL, is_retake INTEGER, is_required INTEGER, is_pass INTEGER
+          gpa REAL, credits REAL, is_retake INTEGER, is_required INTEGER,
+          is_pass INTEGER
         );
         CREATE TABLE fact_alert(
           student_id TEXT, level TEXT, status TEXT, is_active INTEGER
@@ -41,9 +42,9 @@ def make_conn() -> sqlite3.Connection:
           ('CUR','当前学生','COL','M1','B1','2022','在校'),
           ('OTHER','其他课程学生','COL','M1','B1','2022','在校');
         INSERT INTO fact_grade VALUES
-          ('OLD','C1','S1','real',2.0,0,1,0),
-          ('CUR','C1','S2','real',3.0,0,1,1),
-          ('OTHER','C2','S2','real',3.5,0,1,1);
+          ('OLD','C1','S1','real',2.0,2,0,1,0),
+          ('CUR','C1','S2','real',3.0,2,0,1,1),
+          ('OTHER','C2','S2','real',3.5,2,0,1,1);
     """)
     return conn
 

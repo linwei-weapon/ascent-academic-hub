@@ -193,20 +193,31 @@ class MyScopeTest(unittest.TestCase):
         n = self.conn.execute(
             "SELECT COUNT(*) FROM dim_student WHERE class_id='B01'").fetchone()[0]
         self.assertEqual(n, card["studentCount"])
-        # 对账：平均GPA=每生AVG(gpa)再平均 → S01=3.5, S02=2.0 → 2.75
+        # 对账：本学期平均GPA=每生学分加权GPA再平均
+        # S01=(3*10+4*20)/30=3.6667, S02=2.0 → 2.83
         gpas = self.conn.execute("""
             SELECT AVG(g) FROM (
-              SELECT AVG(gpa) g FROM fact_grade
-              WHERE gpa IS NOT NULL AND student_id IN
+              SELECT SUM(gpa*credits)/SUM(credits) g FROM fact_grade
+              WHERE gpa IS NOT NULL AND credits>0
+                AND semester_id=? AND student_id IN
                 (SELECT student_id FROM dim_student WHERE class_id='B01')
-              GROUP BY student_id)""").fetchone()[0]
+              GROUP BY student_id)""", (CUR,)).fetchone()[0]
         self.assertEqual(round(gpas, 2), card["avgGpa"])
-        # 对账：挂科率=有真实未通过记录学生占比 → S02 → 50%
+        # 对账：本学期未通过学生率=本学期有未通过学生/本学期有成绩学生
         failed = self.conn.execute("""
             SELECT COUNT(DISTINCT student_id) FROM fact_grade
-            WHERE source='real' AND is_pass=0 AND student_id IN
-              (SELECT student_id FROM dim_student WHERE class_id='B01')""").fetchone()[0]
-        self.assertEqual(round(failed / n * 100, 1), card["failRate"])
+            WHERE source='real' AND is_pass=0 AND semester_id=? AND student_id IN
+              (SELECT student_id FROM dim_student WHERE class_id='B01')""",
+            (CUR,)).fetchone()[0]
+        graded = self.conn.execute("""
+            SELECT COUNT(DISTINCT student_id) FROM fact_grade
+            WHERE source='real' AND is_pass IS NOT NULL AND semester_id=?
+              AND student_id IN
+                (SELECT student_id FROM dim_student WHERE class_id='B01')""",
+            (CUR,)).fetchone()[0]
+        self.assertEqual(round(failed / graded * 100, 1), card["failRate"])
+        self.assertEqual(graded, card["gradedStudentCount"])
+        self.assertEqual(failed, card["failedStudentCount"])
         # 对账：学分完成率中位数 → S01 30%, S02 10%（仅通过记录计入学分）→ 20%
         self.assertEqual(20.0, card["creditMedian"])
         # 对账：未解除预警事件 → 仅 S01 的 assigned 事件

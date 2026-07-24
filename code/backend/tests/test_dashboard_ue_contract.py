@@ -134,7 +134,9 @@ class DashboardUeContractTest(unittest.TestCase):
         student_list = (
             FRONTEND / "views" / "admin" / "students" / "List.vue"
         ).read_text(encoding="utf-8")
-        self.assertIn("qs.set('page', String(page.value))", student_list)
+        self.assertIn("function currentListQuery()", student_list)
+        self.assertIn("page: page.value > 1 ? String(page.value)", student_list)
+        self.assertIn("await syncListState()", student_list)
         self.assertIn("window.scrollTo({ top: restoredScroll", student_list)
 
 

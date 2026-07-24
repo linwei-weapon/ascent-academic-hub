@@ -273,7 +273,7 @@ const studentKpis = computed(() => {
   return [
     { label: '当前GPA', value: findKpi('当前GPA') || '—' },
     { label: '已修学分', value: summary.passed?.credits ?? findKpi('已修学分') ?? '—' },
-    { label: '历史未通过', value: `${summary.failed?.courses ?? failedScores.value.length}门` },
+    { label: '当前未解决课程', value: `${summary.failed?.courses ?? failedScores.value.length}门` },
     { label: '当前规则命中', value: `${props.row?.alertCount || 0}条` },
   ]
 })

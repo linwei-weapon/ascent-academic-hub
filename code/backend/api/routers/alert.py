@@ -9,6 +9,11 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from .. import db as dbm
+from ..academic_metrics import (
+    earned_credit_map,
+    effective_course_outcomes,
+    term_earned_credit_map,
+)
 from ..deps import (get_db, get_db_rw, get_current_user,
                     student_data_scope)
 from ..envelope import ok, ApiError
@@ -43,9 +48,10 @@ def _now() -> str:
 
 def _gpa_history(conn, sid, limit=6) -> list[float]:
     rows = dbm.query(conn, """
-        SELECT semester_id, AVG(gpa) g FROM fact_grade
-        WHERE student_id=? AND gpa IS NOT NULL
-        GROUP BY semester_id ORDER BY semester_id""", (sid,))
+        SELECT semester_id,weighted_gpa g
+        FROM agg_student_term_growth
+        WHERE student_id=? AND weighted_gpa IS NOT NULL
+        ORDER BY semester_id""", (sid,))
     seq = [round(r["g"], 2) for r in rows if r["g"] is not None]
     return seq[-limit:]
 
@@ -294,11 +300,89 @@ def _rule_text(params):
         return ""
 
 
+def _curriculum_progress_evidence(student_id: str) -> dict:
+    """读取培养质量模块已经构建的V2学生方案进度摘要。
+
+    当前学生已先通过V1数据范围校验，因此这里只按同一学号补充只读证据，
+    不接受新的范围参数，也不因V2缺失而把简单累计学分冒充为方案完成度。
+    """
+    empty = {
+        "status": "unavailable",
+        "statusLabel": "培养方案进度暂不可正式计算",
+        "planId": None,
+        "planName": None,
+        "bindingStatus": "unavailable",
+        "completedModules": None,
+        "assessableModules": None,
+        "moduleCount": None,
+        "ruleCoverageRate": None,
+        "explicitGapModules": None,
+        "candidateModules": None,
+        "failedRequiredCourses": None,
+        "dueCandidateCourses": None,
+        "evidenceStatus": "unavailable",
+        "ruleVersion": None,
+        "calculatedAt": None,
+        "source": "student_plan_progress_summary",
+        "boundary": (
+            "未找到可复用的结构化培养方案进度摘要；"
+            "不得用历史累计通过学分替代培养方案完成度。"
+        ),
+    }
+    v2_conn = None
+    try:
+        v2_conn = dbm.get_v2_conn()
+        row = dbm.query_one(v2_conn, """
+            SELECT ps.*,p.plan_name
+            FROM student_plan_progress_summary ps
+            LEFT JOIN curriculum_plan p ON p.plan_id=ps.plan_id
+            WHERE ps.student_id=?
+            ORDER BY ps.calculated_at DESC,ps.plan_id
+            LIMIT 1""", (student_id,))
+        if not row:
+            return empty
+        matched = row["binding_status"] == "matched"
+        return {
+            "status": "matched" if matched else "binding_review",
+            "statusLabel": (
+                "已匹配结构化培养方案"
+                if matched else "学生与培养方案绑定待核验"
+            ),
+            "planId": row["plan_id"],
+            "planName": row["plan_name"] or row["plan_id"],
+            "bindingStatus": row["binding_status"],
+            "completedModules": row["completed_modules"],
+            "assessableModules": row["assessable_modules"],
+            "moduleCount": row["module_count"],
+            "ruleCoverageRate": row["rule_coverage_rate"],
+            "explicitGapModules": row["explicit_gap_modules"],
+            "candidateModules": row["candidate_modules"],
+            "failedRequiredCourses": row["failed_required_courses"],
+            "dueCandidateCourses": row["due_candidate_courses"],
+            "evidenceStatus": row["evidence_status"],
+            "ruleVersion": row["rule_version"],
+            "calculatedAt": row["calculated_at"],
+            "source": "student_plan_progress_summary",
+            "boundary": (
+                "模块进度复用培养质量分析的结构化方案规则；"
+                "明确缺口与待核验候选分开呈现，候选项不作为正式缺修结论。"
+                if matched else
+                "当前学生与方案年级或绑定关系不一致，"
+                "不输出正式培养方案完成结论。"
+            ),
+        }
+    except (OSError, sqlite3.Error):
+        return empty
+    finally:
+        if v2_conn is not None:
+            v2_conn.close()
+
+
 @router.get("/student/{sid}")
 def student_detail(sid: str, user: dict = Depends(get_current_user),
                    conn: sqlite3.Connection = Depends(get_db)):
     st = dbm.query_one(conn, """
-        SELECT s.student_id, s.name, s.grade, s.enroll_on,
+        SELECT s.student_id, s.name, s.grade, s.enroll_on, s.major_id,
                c.college_id, c.name college, m.name major, cl.name cls
         FROM dim_student s
         LEFT JOIN dim_college c ON s.college_id=c.college_id
@@ -318,8 +402,7 @@ def student_detail(sid: str, user: dict = Depends(get_current_user),
 
     gpa_hist = _gpa_history(conn, sid)
     cur_gpa = gpa_hist[-1] if gpa_hist else 0
-    earned = dbm.scalar(conn, "SELECT SUM(credits) FROM fact_grade WHERE student_id=? AND is_pass=1",
-                        (sid,)) or 0
+    earned = earned_credit_map(conn, [sid]).get(sid, 0)
     all_alert_rows = dbm.query(conn, """
         SELECT a.alert_id,a.rule_id,a.level,a.type,a.trigger_detail detail,a.status,
                a.created_at time,COALESCE(a.is_active,1) is_active,e.event_id,
@@ -370,9 +453,9 @@ def student_detail(sid: str, user: dict = Depends(get_current_user),
     }
 
     kpis = [
-        {"label": "当前GPA", "value": f"{cur_gpa:.2f}", "formula": "最新学期平均绩点",
+        {"label": "当前GPA", "value": f"{cur_gpa:.2f}", "formula": "最新有成绩学期的学分加权GPA",
          "color": "#DC2626" if cur_gpa < 2 else "#16A34A", "sub": "5分制"},
-        {"label": "已修学分", "value": f"{earned:.0f}", "formula": "已通过课程学分合计",
+        {"label": "已修学分", "value": f"{earned:.0f}", "formula": "按课程去重后的历史通过学分合计",
          "color": "#2563EB", "sub": ""},
         {"label": "预警状态", "value": top_level, "formula": "当前最高预警等级",
          "color": "#DC2626" if "严重" in top_level else "#EA580C", "sub": f"{len(alert_rows)}条预警"},
@@ -394,7 +477,8 @@ def student_detail(sid: str, user: dict = Depends(get_current_user),
             "examStatus": r["exam_status"] or "正常",
         })
 
-    # V1.1：挂科溯源——关联教师和开课学院
+    # V1.1：历史未通过溯源——关联教师和开课学院，并区分是否已解决。
+    course_outcomes = effective_course_outcomes(conn, sid)
     fail_trace = []
     for r in dbm.query(conn, """
         SELECT g.course_id, co.name cname, co.dept college,
@@ -409,63 +493,93 @@ def student_detail(sid: str, user: dict = Depends(get_current_user),
     """, (sid,)):
         sem_list = sorted(set((r["semesters"] or "").split(",")))
         fail_trace.append({
+            "courseId": r["course_id"],
             "courseName": r["cname"] or r["course_id"],
             "teacherName": r["tname"] or "—",
             "college": r["college"] or "—",
             "failCount": r["fc"],
             "semesters": sem_list,
+            "status": (course_outcomes.get(r["course_id"]) or {}).get(
+                "status", "待核验"
+            ),
+            "latestSemester": (course_outcomes.get(r["course_id"]) or {}).get(
+                "latestSemester"
+            ),
+            "repeatedUnresolved": bool(
+                (course_outcomes.get(r["course_id"]) or {}).get(
+                    "repeatedUnresolved"
+                )
+            ),
         })
+    fail_trace.sort(
+        key=lambda item: (
+            item["status"] != "当前未解决",
+            not item["repeatedUnresolved"],
+            -item["failCount"],
+            item["courseName"],
+        )
+    )
 
     # V1.1：逐学期摘要
     semester_summary = []
     for r in dbm.query(conn, """
-        SELECT semester_id,
-               AVG(gpa) gpa,
-               SUM(CASE WHEN is_pass=0 THEN 1 ELSE 0 END) fail_count,
-               SUM(CASE WHEN is_pass=1 THEN credits ELSE 0 END) earned
-        FROM fact_grade WHERE student_id=? AND gpa IS NOT NULL
-        GROUP BY semester_id ORDER BY semester_id
+        SELECT semester_id,weighted_gpa gpa,fail_count
+        FROM agg_student_term_growth
+        WHERE student_id=? AND weighted_gpa IS NOT NULL
+        ORDER BY semester_id
     """, (sid,)):
+        term_earned = term_earned_credit_map(
+            conn, [sid], r["semester_id"]
+        ).get(sid, 0)
         semester_summary.append({
             "semester": r["semester_id"],
             "gpa": round(r["gpa"], 2) if r["gpa"] is not None else 0,
             "failCount": r["fail_count"] or 0,
-            "earnedCredits": round(r["earned"] or 0, 1),
+            "earnedCredits": round(term_earned, 1),
         })
 
-    # V1.1：学业统计摘要（已修 vs 挂科 双栏对比）
+    # V1.1：学业统计摘要（已修 vs 当前未解决 双栏对比）
     total_req = dbm.scalar(conn,
-        "SELECT total_req FROM fact_major_req WHERE major_id=?",
-        (st["major_id"] if "major_id" in st else None,)) or 0
-    earned_credits = dbm.scalar(conn,
-        "SELECT SUM(credits) FROM fact_grade WHERE student_id=? AND is_pass=1",
-        (sid,)) or 0
+        "SELECT total_req FROM fact_major_req WHERE major_id=? AND grade=?",
+        (st["major_id"], st["grade"])) or 0
+    earned_credits = earned
+    passed_outcomes = [
+        outcome for outcome in course_outcomes.values()
+        if outcome["latestPassed"]
+    ]
+    unresolved_outcomes = [
+        outcome for outcome in course_outcomes.values()
+        if outcome["status"] == "当前未解决"
+    ]
+    unresolved_credits = sum(
+        outcome["latestCredits"] for outcome in unresolved_outcomes
+    )
     study_summary = {
         "passed": {
-            "courses": dbm.scalar(conn,
-                "SELECT COUNT(*) FROM fact_grade WHERE student_id=? AND score IS NOT NULL",
-                (sid,)) or 0,
-            "hours": round((dbm.scalar(conn,
-                "SELECT SUM(credits*16) FROM fact_grade WHERE student_id=? AND score IS NOT NULL",
-                (sid,)) or 0), 1),
+            "courses": len(passed_outcomes),
+            "hours": round(earned_credits * 16, 1),
             "credits": round(earned_credits, 1),
-            "completionRate": round(earned_credits / total_req * 100, 1) if total_req else 0,
+            "requirementCredits": total_req or None,
+            "completionRate": round(earned_credits / total_req * 100, 1) if total_req else None,
+            "requirementStatus": "已匹配要求学分" if total_req else "培养方案学分要求待绑定",
         },
         "failed": {
-            "courses": dbm.scalar(conn,
-                "SELECT COUNT(DISTINCT course_id) FROM fact_grade WHERE student_id=? AND is_pass=0",
-                (sid,)) or 0,
-            "hours": round((dbm.scalar(conn,
-                "SELECT SUM(credits*16) FROM fact_grade WHERE student_id=? AND is_pass=0",
-                (sid,)) or 0), 1),
-            "credits": round((dbm.scalar(conn,
-                "SELECT SUM(credits) FROM fact_grade WHERE student_id=? AND is_pass=0",
-                (sid,)) or 0), 1),
+            "courses": len(unresolved_outcomes),
+            "historicalCourses": len(fail_trace),
+            "resolvedCourses": sum(
+                1 for item in fail_trace if item["status"] == "历史已解决"
+            ),
+            "repeatedUnresolvedCourses": sum(
+                1 for item in fail_trace if item["repeatedUnresolved"]
+            ),
+            "hours": round(unresolved_credits * 16, 1),
+            "credits": round(unresolved_credits, 1),
             "currentCourses": dbm.scalar(conn,
                 "SELECT COUNT(DISTINCT course_id) FROM fact_grade WHERE student_id=? AND is_pass=0 AND semester_id=?",
                 (sid, CUR)) or 0,
         },
     }
+    curriculum_progress = _curriculum_progress_evidence(sid)
 
     return ok({
         "code": st["student_id"], "name": st["name"], "collegeId": st["college_id"],
@@ -488,4 +602,17 @@ def student_detail(sid: str, user: dict = Depends(get_current_user),
         "failTrace": fail_trace,
         "semesterSummary": semester_summary,
         "studySummary": study_summary,
+        "curriculumProgress": curriculum_progress,
+        "evidence": {
+            "sources": [
+                "dim_student", "fact_grade", "fact_alert", "alert_event",
+                "student_plan_progress_summary",
+            ],
+            "ruleVersion": "academic-metrics-v1",
+            "calculatedAt": curriculum_progress.get("calculatedAt"),
+            "boundary": (
+                "GPA使用有效课程学分加权口径；当前未解决课程按最新有效修读"
+                "结果识别；培养方案进度仅在结构化方案绑定和规则证据可用时展示。"
+            ),
+        },
     })

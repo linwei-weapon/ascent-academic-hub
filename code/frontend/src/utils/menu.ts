@@ -14,8 +14,8 @@ export function menuKeyOfPath(path: string, returnTo = ''): string {
   if (path.startsWith('/admin/curriculum/')) return '/admin/curriculum'
   if (path.startsWith('/admin/faculty/')) return '/admin/faculty'
   if (path === '/admin/students/list') return '/admin/students/analysis'
-  // M3：「我的班级/学生」有独立叶子菜单，准入与侧栏高亮均指向自身
-  if (path === '/admin/students/my') return '/admin/students/my'
+  // 旧「我的班级/学生」地址与所有学生子路由统一归属单一业务入口。
+  if (path === '/admin/students/my') return '/admin/students/analysis'
   if (path.startsWith('/admin/students/')) return '/admin/students/analysis'
 
   // 决策简报（含专题工作区）与已废弃的旧「管理要情」「决策研判」统一收口

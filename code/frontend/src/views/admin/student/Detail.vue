@@ -181,11 +181,18 @@
       </el-tabs>
     </div>
 
-    <!-- V1.1 挂科溯源 -->
+    <!-- V1.1 历史未通过溯源 -->
     <div class="sa-card" v-if="data.failTrace && data.failTrace.length">
-      <div class="sa-card-title">挂科溯源 <span class="extra">课程/教师/学院/次数</span></div>
+      <div class="sa-card-title">历史未通过课程 <span class="extra">区分当前未解决与后续已通过</span></div>
       <el-table :data="data.failTrace" size="small">
         <el-table-column prop="courseName" label="课程" width="150" />
+        <el-table-column label="当前状态" width="112">
+          <template #default="{row}">
+            <el-tag size="small" :type="row.status === '当前未解决' ? 'danger' : row.status === '历史已解决' ? 'success' : 'info'">
+              {{ row.repeatedUnresolved ? '重复未解决' : row.status }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column prop="teacherName" label="任课教师" width="100" />
         <el-table-column prop="college" label="开课学院" width="130" />
         <el-table-column prop="failCount" label="挂科次数" width="80" align="right">
@@ -389,7 +396,9 @@ const studyCourses = computed(() => {
 const completionRateSub = computed(() => {
   const s = studySummary.value
   const rate = s.passed?.completionRate
-  return rate != null ? '培养方案完成率 ' + rate + '%' : ''
+  return rate != null
+    ? '培养方案完成率 ' + rate + '%'
+    : (s.passed?.requirementStatus || '培养方案学分要求待绑定')
 })
 
 const gpaOption = computed(() => {

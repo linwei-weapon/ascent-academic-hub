@@ -66,10 +66,14 @@ export const router = createRouter({
           },
         }) },
 
-        // ====== 学生学业分析 ======
-        { path: 'students/analysis', component: () => import('@/views/admin/students/Analysis.vue') },
-        // M3：辅导员/班主任/导师「我的班级/学生」群体视图
-        { path: 'students/my', component: () => import('@/views/admin/students/MyScope.vue') },
+        // ====== 学生成长与学业分析（同一路由按当前工作身份加载对应工作区） ======
+        { path: 'students/analysis', component: () => import('@/views/admin/students/Workspace.vue') },
+        // 旧「我的班级/学生」地址仅保留书签兼容，不再作为独立产品入口。
+        { path: 'students/my', redirect: to => ({
+          path: '/admin/students/analysis',
+          query: to.query,
+          hash: to.hash,
+        }) },
         { path: 'students/list', component: () => import('@/views/admin/students/List.vue') },
 
         // ====== AI管理决策（旧事实专题保留兼容重定向） ======

@@ -105,8 +105,10 @@ ROLE_MENU = {
     ],
     # 学生成长与学业
     "/admin/students/analysis": [
-        "dean", "college_dean", "college_secretary",
-        "counselor", "dept_director", "class_adviser", "mentor",
+        "school_leader", "dean", "dept_operation", "dept_research",
+        "dept_practice", "quality_office", "college_dean",
+        "college_secretary", "counselor", "dept_director",
+        "class_adviser", "mentor",
     ],
     # AI管理决策（Skill链路统一收口：管理要情/决策研判旧页已废弃）
     "/admin/reports/decision": [

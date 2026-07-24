@@ -64,6 +64,13 @@
         AI 只用于解释“低 GPA、较多挂科与严重预警同时出现”的复合风险，不对每名学生逐一生成评价。请先打开“详情”核查学期变化、挂科和历史预警，达到介入条件时再查看 AI 研判。
       </template>
     </el-alert>
+    <el-alert v-if="loadError" class="ai-focus-alert" type="error" :closable="false" show-icon>
+      <template #title>学生名单加载失败，已保留当前页面内容</template>
+      <template #default>
+        <span>{{ loadError }}</span>
+        <el-button link type="primary" @click="loadPage(page)">重新加载</el-button>
+      </template>
+    </el-alert>
 
     <!-- 学生表格 -->
     <div class="sa-card student-table-card">
@@ -96,43 +103,17 @@
       <div v-if="!loading && students.length === 0" class="sa-faint" style="text-align:center;padding:40px">未找到匹配学生</div>
 
       <div style="display:flex;justify-content:flex-end;margin-top:12px" v-if="total > 0">
-        <el-pagination v-model:current-page="page" :page-size="pageSize" :total="total" layout="total, prev, pager, next, jumper" small @current-change="loadPage" />
+        <el-pagination v-model:current-page="page" :page-size="pageSize" :total="total" layout="total, prev, pager, next, jumper" size="small" @current-change="loadPage" />
       </div>
     </div>
 
-    <el-drawer v-model="reviewVisible" :title="`${review.name || ''}｜学业画像核查`" size="920px">
-      <div v-loading="reviewLoading" style="min-height:300px">
-        <el-alert type="info" :closable="false" show-icon title="本抽屉汇总当前学生的成绩、挂科和历史预警证据；管理判断仍需结合培养方案和实际沟通。" />
-        <el-descriptions :column="4" border size="small" style="margin:14px 0">
-          <el-descriptions-item label="学号">{{ review.code || '—' }}</el-descriptions-item><el-descriptions-item label="学院">{{ review.collegeName || '—' }}</el-descriptions-item><el-descriptions-item label="专业">{{ review.majorName || '—' }}</el-descriptions-item><el-descriptions-item label="班级">{{ review.className || '—' }}</el-descriptions-item>
-        </el-descriptions>
-        <div class="review-kpis"><KpiCard v-for="k in review.kpis || []" :key="k.label" :label="k.label" :value="k.value" :hint="k.formula" :tone="reviewTone(k.label,k.value)" /></div>
-        <el-tabs v-model="reviewTab" class="review-tabs">
-          <el-tab-pane label="学期变化" name="semester">
-            <DataTable :columns="reviewSemesterCols" :data="review.semesterSummary || []"
-              storage-key="students:review-semesters" :max-business-columns="5" :config-version="1" size="small">
-              <template #col-gpaDelta="{row,$index}">{{ deltaText(review.semesterSummary,$index,'gpa') }}</template>
-              <template #col-failDelta="{row,$index}">{{ deltaText(review.semesterSummary,$index,'failCount') }}</template>
-            </DataTable>
-          </el-tab-pane>
-          <el-tab-pane :label="`挂科分析 (${(review.failTrace || []).length})`" name="failure">
-            <DataTable :columns="reviewFailureCols" :data="review.failTrace || []"
-              storage-key="students:review-failures" :max-business-columns="4" :config-version="1" size="small">
-              <template #col-semesters="{row}">{{ (row.semesters || []).join('、') }}</template>
-            </DataTable>
-          </el-tab-pane>
-          <el-tab-pane :label="`预警记录 (${(review.alertHistory || []).length})`" name="alert">
-            <DataTable :columns="reviewAlertCols" :data="review.alertHistory || []"
-              storage-key="students:review-alerts" :max-business-columns="5" :config-version="1" size="small" />
-          </el-tab-pane>
-        </el-tabs>
-        <div class="drawer-actions">
-          <span v-if="!selectedStudentNeedsAi" class="no-ai-note">当前证据未达到复合风险 AI 介入条件，建议按常规画像核查。</span>
-          <el-button v-else type="primary" plain @click="openStudentInsight({ sid: review.code })">查看 AI 管理研判</el-button>
-          <el-button type="primary" @click="goStudent({sid:review.code})">打开完整学生档案</el-button>
-        </div>
-      </div>
-    </el-drawer>
+    <StudentEvidenceDrawer
+      v-model="reviewVisible"
+      :student-id="selectedStudentRow?.sid"
+      :context="listEvidenceContext"
+      :ai-eligible="selectedStudentNeedsAi"
+      @ai="openStudentInsight({ sid: selectedStudentRow?.sid })"
+    />
     <AIInsightDrawer v-model="aiDrawerVisible" :insight="aiInsight" :loading="aiLoading" title="AI学业研判" />
   </div>
 </template>
@@ -143,9 +124,9 @@ import { useRoute, useRouter } from 'vue-router'
 import { http } from '@/utils/http'
 import { getStudentAIInsight } from '@/utils/ai'
 import { getFilterMeta, type SemesterOpt, type MajorOpt, type ClassOpt } from '@/utils/meta'
-import KpiCard from '@/components/KpiCard.vue'
 import AIInsightDrawer from '@/components/AIInsightDrawer.vue'
 import DataTable, { type DataTableColumn } from '@/components/DataTable.vue'
+import StudentEvidenceDrawer from '@/components/StudentEvidenceDrawer.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -185,30 +166,6 @@ const studentCols: DataTableColumn[] = [
   { key: 'attention', label: '管理关注', width: 105, align: 'center' },
   { key: 'actions', label: '操作', width: 88, align: 'center', fixed: 'right', region: 'action', required: true },
 ]
-const reviewSemesterCols: DataTableColumn[] = [
-  { key: 'semester', label: '学期', width: 150, fixed: 'left', region: 'identity', required: true },
-  { key: 'gpa', label: 'GPA', width: 90, align: 'right', required: true },
-  { key: 'gpaDelta', label: 'GPA变化', width: 100, align: 'right' },
-  { key: 'failCount', label: '挂科门次', width: 100, align: 'right' },
-  { key: 'failDelta', label: '挂科变化', width: 100, align: 'right' },
-  { key: 'earnedCredits', label: '获得学分', width: 100, align: 'right' },
-]
-const reviewFailureCols: DataTableColumn[] = [
-  { key: 'courseName', label: '课程', minWidth: 190, fixed: 'left', region: 'identity', required: true },
-  { key: 'failCount', label: '挂科次数', width: 90, align: 'right', required: true },
-  { key: 'semesters', label: '发生学期', minWidth: 180 },
-  { key: 'teacherName', label: '授课教师', width: 110 },
-  { key: 'college', label: '开课单位', minWidth: 150 },
-]
-const reviewAlertCols: DataTableColumn[] = [
-  { key: 'time', label: '时间', width: 150, fixed: 'left', region: 'identity', required: true },
-  { key: 'level', label: '等级', width: 76, required: true },
-  { key: 'type', label: '预警类型', width: 130 },
-  { key: 'changeType', label: '与上次相比', width: 100 },
-  { key: 'workflowStatusLabel', label: '处置状态', width: 100 },
-  { key: 'detail', label: '触发证据', minWidth: 210, tooltip: true },
-]
-
 // ── URL 参数预填 ──
 const courseName = ref(route.query.courseName as string || '')
 const courseId = ref(route.query.course as string || '')
@@ -226,14 +183,12 @@ const backLabel = computed(() => (route.query.returnLabel as string) || '学生�
 
 // ── 数据 ──
 const loading = ref(false)
+const loadError = ref('')
 const students = ref<any[]>([])
 const total = ref(0)
 const avgGpa = ref<number | null>(null)
 const appliedFilters = ref<Record<string, any>>({})
 const reviewVisible = ref(false)
-const reviewLoading = ref(false)
-const reviewTab = ref('semester')
-const review = ref<any>({})
 const selectedStudentRow = ref<any>(null)
 const aiDrawerVisible = ref(false)
 const aiLoading = ref(false)
@@ -255,6 +210,57 @@ const classOptions = computed(() => fMajor.value
   : classes.value)
 const currentPageAiFocus = computed(() => students.value.filter(row => studentAttention(row).level === 'ai'))
 const selectedStudentNeedsAi = computed(() => selectedStudentRow.value && studentAttention(selectedStudentRow.value).level === 'ai')
+function currentListQuery() {
+  return {
+    returnTo: route.query.returnTo || undefined,
+    returnLabel: route.query.returnLabel || undefined,
+    collegeName: route.query.collegeName || undefined,
+    majorName: route.query.majorName || undefined,
+    college: fCollege.value || undefined,
+    major: fMajor.value || undefined,
+    grade: fGrade.value || undefined,
+    class: fClass.value || undefined,
+    semester: fSemester.value || undefined,
+    year: fYear.value || undefined,
+    retake: fRetake.value || undefined,
+    required: fRequired.value || undefined,
+    keyword: keyword.value || undefined,
+    course: courseId.value || undefined,
+    courseName: courseName.value || undefined,
+    pattern: patternKey.value || undefined,
+    patternLabel: patternLabel.value || undefined,
+    migration: migrationKey.value || undefined,
+    migrationLabel: migrationLabel.value || undefined,
+    from_semester: fromSemester.value || undefined,
+    to_semester: toSemester.value || undefined,
+    page: page.value > 1 ? String(page.value) : undefined,
+    page_size: pageSize.value !== 20 ? String(pageSize.value) : undefined,
+  }
+}
+async function syncListState() {
+  await router.replace({ path: route.path, query: currentListQuery() })
+}
+const listEvidenceContext = computed(() => {
+  const row = selectedStudentRow.value || {}
+  const reasons = []
+  if (migrationKey.value) reasons.push(`${migrationLabel.value || '画像迁移'}名单命中`)
+  if (patternKey.value) reasons.push(`${patternLabel.value || '挂科模式'}命中`)
+  if (row.failCount > 0) reasons.push(`筛选期有${row.failCount}门未通过课程`)
+  if (row.alertLevel && row.alertLevel !== '—') reasons.push(`当前最高预警为${row.alertLevel}`)
+  if (!reasons.length) reasons.push('当前名单主动核查')
+  const period = fromSemester.value && toSemester.value
+    ? `${fromSemester.value} → ${toSemester.value}`
+    : fSemester.value || (fYear.value ? `${fYear.value}学年` : '当前筛选周期')
+  return {
+    studentName: row.name,
+    reasons,
+    period,
+    ruleVersion: migrationKey.value ? 'student-growth-v1' : 'academic-metrics-v1',
+    returnLabel: pageTitle.value,
+    returnQuery: currentListQuery(),
+    boundary: '当前筛选条件只用于定位学生；抽屉内课程状态按完整历史有效修读结果核查。',
+  }
+})
 
 // ── 页面标题 ──
 const pageTitle = computed(() => {
@@ -270,6 +276,7 @@ const pageTitle = computed(() => {
 
 // ── URL 参数初始化 ──
 onMounted(async () => {
+  const restoredScroll = Math.max(0, Number(route.query.scrollY || 0) || 0)
   const meta = await getFilterMeta()
   semesters.value = meta.semesters.slice().reverse()
   years.value = (meta.years || []).slice().reverse()
@@ -286,13 +293,15 @@ onMounted(async () => {
   if (route.query.year) fYear.value = route.query.year as string
   if (route.query.retake) fRetake.value = route.query.retake as string
   if (route.query.required) fRequired.value = route.query.required as string
+  if (route.query.keyword) keyword.value = route.query.keyword as string
   if (route.query.course) courseId.value = route.query.course as string
   if (route.query.courseName) courseName.value = route.query.courseName as string
+  const restoredPageSize = Number(route.query.page_size || 20)
+  pageSize.value = [10, 20, 50].includes(restoredPageSize) ? restoredPageSize : 20
   const restoredPage = Math.max(1, Number(route.query.page || 1) || 1)
   page.value = restoredPage
   initialized.value = true
   await loadPage(restoredPage)
-  const restoredScroll = Math.max(0, Number(route.query.scrollY || 0) || 0)
   if (restoredScroll) {
     await nextTick()
     window.scrollTo({ top: restoredScroll, behavior: 'auto' })
@@ -309,6 +318,7 @@ function onYear() { if (fYear.value) fSemester.value = '' }
 async function loadPage(p: number) {
   const currentRequest = ++requestSeq
   loading.value = true
+  loadError.value = ''
   try {
     const params: Record<string, any> = { page: p, page_size: pageSize.value }
     if (fCollege.value) params.college = fCollege.value
@@ -339,21 +349,24 @@ async function loadPage(p: number) {
     total.value = data.total || 0
     page.value = data.page || p
     appliedFilters.value = data.appliedFilters || {}
+    await syncListState()
 
     // 使用后端对完整筛选群体计算的均值，不能只计算当前分页。
     avgGpa.value = data.summary?.avgGpa ?? null
-  } catch { /* http 工具已 toast */ }
+  } catch (error: any) {
+    if (currentRequest === requestSeq) {
+      loadError.value = error?.message || '学生名单加载失败，请稍后重试'
+    }
+  }
   finally {
     if (currentRequest === requestSeq) loading.value = false
   }
 }
 
 // ── 操作 ──
-async function openReview(row: any) {
+function openReview(row: any) {
   selectedStudentRow.value = row
-  reviewVisible.value = true; reviewLoading.value = true; reviewTab.value = 'semester'; review.value = { name: row.name, code: row.sid }
-  try { const d = await http.get<any>(`/admin/student/${encodeURIComponent(row.sid)}`); if (d) review.value = d }
-  finally { reviewLoading.value = false }
+  reviewVisible.value = true
 }
 async function openStudentInsight(row: any) {
   const sid = row.sid || row.code || row.student_id
@@ -393,21 +406,6 @@ function removeMigration() {
   migrationKey.value = ''; migrationLabel.value = ''; fromSemester.value = ''; toSemester.value = ''
   clearRouteKeys(['migration', 'migrationLabel', 'from_semester', 'to_semester']); search()
 }
-function goStudent(row: any) {
-  const qs = new URLSearchParams({ from: 'list' })
-  Object.entries(route.query).forEach(([k,v]) => { if (v != null) qs.set(k, String(v)) })
-  if (fCollege.value) qs.set('college', fCollege.value)
-  if (fMajor.value) qs.set('major', fMajor.value)
-  if (fGrade.value) qs.set('grade', fGrade.value)
-  if (fClass.value) qs.set('class', fClass.value)
-  if (fSemester.value) qs.set('semester', fSemester.value)
-  if (courseId.value) qs.set('course', courseId.value)
-  if (courseName.value) qs.set('courseName', courseName.value)
-  qs.set('page', String(page.value))
-  qs.set('scrollY', String(Math.round(window.scrollY)))
-  router.push(`/admin/student/${row.sid}?${qs.toString()}`)
-}
-
 // ── 辅助 ──
 function gpaColor(g: number | null): string {
   if (g == null) return '#6B7280'
@@ -434,8 +432,6 @@ function studentAttention(row: any): { level: 'ai' | 'verify' | 'routine'; label
   }
   return { level: 'routine', label: '常规查看', type: 'info' }
 }
-function reviewTone(label:string,value:any):'primary'|'teal'|'danger'|'amber'{if(label.includes('预警'))return String(value).includes('正常')?'teal':'danger';if(label.includes('GPA'))return Number(value)>=3?'teal':Number(value)<2?'danger':'amber';return'primary'}
-function deltaText(rows:any[],index:number,key:string){if(index===0)return'—';const d=Number(rows[index]?.[key]||0)-Number(rows[index-1]?.[key]||0);return`${d>0?'+':''}${Math.round(d*100)/100}`}
 </script>
 
 <style scoped>
@@ -448,9 +444,5 @@ function deltaText(rows:any[],index:number,key:string){if(index===0)return'—';
 :deep(.student-table th.el-table__cell) { background:#F8FAFC; color:#475569; font-weight:600; height:44px; }
 :deep(.student-table td.el-table__cell) { padding:10px 0; }
 :deep(.student-table .el-table__row:hover > td.el-table__cell) { background:#F5F7FF; }
-.review-kpis { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; }
-.review-tabs { margin-top:14px; }
-.drawer-actions { display:flex; justify-content:flex-end; margin-top:16px; }
 .ai-focus-alert { margin-bottom:12px; }
-.no-ai-note { margin-right:auto; color:#64748b; font-size:13px; line-height:32px; }
 </style>
