@@ -1,6 +1,6 @@
 """Skill 4：预警优先级 alert-priority。
 
-回答：5577条活动预警里，管理者本周有限的注意力应该先给哪几名学生？
+回答：大量当前预警里，管理者本周有限的核查注意力应该先给哪几名学生？
 
 判定逻辑树（纯排序与分流，不改写预警本身的定级）：
   输入: fact_alert(is_active=1) × alert_event(认领状态) × fact_grade(本学期必修未通过/GPA环比)
@@ -10,7 +10,7 @@
       + stall_weight(预警生成>stall_days天仍未认领 +stall分)
   输出: Top N 本周优先队列 + 滞留信号(严重级>stale_days天未认领)
 
-边界：本Skill只做注意力排序与滞留提示，不新增/关闭预警，处理动作仍在预警工作台完成。
+边界：本Skill只做注意力排序与滞留提示，不新增/关闭预警，也不自动创建后续处置任务。
 """
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ from .protocol import (DataRequirement, Signal, Skill, SkillContext,
                        SkillResult)
 
 DATA_BOUNDARY = (
-    "优先级评分仅用于注意力排序，不改变预警定级与处理流程；"
+    "优先级评分仅用于核查注意力排序，不是风险概率，不改变预警定级或自动触发处置；"
     "GPA环比基于相邻两个有成绩学期，转专业/休复学学生的环比可能失真。"
 )
 
@@ -34,9 +34,9 @@ LEVEL_LABEL = {"严重": "严重", "警告": "警告", "提醒": "提醒"}
 class AlertPrioritySkill(Skill):
     skill_id = "alert-priority"
     name = "预警优先级"
-    management_question = "数千条活动预警中，本周有限的干预注意力应该先给哪几名学生？"
+    management_question = "大量当前预警中，本周有限的核查注意力应该先给哪几名学生？"
     description = ("对活动预警按 等级×学业证据×趋势×滞留时长 综合评分，"
-                   "输出本周优先介入队列与滞留预警提示；只做排序分流，不改动预警本身。")
+                   "输出本周优先核查队列与滞留预警提示；只做排序分流，不改动预警本身。")
     briefing_tier = "main"
     data_requirements = [
         DataRequirement("fact_alert", "legacy", True, "活动预警等级与类型"),
@@ -89,12 +89,12 @@ class AlertPrioritySkill(Skill):
         "priority_queue": {
             "队列人数": {
                 "context_key": "queue",
-                "title": "本周优先介入队列明细",
+                "title": "本周优先核查队列明细",
                 "columns": _QUEUE_COLUMNS,
             },
             "其中严重级": {
                 "context_key": "queue",
-                "title": "本周优先介入队列·严重级学生明细",
+                "title": "本周优先核查队列·严重级学生明细",
                 "columns": _QUEUE_COLUMNS,
                 "filter": {"key": "level", "equals": "严重"},
             },
@@ -153,7 +153,7 @@ class AlertPrioritySkill(Skill):
         }
         exclusions = [{
             "what": f"{len(scored) - stats['queue_size']}条活动预警",
-            "why": "综合评分未进入本周优先队列，仍在预警工作台按常规流程处理",
+            "why": "综合评分未进入本周优先核查队列，仍保留在预警工作台供按需核查",
         }]
         return SkillResult(
             skill_id=self.skill_id, skill_name=self.name,
@@ -312,7 +312,7 @@ class AlertPrioritySkill(Skill):
             skill_id=self.skill_id,
             signal_type="priority_queue",
             severity="high" if critical_n else "medium",
-            headline=(f"本周优先介入队列{len(queue)}人（其中严重级{critical_n}人）："
+            headline=(f"本周优先核查队列{len(queue)}人（其中严重级{critical_n}人）："
                       f"首位为{top['student_name'] or top['student_id']}（{top['college_id']}），"
                       f"{'；'.join(top['reasons'])}"),
             facts={
@@ -321,14 +321,14 @@ class AlertPrioritySkill(Skill):
                 "全校活动预警": f"{total_active}条",
             },
             entity={"type": "student_queue", "id": "priority-queue",
-                    "name": "本周优先介入队列"},
+                    "name": "本周优先核查队列"},
             action={
-                "owner": "学工部统筹 → 学院辅导员",
-                "what": "按队列顺序安排本周谈话/介入，优先处理同时带学业证据的严重级预警",
+                "owner": "教务处预警管理岗 → 二级学院",
+                "what": "按队列顺序核对规则证据、未通过课程和既有核查记录",
                 "when": "本周内",
-                "rationale": "评分融合了预警等级、必修未通过、GPA环比与滞留时长，队列头部是干预边际收益最高的对象",
+                "rationale": "评分融合了预警等级、必修未通过、GPA环比与滞留时长，用于避免平均分配有限核查资源",
             },
-            consequence="若按接收顺序而非优先级处理，有限的人力会先消耗在低风险预警上，高风险学生的干预窗口被错过。",
+            consequence="若只按接收顺序核查，有限精力可能先消耗在低风险记录上，严重且证据叠加的学生会被延后看见。",
             confidence="high",
             evidence={
                 "table": "fact_alert × alert_event × fact_grade",
@@ -385,12 +385,12 @@ class AlertPrioritySkill(Skill):
             entity={"type": "alert_set", "id": "stale-critical",
                     "name": "滞留严重预警"},
             action={
-                "owner": "学工部预警督办",
-                "what": f"对滞留超{stale_days}天的严重级预警逐条督办认领，必要时升级到处级协调",
+                "owner": "教务处预警管理岗",
+                "what": f"核对滞留超{stale_days}天的严重级预警是否已分派、是否已有线下核查记录",
                 "when": "3个工作日内",
-                "rationale": "严重级预警的设计前提是快速介入，长期未认领意味着干预机制在这些个案上已失效",
+                "rationale": "长期未认领可能意味着责任范围、系统记录或线下核查信息尚未衔接，需要先确认事实",
             },
-            consequence="滞留每延长一周，学生状态进一步恶化的概率上升，且后续追责时无法说明处置过程。",
+            consequence="若持续不核对，管理者无法区分真实未核查、已线下处理未记录和责任范围不清三类情况。",
             confidence="high",
             evidence={
                 "table": "fact_alert × alert_event",

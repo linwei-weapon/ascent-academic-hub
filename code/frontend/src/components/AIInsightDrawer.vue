@@ -195,6 +195,9 @@ function focusKey(item: any) {
 }
 
 function focusReason(item: any) {
+  if (Array.isArray(item.priorityReasons) && item.priorityReasons.length) {
+    return item.priorityReasons.slice(0, 3).join('；')
+  }
   const parts = [item.level, item.type]
   if (Number(item.failed_courses) > 0) parts.push(`未通过${item.failed_courses}门`)
   if (item.avg_gpa !== null && item.avg_gpa !== undefined) parts.push(`GPA ${item.avg_gpa}`)

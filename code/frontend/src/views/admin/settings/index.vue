@@ -1,6 +1,6 @@
 <template>
   <div>
-    <div class="sa-head-row">
+    <div v-if="!embedded" class="sa-head-row">
       <div>
         <el-breadcrumb v-if="alertRules&&!embedded" separator="/" style="margin-bottom:8px"><el-breadcrumb-item :to="{path:'/admin/alert'}">学业预警监控</el-breadcrumb-item><el-breadcrumb-item>预警规则治理</el-breadcrumb-item></el-breadcrumb>
         <h2 class="sa-page-title">{{alertRules?'预警规则治理':'系统设置'}}</h2>
@@ -11,7 +11,10 @@
     <el-tabs v-model="activeTab" class="sa-tabs">
       <!-- 预警规则配置 -->
       <el-tab-pane v-if="alertRules" label="预警规则" name="rules">
-        <div class="sa-card">
+        <el-alert v-if="ruleLoadError" type="error" :closable="false" show-icon
+          title="生产规则与变更单加载失败" :description="ruleLoadError" style="margin-bottom:12px"/>
+        <div class="sa-card" v-loading="rulesLoading"
+          element-loading-text="正在加载生产规则、权限和变更流程…">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
             <div class="sa-card-title" style="margin:0">预警规则配置 <span class="extra">引擎内置规则 · 阈值可调</span></div>
           </div>
@@ -300,6 +303,8 @@ interface RuleChange { changeId:number; ruleId:string; status:string; reason:str
 
 const activeTab = ref(alertRules ? 'rules' : 'semester')
 const rules = reactive<Rule[]>([])
+const rulesLoading = ref(false)
+const ruleLoadError = ref('')
 const rulePermissions = ref<string[]>([])
 function hasPerm(permission:string) { return rulePermissions.value.includes(permission) }
 const changes = reactive<RuleChange[]>([])
@@ -484,13 +489,20 @@ async function reviewRule(id: number, action: string) {
 
 onMounted(async () => {
   if (!alertRules) return
+  rulesLoading.value = true
+  ruleLoadError.value = ''
   try {
     const p = await http.get<any>('/admin/settings/rule-permissions/me')
     rulePermissions.value = p.permissions || []
-  } catch { rulePermissions.value = [] }
-  const d = await http.get<{ rules: Rule[] }>('/admin/settings')
-  rules.splice(0, rules.length, ...(d.rules || []))
-  loadChanges()
+    const d = await http.get<{ rules: Rule[] }>('/admin/settings')
+    rules.splice(0, rules.length, ...(d.rules || []))
+    await loadChanges()
+  } catch (error:any) {
+    rulePermissions.value = []
+    ruleLoadError.value = error?.message || '请稍后重试'
+  } finally {
+    rulesLoading.value = false
+  }
 })
 </script>
 

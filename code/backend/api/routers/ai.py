@@ -25,6 +25,7 @@ from ..permission_context import (
 from ...ai_experts import get_expert
 from ...ai_experts.versions import resolve_effective_expert
 from ..util import clean_dept, normalize_title
+from . import alert_monitor as alert_monitor_api
 
 router = APIRouter(prefix="/api/admin/ai", tags=["ai"])
 
@@ -97,7 +98,7 @@ TRACEABILITY_BY_SCENARIO = {
         "formula": "高风险：存在严重有效预警，或必修未通过≥2门，或累计未通过≥3门；中风险：存在警告有效预警，或至少1门未通过，或相邻学期GPA下降>0.30；其余按有效预警情况标记关注/低风险。",
         "boundary": "用于辅导员、班主任、学院和教务处核查学生状态，不替代正式成绩认定、处分、毕业资格审核或心理评估。",
         "explanationSources": [
-            {"name": "预警解释", "source": "fact_alert.level/type/trigger_detail、alert_event.workflow_status", "usage": "确认最近一次预警来源和是否需要延续干预。"},
+            {"name": "预警解释", "source": "fact_alert.level/type/trigger_detail、alert_event.workflow_status", "usage": "确认最近一次预警来源、当前核查状态和是否仍需复核。"},
             {"name": "课程与GPA解释", "source": "fact_grade.is_pass/gpa/credits、dim_course.name", "usage": "判断学生是否存在课程缺口、GPA下滑或高难度课程暴露。"},
         ],
     },
@@ -106,7 +107,7 @@ TRACEABILITY_BY_SCENARIO = {
         "calculationLogic": "按预警等级、类型和学生成绩记录汇总当前预警池，识别需要优先分派或复核的学生群体。",
         "rules": ["预警学生按 fact_alert.student_id 去重", "严重/警告优先级高于提醒", "叠加未通过课程数判断处置优先级"],
         "formula": "汇总指标按完整筛选范围统计；重点对象按预警等级（严重>警告>提醒）、未通过课程数降序、触发时间降序排列，仅展示前3名。",
-        "boundary": "用于预警监控和名单分派，不代表已完成干预闭环或学生最终风险结论。",
+        "boundary": "用于预警监控和核查排序，不代表已完成后续处置，也不是学生最终风险结论。",
     },
     "graduation_readiness": {
         "dataSources": ["student_plan_course_status", "curriculum_plan_course", "dim_student", "dim_course"],
@@ -800,7 +801,7 @@ def _reasons(base: dict, alerts: list[dict], stats: dict, failed: list[dict], en
         reasons.append(f"未通过课程中包含历史未通过率较高课程：{names}，学生需要提前获得课程难度提醒和学习资源建议。")
     if enhanced:
         reasons.append("该对象具备较完整的证据链，研判文本在规则证据基础上进行了管理视角增强。")
-    return reasons or ["当前证据未显示明显恶化，但仍建议结合最近成绩、选课和学生访谈进行常规观察。"]
+    return reasons or ["当前证据未显示明显恶化，建议结合最近成绩、选课情况和既有核查记录进行常规观察。"]
 
 
 def _suggestions(base: dict, alerts: list[dict], stats: dict, failed: list[dict], enhanced: bool) -> list[dict]:
@@ -809,8 +810,8 @@ def _suggestions(base: dict, alerts: list[dict], stats: dict, failed: list[dict]
         {
             "role": "辅导员",
             "priority": "high" if alerts or (stats.get("failed_courses") or 0) >= 2 else "medium",
-            "action": "优先完成一次学业状态沟通",
-            "detail": f"围绕 {failed_names}、近期学习投入和心理受挫情况进行访谈，确认是否需要持续跟踪。",
+            "action": "优先核实近期学业事实",
+            "detail": f"围绕 {failed_names}、近期选课和已有核查记录确认事实；是否沟通及采用何种方式由学校制度和责任人员决定。",
         },
         {
             "role": "班主任/导师",
@@ -836,11 +837,11 @@ def _suggestions(base: dict, alerts: list[dict], stats: dict, failed: list[dict]
 
 
 def _next_actions(base: dict, alerts: list[dict], stats: dict, failed: list[dict]) -> list[str]:
-    actions = ["查看学生完整档案中的成长轨迹、历史预警和人工干预记录。"]
+    actions = ["查看学生完整档案中的成长轨迹、历史预警和人工核查记录。"]
     if failed:
         actions.append("核查未通过课程是否已有下学期开课、重修班或课程替代资源。")
     if alerts:
-        actions.append("在预警闭环中补充本次沟通记录，并约定下一次复核时间。")
+        actions.append("在预警核查记录中补充已确认事实、责任人和下一次复核时间。")
     if (stats.get("failed_required_courses") or 0) > 0:
         actions.append("将必修未通过课程纳入学院毕业准备风险清单。")
     return actions
@@ -871,9 +872,9 @@ def _student_insight(conn: sqlite3.Connection, student_id: str, user: dict, scen
 
     if enhanced:
         summary = (
-            f"{base['name']}属于需要优先跟进的复合型学业风险学生：当前预警等级为"
+            f"{base['name']}当前存在需要优先核查的复合学业风险证据：当前预警等级为"
             f"{latest.get('level') or '关注'}，未通过课程 {fail_courses} 门，其中必修 {required_fail} 门。"
-            "建议把该生放入本轮学院帮扶核查名单，先确认课程缺口和重修资源，再安排辅导员沟通。"
+            "建议纳入本轮学院优先核查名单，先确认规则证据、课程缺口、重修资源和既有核查记录。"
         )
         confidence = "高"
     else:
@@ -930,72 +931,66 @@ def alert_summary(level: Optional[str] = None, type: Optional[str] = None,
                   status: Optional[str] = None, college: Optional[str] = None,
                   user: dict = Depends(get_current_user),
                   conn: sqlite3.Connection = Depends(get_db)):
-    conds = ["COALESCE(a.is_active,1)=1"]
-    params: list = []
-    if level:
-        conds.append("a.level=?"); params.append(level)
-    if type:
-        conds.append("a.type=?"); params.append(type)
-    if status:
-        mapped_status = WORKFLOW_BY_LABEL.get(status, status)
-        conds.append("(e.workflow_status=? OR a.status=?)"); params += [mapped_status, status]
-    if college:
-        conds.append("c.name=?"); params.append(college)
-    scope_sql, scope_params = _student_scope_sql(user, conn, "s")
-    if scope_sql:
-        conds.append(scope_sql.replace(" AND ", "", 1)); params += scope_params
-    where = " WHERE " + " AND ".join(conds)
-    aggregate = dbm.query_one(conn, f"""
-        SELECT COUNT(*) AS alert_records,
-               COUNT(DISTINCT a.student_id) AS student_count,
-               SUM(CASE WHEN a.level='严重' THEN 1 ELSE 0 END) AS critical_records,
-               SUM(CASE WHEN a.level='警告' THEN 1 ELSE 0 END) AS warning_records,
-               SUM(CASE WHEN a.level='提醒' THEN 1 ELSE 0 END) AS info_records
-        FROM fact_alert a
-        JOIN dim_student s ON s.student_id=a.student_id
-        LEFT JOIN dim_college c ON c.college_id=s.college_id
-        LEFT JOIN alert_event e ON e.alert_id=a.alert_id
-        {where}
-    """, params) or {}
-    top = dbm.query(conn, f"""
-        WITH ranked AS (
-            SELECT a.student_id, s.name, c.name AS college, a.level, a.type,
-                   a.trigger_detail, e.workflow_status,
-                   COALESCE(g.failed_courses,0) AS failed_courses,
-                   g.avg_gpa,COALESCE(a.created_at,'') AS created_at,
-                   ROW_NUMBER() OVER (
-                       PARTITION BY a.student_id
-                       ORDER BY CASE a.level WHEN '严重' THEN 0 WHEN '警告' THEN 1 ELSE 2 END,
-                                COALESCE(g.failed_courses,0) DESC,COALESCE(a.created_at,'') DESC
-                   ) AS student_rank
-            FROM fact_alert a
-            JOIN dim_student s ON s.student_id=a.student_id
-            LEFT JOIN dim_college c ON c.college_id=s.college_id
-            LEFT JOIN alert_event e ON e.alert_id=a.alert_id
-            LEFT JOIN (
-                SELECT student_id,
-                       COUNT(DISTINCT CASE WHEN is_pass=0 THEN course_id END) AS failed_courses,
-                       ROUND(AVG(CASE WHEN gpa IS NOT NULL THEN gpa END),2) AS avg_gpa
-                FROM fact_grade GROUP BY student_id
-            ) g ON g.student_id=a.student_id
-            {where}
-        )
-        SELECT student_id,name,college,level,type,trigger_detail,workflow_status,failed_courses,avg_gpa
-        FROM ranked
-        WHERE student_rank=1
-        ORDER BY CASE level WHEN '严重' THEN 0 WHEN '警告' THEN 1 ELSE 2 END,
-                 failed_courses DESC,created_at DESC
-        LIMIT 10
-    """, params)
+    management_map = {
+        "new": "pending_review", "待处理": "pending_review",
+        "assigned": "in_review", "notified": "in_review",
+        "contacted": "in_review", "supporting": "in_review",
+        "review_pending": "in_review", "resolved": "recorded",
+        "closed": "closed",
+    }
+    management = management_map.get(status, status) if status else None
+    alert_monitor_api._validate_common_filters(level, management)
+    base_sql, params = alert_monitor_api._base_sql(
+        user, conn, level=level, alert_type=type, college=college,
+    )
+    cte = alert_monitor_api._student_cte(base_sql)
+    where = " WHERE management_state=?" if management else ""
+    aggregate_params = params + ([management] if management else [])
+    aggregate = dbm.query_one(conn, cte + f"""
+        SELECT COUNT(*) student_count,
+               SUM(alert_count) alert_records,
+               SUM(CASE WHEN highest_rank=3 THEN 1 ELSE 0 END)
+                   critical_students,
+               SUM(CASE WHEN highest_rank=2 THEN 1 ELSE 0 END)
+                   warning_students,
+               SUM(CASE WHEN management_state='pending_review' THEN 1 ELSE 0 END)
+                   pending_students,
+               SUM(CASE WHEN management_state='in_review' THEN 1 ELSE 0 END)
+                   reviewing_students
+        FROM students{where}
+    """, tuple(aggregate_params)) or {}
+    priority_result = alert_monitor_api.alert_priority(
+        limit=10, level=level, type=type, management=management,
+        college=college, user=user, conn=conn,
+    )["data"]
+    top = priority_result.get("items") or []
+    meta = alert_monitor_api._meta(conn, user, base_sql, params)
     total = int(aggregate.get("alert_records") or 0)
     student_count = int(aggregate.get("student_count") or 0)
-    critical = int(aggregate.get("critical_records") or 0)
-    warning = int(aggregate.get("warning_records") or 0)
+    critical = int(aggregate.get("critical_students") or 0)
+    warning = int(aggregate.get("warning_students") or 0)
+    pending = int(aggregate.get("pending_students") or 0)
+    reviewing = int(aggregate.get("reviewing_students") or 0)
     summary = (
-        f"当前筛选范围共有 {total} 条有效预警记录，涉及 {student_count} 名学生；"
-        f"其中严重 {critical} 条、警告 {warning} 条。"
-        f"下方重点对象仅展示排序前 {len(top)} 名，汇总指标按完整筛选范围计算。"
+        f"当前分析范围有 {student_count} 名去重学生仍命中 {total} 条有效规则；"
+        f"其中最高风险为严重的学生 {critical} 名，仍有规则待核查 {pending} 名，"
+        f"已进入核查过程 {reviewing} 名。"
+        f"优先队列仅展示前 {len(top)} 名，完整范围仍在学生名单中保留。"
     )
+    focus_items = [{
+        "student_id": item["studentId"],
+        "studentId": item["studentId"],
+        "name": item["studentName"],
+        "studentName": item["studentName"],
+        "college": item["collegeName"],
+        "className": item["className"],
+        "level": item["highestLevel"],
+        "type": item["primaryType"],
+        "trigger_detail": item["primaryReason"],
+        "priorityScore": item["priorityScore"],
+        "priorityReasons": item["priorityReasons"],
+        "managementLabel": item["managementLabel"],
+    } for item in top]
     return ai_ok({
         "targetType": "alertGroup",
         "targetId": "current-alert-filter",
@@ -1004,33 +999,103 @@ def alert_summary(level: Optional[str] = None, type: Optional[str] = None,
         "riskLevel": "critical" if critical else "warning" if warning else "info",
         "riskLabel": "高风险" if critical else "中风险" if warning else "关注",
         "riskTone": "danger" if critical else "warning" if warning else "info",
-        "source": "rule",
-        "sourceLabel": "规则研判兜底",
-        "generatedBy": "deterministic_rule_engine",
+        "source": "hybrid",
+        "sourceLabel": "结构化优先级研判",
+        "generatedBy": "alert_priority_v2",
         "generatedAt": _now(),
         "summary": summary,
-        "confidence": "中",
+        "confidence": "高",
+        "intervention": {
+            "status": "action_required" if critical and pending else "watch",
+            "label": "需优先核查" if critical and pending else "持续观察",
+            "priority": "high" if critical and pending else "medium",
+            "priorityReasons": [
+                f"当前有{critical}名学生最高风险为严重。",
+                f"当前有{pending}名学生仍有规则尚未完成核查。",
+            ],
+        },
+        "decision": {
+            "headline": summary,
+            "whyNow": [
+                "当前快照同时存在风险等级、管理状态和持续时长证据，可形成有限的优先核查队列。",
+                "历史计算批次覆盖不足，因此本次不把当前快照解释为新增、升级或持续变化。",
+            ],
+            "impactScope": (
+                f"{student_count}名当前预警学生；{critical}名最高风险为严重；"
+                f"{pending}名仍有待核查规则"
+            ),
+            "consequence": (
+                "若仍按预警记录逐条浏览，复合风险学生和长期未核查规则容易被大量记录淹没；"
+                "但排序未经人工核查前不能直接形成学生处置结论。"
+            ),
+        },
+        "comparison": {
+            "available": False,
+            "baseline": meta["historyComparison"].get("reason")
+                        or "当前仅提供规则快照，不解释历史变化。",
+            "changes": [],
+        },
         "evidence": [
-            {"label": "预警学生", "value": f"{student_count} 人", "detail": "按完整筛选范围对学生去重", "tone": "info", "source": "fact_alert.student_id（去重，is_active=1）", "managementValue": "判断本轮需要学院和辅导员覆盖的实际学生规模，避免用预警记录人次代替学生人数。"},
-            {"label": "有效预警记录", "value": f"{total} 条", "detail": "同一学生可命中多条规则", "tone": "info", "source": "fact_alert.alert_id（is_active=1）", "managementValue": "判断预警规则触发总量和复合风险规模，用于估算本轮核查工作量。"},
-            {"label": "严重预警", "value": f"{critical} 条", "detail": "应优先进入人工核查", "tone": "danger" if critical else "success", "source": "fact_alert.level='严重'", "managementValue": "定位最高等级风险记录，优先安排学院确认学生是否已被关注。"},
-            {"label": "警告预警", "value": f"{warning} 条", "detail": "建议按课程缺口和 GPA 变化分层处理", "tone": "warning" if warning else "success", "source": "fact_alert.level='警告'", "managementValue": "识别可能继续恶化的学生群体，安排在严重预警之后分层复核。"},
+            {"label": "当前预警学生", "value": f"{student_count} 人", "detail": "一名学生命中多条规则只计1人", "tone": "info", "source": "fact_alert.student_id（is_active=1，按学生去重）", "managementValue": "判断当前需要覆盖的实际学生规模，避免把规则命中记录误当人数。"},
+            {"label": "最高风险为严重", "value": f"{critical} 人", "detail": "按每名学生当前命中的最高风险等级统计", "tone": "danger" if critical else "success", "source": "fact_alert.level，经学生级最高等级聚合", "managementValue": "确定本轮先核查的高风险学生规模。"},
+            {"label": "仍有待核查", "value": f"{pending} 人", "detail": "至少有1条当前规则的事件状态为new", "tone": "warning" if pending else "success", "source": "alert_event.workflow_status='new'，按学生聚合", "managementValue": "估算尚未完成规则级核查的工作量。"},
+            {"label": "当前规则命中", "value": f"{total} 条", "detail": "同一学生可以同时命中多条规则", "tone": "info", "source": "fact_alert.alert_id（is_active=1）", "managementValue": "识别复合证据叠加，并估算逐规则核查量。"},
         ],
         "reasons": [
-            "预警切片用于帮助管理者判断本轮应先处理哪些学生，而不是仅按列表顺序逐条查看。",
-            "严重等级、未通过课程数量和 GPA 偏低是本次排序的核心依据。",
+            "排序先考虑学生当前最高风险，再考虑是否仍有规则待核查、同时命中规则数和风险持续时长。",
+            "优先分只用于安排核查先后，不是风险概率、学生评价或处分依据。",
         ],
         "suggestions": [
-            {"role": "教务处", "priority": "high", "action": "按学院分派核查任务", "detail": "先推动严重预警学生所在学院确认课程缺口和重修资源。"},
-            {"role": "二级学院", "priority": "high", "action": "建立本周重点学生清单", "detail": "优先处理严重预警、持续预警和必修未通过课程较多的学生。"},
-            {"role": "辅导员", "priority": "medium", "action": "完成学生访谈并保留跟进证据", "detail": "在学校授权的预警业务流程中记录访谈结论，并同步呈现在学生档案中，便于比较历史预警变化。"},
+            {"role": "教务处", "priority": "high", "action": "核查优先学生是否集中于同一学院或课程", "detail": "若出现群体集中，再进入课程供给、课程难度和培养环节分析；不把个人名单直接解释为学院质量结论。"},
+            {"role": "二级学院", "priority": "high", "action": "打开队列前列学生的核查抽屉", "detail": "逐人确认规则证据、未通过课程、GPA变化和既有核查记录，形成可核验事实。"},
+            {"role": "辅导员/班主任", "priority": "medium", "action": "在授权责任范围内补充核查事实", "detail": "只记录已确认的学业情况和后续关注时间，不根据AI排序自动形成处置结论。"},
         ],
         "nextActions": [
-            "打开前 3 名重点学生的 AI 研判，确认是否进入本轮帮扶名单。",
-            "对同一课程集中触发的学生，进一步查看课程质量与重修资源。",
+            "先打开优先队列前3名学生的核查抽屉，确认排序证据是否成立。",
+            "若多名学生集中命中同一课程，再进入教学运行分析核查课程难度和重修资源。",
+            "完成核查后记录事实与复核时间；人工核查状态不替代当前规则风险状态。",
         ],
-        "focusItems": top,
-        "limitations": ["当前统计基于已接入预警和成绩数据，未包含心理、出勤等暂未接入数据。"],
+        "focusItems": focus_items,
+        "traceability": {
+            "businessDataSources": "fact_alert、alert_event、dim_student",
+            "dataSources": priority_result["definition"]["sourceTables"],
+            "scope": meta["scope"]["label"],
+            "ruleVersion": (
+                f"{meta['definitionVersion']} / "
+                f"{priority_result['definition']['version']}"
+            ),
+            "asOfTime": meta["dataAsOf"],
+            "generationMethod": "结构化规则聚合与可解释优先级评分",
+            "calculationLogic": (
+                "先按学生合并当前有效预警，再分开统计当前风险与人工核查状态，"
+                "最后按风险、核查状态、规则叠加和持续时长形成优先队列。"
+            ),
+            "rules": [
+                f"{item['rule_id']}@{item['rule_version']}"
+                for item in meta["ruleVersions"]
+            ],
+            "thresholds": [
+                "风险分：严重50、警告30、提醒15",
+                "管理状态分：仍有待核查15、核查中8",
+                "多规则分：每增加1条加5，最多15",
+                "持续时长分：30天加5、60天加10",
+            ],
+            "formula": priority_result["definition"]["formula"],
+            "boundary": priority_result["definition"]["boundary"],
+            "analysisScope": meta["scope"],
+            "dataAsOf": meta["dataAsOf"],
+            "currentSemester": meta["currentSemester"],
+            "definitionVersion": meta["definitionVersion"],
+            "priorityVersion": priority_result["definition"]["version"],
+            "priorityFormula": priority_result["definition"]["formula"],
+            "sourceTables": priority_result["definition"]["sourceTables"],
+            "ruleVersions": meta["ruleVersions"],
+            "historyComparison": meta["historyComparison"],
+        },
+        "limitations": [
+            "当前统计基于已接入预警、学生和核查事件数据，未包含心理、出勤等未接入数据。",
+            "历史计算批次证据不足时，不输出新增、升级或持续风险判断。",
+        ],
     })
 
 

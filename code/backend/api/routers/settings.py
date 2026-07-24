@@ -124,6 +124,27 @@ def _require_rule_permission(conn: sqlite3.Connection, user: dict, permission: s
         raise ApiError(f"当前角色缺少规则治理权限：{permission}", code=403, status_code=403)
 
 
+def _require_rule_view(conn: sqlite3.Connection, user: dict) -> None:
+    """规则读取也必须经过服务端授权，不能只依赖前端隐藏工作区。"""
+    if has_action(user, "rule.discovery.manage"):
+        return
+    exists = dbm.scalar(
+        conn,
+        "SELECT 1 FROM sqlite_master WHERE type='table' "
+        "AND name='sys_rule_governance_permission'",
+    )
+    allowed = exists and dbm.scalar(
+        conn,
+        """SELECT 1 FROM sys_rule_governance_permission
+           WHERE role_id=? AND permission IN
+                 ('edit','review','publish','activate','audit')
+           LIMIT 1""",
+        (user["role_id"],),
+    )
+    if not allowed:
+        raise ApiError("当前角色无权查看预警规则治理", code=403, status_code=403)
+
+
 def _validate_values(rule_id: str, current: dict, values: dict | None) -> dict:
     params = dict(current)
     if values:
@@ -224,6 +245,7 @@ def _gen_text(rule_id: str, params: dict) -> str:
 @router.get("/settings")
 def settings(conn: sqlite3.Connection = Depends(get_db),
             user: dict = Depends(get_current_user)):
+    _require_rule_view(conn, user)
     # 预警规则（结构化阈值）
     rules = []
     for r in dbm.query(conn, """
@@ -851,6 +873,7 @@ def trigger_discovery(user: dict = Depends(get_current_user),
 def list_discovered(conn: sqlite3.Connection = Depends(get_db),
                   user: dict = Depends(get_current_user)):
     """获取规则自发现结果，按状态分组。"""
+    _require_rule_view(conn, user)
     pending, approved, rejected, superseded = [], [], [], []
     last_semester = dbm.scalar(conn,
         "SELECT MAX(semester_id) FROM sys_discovered_rule") or ""
@@ -970,6 +993,7 @@ class DiscoveryConfigIn(BaseModel):
 def get_discovery_config(conn: sqlite3.Connection = Depends(get_db),
                          user: dict = Depends(get_current_user)):
     """获取规则自发现的数据范围/LLM/采样配置。"""
+    _require_rule_view(conn, user)
     exists = dbm.scalar(conn, "SELECT 1 FROM sqlite_master WHERE type='table' AND name='sys_config'")
     rows = (dbm.query(conn, "SELECT config_key, config_value FROM sys_config "
                       "WHERE config_key LIKE 'discovery.%'") if exists else [])

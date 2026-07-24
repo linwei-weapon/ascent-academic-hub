@@ -1,686 +1,1020 @@
 <template>
-  <div v-loading="pageLoading" element-loading-text="正在加载学校预警数据…" :aria-busy="pageLoading">
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
-      <div v-if="!embedded">
-        <h2 class="sa-page-title">学业预警监控</h2>
-        <p class="sa-page-sub">数据来源：学校学籍、成绩数据与当前已激活规则计算结果 · 点击等级卡片筛选核查对象</p>
-      </div>
+  <div class="alert-monitor">
+    <div v-if="!embedded" class="monitor-head">
+      <h2 class="sa-page-title">学业预警监控</h2>
+      <p class="sa-page-sub">按去重学生查看当前规则命中、核查状态和组织集中情况。</p>
     </div>
 
-    <div v-if="hasFilters" class="filter-feedback">
-      <div><b>当前查看：</b>{{ activeFilterText }}<span>，匹配 {{ filteredList.length }} 条预警</span></div>
-      <el-button link type="primary" @click="clearFilters">清除全部筛选</el-button>
+    <div v-if="initialLoading" class="initial-loading" aria-live="polite">
+      <div class="loading-title">正在建立当前预警快照</div>
+      <p>正在加载去重学生摘要、第一页核查名单和组织分布，预计需要数秒…</p>
+      <el-skeleton :rows="9" animated />
     </div>
 
-    <section class="ai-focus-callout" :class="{ empty: !aiFocusCandidates.length }">
-      <div class="ai-focus-mark">AI</div>
-      <div class="ai-focus-copy">
-        <b v-if="aiFocusCandidates.length">从 {{ aiCandidateStudents.length }} 名介入候选中，收敛本轮优先核查 {{ aiFocusCandidates.length }} 名</b>
-        <b v-else>当前范围暂未发现需要AI优先介入的对象</b>
-        <span v-if="aiFocusCandidates.length">
-          仅纳入未解决的严重预警，并叠加多门未通过或明显GPA下降等可行动证据；再按风险强度和课程问题规模取本轮 Top30。
-        </span>
-        <span v-else>普通预警仍可通过列表和学生详情查看，AI只在达到管理介入条件时出现。</span>
-      </div>
-      <el-button v-if="aiFocusCandidates.length" type="primary" plain :disabled="pageLoading" @click="openGroupInsight">
-        查看AI管理研判
-      </el-button>
-    </section>
+    <template v-else>
+      <el-alert
+        v-if="loadError"
+        class="state-alert"
+        type="error"
+        :closable="false"
+        show-icon
+        title="预警监控数据加载失败"
+      >
+        <template #default>
+          <span>{{ loadError }}</span>
+          <el-button link type="primary" @click="loadAll">重新加载</el-button>
+        </template>
+      </el-alert>
 
-    <!-- KPI 行（点击联动筛选） -->
-    <div class="alert-kpi-row">
-      <div v-for="a in levels" :key="a.key" class="alert-kpi" :class="{ active: activeFilter === a.key }"
-        role="button" tabindex="0" :aria-pressed="activeFilter === a.key"
-        @click="toggleFilter(a)" @keydown.enter.prevent="toggleFilter(a)" @keydown.space.prevent="toggleFilter(a)">
-        <div class="ak-val tnum" :style="{ color: a.color }">{{ data.summary[a.key] }}</div>
-        <div class="ak-label"><KpiLabel :label="a.label" :formula="a.formula" /></div>
-        <div class="ak-hint">{{ activeFilter === a.key ? '▼ 已筛选' : '点击筛选' }}</div>
-      </div>
-      <div class="alert-kpi" :class="{ active: activeFilter === 'inbox' }" role="button" tabindex="0"
-        :aria-pressed="activeFilter === 'inbox'" @click="toggleInbox" @keydown.enter.prevent="toggleInbox" @keydown.space.prevent="toggleInbox">
-        <div class="ak-val tnum" style="color:#4F46E5">{{ data.summary.inbox }}</div>
-        <div class="ak-label"><KpiLabel label="我的待办" formula="分派给当前用户且尚未解决/关闭的预警事件" /></div>
-        <div class="ak-hint">{{ activeFilter === 'inbox' ? '▼ 已筛选' : '点击筛选' }}</div>
-      </div>
-      <div class="alert-kpi" @click="clearFilters">
-        <div class="ak-val tnum" style="color:#0D9488">{{ data.summary.resolvedRate }}</div>
-        <div class="ak-label"><KpiLabel label="解决率" formula="已解决预警数÷预警总数×100%" /></div>
-        <div class="ak-hint">显示全部</div>
-      </div>
-    </div>
-
-    <!-- 当前范围优先对象：只呈现达到AI管理介入阈值的少量对象 -->
-    <div class="sa-card" style="margin-bottom:16px" v-if="aiFocusCandidates.length">
-      <div class="sa-card-title">当前优先核查对象 <span class="extra">展示 Top4 · 完整范围 {{ aiFocusCandidates.length }} 人</span></div>
-      <div class="focus-grid">
-        <div v-for="f in aiFocusCandidates.slice(0,4)" :key="f.sid" class="focus-card" @click="showStudent(f)">
-          <div class="focus-name">{{ f.name }} <span class="sa-faint" style="font-weight:400">{{ f.class }}</span></div>
-          <div class="focus-type">{{ f.type }} · {{ f.detail }}</div>
-          <div class="sa-faint" style="font-size:11px;margin-top:2px">{{ f.college }} · 触发：{{ f.time }}</div>
+      <div class="monitor-context">
+        <div>
+          <b>当前规则快照</b>
+          <span>{{ meta.currentSemester || '学期待确认' }}</span>
+          <span>{{ meta.scope?.label || '当前授权范围' }}</span>
+          <span>数据截止 {{ formatDate(meta.dataAsOf) }}</span>
+        </div>
+        <div class="context-boundary">
+          当前风险与人工核查状态分别统计
+          <KpiLabel
+            label=""
+            formula="当前规则仍命中，不代表尚未核查；已有核查记录，也不代表风险已经消失。"
+          />
         </div>
       </div>
-    </div>
 
-    <!-- 趋势 + 分布 -->
-    <el-row :gutter="16" style="margin-bottom:16px">
-      <el-col :span="12">
-        <div class="sa-card">
-          <div class="sa-card-title">月度预警趋势 <span class="extra">各月新增预警数</span></div>
-          <EChart v-if="data.monthlyTrend.length" :option="trendOption" :height="220" />
-          <div v-else class="sa-faint" style="font-size:12px">暂无趋势数据</div>
-        </div>
-      </el-col>
-      <el-col :span="12">
-        <div class="sa-card">
-          <div class="sa-card-title">按学院预警分布 <span class="extra">严重 / 警告 / 提醒 分层</span></div>
-          <EChart v-if="data.collegeDist.length" :option="distOption" :height="Math.max(200, data.collegeDist.length*28)" />
-          <div v-else class="sa-faint" style="font-size:12px">暂无分布数据</div>
-        </div>
-      </el-col>
-    </el-row>
+      <el-alert
+        v-if="meta.historyComparison && !meta.historyComparison.available"
+        class="state-alert"
+        type="warning"
+        :closable="false"
+        show-icon
+        title="暂不展示新增、升级和持续风险指标"
+        :description="meta.historyComparison.reason"
+      />
 
-    <!-- 主内容区 -->
-    <el-row :gutter="16">
-      <el-col :span="5">
-        <div class="sa-card" style="margin-bottom:12px">
-          <div class="sa-card-title">筛选条件</div>
-          <el-select v-model="fCollege" placeholder="学院" size="small" style="width:100%;margin-bottom:8px" clearable>
-            <el-option label="全部学院" value="" /><el-option v-for="c in filterColleges" :key="c" :label="c" :value="c" />
-          </el-select>
-          <el-select v-model="fType" placeholder="预警类型" size="small" style="width:100%;margin-bottom:8px" clearable>
-            <el-option label="全部类型" value="" /><el-option v-for="t in filterTypes" :key="t" :label="t" :value="t" />
-          </el-select>
-          <el-select v-model="fLevel" placeholder="预警等级" size="small" style="width:100%;margin-bottom:8px" clearable>
-            <el-option label="全部等级" value="" /><el-option label="严重" value="严重" /><el-option label="警告" value="警告" /><el-option label="提醒" value="提醒" />
-          </el-select>
-          <el-select v-model="fStatus" placeholder="处理状态" size="small" style="width:100%" clearable>
-            <el-option label="全部状态" value="" />
-            <el-option v-for="s in workflowStatuses" :key="s.value" :label="s.label" :value="s.label" />
-          </el-select>
-        </div>
-      </el-col>
+      <div v-if="refreshing" class="refresh-feedback" aria-live="polite">
+        <span>正在按新条件更新摘要、图表和学生名单，当前结果暂时保留…</span>
+      </div>
 
-      <el-col :span="19">
-        <div class="sa-card">
-          <div class="sa-card-title">
-            <span>预警列表<span class="sa-faint" style="font-weight:400;font-size:12px;margin-left:8px">共 {{ filteredList.length }} 条</span></span>
-            <el-button size="small" @click="exportList">导出 CSV</el-button>
+      <section class="kpi-grid">
+        <button
+          v-for="card in kpiCards"
+          :key="card.key"
+          type="button"
+          class="kpi-card"
+          :class="{ active: activePreset === card.key, static: !card.filter }"
+          :aria-pressed="card.filter ? activePreset === card.key : undefined"
+          @click="card.filter && applyPreset(card)"
+        >
+          <span class="kpi-value" :style="{ color: card.color }">{{ card.value }}</span>
+          <span class="kpi-label">
+            <KpiLabel :label="card.label" :formula="card.formula" />
+          </span>
+          <span class="kpi-note">{{ card.note }}</span>
+        </button>
+      </section>
+
+      <section class="priority-section">
+        <div class="section-head">
+          <div>
+            <h3>本轮优先核查队列</h3>
+            <p>综合最高风险、核查状态、规则叠加和持续时长排序；分数只用于安排核查先后。</p>
           </div>
-          <DataTable :columns="alertCols" :data="filteredList" storage-key="alert:list" size="small"
-            pagination :default-page-size="15" :page-sizes="[15, 30, 50, 100]"
-            @row-click="showStudent" row-class-name="row-clickable" :class="{'is-filtered':hasFilters}">
-            <template #col-name="{row}"><span class="link">{{ row.name }}</span></template>
-            <template #col-level="{row}"><el-tag :type="tagType(row.level)" size="small">{{ row.level }}</el-tag></template>
-            <template #col-detail="{row}"><span style="font-size:12px">{{ row.detail }}</span></template>
-            <template #col-status="{row}"><el-tag :type="statusType(row.status)" size="small">{{ row.status }}</el-tag></template>
-            <template #col-failSummary="{row}"><el-tooltip :content="row.failSummary || ''" placement="top" :disabled="!row.failSummary" :show-after="300"><span class="fail-summary-cell">{{ row.failSummary || '-' }}</span></el-tooltip></template>
-            <template #col-attention="{row}"><el-tag v-if="isAIFocus(row)" type="danger" effect="plain" size="small">AI重点</el-tag><span v-else class="normal-view">常规查看</span></template>
-          </DataTable>
+          <el-button
+            v-if="priorityRows.length"
+            type="primary"
+            plain
+            size="small"
+            @click="openGroupInsight"
+          >AI管理研判</el-button>
         </div>
-      </el-col>
-    </el-row>
-
-    <!-- 抽屉：学生数据查看（对齐真实 student 接口） -->
-    <el-drawer v-model="drawerVisible" title="预警学生数据查看" size="520px">
-      <div v-if="student.name">
-        <div class="drawer-info">
-          {{ student.code }} · {{ student.collegeName }} · {{ student.majorName }} · {{ student.className }}
-          <el-button size="small" type="primary" text style="margin-left:8px" @click="router.push('/admin/student/' + student.code)">查看完整档案 →</el-button>
-          <el-button v-if="selectedNeedsAI" size="small" type="primary" text @click="openStudentInsight({ sid: student.code })">查看AI管理研判</el-button>
-          <el-tag v-else size="small" type="info" effect="plain">当前无需AI介入</el-tag>
-        </div>
-
-        <el-row :gutter="8" style="margin-bottom:12px">
-          <el-col :span="6" v-for="k in (student.kpis || [])" :key="k.label">
-            <div class="drawer-kpi">
-              <div class="dk-val tnum" :style="{ color: k.color || '#1E293B' }">{{ k.value }}</div>
-              <div class="dk-label">{{ k.label }}</div>
+        <div v-if="priorityRows.length" class="priority-grid">
+          <button
+            v-for="item in priorityRows.slice(0, 4)"
+            :key="item.studentId"
+            type="button"
+            class="priority-card"
+            @click="showStudent(item)"
+          >
+            <div>
+              <b>{{ item.studentName }}</b>
+              <span>优先分 {{ item.priorityScore }}</span>
             </div>
-          </el-col>
-        </el-row>
-
-        <div class="sa-card" style="margin-bottom:12px">
-          <div class="sa-card-title">GPA 趋势</div>
-          <EChart v-if="student.gpaHistory && student.gpaHistory.length" :option="gpaTrendOption" :height="150" />
-          <div v-else class="sa-faint" style="font-size:12px">暂无 GPA 数据</div>
+            <p>{{ item.priorityReasons?.join('；') }}</p>
+            <small>
+              {{ organizationText(item) }} · {{ item.className }}
+            </small>
+          </button>
         </div>
+        <el-empty
+          v-else
+          description="当前范围没有严重且待核查的学生"
+          :image-size="70"
+        />
+      </section>
 
-        <!-- V1.1 学业统计摘要 -->
-        <div class="sa-card" style="margin-bottom:12px" v-if="student.studySummary">
-          <div class="sa-card-title">学业统计摘要</div>
-          <el-row :gutter="12">
-            <el-col :span="12">
-              <div class="study-stat study-stat--pass">
-                <div class="study-stat__label">已通过</div>
-                <div class="study-stat__items">
-                  <span class="study-stat__item">已修 <b>{{ student.studySummary.passed?.courses ?? '-' }}</b> 门</span>
-                  <span class="study-stat__item"><b>{{ student.studySummary.passed?.hours ?? '-' }}</b> 学时</span>
-                  <span class="study-stat__item"><b>{{ student.studySummary.passed?.credits ?? '-' }}</b> 学分</span>
-                </div>
-                <div class="study-stat__rate" style="color:#0D9488">完成率 {{ student.studySummary.passed?.completionRate ?? '-' }}%</div>
+      <el-row :gutter="16" class="chart-row">
+        <el-col :span="12">
+          <section class="sa-card chart-card">
+            <div class="section-head compact">
+              <div>
+                <h3>当前预警首次生成时间分布</h3>
+                <p>用于识别当前风险池中的长期滞留，不代表各月历史新增。</p>
               </div>
-            </el-col>
-            <el-col :span="12">
-              <div class="study-stat study-stat--fail">
-                <div class="study-stat__label">挂科</div>
-                <div class="study-stat__items">
-                  <span class="study-stat__item">挂科 <b>{{ student.studySummary.failed?.courses ?? '-' }}</b> 门</span>
-                  <span class="study-stat__item"><b>{{ student.studySummary.failed?.hours ?? '-' }}</b> 学时</span>
-                  <span class="study-stat__item"><b>{{ student.studySummary.failed?.credits ?? '-' }}</b> 学分</span>
-                </div>
-                <div class="study-stat__rate" style="color:#E11D48">当前挂科 <b>{{ student.studySummary.failed?.currentCourses ?? '-' }}</b> 门</div>
+              <KpiLabel label="" :formula="timeData.definition?.boundary || ''" />
+            </div>
+            <EChart
+              v-if="timeData.items?.length"
+              :option="timeOption"
+              :height="230"
+            />
+            <el-empty
+              v-else
+              description="当前范围暂无活动预警时间分布"
+              :image-size="70"
+            />
+          </section>
+        </el-col>
+        <el-col :span="12">
+          <section class="sa-card chart-card">
+            <div class="section-head compact">
+              <div>
+                <h3>{{ distributionTitle }}</h3>
+                <p>比例用于组织间比较，人数用于评估实际核查工作量。</p>
               </div>
-            </el-col>
-          </el-row>
-        </div>
-
-        <!-- V1.1 挂科溯源 -->
-        <div class="sa-card" style="margin-bottom:12px" v-if="student.failTrace && student.failTrace.length">
-          <div class="sa-card-title">挂科溯源</div>
-          <el-table :data="student.failTrace" size="small" style="width:100%">
-            <el-table-column prop="courseName" label="课程名称" min-width="140"><template #default="{row}"><span style="color:#E11D48">{{ row.courseName }}</span></template></el-table-column>
-            <el-table-column prop="teacherName" label="授课教师" width="80" />
-            <el-table-column prop="college" label="开课学院" width="110" />
-            <el-table-column prop="failCount" label="挂科次数" width="76"><template #default="{row}"><span style="font-weight:600;color:#E11D48">{{ row.failCount }}</span></template></el-table-column>
-            <el-table-column prop="semesters" label="挂科学期" min-width="130"><template #default="{row}"><span style="font-size:11px">{{ row.semesters }}</span></template></el-table-column>
-          </el-table>
-        </div>
-
-        <div class="sa-card" style="margin-bottom:12px">
-          <div class="sa-card-title">预警历史与变化</div>
-          <div v-if="student.alertComparison" class="comparison-grid">
-            <div><b>{{ student.alertComparison.totalCycles || 0 }}</b><span>历史预警</span></div>
-            <div><b>{{ student.alertComparison.activeAlerts || 0 }}</b><span>当前有效</span></div>
-            <div><b>{{ student.alertComparison.interventionCount || 0 }}</b><span>干预记录</span></div>
-            <div><b>{{ student.alertComparison.latestChange || '—' }}</b><span>最近变化</span></div>
-          </div>
-          <div v-if="student.alertHistory && student.alertHistory.length">
-            <div v-for="a in student.alertHistory" :key="a.time + a.type" class="rule-row">
-              <div class="history-head"><div><el-tag :type="tagType(a.level)" size="small">{{ a.level }}</el-tag><span>{{ a.type }}</span></div><el-tag size="small" effect="plain">{{ a.changeType }}</el-tag></div>
-              <div class="sa-faint" style="font-size:11px;margin-top:3px">{{ a.detail }} · {{ a.time }}<span v-if="a.workflowStatusLabel"> · {{ a.workflowStatusLabel }}</span></div>
+              <KpiLabel label="" :formula="distribution.definition?.formula || ''" />
             </div>
+            <EChart
+              v-if="distribution.items?.length"
+              :option="distributionOption"
+              :height="230"
+            />
+            <el-empty
+              v-else
+              description="当前范围暂无可比较的组织分布"
+              :image-size="70"
+            />
+          </section>
+        </el-col>
+      </el-row>
+
+      <section class="sa-card filter-card">
+        <div class="section-head compact">
+          <div>
+            <h3>分析范围</h3>
+            <p>以下条件作用于指标、优先队列、图表和学生名单；调整后点击“应用范围”。</p>
           </div>
-          <div v-else class="sa-faint" style="font-size:12px">无历史记录</div>
+          <span v-if="appliedDescription" class="applied-summary">
+            已应用：{{ appliedDescription }}
+          </span>
+        </div>
+        <div class="filter-grid">
+          <el-select
+            v-if="organizationOptions.college?.length"
+            v-model="draft.college"
+            clearable
+            placeholder="学院"
+          >
+            <el-option
+              v-for="item in organizationOptions.college"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value"
+            />
+          </el-select>
+          <el-select
+            v-if="organizationOptions.major?.length"
+            v-model="draft.major"
+            clearable
+            placeholder="专业"
+          >
+            <el-option
+              v-for="item in organizationOptions.major"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value"
+            />
+          </el-select>
+          <el-select
+            v-if="organizationOptions.class?.length"
+            v-model="draft.classId"
+            clearable
+            placeholder="行政班"
+          >
+            <el-option
+              v-for="item in organizationOptions.class"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value"
+            />
+          </el-select>
+          <el-select v-model="draft.type" clearable placeholder="预警类型">
+            <el-option
+              v-for="item in filterOptions.types || []"
+              :key="item.value"
+              :label="item.value"
+              :value="item.value"
+            />
+          </el-select>
+          <el-select v-model="draft.level" clearable placeholder="风险等级">
+            <el-option
+              v-for="item in filterOptions.levels || []"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value"
+            />
+          </el-select>
+          <div class="filter-actions">
+            <el-button type="primary" :loading="refreshing" @click="applyFilters">
+              应用范围
+            </el-button>
+            <el-button @click="resetAnalysisFilters">恢复全部范围</el-button>
+          </div>
+        </div>
+      </section>
+
+      <section class="sa-card list-card">
+        <div class="section-head compact">
+          <div>
+            <h3>当前预警学生</h3>
+            <p>共 {{ pagination.total }} 名去重学生；多条规则命中在核查抽屉中查看。</p>
+          </div>
+          <div class="list-head-actions">
+            <span v-if="listAppliedDescription" class="applied-summary">
+              名单筛选：{{ listAppliedDescription }}
+            </span>
+            <el-button :loading="exporting" @click="exportCurrentList">导出当前筛选</el-button>
+            <el-tag effect="plain" type="info">学生视图</el-tag>
+          </div>
         </div>
 
-        <TrajectoryCard :rule-id="selectedAlertRow?.ruleId || workflow.ruleId" :level="selectedAlertRow?.level || workflow.level" />
-
-        <div class="sa-card" style="margin-bottom:12px" v-if="student.interventionHistory?.length">
-          <div class="sa-card-title">已记录干预过程 <span class="extra">同步呈现在学生完整档案</span></div>
-          <div v-for="item in student.interventionHistory" :key="item.event_id + '-' + item.created_at" class="intervention-item">
-            <div><b>{{ item.action_type }}</b><span>{{ item.operator }} · {{ item.created_at }}</span></div>
-            <p>{{ item.content }}</p>
-            <small v-if="item.next_action_at">下次跟进：{{ item.next_action_at }}</small>
-          </div>
+        <div class="list-filter-bar">
+          <span class="list-filter-label">名单内筛选</span>
+          <el-input
+            v-model="listDraft.q"
+            clearable
+            placeholder="学生姓名或学号"
+            @keyup.enter="applyListFilters"
+          />
+          <el-select v-model="listDraft.management" clearable placeholder="核查状态">
+            <el-option
+              v-for="item in filterOptions.managementStates || []"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value"
+            />
+          </el-select>
+          <el-checkbox
+            v-if="['class', 'staff_relation'].includes(meta.scope?.type)"
+            v-model="listDraft.mine"
+          >只看我的待办</el-checkbox>
+          <el-button type="primary" plain :loading="refreshing" @click="applyListFilters">
+            筛选名单
+          </el-button>
+          <el-button v-if="hasListFilters" link @click="resetListFilters">清除名单筛选</el-button>
+          <span class="list-filter-hint">不改变上方管理指标和组织图表</span>
         </div>
 
-        <div class="sa-card" style="margin-bottom:12px" v-if="workflow.eventId">
-          <div class="sa-card-title">
-            <span>预警跟进闭环</span>
-            <el-tag :type="statusType(workflow.workflowStatusLabel)" size="small">{{ workflow.workflowStatusLabel }}</el-tag>
-          </div>
-          <div class="workflow-meta">
-            主责任人：{{ workflow.assignees?.[0]?.username || '未分派' }}
-            <span v-if="workflow.assignees?.[0]?.assignment_reason"> · {{ workflow.assignees[0].assignment_reason }}</span>
-          </div>
-          <div class="workflow-meta">
-            风险周期：第 {{ workflow.cycleNo || 1 }} 周期
-            <span v-if="workflow.recurrenceOfEventId"> · 前序事件 #{{ workflow.recurrenceOfEventId }}</span>
-            <span v-if="workflow.cycleReason"> · {{ workflow.cycleReason }}</span>
-          </div>
-          <div class="workflow-actions">
-            <el-select v-model="nextStatus" size="small" style="width:120px" placeholder="更新状态">
-              <el-option v-for="s in workflowStatuses" :key="s.value" :label="s.label" :value="s.value" />
-            </el-select>
-            <el-button size="small" type="primary" :loading="savingWorkflow" @click="saveStatus">更新状态</el-button>
-          </div>
-          <el-input v-model="followupContent" type="textarea" :rows="2" maxlength="1000" show-word-limit placeholder="填写联系、约谈或帮扶记录" />
-          <div style="display:flex;justify-content:flex-end;margin-top:8px">
-            <el-button size="small" type="primary" :loading="savingWorkflow" @click="addFollowup">添加跟进记录</el-button>
-          </div>
-          <div v-if="workflow.followups?.length" class="followup-list">
-            <div v-for="f in workflow.followups" :key="f.followup_id" class="followup-item">
-              <div><b>{{ f.operator }}</b> · {{ f.action_type }} <span class="sa-faint">{{ f.created_at }}</span></div>
-              <div class="followup-content">{{ f.content }}</div>
+        <DataTable
+          :columns="studentColumns"
+          :data="rows"
+          storage-key="alert:student-list"
+          config-version="2"
+          :max-business-columns="6"
+          :page-size="pagination.pageSize"
+          :page-sizes="[10, 20, 50]"
+          size="small"
+          empty-text="当前条件下没有预警学生"
+          row-class-name="row-clickable"
+          @row-click="showStudent"
+          @update:page-size="changePageSize"
+        >
+          <template #col-student="{ row }">
+            <div class="student-cell">
+              <button type="button" @click.stop="showStudent(row)">{{ row.studentName }}</button>
+              <span>{{ row.studentId }}</span>
             </div>
-          </div>
-          <div v-else class="sa-faint" style="font-size:12px;margin-top:10px">暂无人工跟进记录</div>
-        </div>
-
-        <div class="sa-card" style="margin-bottom:12px">
-          <div class="sa-card-title">挂科课程明细</div>
-          <div v-if="failScores.length">
-            <div v-for="s in failScores" :key="s.courseName + s.semester" class="score-row">
-              <span style="color:#E11D48">{{ s.courseName }}<span class="sa-faint" style="margin-left:6px">{{ s.semester }}</span></span>
-              <span style="color:#E11D48;font-weight:600" class="tnum">{{ s.score }} 分</span>
+          </template>
+          <template #col-highestLevel="{ row }">
+            <el-tag :type="levelType(row.highestLevel)" size="small">
+              {{ row.highestLevel }}
+            </el-tag>
+          </template>
+          <template #col-primaryReason="{ row }">
+            <div class="reason-cell">
+              <b>{{ row.primaryType }}</b>
+              <span>{{ row.primaryReason }}</span>
             </div>
-          </div>
-          <div v-else class="sa-faint" style="font-size:12px">无挂科记录</div>
-        </div>
-
-        <div class="sa-card">
-          <div class="sa-card-title">近期全部成绩</div>
-          <div v-if="student.scores && student.scores.length">
-            <div v-for="s in student.scores" :key="s.courseName + s.semester" class="score-row">
-              <span>{{ s.courseName }}</span>
-              <span :style="{ color: s.passed ? '#0D9488' : '#E11D48', fontWeight: 600 }" class="tnum">{{ s.score }}</span>
+          </template>
+          <template #col-alertCount="{ row }">
+            <span class="count-cell">{{ row.alertCount }}条</span>
+          </template>
+          <template #col-managementLabel="{ row }">
+            <el-tag :type="managementType(row.managementState)" effect="plain" size="small">
+              {{ row.managementLabel }}
+            </el-tag>
+          </template>
+          <template #col-latestAt="{ row }">{{ formatDate(row.latestAt) }}</template>
+          <template #col-action="{ row }">
+            <el-button link type="primary" @click.stop="showStudent(row)">核查</el-button>
+          </template>
+          <template #empty>
+            <div class="table-empty">
+              <p v-if="hasAppliedFilters">当前筛选条件下没有匹配学生。</p>
+              <p v-else>当前规则快照在本权限范围内没有命中学生。</p>
+              <el-button v-if="hasAppliedFilters" link type="primary" @click="resetFilters">
+                清除筛选
+              </el-button>
             </div>
-          </div>
-          <div v-else class="sa-faint" style="font-size:12px">暂无成绩数据</div>
-        </div>
+          </template>
+        </DataTable>
 
-        <div class="sa-faint" style="font-size:11px;text-align:center;margin-top:12px">
-          学业数据来源：教务系统 · 跟进记录保存在本平台 · 不回写教务源库
+        <div class="external-pager">
+          <el-pagination
+            v-model:current-page="pagination.page"
+            :page-size="pagination.pageSize"
+            :total="pagination.total"
+            layout="total, prev, pager, next"
+            small
+            @current-change="loadStudentPage"
+          />
         </div>
-      </div>
-      <div v-else class="sa-faint" style="font-size:12px;text-align:center;padding-top:40px">加载中…</div>
-    </el-drawer>
-    <AIInsightDrawer v-model="aiDrawerVisible" :insight="aiInsight" :loading="aiLoading" title="AI管理研判" @focus-item-click="openStudentFromFocus" />
+      </section>
+    </template>
+
+    <AlertStudentDrawer
+      v-model="drawerVisible"
+      :row="selectedStudent"
+      @ai="openStudentInsight"
+      @changed="loadAll"
+    />
+    <AIInsightDrawer
+      v-model="aiDrawerVisible"
+      :insight="aiInsight"
+      :loading="aiLoading"
+      title="AI管理研判"
+      @focus-item-click="openStudentFromFocus"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { reactive, onMounted, ref, computed, watch } from 'vue'
-import { http } from '@/utils/http';
-import { getAlertSummaryAIInsight, getStudentAIInsight } from '@/utils/ai';
-import KpiLabel from '@/components/KpiLabel.vue';
-import EChart from '@/components/EChart.vue';
-import AIInsightDrawer from '@/components/AIInsightDrawer.vue';
-import DataTable, { type DataTableColumn } from '@/components/DataTable.vue';
-import TrajectoryCard from './TrajectoryCard.vue';
-import { exportCsv } from '@/utils/export';
-import { authStore } from '@/store/auth';
-import { useRoute } from 'vue-router';
+import { computed, onMounted, reactive, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
+import { getActiveIdentity, getToken, http } from '@/utils/http'
+import { getAlertSummaryAIInsight, getStudentAIInsight } from '@/utils/ai'
+import EChart from '@/components/EChart.vue'
+import KpiLabel from '@/components/KpiLabel.vue'
+import DataTable, { type DataTableColumn } from '@/components/DataTable.vue'
+import AIInsightDrawer from '@/components/AIInsightDrawer.vue'
+import AlertStudentDrawer from './AlertStudentDrawer.vue'
 
-const route = useRoute();
-withDefaults(defineProps<{ embedded?: boolean }>(), { embedded:false });
+withDefaults(defineProps<{ embedded?: boolean }>(), { embedded: false })
 
-const drawerVisible = ref(false); const student = ref({} as any);
-const selectedAlertRow = ref<any>(null);
-const workflow = ref({} as any); const followupContent = ref(''); const nextStatus = ref('');
-const savingWorkflow = ref(false); const currentEventId = ref<number | null>(null);
-const fCollege = ref(''); const fType = ref(''); const fLevel = ref(''); const fStatus = ref('');
-const activeFilter = ref('');
-const aiDrawerVisible = ref(false); const aiLoading = ref(false); const aiInsight = ref<any>(null);
-const pageLoading = ref(true);
+const route = useRoute()
+const router = useRouter()
+const initialLoading = ref(true)
+const refreshing = ref(false)
+const loadError = ref('')
+const requestSequence = ref(0)
+const summary = reactive<Record<string, any>>({})
+const definitions = reactive<Record<string, any>>({})
+const meta = reactive<Record<string, any>>({})
+const rows = ref<any[]>([])
+const priorityRows = ref<any[]>([])
+const distribution = reactive<Record<string, any>>({ items: [] })
+const timeData = reactive<Record<string, any>>({ items: [] })
+const filterOptions = reactive<Record<string, any>>({
+  levels: [], types: [], managementStates: [], organizations: {},
+})
+const pagination = reactive({ page: 1, pageSize: 20, total: 0, pages: 0 })
+const drawerVisible = ref(false)
+const selectedStudent = ref<any>(null)
+const aiDrawerVisible = ref(false)
+const aiLoading = ref(false)
+const aiInsight = ref<any>(null)
+const activePreset = ref('')
+const exporting = ref(false)
 
-const levels = [
-  { key: 'critical', label: '严重', color: '#E11D48', formula: '触发条件满足且等级=严重' },
-  { key: 'warning', label: '警告', color: '#F97316', formula: '触发条件满足且等级=警告' },
-  { key: 'info', label: '提醒', color: '#D97706', formula: '触发条件满足且等级=提醒' },
-  { key: 'resolved', label: '已解决', color: '#0D9488', formula: '干预状态=已解决的预警数' },
-];
-const workflowStatuses = [
-  { value: 'new', label: '待处理' }, { value: 'assigned', label: '已分派' },
-  { value: 'notified', label: '已通知' }, { value: 'contacted', label: '已联系' },
-  { value: 'supporting', label: '帮扶中' }, { value: 'review_pending', label: '待复核' },
-  { value: 'resolved', label: '已解决' }, { value: 'closed', label: '已关闭' },
-];
+const emptyFilter = () => ({
+  college: '', major: '', classId: '', type: '', level: '',
+})
+const emptyListFilter = () => ({ q: '', management: '', mine: false })
+const draft = reactive(emptyFilter())
+const applied = reactive(emptyFilter())
+const listDraft = reactive(emptyListFilter())
+const listApplied = reactive(emptyListFilter())
 
-// 预警列表列定义（M6 DataTable）
-const alertCols: DataTableColumn[] = [
-  { key: 'name', label: '姓名', width: 70 },
-  { key: 'sid', label: '学号', width: 105 },
-  { key: 'college', label: '学院', width: 130 },
-  { key: 'class', label: '班级', width: 130 },
-  { key: 'level', label: '等级', width: 64 },
-  { key: 'type', label: '类型', width: 120 },
-  { key: 'detail', label: '触发数据链', minWidth: 180 },
-  { key: 'status', label: '状态', width: 76 },
-  { key: 'failSummary', label: '挂科溯源摘要', width: 160 },
-  { key: 'attention', label: '管理关注', width: 90, fixed: 'right' },
-  { key: 'time', label: '时间', width: 92 },
-];
-
-const data = reactive({
-  summary: { critical: 0, warning: 0, info: 0, resolved: 0, resolvedRate: '0%', inbox: 0, workflow: {} } as Record<string, any>,
-  rules: [] as any[], list: [] as any[],
-  monthlyTrend: [] as any[], collegeDist: [] as any[],
-});
-
-// 筛选项由真实列表派生，避免与数据不一致
-const filterColleges = computed(() => [...new Set(data.list.map((x: any) => x.college).filter(Boolean))]);
-const filterTypes = computed(() => [...new Set(data.list.map((x: any) => x.type).filter(Boolean))]);
-
-function alertEvidence(row: any) {
-  const text = `${row.type || ''} ${row.detail || ''} ${row.failSummary || ''}`;
-  const failedMatch = text.match(/(?:未通过课程|尚未通过课程|挂科)\s*(\d+)\s*门/);
-  const declineMatch = text.match(/(?:降|下降)\s*([0-9.]+)/);
-  return {
-    failedCourses: failedMatch ? Number(failedMatch[1]) : 0,
-    gpaDecline: declineMatch ? Number(declineMatch[1]) : 0,
-  };
-}
-
-function aiPriorityScore(row: any) {
-  if (['已解决', '已关闭'].includes(row.status)) return 0;
-  const evidence = alertEvidence(row);
-  let score = row.level === '严重' ? 100 : row.level === '警告' ? 45 : 0;
-  score += Math.min(evidence.failedCourses, 5) * 12;
-  score += Math.min(evidence.gpaDecline, 1.5) * 35;
-  if (row.status === '未处理' || row.status === '待处理' || !row.status) score += 15;
-  if (String(row.type || '').includes('未解决')) score += 15;
-  return score;
-}
-
-function meetsAICandidate(row: any) {
-  if (['已解决', '已关闭'].includes(row.status) || row.level !== '严重') return false;
-  const evidence = alertEvidence(row);
-  return evidence.failedCourses >= 3
-    || evidence.gpaDecline >= 0.8
-    || String(row.type || '').includes('复合');
-}
-
-const failScores = computed(() => (student.value.scores || []).filter((s: any) => !s.passed));
-
-const filteredList = computed(() => {
-  let arr = data.list;
-  if (fCollege.value) arr = arr.filter((x: any) => x.college === fCollege.value);
-  if (fType.value) arr = arr.filter((x: any) => x.type === fType.value);
-  if (fLevel.value) arr = arr.filter((x: any) => x.level === fLevel.value);
-  if (fStatus.value) arr = arr.filter((x: any) => x.status === fStatus.value);
-  if (activeFilter.value === 'inbox') {
-    const username = authStore.user?.username;
-    arr = arr.filter((x: any) => x.assignee === username && !['已解决', '已关闭'].includes(x.status));
+const organizationOptions = computed(() => filterOptions.organizations || {})
+const hasAppliedFilters = computed(() =>
+  Object.values(applied).some(Boolean) || Object.values(listApplied).some(Boolean),
+)
+const hasListFilters = computed(() => Object.values(listApplied).some(Boolean))
+const appliedDescription = computed(() => {
+  const labels: string[] = []
+  const findLabel = (dimension: string, value: string) =>
+    organizationOptions.value[dimension]?.find((item: any) => item.value === value)?.label || value
+  if (applied.college) labels.push(`学院=${findLabel('college', applied.college)}`)
+  if (applied.major) labels.push(`专业=${findLabel('major', applied.major)}`)
+  if (applied.classId) labels.push(`班级=${findLabel('class', applied.classId)}`)
+  if (applied.type) labels.push(`类型=${applied.type}`)
+  if (applied.level) labels.push(`等级=${applied.level}`)
+  return labels.join('、')
+})
+const listAppliedDescription = computed(() => {
+  const labels: string[] = []
+  if (listApplied.q) labels.push(`学生=${listApplied.q}`)
+  if (listApplied.management) {
+    const label = filterOptions.managementStates?.find((item: any) =>
+      item.value === listApplied.management)?.label || listApplied.management
+    labels.push(`核查状态=${label}`)
   }
-  return arr;
-});
-const aiCandidateStudents = computed(() => {
-  const best = new Map<string, any>();
-  for (const row of filteredList.value) {
-    if (!meetsAICandidate(row)) continue;
-    const current = best.get(row.sid);
-    if (!current || aiPriorityScore(row) > aiPriorityScore(current)) best.set(row.sid, row);
-  }
-  return [...best.values()].sort((a, b) => aiPriorityScore(b) - aiPriorityScore(a));
-});
-const aiFocusCandidates = computed(() => aiCandidateStudents.value.slice(0, 30));
-const aiFocusIds = computed(() => new Set(aiFocusCandidates.value.map((row: any) => row.sid)));
-function isAIFocus(row: any) { return aiFocusIds.value.has(row.sid); }
-const selectedNeedsAI = computed(() => Boolean(selectedAlertRow.value && isAIFocus(selectedAlertRow.value)));
-const hasFilters = computed(() => Boolean(activeFilter.value || fCollege.value || fType.value || fLevel.value || fStatus.value));
-const activeFilterText = computed(() => {
-  const parts:string[] = [];
-  if (fLevel.value) parts.push(`等级=${fLevel.value}`);
-  if (fStatus.value) parts.push(`状态=${fStatus.value}`);
-  if (fCollege.value) parts.push(`学院=${fCollege.value}`);
-  if (fType.value) parts.push(`类型=${fType.value}`);
-  if (activeFilter.value === 'inbox') parts.unshift('范围=我的待办');
-  return parts.join('、') || '全部预警';
-});
-function fmtMonth(m: string) { const p = String(m).split('-'); return p.length > 1 ? `${+p[1]}月` : m; }
-function tagType(level: string) { return level === '严重' ? 'danger' : level === '警告' ? 'warning' : 'info'; }
-function statusType(s: string) { return s === '已解决' ? 'success' : s === '未处理' ? 'danger' : s === '已约谈' ? 'warning' : 'info'; }
+  if (listApplied.mine) labels.push('我的待办')
+  return labels.join('、')
+})
 
-const trendOption = computed(() => {
-  const mt = data.monthlyTrend || [];
-  return {
-    grid: { left: 6, right: 12, top: 24, bottom: 4, containLabel: true },
-    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-    xAxis: { type: 'category', data: mt.map((m: any) => fmtMonth(m.month)), axisLabel: { color: '#475569', fontSize: 11 }, axisLine: { lineStyle: { color: '#E2E8F0' } }, axisTick: { show: false } },
-    yAxis: { type: 'value', axisLabel: { color: '#94A3B8' }, splitLine: { lineStyle: { color: '#EEF1F5' } } },
-    series: [{
-      type: 'bar', barWidth: '46%', itemStyle: { borderRadius: [4, 4, 0, 0] },
-      data: mt.map((m: any) => ({ value: m.count, itemStyle: { color: m.count > 60 ? '#E11D48' : m.count > 40 ? '#F97316' : '#D97706' } })),
-      label: { show: true, position: 'top', formatter: '{c}', color: '#64748B', fontSize: 11 },
-    }],
-  };
-});
-
-const distOption = computed(() => {
-  const cd = [...(data.collegeDist || [])].reverse();
-  return {
-    grid: { left: 6, right: 24, top: 6, bottom: 28, containLabel: true },
-    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-    legend: { data: ['严重', '警告', '提醒'], bottom: 0, textStyle: { color: '#64748B', fontSize: 11 }, itemWidth: 12, itemHeight: 8 },
-    xAxis: { type: 'value', axisLabel: { color: '#94A3B8' }, splitLine: { lineStyle: { color: '#EEF1F5' } } },
-    yAxis: { type: 'category', data: cd.map((c: any) => c.name), axisLabel: { color: '#475569', fontSize: 11 }, axisLine: { lineStyle: { color: '#E2E8F0' } }, axisTick: { show: false } },
-    series: [
-      { name: '严重', type: 'bar', stack: 't', data: cd.map((c: any) => c.critical), itemStyle: { color: '#E11D48' }, barWidth: '56%' },
-      { name: '警告', type: 'bar', stack: 't', data: cd.map((c: any) => c.warning), itemStyle: { color: '#F97316' } },
-      { name: '提醒', type: 'bar', stack: 't', data: cd.map((c: any) => c.info), itemStyle: { color: '#D97706' } },
-    ],
-  };
-});
-
-const gpaTrendOption = computed(() => {
-  const g = student.value.gpaHistory || [];
-  return {
-    grid: { left: 4, right: 10, top: 16, bottom: 4, containLabel: true },
-    tooltip: { trigger: 'axis' },
-    xAxis: { type: 'category', data: g.map((_: any, i: number) => `S${i + 1}`), axisLabel: { color: '#94A3B8', fontSize: 11 }, axisLine: { lineStyle: { color: '#E2E8F0' } }, axisTick: { show: false } },
-    yAxis: { type: 'value', min: 0, max: 5, axisLabel: { color: '#94A3B8' }, splitLine: { lineStyle: { color: '#EEF1F5' } } },
-    series: [{
-      type: 'line', smooth: true, data: g, symbolSize: 7, lineStyle: { width: 3, color: '#4F46E5' }, itemStyle: { color: '#4F46E5' },
-      areaStyle: { color: 'rgba(79,70,229,0.08)' },
-      markLine: { silent: true, symbol: 'none', data: [{ yAxis: 2 }], lineStyle: { color: '#E11D48', type: 'dashed' }, label: { formatter: '预警线 2.0', color: '#E11D48', fontSize: 10 } },
-    }],
-  };
-});
-
-function toggleFilter(a: any) {
-  if (activeFilter.value === a.key) {
-    activeFilter.value = ''; fLevel.value = ''; fStatus.value = '';
+const kpiCards = computed(() => {
+  const cards: any[] = [
+    {
+      key: 'current', label: '当前预警学生',
+      value: `${summary.current_students || 0}人`, color: '#4f46e5',
+      formula: definitionText('current_students'),
+      note: `${summary.current_alert_records || 0}条规则命中 · 点击查看全部`,
+      filter: {},
+    },
+    {
+      key: 'critical', label: '当前严重学生',
+      value: `${summary.critical_students || 0}人`, color: '#e11d48',
+      formula: '按学生当前命中的最高风险等级去重统计；一名学生只计一次。',
+      note: '点击筛选严重风险',
+      filter: { level: '严重' },
+    },
+    {
+      key: 'criticalPending', label: '严重且待核查',
+      value: `${summary.critical_pending_students || 0}人`, color: '#be123c',
+      formula: definitionText('critical_pending_students'),
+      note: '严重风险且仍有规则待核查',
+      filter: { level: '严重', management: 'pending_review' },
+    },
+    {
+      key: 'pending', label: '待核查学生',
+      value: `${summary.pending_students || 0}人`, color: '#d97706',
+      formula: definitionText('pending_students'),
+      note: '点击查看仍有规则待核查的学生',
+      filter: { management: 'pending_review' },
+    },
+  ]
+  if (['class', 'staff_relation'].includes(meta.scope?.type)) {
+    cards.push({
+      key: 'inbox', label: '我的待核查',
+      value: `${summary.inbox_students || 0}人`, color: '#0f766e',
+      formula: '分派给当前用户且至少存在1条尚未关闭的当前预警学生数。',
+      note: '点击查看本人责任范围',
+      filter: { mine: true },
+    })
   } else {
-    activeFilter.value = a.key;
-    if (a.key === 'resolved') { fStatus.value = '已解决'; fLevel.value = ''; }
-    else { fLevel.value = a.label; fStatus.value = ''; }
+    cards.push({
+      key: 'rate', label: '当前预警学生率',
+      value: summary.alert_student_rate == null ? '—' : `${summary.alert_student_rate}%`,
+      color: '#0f766e',
+      formula: definitionText('alert_student_rate'),
+      note: `${summary.current_students || 0}/${summary.eligible_students || 0}人`,
+      filter: null,
+    })
   }
-  // M6：列表分页内置在 DataTable 中，筛选导致 data 变化时自动回到第 1 页
+  return cards
+})
+
+const studentColumns = computed<DataTableColumn[]>(() => {
+  const columns: DataTableColumn[] = [
+    {
+      key: 'student', label: '学生', width: 126, fixed: 'left',
+      required: true, region: 'identity',
+    },
+  ]
+  if (meta.scope?.type === 'all') {
+    columns.push({
+      key: 'collegeName', label: '学院', width: 150,
+      region: 'business', tooltip: true,
+    })
+  }
+  if (['all', 'college', 'major'].includes(meta.scope?.type)) {
+    columns.push({
+      key: 'majorName', label: '专业', width: 145,
+      region: 'business', tooltip: true,
+    })
+  }
+  columns.push(
+    {
+      key: 'className', label: '班级', width: 145, region: 'business',
+      tooltip: true, defaultVisible: meta.scope?.type !== 'all',
+    },
+    {
+      key: 'highestLevel', label: '最高风险', width: 84,
+      required: true, region: 'business',
+    },
+    {
+      key: 'primaryReason', label: '主要触发证据', minWidth: 245,
+      required: true, region: 'business', tooltip: true,
+    },
+    { key: 'alertCount', label: '规则命中', width: 84, region: 'business' },
+    {
+      key: 'managementLabel', label: '核查状态', width: 110,
+      required: true, region: 'business',
+    },
+    {
+      key: 'latestAt', label: '最近变化', width: 138,
+      region: 'business', defaultVisible: false,
+    },
+    {
+      key: 'action', label: '操作', width: 64, fixed: 'right',
+      required: true, region: 'action',
+    },
+  )
+  return columns
+})
+
+const distributionTitle = computed(() => ({
+  college: '学院当前预警学生率',
+  major: '专业当前预警学生率',
+  class: '行政班当前预警学生率',
+}[distribution.dimension] || '组织当前预警学生率'))
+
+const distributionOption = computed(() => {
+  const items = [...(distribution.items || [])].slice(0, 10).reverse()
+  const benchmark = distribution.benchmark?.alertStudentRate
+  return {
+    grid: { left: 8, right: 45, top: 10, bottom: 8, containLabel: true },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'shadow' },
+      formatter: (params: any[]) => {
+        const item = items[params[0]?.dataIndex]
+        return `${item?.name || ''}<br/>预警学生率：${item?.alertStudentRate ?? '—'}%`
+          + `<br/>预警学生：${item?.alertStudents || 0}人`
+          + `<br/>在籍学生：${item?.eligibleStudents || 0}人`
+      },
+    },
+    xAxis: {
+      type: 'value', axisLabel: { formatter: '{value}%', color: '#94a3b8' },
+      splitLine: { lineStyle: { color: '#eef2f7' } },
+    },
+    yAxis: {
+      type: 'category', data: items.map((item: any) => item.name),
+      axisLabel: { color: '#475569', fontSize: 11, width: 105, overflow: 'truncate' },
+      axisLine: { show: false }, axisTick: { show: false },
+    },
+    series: [{
+      type: 'bar',
+      data: items.map((item: any) => item.alertStudentRate || 0),
+      barWidth: '48%',
+      itemStyle: { color: '#4f46e5', borderRadius: [0, 5, 5, 0] },
+      label: { show: true, position: 'right', formatter: '{c}%', color: '#475569' },
+      markLine: benchmark == null ? undefined : {
+        symbol: 'none',
+        lineStyle: { color: '#f59e0b', type: 'dashed' },
+        label: { formatter: `范围平均 ${benchmark}%`, color: '#b45309' },
+        data: [{ xAxis: benchmark }],
+      },
+    }],
+  }
+})
+
+const timeOption = computed(() => {
+  const items = timeData.items || []
+  return {
+    grid: { left: 8, right: 18, top: 18, bottom: 8, containLabel: true },
+    tooltip: {
+      trigger: 'axis', axisPointer: { type: 'shadow' },
+      formatter: (params: any[]) => {
+        const item = items[params[0]?.dataIndex]
+        return `${item?.month || ''}<br/>当前仍命中学生：${item?.alertStudents || 0}人`
+          + `<br/>规则命中记录：${item?.alertRecords || 0}条`
+      },
+    },
+    xAxis: {
+      type: 'category', data: items.map((item: any) => item.month),
+      axisLabel: { color: '#64748b', fontSize: 11 },
+      axisLine: { lineStyle: { color: '#e2e8f0' } },
+      axisTick: { show: false },
+    },
+    yAxis: {
+      type: 'value', name: '学生数',
+      axisLabel: { color: '#94a3b8' },
+      splitLine: { lineStyle: { color: '#eef2f7' } },
+    },
+    series: [{
+      type: 'bar',
+      data: items.map((item: any) => item.alertStudents),
+      barWidth: '45%',
+      itemStyle: { color: '#6366f1', borderRadius: [5, 5, 0, 0] },
+      label: { show: true, position: 'top', color: '#475569' },
+    }],
+  }
+})
+
+function definitionText(key: string) {
+  const item = definitions[key]
+  return item
+    ? `${item.formula}。管理用途：${item.managementUse}。`
+    : '指标口径由当前预警学生口径接口返回。'
 }
-function toggleInbox() {
-  const selected = activeFilter.value === 'inbox';
-  activeFilter.value = selected ? '' : 'inbox';
-  fLevel.value = '';
-  fStatus.value = '';
+function levelType(level: string) {
+  return level === '严重' ? 'danger' : level === '警告' ? 'warning' : 'info'
 }
-function clearFilters() {
-  activeFilter.value = ''; fLevel.value = ''; fStatus.value = ''; fCollege.value = ''; fType.value = '';
+function managementType(state: string) {
+  if (state === 'pending_review') return 'danger'
+  if (state === 'in_review') return 'warning'
+  if (state === 'recorded') return 'success'
+  return 'info'
+}
+function formatDate(value: string) {
+  if (!value) return '—'
+  return String(value).replace('T', ' ').slice(0, 16)
+}
+function organizationText(row: any) {
+  if (meta.scope?.type === 'all') return row.collegeName
+  if (meta.scope?.type === 'college') return row.majorName
+  return row.className
+}
+function commonParams(source = applied) {
+  const params = new URLSearchParams()
+  if (source.level) params.set('level', source.level)
+  if (source.type) params.set('type', source.type)
+  if (source.college) params.set('college', source.college)
+  if (source.major) params.set('major', source.major)
+  if (source.classId) params.set('class_id', source.classId)
+  return params
+}
+function studentParams() {
+  const params = commonParams()
+  params.set('page', String(pagination.page))
+  params.set('page_size', String(pagination.pageSize))
+  if (listApplied.q) params.set('q', listApplied.q)
+  if (listApplied.management) params.set('management', listApplied.management)
+  if (listApplied.mine) params.set('assigned_to_me', 'true')
+  return params
+}
+function query(path: string, params: URLSearchParams) {
+  const suffix = params.toString()
+  return `${path}${suffix ? `?${suffix}` : ''}`
+}
+function assignObject(target: Record<string, any>, source: any) {
+  Object.keys(target).forEach(key => delete target[key])
+  Object.assign(target, source || {})
 }
 
-watch([fCollege, fType, fLevel, fStatus], () => {
-  // 下拉条件与顶层卡片可组合；手工改掉卡片对应条件时同步取消高亮。
-  const selected = levels.find((item) => item.key === activeFilter.value);
-  if (selected && selected.key === 'resolved' && fStatus.value !== '已解决') activeFilter.value = '';
-  if (selected && selected.key !== 'resolved' && fLevel.value !== selected.label) activeFilter.value = '';
-});
-
-onMounted(async () => {
-  pageLoading.value = true;
+async function loadOptions() {
+  const data: any = await http.get('/admin/alerts/options')
+  assignObject(filterOptions, data)
+}
+async function loadAll() {
+  const sequence = ++requestSequence.value
+  refreshing.value = !initialLoading.value
+  loadError.value = ''
   try {
-    const d = await http.get('/admin/alerts');
-    if (d) Object.assign(data, d);
-    const level = String(route.query.level || '');
-    const status = String(route.query.status || '');
-    const college = String(route.query.college || '');
-    const type = String(route.query.type || '');
-    if (level) {
-      fLevel.value = level;
-      activeFilter.value = levels.find((item) => item.label === level)?.key || '';
+    const params = commonParams()
+    const priorityParams = commonParams()
+    priorityParams.set('limit', '10')
+    const [summaryData, studentData, distributionData, timeResult, priorityData] =
+      await Promise.all([
+        http.get<any>(query('/admin/alerts/summary', params)),
+        http.get<any>(query('/admin/alerts/students', studentParams())),
+        http.get<any>(query('/admin/alerts/distribution', params)),
+        http.get<any>(query('/admin/alerts/time-distribution', params)),
+        http.get<any>(query('/admin/alerts/priority', priorityParams)),
+      ])
+    if (sequence !== requestSequence.value) return
+    assignObject(summary, summaryData.summary)
+    assignObject(definitions, summaryData.definitions)
+    assignObject(meta, summaryData.meta)
+    rows.value = studentData.items || []
+    Object.assign(pagination, studentData.pagination || {})
+    assignObject(distribution, distributionData)
+    assignObject(timeData, timeResult)
+    priorityRows.value = priorityData.items || []
+  } catch (error: any) {
+    if (sequence !== requestSequence.value) return
+    loadError.value = error?.message || '请稍后重试'
+  } finally {
+    if (sequence === requestSequence.value) {
+      initialLoading.value = false
+      refreshing.value = false
     }
-    if (status) fStatus.value = status;
-    if (college) fCollege.value = college;
-    if (type) fType.value = type;
-  } finally {
-    pageLoading.value = false;
-  }
-});
-
-async function showStudent(row: any) {
-  drawerVisible.value = true;
-  selectedAlertRow.value = row;
-  student.value = {};
-  workflow.value = {}; currentEventId.value = row.eventId || null;
-  followupContent.value = ''; nextStatus.value = '';
-  try {
-    const d = await http.get('/admin/student/' + row.sid);
-    student.value = d || {};
-    if (row.eventId) await loadWorkflow(row.eventId);
-  } catch {
-    // 不伪造数据：仅回填列表中已有的真实字段，其余留空
-    student.value = { name: row.name, code: row.sid, collegeName: row.college, className: row.class, majorName: '', kpis: [], gpaHistory: row.gpaHistory || [], alertHistory: [], scores: [] };
   }
 }
-
+async function loadStudentPage() {
+  const sequence = ++requestSequence.value
+  refreshing.value = true
+  try {
+    const data: any = await http.get(query('/admin/alerts/students', studentParams()))
+    if (sequence !== requestSequence.value) return
+    rows.value = data.items || []
+    Object.assign(pagination, data.pagination || {})
+  } catch (error: any) {
+    if (sequence === requestSequence.value) loadError.value = error?.message || '学生名单加载失败'
+  } finally {
+    if (sequence === requestSequence.value) refreshing.value = false
+  }
+}
+function applyFilters() {
+  Object.assign(applied, { ...draft })
+  pagination.page = 1
+  activePreset.value = ''
+  syncRoute()
+  loadAll()
+}
+function resetAnalysisFilters() {
+  Object.assign(draft, emptyFilter())
+  Object.assign(applied, emptyFilter())
+  pagination.page = 1
+  activePreset.value = ''
+  syncRoute()
+  loadAll()
+}
+function resetFilters() {
+  Object.assign(draft, emptyFilter())
+  Object.assign(applied, emptyFilter())
+  Object.assign(listDraft, emptyListFilter())
+  Object.assign(listApplied, emptyListFilter())
+  pagination.page = 1
+  activePreset.value = ''
+  syncRoute()
+  loadAll()
+}
+function applyListFilters() {
+  Object.assign(listApplied, { ...listDraft })
+  pagination.page = 1
+  activePreset.value = ''
+  syncRoute()
+  loadStudentPage()
+}
+function resetListFilters() {
+  Object.assign(listDraft, emptyListFilter())
+  Object.assign(listApplied, emptyListFilter())
+  pagination.page = 1
+  activePreset.value = ''
+  syncRoute()
+  loadStudentPage()
+}
+function applyPreset(card: any) {
+  const nextAnalysis = { ...applied }
+  const nextList = { ...listApplied }
+  if (activePreset.value === card.key) {
+    if (card.filter?.level) nextAnalysis.level = ''
+    if (card.filter?.management) nextList.management = ''
+    if (card.filter?.mine) nextList.mine = false
+    activePreset.value = ''
+  } else {
+    if (card.key === 'current') {
+      nextAnalysis.level = ''
+      nextList.management = ''
+      nextList.mine = false
+    }
+    if (card.filter?.level !== undefined) nextAnalysis.level = card.filter.level
+    if (card.filter?.management !== undefined) {
+      nextList.management = card.filter.management
+    }
+    if (card.filter?.mine !== undefined) nextList.mine = card.filter.mine
+    activePreset.value = card.key
+  }
+  Object.assign(draft, nextAnalysis)
+  Object.assign(applied, nextAnalysis)
+  Object.assign(listDraft, nextList)
+  Object.assign(listApplied, nextList)
+  pagination.page = 1
+  syncRoute()
+  if (card.filter?.level !== undefined || card.key === 'current') loadAll()
+  else loadStudentPage()
+}
+function changePageSize(value: number) {
+  if (value === pagination.pageSize) return
+  pagination.pageSize = value
+  pagination.page = 1
+  loadStudentPage()
+}
+function syncRoute() {
+  const queryValue: Record<string, string> = {}
+  if (route.query.tab) queryValue.tab = String(route.query.tab)
+  if (applied.level) queryValue.level = applied.level
+  if (applied.type) queryValue.type = applied.type
+  if (applied.college) queryValue.college = applied.college
+  if (applied.major) queryValue.major = applied.major
+  if (applied.classId) queryValue.class_id = applied.classId
+  if (listApplied.management) queryValue.management = listApplied.management
+  if (listApplied.q) queryValue.q = listApplied.q
+  if (listApplied.mine) queryValue.mine = '1'
+  router.replace({ path: '/admin/alert', query: queryValue })
+}
+function restoreRoute() {
+  Object.assign(draft, {
+    college: String(route.query.college || ''),
+    major: String(route.query.major || ''),
+    classId: String(route.query.class_id || ''),
+    type: String(route.query.type || ''),
+    level: String(route.query.level || ''),
+  })
+  Object.assign(applied, { ...draft })
+  Object.assign(listDraft, {
+    q: String(route.query.q || ''),
+    management: String(route.query.management || ''),
+    mine: String(route.query.mine || '') === '1',
+  })
+  Object.assign(listApplied, { ...listDraft })
+}
+function showStudent(row: any) {
+  selectedStudent.value = row
+  drawerVisible.value = true
+}
 async function openStudentInsight(row: any) {
-  const sid = row.sid || row.code || row.student_id;
-  if (!sid) return;
-  aiDrawerVisible.value = true;
-  aiLoading.value = true;
-  aiInsight.value = null;
+  if (!row?.studentId) return
+  aiDrawerVisible.value = true
+  aiLoading.value = true
+  aiInsight.value = null
   try {
-    aiInsight.value = await getStudentAIInsight(sid, 'alert');
+    aiInsight.value = await getStudentAIInsight(row.studentId, 'alert')
   } finally {
-    aiLoading.value = false;
+    aiLoading.value = false
   }
 }
-
 async function openGroupInsight() {
-  aiDrawerVisible.value = true;
-  aiLoading.value = true;
-  aiInsight.value = null;
+  aiDrawerVisible.value = true
+  aiLoading.value = true
+  aiInsight.value = null
   try {
     aiInsight.value = await getAlertSummaryAIInsight({
-      level: fLevel.value,
-      type: fType.value,
-      status: fStatus.value,
-      college: fCollege.value,
-    });
+      level: applied.level,
+      type: applied.type,
+      status: listApplied.management,
+      college: applied.college,
+    })
   } finally {
-    aiLoading.value = false;
+    aiLoading.value = false
   }
 }
-
 function openStudentFromFocus(item: any) {
-  const sid = item.student_id || item.sid || item.code;
-  if (!sid) return;
-  aiDrawerVisible.value = false;
-  openStudentInsight({ sid });
+  const id = item.student_id || item.studentId || item.sid || item.code
+  const row = rows.value.find(current => current.studentId === id)
+    || priorityRows.value.find(current => current.studentId === id)
+  if (!row) return
+  aiDrawerVisible.value = false
+  showStudent(row)
 }
-
-async function loadWorkflow(eventId: number) {
-  const d = await http.get('/admin/alert-events/' + eventId);
-  workflow.value = d || {};
-  nextStatus.value = workflow.value.workflowStatus || '';
-}
-
-async function addFollowup() {
-  if (!currentEventId.value || !followupContent.value.trim()) {
-    ElMessage.warning('请先填写跟进内容'); return;
+async function exportCurrentList() {
+  exporting.value = true
+  try {
+    const params = studentParams()
+    params.delete('page')
+    params.delete('page_size')
+    const headers: Record<string, string> = {}
+    const token = getToken()
+    const activeIdentity = getActiveIdentity()
+    if (token) headers.Authorization = `Bearer ${token}`
+    if (token && activeIdentity) headers['X-Active-Identity'] = activeIdentity
+    const response = await fetch(
+      `/api${query('/admin/alerts/students.csv', params)}`,
+      { headers },
+    )
+    if (!response.ok) {
+      let message = '导出失败'
+      try {
+        const body = await response.json()
+        message = body?.msg || message
+      } catch {
+        // 非JSON错误响应使用通用提示。
+      }
+      throw new Error(message)
+    }
+    const blob = await response.blob()
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = `当前预警学生_${new Date().toISOString().slice(0, 10)}.csv`
+    anchor.click()
+    URL.revokeObjectURL(url)
+    ElMessage.success(`已导出${response.headers.get('X-Export-Count') || ''}名学生`)
+  } catch (error: any) {
+    ElMessage.error(error?.message || '导出失败，请稍后重试')
+  } finally {
+    exporting.value = false
   }
-  savingWorkflow.value = true;
-  try {
-    await http.post('/admin/alert-events/' + currentEventId.value + '/followups', {
-      action_type: '人工跟进', content: followupContent.value.trim(),
-    });
-    followupContent.value = '';
-    await loadWorkflow(currentEventId.value);
-    ElMessage.success('跟进记录已保存');
-  } finally { savingWorkflow.value = false; }
 }
 
-async function saveStatus() {
-  if (!currentEventId.value || !nextStatus.value) return;
-  savingWorkflow.value = true;
+onMounted(async () => {
+  restoreRoute()
   try {
-    await http.put('/admin/alert-events/' + currentEventId.value + '/status', {
-      status: nextStatus.value, reason: '在预警详情中更新',
-    });
-    await loadWorkflow(currentEventId.value);
-    const row = data.list.find((x: any) => x.eventId === currentEventId.value);
-    if (row) row.status = workflow.value.workflowStatusLabel;
-    ElMessage.success('预警状态已更新');
-  } finally { savingWorkflow.value = false; }
-}
-
-function exportList() {
-  if (!filteredList.value.length) { window.alert('当前无数据可导出'); return }
-  exportCsv('学业预警列表', [
-    { prop: 'name', label: '姓名' }, { prop: 'sid', label: '学号' },
-    { prop: 'college', label: '学院' }, { prop: 'class', label: '班级' },
-    { prop: 'level', label: '等级' }, { prop: 'type', label: '类型' },
-    { prop: 'detail', label: '触发数据链' }, { prop: 'status', label: '状态' },
-    { prop: 'failSummary', label: '挂科溯源摘要' }, { prop: 'time', label: '时间' },
-  ], filteredList.value)
-}
+    await loadOptions()
+  } catch (error: any) {
+    loadError.value = error?.message || '筛选条件加载失败'
+  }
+  await loadAll()
+})
 </script>
 
 <style scoped>
-.alert-kpi-row { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; margin-bottom: 16px; }
-.ai-focus-callout { display:flex; align-items:center; gap:12px; margin:0 0 16px; padding:13px 14px; border:1px solid #c7d2fe; border-radius:12px; background:linear-gradient(135deg,#f8f7ff,#f8fafc); }
-.ai-focus-callout.empty { border-color:#e2e8f0; background:#f8fafc; }
-.ai-focus-mark { display:flex; align-items:center; justify-content:center; flex:none; width:34px; height:34px; border-radius:10px; background:#4f46e5; color:#fff; font-size:12px; font-weight:700; }
-.ai-focus-callout.empty .ai-focus-mark { background:#94a3b8; }
-.ai-focus-copy { flex:1; min-width:0; }
-.ai-focus-copy b { display:block; color:#1e293b; font-size:13px; }
-.ai-focus-copy span { display:block; margin-top:4px; color:#64748b; font-size:11px; line-height:1.55; }
-.normal-view { color:#94a3b8; font-size:11px; }
-.alert-kpi {
-  background: #fff; border: 1.5px solid var(--sa-border); border-radius: 14px;
-  padding: 14px 12px; text-align: center; cursor: pointer; transition: all .18s;
+.monitor-head { margin-bottom: 12px; }
+.initial-loading {
+  padding: 18px; border: 1px solid var(--sa-border); border-radius: 12px; background: #fff;
 }
-.alert-kpi:hover { border-color: #c7d2fe; transform: translateY(-2px); }
-.alert-kpi:focus-visible { outline: 3px solid #c7d2fe; outline-offset: 2px; }
-.alert-kpi.active { border-color: var(--sa-primary); box-shadow: 0 0 0 3px #eef2ff; }
-.ak-val { font-family: var(--sa-font-head); font-size: 24px; font-weight: 700; line-height: 1; }
-.ak-label { font-size: 12px; color: var(--sa-muted); margin-top: 6px; }
-.ak-hint { font-size: 10px; color: var(--sa-faint); margin-top: 3px; }
-.filter-feedback { margin:-4px 0 14px; padding:9px 12px; display:flex; justify-content:space-between; align-items:center; background:#eef2ff; border:1px solid #c7d2fe; border-radius:9px; color:#3730a3; font-size:12px; }
-.filter-feedback span { color:#64748b; margin-left:3px; }
-.is-filtered { animation:filter-in .18s ease-out; }
-@keyframes filter-in { from { opacity:.55; transform:translateY(3px) } to { opacity:1; transform:none } }
-
-.focus-grid { display: flex; gap: 12px; flex-wrap: wrap; }
-.focus-card {
-  flex: 1; min-width: 200px; padding: 10px 12px; cursor: pointer;
-  background: #fff5f7; border: 1px solid #fecdd3; border-left: 3px solid #E11D48; border-radius: 10px; transition: all .18s;
+.loading-title { color: var(--sa-text); font-size: 15px; font-weight: 700; }
+.initial-loading > p { margin: 5px 0 18px; color: var(--sa-muted); font-size: 12px; }
+.state-alert { margin-bottom: 12px; }
+.monitor-context {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin-bottom: 12px; padding: 10px 12px; border: 1px solid #dbeafe;
+  border-radius: 9px; background: #f8fbff; color: #475569; font-size: 12px;
 }
-.focus-card:hover { box-shadow: 0 4px 12px rgba(225,29,72,.12); }
-.focus-name { font-size: 13px; font-weight: 600; color: var(--sa-text); }
-.focus-type { font-size: 12px; color: #E11D48; margin-top: 4px; }
-
-.rule-row { padding: 6px 0; border-bottom: 1px solid var(--sa-border); }
-.rule-row:last-child { border-bottom: none; }
-.history-head { display:flex; align-items:center; justify-content:space-between; gap:8px; font-size:12px; }
-.history-head span { margin-left:6px; }
-.comparison-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:6px; margin:8px 0 10px; }
-.comparison-grid div { padding:7px 4px; text-align:center; background:#f8fafc; border-radius:7px; }
-.comparison-grid b { display:block; color:#1e293b; font-size:14px; }
-.comparison-grid span { display:block; color:#94a3b8; font-size:10px; margin-top:2px; }
-.intervention-item { padding:9px 0; border-bottom:1px solid var(--sa-border); font-size:12px; }
-.intervention-item:last-child { border-bottom:0; }
-.intervention-item div { display:flex; justify-content:space-between; gap:8px; }
-.intervention-item div span,.intervention-item small { color:#94a3b8; }
-.intervention-item p { margin:5px 0 2px; color:#475569; line-height:1.6; }
-.rule-name { font-size: 12px; font-weight: 600; color: var(--sa-text); }
-.score-row { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid #f1f5f9; font-size: 12px; }
-.score-row:last-child { border-bottom: none; }
-
-.drawer-info { font-size: 12px; color: var(--sa-muted); margin-bottom: 12px; }
-.drawer-kpi { background: #f8fafc; border: 1px solid var(--sa-border); border-radius: 8px; padding: 8px 4px; text-align: center; }
-.dk-val { font-family: var(--sa-font-head); font-size: 16px; font-weight: 700; }
-.dk-label { font-size: 10px; color: var(--sa-muted); margin-top: 2px; }
-
-.fail-summary-cell { font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:block; max-width:148px; }
-
-.study-stat { border-radius:10px; padding:12px; height:100%; }
-.study-stat--pass { background:#f0fdf6; border:1px solid #bbf7d0; }
-.study-stat--fail { background:#fff5f7; border:1px solid #fecdd3; }
-.study-stat__label { font-size:13px; font-weight:600; margin-bottom:6px; }
-.study-stat--pass .study-stat__label { color:#0D9488; }
-.study-stat--fail .study-stat__label { color:#E11D48; }
-.study-stat__items { display:flex; flex-wrap:wrap; gap:4px 10px; font-size:11px; color:var(--sa-muted); margin-bottom:6px; }
-.study-stat__item b { color:var(--sa-text); }
-.study-stat__rate { font-size:12px; font-weight:600; }
-
-.workflow-meta { font-size:12px; color:var(--sa-muted); margin-bottom:10px; }
-.workflow-actions { display:flex; gap:8px; margin-bottom:10px; }
-.followup-list { margin-top:10px; border-top:1px solid var(--sa-border); }
-.followup-item { padding:8px 0; border-bottom:1px solid #f1f5f9; font-size:12px; }
-.followup-content { margin-top:3px; color:var(--sa-text); white-space:pre-wrap; }
-
-.link { color: var(--sa-primary); cursor: pointer; font-weight: 500; }
-.link:hover { text-decoration: underline; }
+.monitor-context > div:first-child { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.monitor-context b { color: #1e3a8a; }
+.monitor-context span { padding-left: 10px; border-left: 1px solid #cbd5e1; }
+.context-boundary { display: flex; align-items: center; color: #64748b; white-space: nowrap; }
+.refresh-feedback {
+  margin-bottom: 12px; padding: 8px 12px; border-radius: 8px;
+  background: #eef2ff; color: #4338ca; font-size: 12px;
+}
+.kpi-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 16px; }
+.kpi-card {
+  min-width: 0; padding: 14px; text-align: left; border: 1px solid var(--sa-border);
+  border-radius: 12px; background: #fff; cursor: pointer; transition: .18s ease;
+}
+.kpi-card:not(.static):hover { border-color: #a5b4fc; transform: translateY(-1px); }
+.kpi-card.active { border-color: #6366f1; box-shadow: 0 0 0 3px #eef2ff; }
+.kpi-card.static { cursor: default; }
+.kpi-value { display: block; font-size: 25px; font-weight: 750; line-height: 1.1; }
+.kpi-label { display: block; margin-top: 7px; color: var(--sa-text); font-size: 12px; font-weight: 600; }
+.kpi-note { display: block; margin-top: 4px; overflow: hidden; color: #94a3b8; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.priority-section {
+  margin-bottom: 16px; padding: 15px; border: 1px solid #fed7aa;
+  border-radius: 12px; background: linear-gradient(135deg, #fffaf5, #fff);
+}
+.section-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.section-head.compact { align-items: center; }
+.section-head h3 { margin: 0; color: var(--sa-text); font-size: 15px; }
+.section-head p { margin: 4px 0 0; color: var(--sa-muted); font-size: 11px; line-height: 1.55; }
+.priority-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.priority-card {
+  min-width: 0; padding: 11px; text-align: left; border: 1px solid #fed7aa;
+  border-left: 3px solid #e11d48; border-radius: 9px; background: #fff;
+  cursor: pointer; transition: .18s ease;
+}
+.priority-card:hover { box-shadow: 0 5px 16px rgba(190, 24, 93, .1); }
+.priority-card > div { display: flex; justify-content: space-between; gap: 8px; }
+.priority-card b { color: var(--sa-text); font-size: 13px; }
+.priority-card span {
+  flex: none; padding: 1px 6px; border-radius: 9px; background: #fff1f2;
+  color: #be123c; font-size: 10px; font-weight: 700;
+}
+.priority-card p {
+  display: -webkit-box; min-height: 32px; margin: 6px 0 4px; overflow: hidden;
+  color: #9f1239; font-size: 11px; line-height: 16px;
+  -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+}
+.priority-card small { color: #94a3b8; }
+.chart-row { margin-bottom: 16px; }
+.chart-card { height: 330px; }
+.filter-card, .list-card { margin-bottom: 16px; }
+.filter-grid { display: grid; grid-template-columns: repeat(4, minmax(150px, 1fr)); gap: 10px; }
+.filter-actions { display: flex; gap: 8px; }
+.applied-summary {
+  max-width: 50%; overflow: hidden; color: #4338ca; font-size: 11px;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+.list-head-actions { display: flex; align-items: center; gap: 8px; }
+.list-filter-bar {
+  display: flex; align-items: center; gap: 8px; margin: 2px 0 12px; padding: 9px 10px;
+  border: 1px solid #e2e8f0; border-radius: 8px; background: #f8fafc;
+}
+.list-filter-bar .el-input { width: 210px; }
+.list-filter-bar .el-select { width: 150px; }
+.list-filter-label { flex: none; color: #334155; font-size: 12px; font-weight: 700; }
+.list-filter-hint { margin-left: auto; color: #94a3b8; font-size: 11px; }
+.student-cell button {
+  display: block; padding: 0; border: 0; background: transparent;
+  color: var(--sa-primary); cursor: pointer; font-size: 12px; font-weight: 650;
+}
+.student-cell span { display: block; margin-top: 2px; color: #94a3b8; font-size: 10px; }
+.reason-cell { min-width: 0; }
+.reason-cell b { display: block; color: var(--sa-text); font-size: 12px; }
+.reason-cell span { display: block; margin-top: 2px; overflow: hidden; color: #64748b; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.count-cell { color: #475569; font-weight: 600; }
+.external-pager { display: flex; justify-content: flex-end; margin-top: 12px; }
+.table-empty { padding: 18px; color: #64748b; font-size: 12px; }
 :deep(.row-clickable) { cursor: pointer; }
-:deep(.row-clickable:hover) { background: #eef2ff !important; }
+:deep(.row-clickable:hover td.el-table__cell) { background: #f5f7ff !important; }
+@media (max-width: 1200px) {
+  .kpi-grid { grid-template-columns: repeat(3, 1fr); }
+  .priority-grid { grid-template-columns: repeat(2, 1fr); }
+  .filter-grid { grid-template-columns: repeat(3, minmax(150px, 1fr)); }
+  .list-filter-hint { display: none; }
+}
+@media (max-width: 760px) {
+  .kpi-grid, .priority-grid, .filter-grid { grid-template-columns: 1fr; }
+  .chart-row :deep(.el-col) { max-width: 100%; flex: 0 0 100%; }
+  .monitor-context, .section-head { align-items: flex-start; flex-direction: column; }
+  .list-head-actions, .list-filter-bar {
+    align-items: stretch; flex-direction: column; width: 100%;
+  }
+  .list-filter-bar .el-input, .list-filter-bar .el-select { width: 100%; }
+}
 </style>

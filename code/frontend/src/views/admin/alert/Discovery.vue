@@ -5,15 +5,24 @@
       <el-breadcrumb-item>规则自发现</el-breadcrumb-item>
     </el-breadcrumb>
     <div class="sa-head-row">
-      <div>
+      <div v-if="!embedded">
         <h2 class="sa-page-title">规则自发现</h2>
         <p class="sa-page-sub">历史风险关联建议 · 采纳后必须进入规则治理流程，不会自动产生预警</p>
       </div>
       <el-button type="primary" size="small" :loading="discovering" :disabled="!canEdit" @click="runDiscovery">运行新一轮分析</el-button>
     </div>
 
-    <el-alert :title="evidence.limitation || '历史关联不等于因果关系'" type="warning"
-      :closable="false" show-icon style="margin-bottom:14px" />
+    <el-alert v-if="loadError" type="error" :closable="false" show-icon
+      title="规则自发现结果加载失败" style="margin-bottom:14px">
+      <template #default>{{loadError}} <el-button link type="primary" @click="loadData">重新加载</el-button></template>
+    </el-alert>
+    <div v-if="initialLoading" class="discovery-loading">
+      <b>正在加载候选规则、历史样本和治理衔接状态</b>
+      <el-skeleton :rows="7" animated />
+    </div>
+    <template v-else>
+      <el-alert :title="evidence.limitation || '历史关联不等于因果关系'" type="warning"
+        :closable="false" show-icon style="margin-bottom:14px" />
 
     <div class="sa-card summary">
       <div><span>分析周期</span><b>{{ lastSemester || '—' }}</b></div>
@@ -78,6 +87,7 @@
         <el-table-column prop="riskRatio" label="当时风险倍数" width="120" />
       </el-table>
     </div>
+    </template>
   </div>
 </template>
 
@@ -94,17 +104,26 @@ const totalStudents = ref(0)
 const evidence = ref<any>({})
 const discovering = ref(false)
 const canEdit = ref(false)
+const initialLoading = ref(true)
+const loadError = ref('')
 const levelType = (level:string) => level === '严重' ? 'danger' : level === '警告' ? 'warning' : 'info'
 
 async function loadData() {
-  const data:any = await http.get('/admin/settings/rules/discovered')
-  discovered.pending = data.pending || []
-  discovered.approved = data.approved || []
-  discovered.rejected = data.rejected || []
-  discovered.superseded = data.superseded || []
-  lastSemester.value = data.lastSemester || ''
-  totalStudents.value = data.totalStudents || 0
-  evidence.value = data.evidence || {}
+  loadError.value = ''
+  try {
+    const data:any = await http.get('/admin/settings/rules/discovered')
+    discovered.pending = data.pending || []
+    discovered.approved = data.approved || []
+    discovered.rejected = data.rejected || []
+    discovered.superseded = data.superseded || []
+    lastSemester.value = data.lastSemester || ''
+    totalStudents.value = data.totalStudents || 0
+    evidence.value = data.evidence || {}
+  } catch (error:any) {
+    loadError.value = error?.message || '请稍后重试'
+  } finally {
+    initialLoading.value = false
+  }
 }
 async function runDiscovery() {
   await ElMessageBox.confirm('新一轮分析会将当前待审核建议标记为“已替代”，但不会修改生产规则。是否继续？','运行规则自发现',{type:'warning'})
@@ -134,5 +153,5 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.sa-head-row{display:flex;justify-content:space-between;align-items:flex-start;gap:16px}.summary{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}.summary div{display:flex;flex-direction:column;gap:5px}.summary span{font-size:12px;color:#94A3B8}.summary b{font-size:20px;color:#1E293B}.rule-card{border:1px solid var(--sa-border);border-radius:10px;padding:14px;margin-top:10px}.rule-head{display:flex;justify-content:space-between;align-items:center}.risk{font-size:13px;font-weight:600;color:#D97706}.conditions{font-size:13px;color:#475569;margin-top:10px}.conditions i{font-style:normal;color:#94A3B8;margin:0 8px}.evidence-line{font-size:12px;color:#64748B;background:#F8FAFC;border-radius:7px;padding:9px 10px;margin-top:10px;line-height:1.7}.actions{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}@media(max-width:900px){.summary{grid-template-columns:repeat(2,1fr)}}
+.sa-head-row{display:flex;justify-content:space-between;align-items:flex-start;gap:16px}.discovery-loading{padding:16px;border:1px solid var(--sa-border);border-radius:10px;background:#fff}.discovery-loading b{display:block;margin-bottom:14px;color:#334155;font-size:13px}.summary{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}.summary div{display:flex;flex-direction:column;gap:5px}.summary span{font-size:12px;color:#94A3B8}.summary b{font-size:20px;color:#1E293B}.rule-card{border:1px solid var(--sa-border);border-radius:10px;padding:14px;margin-top:10px}.rule-head{display:flex;justify-content:space-between;align-items:center}.risk{font-size:13px;font-weight:600;color:#D97706}.conditions{font-size:13px;color:#475569;margin-top:10px}.conditions i{font-style:normal;color:#94A3B8;margin:0 8px}.evidence-line{font-size:12px;color:#64748B;background:#F8FAFC;border-radius:7px;padding:9px 10px;margin-top:10px;line-height:1.7}.actions{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}@media(max-width:900px){.summary{grid-template-columns:repeat(2,1fr)}}
 </style>
