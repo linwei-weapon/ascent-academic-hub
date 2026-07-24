@@ -30,7 +30,7 @@ class P3ModuleReorganizationTest(unittest.TestCase):
         operation = self.read("frontend/src/views/admin/operation/Index.vue")
         self.assertIn('label="低年级风险观察"', alert)
         self.assertIn("<EarlySetback", alert)
-        self.assertIn('label="毕业准备核查"', curriculum)
+        self.assertIn('label="毕业准备与课程保障"', curriculum)
         self.assertIn("<GraduationReadiness", curriculum)
         self.assertIn('label="课程结果"', operation)
         self.assertIn("<CourseQuality", operation)

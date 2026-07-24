@@ -1,12 +1,12 @@
 <template>
-  <div v-loading="loading" element-loading-text="正在加载培养方案与学生执行证据，请稍候…" element-loading-background="rgba(248,250,252,.82)">
+  <div v-loading="optionsLoading" element-loading-text="正在读取可用培养方案…" element-loading-background="rgba(248,250,252,.82)">
     <div class="sa-head-row">
       <div>
         <h2 class="sa-page-title">{{ pageTitle }}</h2>
         <p class="sa-page-sub">基于真实培养方案与学生课程记录，核查方案结构、学分要求和学生执行情况</p>
       </div>
-      <div v-if="activeTab !== 'overview'" class="plan-filter-area">
-        <div class="filter-scope-label">方案查看条件 <span>仅作用于“培养方案详情”和“学业进度监控”</span></div>
+      <div v-if="['plan','progress'].includes(activeTab)" class="plan-filter-area">
+        <div class="filter-scope-label">当前分析方案 <span>同时作用于“方案结构与要求”和“学生进度核查”</span></div>
         <div class="plan-filters">
         <el-select v-model="college" placeholder="学院" clearable filterable @change="resetCollege">
           <el-option v-for="x in colleges" :key="x" :label="x" :value="x" />
@@ -17,7 +17,7 @@
         <el-select v-model="major" placeholder="专业" clearable filterable @change="resetMajor">
           <el-option v-for="x in majorNames" :key="x" :label="x" :value="x" />
         </el-select>
-        <el-select v-model="selectedMajor" placeholder="培养方案" filterable style="width:260px" @change="loadPlan">
+        <el-select v-model="selectedMajor" placeholder="培养方案" filterable style="width:260px" @change="onPlanChanged">
           <el-option v-for="x in availablePlans" :key="x.planId" :label="`${x.planName} · ${x.coverageLabel}`" :value="x.planId" />
         </el-select>
         </div>
@@ -25,60 +25,52 @@
     </div>
     <BusinessPageContext
       source="培养方案、学籍、成绩、教学任务与课程替代数据"
-      :loading="loading"
-      :period="activeTab === 'overview' ? '当前授权范围总览' : selectedPlanPeriod"
+      :loading="pageLoading"
+      :period="analysisPeriod"
     />
 
     <el-tabs v-model="activeTab">
-      <el-tab-pane label="培养质量管理总览" name="overview">
-        <el-alert type="success" :closable="false" show-icon title="当前是全校管理总览" description="以下卡片和表格按当前账号的全部授权学生计算，不受培养方案查看条件影响。" style="margin-bottom:10px" />
+      <el-tab-pane label="方案执行总览" name="overview">
+        <el-alert type="success" :closable="false" show-icon title="当前授权范围的方案执行总览" description="以下卡片和表格按当前工作身份的数据权限计算，不受单个培养方案查看条件影响。" style="margin-bottom:10px" />
         <el-alert type="info" :closable="false" show-icon :title="overview.definition.boundary" style="margin-bottom:14px" />
-        <div class="sa-kpi-row">
-          <KpiCard label="有效培养方案" :value="`${overview.summary.activePlans || 0}个`" hint="当前V2已接入并可查询的培养方案数" tone="primary" />
-          <KpiCard label="结构完整方案" :value="`${overview.summary.completeStructurePlans || 0}个`" :hint="overview.definition.completeStructurePlans" tone="teal" />
-          <KpiCard label="未绑定已接入方案" :value="`${overview.summary.studentsWithoutPlan || 0}人`" hint="当前学籍未匹配到本次已接入方案的去重学生数，包含方案源数据尚未覆盖的年级，不直接视为异常" tone="amber" />
-          <KpiCard label="明确需处理学生" :value="`${overview.summary.actionRequiredStudents || 0}人`" :hint="overview.definition.actionRequiredStudents" tone="danger" />
-          <KpiCard label="到期待核验学生" :value="`${overview.summary.verificationStudents || 0}人`" :hint="overview.definition.verificationStudents" tone="amber" />
-          <KpiCard label="无开课证据课程" :value="`${overview.summary.coursesWithoutOfferingEvidence || 0}门`" :hint="overview.definition.coursesWithoutOfferingEvidence" tone="amber" />
-          <KpiCard label="单一教师覆盖课程" :value="`${overview.summary.singleTeacherCourses || 0}门`" :hint="overview.definition.singleTeacherCourses" tone="amber" />
+        <div class="sa-kpi-row" v-loading="overviewLoading" element-loading-text="正在汇总方案覆盖与执行状态…">
+          <KpiCard label="已接入方案" :value="`${overview.summary.activePlans || 0}个`" hint="当前授权范围可见的已接入培养方案数" tone="primary" />
+          <KpiCard label="可进行规则核查方案" :value="`${overview.summary.reviewablePlans || 0}个`" :hint="overview.definition.reviewablePlans" tone="teal" />
+          <KpiCard label="适用学生绑定率" :value="overview.summary.bindingRate == null ? '—' : `${overview.summary.bindingRate}%`" :hint="overview.definition.bindingRate" tone="teal" />
+          <KpiCard label="明确培养要求问题" :value="`${overview.summary.actionRequiredStudents || 0}人`" :hint="overview.definition.actionRequiredStudents" tone="danger" />
+          <KpiCard label="数据候选学生" :value="`${overview.summary.verificationStudents || 0}人`" :hint="overview.definition.verificationStudents" tone="amber" />
         </div>
         <div class="sa-card" style="margin-top:16px">
-          <div class="sa-card-title">学院方案执行关注 <span class="extra">按明确需处理、到期待核验、无方案学生依次排序</span></div>
-          <el-table :data="overview.colleges" size="small" stripe>
-            <el-table-column prop="collegeName" label="学院" min-width="180" />
-            <el-table-column prop="students" label="覆盖学生" width="100" align="right" />
-            <el-table-column label="明确需处理" width="110" align="right"><template #default="{row}"><el-button link type="danger" :disabled="!row.actionRequired" @click="openStudents({college_name:row.collegeName,status:'明确需处理'},`${row.collegeName}｜明确需处理`)">{{row.actionRequired}}</el-button></template></el-table-column>
-            <el-table-column label="到期待核验" width="110" align="right"><template #default="{row}"><el-button link type="warning" :disabled="!row.verification" @click="openStudents({college_name:row.collegeName,status:'到期待核验'},`${row.collegeName}｜到期待核验`)">{{row.verification}}</el-button></template></el-table-column>
-            <el-table-column label="未绑定已接入方案" width="150" align="right"><template #default="{row}"><el-button link type="warning" :disabled="!row.withoutPlan" @click="openStudents({college_name:row.collegeName,status:'未绑定已接入方案'},`${row.collegeName}｜未绑定方案`)">{{row.withoutPlan}}</el-button></template></el-table-column>
-            <el-table-column label="操作" width="85"><template #default="{row}"><el-button link type="primary" @click="openStudents({college_name:row.collegeName},`${row.collegeName}｜全部`)">全部学生</el-button></template></el-table-column>
-          </el-table>
+          <div class="sa-card-title">学院方案执行关注 <span class="extra">按明确问题、数据候选、绑定待核验依次排序</span></div>
+          <DataTable :columns="collegeColumns" :data="overview.colleges" storage-key="curriculum:college-overview"
+            :max-business-columns="7" :config-version="2" size="small" stripe v-loading="overviewLoading">
+            <template #col-bindingRate="{row}">{{row.bindingRate == null ? '—' : `${row.bindingRate}%`}}</template>
+            <template #col-actionRequired="{row}"><el-button link type="danger" :disabled="!row.actionRequired" @click="openStudents({college_name:row.collegeName,status:'明确需处理'},`${row.collegeName}｜明确问题`)">{{row.actionRequired}}</el-button></template>
+            <template #col-verification="{row}"><el-button link type="warning" :disabled="!row.verification" @click="openStudents({college_name:row.collegeName,status:'数据候选'},`${row.collegeName}｜数据候选`)">{{row.verification}}</el-button></template>
+            <template #col-bindingReview="{row}"><el-button link type="warning" :disabled="!row.bindingReview" @click="openStudents({college_name:row.collegeName,status:'方案绑定待核验'},`${row.collegeName}｜绑定待核验`)">{{row.bindingReview}}</el-button></template>
+            <template #col-action="{row}"><el-button link type="primary" @click="openStudents({college_name:row.collegeName},`${row.collegeName}｜适用范围学生`)">核查名单</el-button></template>
+          </DataTable>
         </div>
         <el-row :gutter="16" style="margin-top:16px">
           <el-col :span="13"><div class="sa-card">
             <div class="sa-card-title">专业执行关注 <span class="extra">用于定位学院内部重点专业</span></div>
-            <el-table :data="overview.majors" size="small" stripe max-height="420">
-              <el-table-column prop="collegeName" label="学院" min-width="150" />
-              <el-table-column prop="majorName" label="专业" min-width="150" />
-              <el-table-column prop="students" label="学生" width="70" align="right" />
-              <el-table-column prop="actionRequired" label="明确需处理" width="100" align="right" />
-              <el-table-column prop="verification" label="待核验" width="80" align="right" />
-              <el-table-column label="操作" width="115"><template #default="{row}"><el-button link type="primary" @click="openMajor(row)">画像</el-button><el-button link @click="openStudents({major_code:row.majorCode},row.majorName)">学生</el-button></template></el-table-column>
-            </el-table>
+            <DataTable :columns="majorColumns" :data="overview.majors" storage-key="curriculum:major-overview"
+              :max-business-columns="6" :config-version="2" size="small" stripe max-height="420" v-loading="overviewLoading">
+              <template #col-bindingRate="{row}">{{row.bindingRate == null ? '—' : `${row.bindingRate}%`}}</template>
+              <template #col-action="{row}"><el-button link type="primary" @click="openStudents({major_code:row.majorCode},`${row.majorName}｜执行核查`)">核查名单</el-button></template>
+            </DataTable>
           </div></el-col>
           <el-col :span="11"><div class="sa-card">
             <div class="sa-card-title">必修课程瓶颈 <span class="extra">按影响学生数排序</span></div>
-            <el-table :data="overview.bottleneckCourses" size="small" stripe max-height="420">
-              <el-table-column prop="courseName" label="课程" min-width="170" />
-              <el-table-column prop="actionRequiredStudents" label="明确未通过学生" width="110" align="right" />
-              <el-table-column prop="verificationStudents" label="待核验学生" width="95" align="right" />
-              <el-table-column prop="affectedMajors" label="涉及专业" width="80" align="right" />
-              <el-table-column label="操作" width="70"><template #default="{row}"><el-button link type="primary" @click="openStudents({course_id:row.courseId},row.courseName)">学生</el-button></template></el-table-column>
-            </el-table>
+            <DataTable :columns="courseColumns" :data="overview.bottleneckCourses" storage-key="curriculum:bottleneck-courses"
+              :max-business-columns="4" :config-version="2" size="small" stripe max-height="420"
+              v-loading="courseLoading" element-loading-text="正在按需提取课程证据…">
+              <template #col-action="{row}"><el-button link type="primary" @click="openStudents({course_id:row.courseId},row.courseName)">学生</el-button></template>
+            </DataTable>
           </div></el-col>
         </el-row>
       </el-tab-pane>
-      <!-- Tab 1: 培养方案详情 -->
-      <el-tab-pane label="培养方案详情" name="plan">
+      <el-tab-pane label="方案结构与要求" name="plan">
         <template v-if="hasPlan">
           <el-alert type="info" :closable="false" style="margin-bottom:14px"
             :title="`${plan.dataSource || '培养方案'}：${plan.coverageNote || '按专业与年级匹配适用方案'}`" />
@@ -86,69 +78,16 @@
             <KpiCard v-for="k in planKpis" :key="k.label" :label="k.label" :value="k.value" :hint="k.formula" :tone="k.tone" />
           </div>
 
-          <el-row :gutter="16" style="margin-bottom:16px">
-            <el-col :span="10">
-              <div class="sa-card">
-                <div class="sa-card-title">学分结构 <KpiLabel label="" formula="各课程模块学分占总学分比例" /></div>
-                <EChart v-if="creditDist.length" :option="creditOption" :height="240" />
-                <div v-else class="sa-faint" style="font-size:12px">暂无数据</div>
-              </div>
-            </el-col>
-            <el-col :span="14">
-              <div class="sa-card">
-                <div class="sa-card-title">各模块学分与课程数 <span class="extra">★ 为核心课程</span></div>
-                <el-table :data="moduleSummary" size="small">
-                  <el-table-column prop="name" label="模块" min-width="160" />
-                  <el-table-column v-if="false" label="性质" width="80"><template #default="{row}">
-                    <el-tag :type="row.required?'danger':'warning'" size="small">{{ row.required?'必修':'选修' }}</el-tag>
-                  </template></el-table-column>
-                  <el-table-column prop="credits" label="记录学分" width="90" align="right"><template #default="{row}"><b class="tnum">{{ row.credits }}</b></template></el-table-column>
-                  <el-table-column prop="courseCount" label="课程数" width="70" align="right"><template #default="{row}"><span class="tnum">{{ row.courseCount }}</span></template></el-table-column>
-                  <el-table-column prop="coreCount" label="核心" width="60" align="right"><template #default="{row}"><span class="tnum" :style="{color:row.coreCount?'#0D9488':'#94A3B8'}">{{ row.coreCount || '—' }}</span></template></el-table-column>
-                </el-table>
-              </div>
-            </el-col>
-          </el-row>
-
-          <div class="sa-card" style="margin-bottom:16px">
-            <div class="sa-card-title">模块最低学分要求 <span class="extra">来源：Word计划课程表中的“要求学分”汇总行</span></div>
-            <el-alert v-if="!plan.moduleRequirements.length" type="warning" :closable="false" show-icon
-              title="当前方案没有可展示的Word模块学分规则" description="该方案可能只有结构化课程表、未匹配到Word方案原文，或原表的要求学分为空。" />
-            <el-table v-else :data="plan.moduleRequirements" size="small" max-height="360">
-              <el-table-column prop="parentModule" label="一级模块" min-width="170" />
-              <el-table-column prop="moduleName" label="子模块/课程组" min-width="170" />
-              <el-table-column prop="requirementType" label="性质" width="80"><template #default="{row}">{{ row.requirementType || '—' }}</template></el-table-column>
-              <el-table-column prop="minimumCredits" label="要求学分" width="90" align="right"><template #default="{row}"><b class="tnum">{{ row.minimumCredits }}</b></template></el-table-column>
-              <el-table-column prop="rawHierarchy" label="原表层级证据" min-width="220" />
-            </el-table>
-          </div>
-
-          <div class="sa-card module-course-card" style="margin-bottom:16px" v-if="plan.modules.length">
-            <div class="sa-card-title">课程模块与课程明细 <span class="extra">默认显示汇总，点击模块后展开课程</span></div>
-            <el-collapse class="module-collapse">
-              <el-collapse-item v-for="(mod, mi) in plan.modules" :key="mi" :name="String(mi)">
-                <template #title>
-                  <div class="module-collapse-title">
-                    <b>{{ mod.name }}</b>
-                    <span>{{ moduleCourseCount(mod) }}门 · 记录学分 {{ mod.credits }}</span>
-                  </div>
-                </template>
-                <div v-for="sm in mod.subModules" :key="sm.name" class="module-course-table">
-                  <div v-if="mod.subModules.length > 1" class="submodule-name">{{ sm.name }}</div>
-                  <el-table :data="sm.courses" size="small" max-height="420">
-                    <el-table-column prop="code" label="课程代码" width="130" />
-                    <el-table-column prop="name" label="课程名称" min-width="200">
-                      <template #default="{row}"><span :style="{fontWeight:row.name.includes('★')?'700':'400'}">{{ row.name }}</span></template>
-                    </el-table-column>
-                    <el-table-column prop="credits" label="学分" width="64" align="right"><template #default="{row}"><span class="tnum">{{ row.credits }}</span></template></el-table-column>
-                    <el-table-column prop="hours" label="学时" width="64" align="right"><template #default="{row}"><span class="tnum">{{ row.hours }}</span></template></el-table-column>
-                    <el-table-column prop="term" label="学期" width="64" align="center"><template #default="{row}"><el-tag size="small" :type="row.term<=4?'success':row.term<=6?'warning':'info'">{{ row.term||'-' }}</el-tag></template></el-table-column>
-                    <el-table-column prop="dept" label="开课院系" width="150" />
-                  </el-table>
-                </div>
-              </el-collapse-item>
-            </el-collapse>
-          </div>
+          <section class="sa-card" style="margin-bottom:16px">
+            <div class="sa-card-title">模块要求与课程池 <span class="extra">课程池记录学分只描述可选范围，不等同学生应修学分</span></div>
+            <DataTable :columns="moduleStructureColumns" :data="moduleSummary"
+              storage-key="curriculum:plan-modules" :max-business-columns="7"
+              :config-version="2" size="small" stripe v-loading="planLoading">
+              <template #col-ruleLabel="{row}"><el-tag size="small" :type="row.ruleType==='not_assessable'?'info':'success'">{{row.ruleLabel}}</el-tag></template>
+              <template #col-recordedCredits="{row}">{{Number(row.recordedCredits||0).toFixed(1)}}</template>
+              <template #col-action="{row}"><el-button link type="primary" @click="openModuleCourses(row)">课程明细</el-button></template>
+            </DataTable>
+          </section>
 
           <div class="sa-card plan-text-card" style="margin-bottom:16px" v-if="plan.graduationRequirements.length">
             <div class="sa-card-title">毕业要求说明 <span class="extra">方案文本，不作为学生达成度结论</span></div>
@@ -175,26 +114,34 @@
         </el-empty>
       </el-tab-pane>
 
-      <!-- Tab 4: 学业进度监控 -->
-      <el-tab-pane label="学业进度监控" name="progress">
+      <el-tab-pane label="学生进度核查" name="progress">
         <ProgressView v-if="activeTab === 'progress'" :major-id="selectedMajor" />
       </el-tab-pane>
-      <el-tab-pane label="毕业准备核查" name="graduation-readiness">
+      <el-tab-pane label="毕业准备与课程保障" name="graduation-readiness">
         <div v-if="activeTab === 'graduation-readiness'" class="embedded-topic"><GraduationReadiness /></div>
       </el-tab-pane>
     </el-tabs>
-    <el-dialog v-model="studentDialog.visible" :title="`${studentDialog.title}｜方案执行学生名单`" width="980px">
+    <el-drawer v-model="moduleDrawer.visible" :title="`${moduleDrawer.module?.name || ''}｜课程池明细`" size="820px">
+      <el-alert type="info" :closable="false" show-icon title="课程池明细用于解释方案结构；选修池课程不等同每名学生都必须完成。" style="margin-bottom:12px" />
+      <DataTable :columns="moduleCourseColumns" :data="moduleDrawer.module?.courses || []"
+        storage-key="curriculum:module-courses" :max-business-columns="6"
+        :config-version="2" :pagination="true" :default-page-size="20" size="small">
+        <template #col-suggestedTerm="{row}">{{row.suggestedTerm || '—'}}</template>
+      </DataTable>
+    </el-drawer>
+    <el-drawer v-model="studentDialog.visible" :title="`${studentDialog.title}｜方案执行学生名单`" size="980px">
       <el-alert type="info" :closable="false" :title="studentDialog.definition" style="margin-bottom:12px" />
-      <el-table :data="studentDialog.items" size="small" stripe max-height="520" v-loading="studentDialog.loading">
-        <el-table-column prop="studentId" label="学号" width="130" /><el-table-column prop="name" label="姓名" width="90" />
-        <el-table-column prop="grade" label="年级" width="70" /><el-table-column prop="collegeName" label="学院" min-width="150" />
-        <el-table-column prop="majorName" label="专业" min-width="140" />
-        <el-table-column prop="failedRequired" label="明确未通过必修" width="120" align="right" />
-        <el-table-column prop="verificationRequired" label="到期待核验" width="100" align="right" />
-        <el-table-column label="状态" width="110"><template #default="{row}"><el-tag size="small" :type="row.evidenceStatus==='明确需处理'?'danger':row.evidenceStatus==='到期待核验'?'warning':'success'">{{row.evidenceStatus}}</el-tag></template></el-table-column>
-        <el-table-column label="操作" width="90"><template #default="{row}"><el-button link type="primary" @click="studentProfile(row)">执行详情</el-button></template></el-table-column>
-      </el-table>
-    </el-dialog>
+      <DataTable :columns="studentListColumns" :data="studentDialog.items"
+        storage-key="curriculum:management-students" :max-business-columns="7"
+        :config-version="2" :page-size="studentDialog.pageSize" @update:page-size="onStudentPageSize"
+        size="small" stripe v-loading="studentDialog.loading" element-loading-text="正在加载核查名单…">
+        <template #col-evidenceStatus="{row}"><el-tag size="small" :type="row.evidenceStatus==='明确需处理'?'danger':row.evidenceStatus==='数据候选'||row.evidenceStatus==='方案绑定待核验'?'warning':'info'">{{row.evidenceStatus}}</el-tag></template>
+        <template #col-action="{row}"><el-button v-if="row.coverageStatus==='matched'" link type="primary" @click="studentProfile(row)">执行详情</el-button><span v-else class="sa-faint">先核验绑定</span></template>
+      </DataTable>
+      <el-pagination v-if="studentDialog.total" v-model:current-page="studentDialog.page"
+        :page-size="studentDialog.pageSize" :total="studentDialog.total"
+        layout="total, prev, pager, next" class="drawer-pager" @current-change="loadStudentPage" />
+    </el-drawer>
     <el-drawer v-model="studentEvidence.visible" :title="`${studentEvidence.data.student?.display_name || ''}｜培养方案执行详情`" size="760px" append-to-body>
       <div v-loading="studentEvidence.loading">
         <el-alert type="warning" :closable="false" show-icon title="这是方案执行核查，不是学生综合档案" :description="studentEvidence.data.boundary" />
@@ -209,40 +156,15 @@
           <el-descriptions-item label="有课程替代证据">{{ studentEvidence.data.summary?.courses_with_substitution || 0 }} 门</el-descriptions-item>
         </el-descriptions>
         <h4 class="evidence-title">明确未通过必修课程 <small>可直接进入重修与课程保障核查</small></h4>
-        <el-table :data="studentEvidence.data.failed_courses || []" size="small" empty-text="当前没有明确未通过必修课程">
-          <el-table-column prop="course_name" label="课程" min-width="150" /><el-table-column prop="effective_score" label="成绩" width="65" />
-          <el-table-column prop="lesson_count" label="历史教学班" width="95" /><el-table-column prop="substitution_count" label="替代证据" width="85" />
-          <el-table-column prop="reason" label="核查原因与动作" min-width="260" />
-        </el-table>
+        <DataTable :columns="failedEvidenceColumns" :data="studentEvidence.data.failed_courses || []"
+          storage-key="curriculum:overview-student-failed-evidence" :max-business-columns="5"
+          :config-version="2" size="small" empty-text="当前没有明确未通过必修课程" />
         <h4 class="evidence-title">到期缺结果记录候选 <small>必须先核验选课、免修与认定数据</small></h4>
-        <el-table :data="studentEvidence.data.candidate_courses || []" size="small" max-height="280" empty-text="当前没有到期缺结果候选">
-          <el-table-column prop="course_name" label="课程" min-width="150" /><el-table-column prop="suggested_term" label="建议学期" width="80" />
-          <el-table-column prop="lesson_count" label="历史教学班" width="95" /><el-table-column prop="reason" label="核查原因与动作" min-width="280" />
-        </el-table>
+        <DataTable :columns="candidateEvidenceColumns" :data="studentEvidence.data.candidate_courses || []"
+          storage-key="curriculum:overview-student-candidate-evidence" :max-business-columns="4"
+          :config-version="2" size="small" max-height="280" empty-text="当前没有到期缺结果候选" />
       </div>
     </el-drawer>
-    <el-dialog v-model="majorDialog.visible" :title="`${majorDialog.data.majorName || ''}｜专业方案执行画像`" width="1080px">
-      <el-alert type="info" :closable="false" :title="majorDialog.data.boundary" style="margin-bottom:12px" />
-      <div class="sa-kpi-row">
-        <KpiCard label="覆盖学生" :value="`${majorDialog.data.summary?.students || 0}人`" hint="当前专业纳入V2范围的去重学生" tone="primary" />
-        <KpiCard label="适用方案版本" :value="`${majorDialog.data.summary?.plans || 0}个`" hint="当前学生实际绑定的培养方案版本数" tone="primary" />
-        <KpiCard label="明确需处理" :value="`${majorDialog.data.summary?.actionRequiredStudents || 0}人`" hint="存在明确未通过必修课的学生" tone="danger" />
-        <KpiCard label="课程瓶颈" :value="`${majorDialog.data.summary?.bottleneckCourses || 0}门`" hint="影响学生方案推进、需要进一步核查的课程" tone="amber" />
-        <KpiCard label="无开课证据" :value="`${majorDialog.data.summary?.coursesWithoutOffering || 0}门`" hint="瓶颈课程中当前教学任务未发现开课记录的课程" tone="amber" />
-        <KpiCard label="单一教师覆盖" :value="`${majorDialog.data.summary?.singleTeacherCourses || 0}门`" hint="瓶颈课程中当前仅关联一名教师的课程" tone="amber" />
-      </div>
-      <el-row :gutter="16" style="margin-top:14px"><el-col :span="10"><div class="sa-card"><div class="sa-card-title">适用方案版本</div>
-        <el-table :data="majorDialog.data.plans" size="small"><el-table-column prop="planName" label="方案" min-width="180"/><el-table-column prop="courseCount" label="课程" width="65"/><el-table-column prop="moduleRuleCount" label="规则" width="65"/></el-table>
-      </div></el-col><el-col :span="14"><div class="sa-card"><div class="sa-card-title">重点课程</div>
-        <el-table :data="majorDialog.data.courses" size="small" max-height="360"><el-table-column prop="courseName" label="课程" min-width="150"/><el-table-column prop="actionRequiredStudents" label="未通过学生" width="90"/><el-table-column prop="lessonCount" label="教学班" width="70"/><el-table-column prop="teacherCount" label="教师" width="60"/><el-table-column label="操作" width="75"><template #default="{row}"><el-button link type="primary" @click="openSupply(row)">供给证据</el-button></template></el-table-column></el-table>
-      </div></el-col></el-row>
-    </el-dialog>
-    <el-dialog v-model="supplyDialog.visible" :title="`${supplyDialog.data.course?.courseName || ''}｜课程供给保障证据`" width="900px">
-      <el-alert type="warning" :closable="false" :title="supplyDialog.data.boundary" style="margin-bottom:12px" />
-      <div class="sa-kpi-row"><KpiCard label="明确未通过学生" :value="`${supplyDialog.data.affected?.actionRequiredStudents || 0}人`" hint="该必修课程存在明确未通过记录的学生" tone="danger"/><KpiCard label="涉及专业" :value="`${supplyDialog.data.affected?.affectedMajors || 0}个`" hint="方案课程状态涉及的去重专业数" tone="primary"/><KpiCard label="已接入开课学期" :value="`${supplyDialog.data.offerings?.length || 0}个`" hint="当前真实教学任务中发现开课记录的学期数" tone="teal"/></div>
-      <div class="sa-card" style="margin-top:12px"><div class="sa-card-title">已接入开课记录</div><el-empty v-if="!supplyDialog.data.offerings?.length" description="当前教学任务未发现开课证据" :image-size="70"/><el-table v-else :data="supplyDialog.data.offerings" size="small"><el-table-column prop="semesterId" label="学期"/><el-table-column prop="lessonCount" label="教学班"/><el-table-column prop="teacherCount" label="教师"/><el-table-column prop="enrolled" label="选课人次"/><el-table-column prop="avgClassSize" label="平均班额"/></el-table></div>
-      <div class="sa-card" style="margin-top:12px"><div class="sa-card-title">课程替代证据</div><el-empty v-if="!supplyDialog.data.substitutions?.length" description="当前未发现课程替代记录" :image-size="70"/><el-table v-else :data="supplyDialog.data.substitutions" size="small"><el-table-column prop="originalCourseName" label="原课程"/><el-table-column prop="substituteCourseName" label="替代课程"/><el-table-column prop="studentCount" label="涉及学生"/></el-table></div>
-    </el-dialog>
   </div>
 </template>
 
@@ -250,10 +172,9 @@
 import { http } from '@/utils/http'
 import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import KpiLabel from '@/components/KpiLabel.vue'
 import KpiCard from '@/components/KpiCard.vue'
-import EChart from '@/components/EChart.vue'
 import BusinessPageContext from '@/components/BusinessPageContext.vue'
+import DataTable, { type DataTableColumn } from '@/components/DataTable.vue'
 import ProgressView from './Progress.vue'
 import GraduationReadiness from '../reports/GraduationReadiness.vue'
 import { useBusinessPageTitle } from '@/utils/businessPage'
@@ -272,37 +193,128 @@ const selectedPlanPeriod = computed(() => {
   const plan = allPlans.value.find((item:any) => item.planId === selectedMajor.value)
   return plan ? `当前方案：${plan.planName}` : '尚未选择培养方案'
 })
+const analysisPeriod = computed(() => {
+  if (activeTab.value === 'overview') return '当前授权范围总览'
+  if (activeTab.value === 'graduation-readiness') return '当前授权范围毕业准备核查'
+  return selectedPlanPeriod.value
+})
 watch(activeTab, tab => {
   const query = { ...route.query }
   if (tab === 'overview') delete query.tab
   else query.tab = tab
   router.replace({ path:'/admin/curriculum', query })
+  loadActiveTab(tab)
 })
-const loading = ref(false)
+const optionsLoading=ref(false),overviewLoading=ref(false),courseLoading=ref(false),planLoading=ref(false)
+const overviewLoaded=ref(false),courseLoaded=ref(false)
+const pageLoading=computed(()=>optionsLoading.value||(activeTab.value==='overview'&&overviewLoading.value)||(activeTab.value==='plan'&&planLoading.value))
 const overview = reactive<any>({ summary:{}, colleges:[], majors:[], bottleneckCourses:[], definition:{ boundary:'' } })
-const studentDialog = reactive<any>({visible:false,loading:false,title:'',items:[],definition:''})
+const studentDialog = reactive<any>({visible:false,loading:false,title:'',items:[],definition:'',params:{},page:1,pageSize:50,total:0})
 const studentEvidence = reactive<any>({visible:false,loading:false,data:{student:{},summary:{},failed_courses:[],candidate_courses:[],boundary:''}})
-const majorDialog = reactive<any>({visible:false,loading:false,data:{summary:{},plans:[],courses:[]}})
-const supplyDialog = reactive<any>({visible:false,loading:false,data:{course:{},affected:{},offerings:[],substitutions:[],boundary:''}})
-async function openMajor(row:any) {
-  majorDialog.visible=true; majorDialog.loading=true
-  try { majorDialog.data=await http.get('/v2/curriculum/management-major/'+row.majorCode) }
-  finally { majorDialog.loading=false }
+const moduleDrawer=reactive<any>({visible:false,module:null})
+const collegeColumns:DataTableColumn[]=[
+  {key:'collegeName',label:'学院',minWidth:180,fixed:'left',required:true,region:'identity'},
+  {key:'applicableStudents',label:'适用学生',width:90,align:'right'},
+  {key:'bindingRate',label:'正确绑定率',width:100,align:'right',required:true},
+  {key:'actionRequired',label:'明确问题',width:90,align:'right'},
+  {key:'verification',label:'数据候选',width:90,align:'right'},
+  {key:'bindingReview',label:'绑定待核验',width:105,align:'right'},
+  {key:'outsideSourceScope',label:'方案源未覆盖',width:110,align:'right',defaultVisible:false},
+  {key:'action',label:'操作',width:90,fixed:'right',required:true,region:'action'},
+]
+const majorColumns:DataTableColumn[]=[
+  {key:'collegeName',label:'学院',minWidth:140,fixed:'left',required:true,region:'identity'},
+  {key:'majorName',label:'专业',minWidth:150,fixed:'left',required:true,region:'identity'},
+  {key:'applicableStudents',label:'适用学生',width:90,align:'right'},
+  {key:'bindingRate',label:'正确绑定率',width:100,align:'right'},
+  {key:'actionRequired',label:'明确问题',width:90,align:'right'},
+  {key:'verification',label:'数据候选',width:90,align:'right'},
+  {key:'bindingReview',label:'绑定待核验',width:105,align:'right',defaultVisible:false},
+  {key:'action',label:'操作',width:105,fixed:'right',required:true,region:'action'},
+]
+const courseColumns:DataTableColumn[]=[
+  {key:'courseName',label:'课程',minWidth:170,fixed:'left',required:true,region:'identity',tooltip:true},
+  {key:'actionRequiredStudents',label:'明确未通过学生',width:120,align:'right',required:true},
+  {key:'verificationStudents',label:'数据候选学生',width:110,align:'right'},
+  {key:'affectedMajors',label:'涉及专业',width:85,align:'right'},
+  {key:'action',label:'操作',width:70,fixed:'right',required:true,region:'action'},
+]
+const moduleStructureColumns:DataTableColumn[]=[
+  {key:'name',label:'模块',minWidth:180,fixed:'left',required:true,region:'identity',tooltip:true},
+  {key:'nature',label:'性质',width:110},
+  {key:'ruleLabel',label:'采用规则',minWidth:190,required:true,tooltip:true},
+  {key:'courseCount',label:'课程池',width:85,align:'right'},
+  {key:'recordedCredits',label:'课程池记录学分',width:125,align:'right'},
+  {key:'sourceReference',label:'规则来源',minWidth:180,defaultVisible:false,tooltip:true},
+  {key:'action',label:'操作',width:85,fixed:'right',required:true,region:'action'},
+]
+const moduleCourseColumns:DataTableColumn[]=[
+  {key:'courseId',label:'课程代码',width:130,fixed:'left',required:true,region:'identity'},
+  {key:'courseName',label:'课程名称',minWidth:210,fixed:'left',required:true,region:'identity',tooltip:true},
+  {key:'requirementType',label:'性质',width:80},
+  {key:'credits',label:'学分',width:75,align:'right'},
+  {key:'suggestedTerm',label:'建议学期',width:90},
+  {key:'organizationId',label:'开课单位代码',width:120,defaultVisible:false},
+]
+const studentListColumns:DataTableColumn[]=[
+  {key:'studentId',label:'学号',width:130,fixed:'left',required:true,region:'identity'},
+  {key:'name',label:'姓名',width:90,fixed:'left',required:true,region:'identity'},
+  {key:'grade',label:'年级',width:75},
+  {key:'collegeName',label:'学院',minWidth:140},
+  {key:'majorName',label:'专业',minWidth:140},
+  {key:'completedModules',label:'已达到模块',width:100,align:'right'},
+  {key:'assessableModules',label:'可核查模块',width:100,align:'right'},
+  {key:'failedRequired',label:'明确未通过',width:100,align:'right'},
+  {key:'verificationRequired',label:'数据候选',width:90,align:'right'},
+  {key:'evidenceStatus',label:'状态',width:140,required:true},
+  {key:'action',label:'操作',width:85,fixed:'right',required:true,region:'action'},
+]
+const failedEvidenceColumns:DataTableColumn[]=[
+  {key:'course_name',label:'课程',minWidth:160,fixed:'left',required:true,region:'identity',tooltip:true},
+  {key:'effective_score',label:'成绩',width:70,align:'right'},
+  {key:'lesson_count',label:'历史教学班',width:100,align:'right'},
+  {key:'substitution_count',label:'替代证据',width:90,align:'right'},
+  {key:'reason',label:'核查原因与动作',minWidth:280,required:true,tooltip:true},
+]
+const candidateEvidenceColumns:DataTableColumn[]=[
+  {key:'course_name',label:'课程',minWidth:160,fixed:'left',required:true,region:'identity',tooltip:true},
+  {key:'suggested_term',label:'建议学期',width:90},
+  {key:'lesson_count',label:'历史教学班',width:100,align:'right'},
+  {key:'reason',label:'核查原因与动作',minWidth:300,required:true,tooltip:true},
+]
+function openModuleCourses(row:any){moduleDrawer.module=row;moduleDrawer.visible=true}
+
+async function loadOverview(){
+  if(overviewLoaded.value)return
+  overviewLoading.value=true
+  try{Object.assign(overview,await http.get('/v2/curriculum/management-overview'));overviewLoaded.value=true}
+  finally{overviewLoading.value=false}
+  if(!courseLoaded.value){
+    courseLoading.value=true
+    try{const result=await http.get('/v2/curriculum/management-courses?limit=20');overview.bottleneckCourses=result.items||[];courseLoaded.value=true}
+    finally{courseLoading.value=false}
+  }
 }
-async function openSupply(row:any) {
-  supplyDialog.visible=true; supplyDialog.loading=true
-  try { supplyDialog.data=await http.get('/v2/curriculum/course-supply/'+row.courseId) }
-  finally { supplyDialog.loading=false }
+function loadActiveTab(tab:string){
+  if(tab==='overview')loadOverview()
+  else if(tab==='plan')loadPlan()
 }
 
 async function openStudents(params:Record<string,string>, title:string) {
-  studentDialog.visible=true; studentDialog.loading=true; studentDialog.title=title
+  studentDialog.visible=true;studentDialog.title=title;studentDialog.params=params;studentDialog.page=1
+  await loadStudentPage()
+}
+async function loadStudentPage(){
+  studentDialog.loading=true
   try {
-    const query=new URLSearchParams(params)
+    const query=new URLSearchParams(studentDialog.params)
+    query.set('limit',String(studentDialog.pageSize))
+    query.set('offset',String((studentDialog.page-1)*studentDialog.pageSize))
     const data=await http.get('/v2/curriculum/management-students?'+query.toString())
-    Object.assign(studentDialog,{items:data.items||[],definition:data.definition||''})
+    Object.assign(studentDialog,{items:data.items||[],definition:data.definition||'',total:data.total||0})
   } finally { studentDialog.loading=false }
 }
+function onStudentPageSize(value:number){studentDialog.pageSize=value;studentDialog.page=1;loadStudentPage()}
 async function studentProfile(row:any) {
   studentEvidence.visible=true; studentEvidence.loading=true
   studentEvidence.data={student:{display_name:row.name,student_id:row.studentId},summary:{},failed_courses:[],candidate_courses:[],boundary:''}
@@ -317,10 +329,11 @@ const gradePlans = computed(() => collegePlans.value.filter(x => grade.value ===
 const majorNames = computed(() => [...new Set<string>(gradePlans.value.map(x => x.majorName))].sort())
 const availablePlans = computed(() => gradePlans.value.filter(x => !major.value || x.majorName === major.value))
 
-function pickFirst() { selectedMajor.value = availablePlans.value[0]?.planId || ''; loadPlan() }
+function pickFirst() { selectedMajor.value = availablePlans.value[0]?.planId || ''; onPlanChanged() }
 function resetCollege() { grade.value=''; major.value=''; pickFirst() }
 function resetGrade() { major.value=''; pickFirst() }
 function resetMajor() { pickFirst() }
+function onPlanChanged(){if(activeTab.value==='plan')loadPlan()}
 
 const plan = reactive<any>({
   name: '', grade: '', college: '', totalCredits: 0, requiredCredits: 0,
@@ -328,7 +341,7 @@ const plan = reactive<any>({
   planVersion: '', applicableGrade: '', dataSource: '', coverageNote: '',
   courseCount: 0, moduleCount: 0, graduationMinimumCredits: null, creditNote: '',
   requiredMinimumCredits:null, electiveMinimumCredits:null, practiceMinimumCredits:null,
-  moduleRequirements: [],
+  moduleRequirements: [], coverageLabel:'',
 })
 const hasPlan = ref(true)
 
@@ -339,46 +352,23 @@ function resetPlan() {
     planVersion: '', applicableGrade: '', dataSource: '', coverageNote: '',
     courseCount: 0, moduleCount: 0, graduationMinimumCredits: null, creditNote: '',
     requiredMinimumCredits:null, electiveMinimumCredits:null, practiceMinimumCredits:null,
-    moduleRequirements: [],
+    moduleRequirements: [], coverageLabel:'',
   })
 }
 
 const planKpis = computed(() => [
-  { label: '方案课程记录', value: `${plan.courseCount}门`, formula: '结构化方案课程表中的课程行数', tone: 'primary' as const },
-  { label: '课程记录学分合计', value: plan.totalCredits, formula: plan.creditNote, tone: 'teal' as const },
-  { label: '课程模块', value: `${plan.moduleCount}个`, formula: '按方案课程表中的课程模块字段去重', tone: 'primary' as const },
   { label: '毕业最低学分', value: plan.graduationMinimumCredits ?? '待核验', formula: '只采用方案原文明示的毕业最低要求；未结构化时不推算', tone: 'amber' as const },
-  { label: '必修课学分', value: plan.requiredMinimumCredits ?? '待核验', formula: '培养方案修读要求原文明示的必修课学分', tone: 'teal' as const },
-  { label: '选修课学分', value: plan.electiveMinimumCredits ?? '待核验', formula: '培养方案修读要求原文明示的选修课最低学分', tone: 'amber' as const },
-  { label: '集中实践环节', value: plan.practiceMinimumCredits ?? '待核验', formula: '培养方案修读要求原文明示的集中实践教学环节学分；未可靠识别时不倒推', tone: 'primary' as const },
-  { label: '模块学分规则', value: `${plan.moduleRequirements.length}条`, formula: 'Word计划课程表中带明确数字的“要求学分”汇总行', tone: 'teal' as const },
+  { label: '课程模块', value: `${plan.moduleCount}个`, formula: '按方案课程表模块字段去重', tone: 'primary' as const },
+  { label: '有明确规则模块', value: `${plan.modules.filter((x:any)=>x.ruleType!=='not_assessable').length}/${plan.moduleCount}个`, formula: '可按最低学分、最低门数或逐门必修评价的模块数', tone: 'teal' as const },
+  { label: '课程池课程', value: `${plan.courseCount}门`, formula: '结构化方案课程表全部课程行，包含选修备选范围，不作为学生应修门数', tone: 'primary' as const },
+  { label: '方案证据状态', value: plan.coverageLabel || '待核验', formula: '说明方案原文、课程表和规则的接入完整程度', tone: 'amber' as const },
 ])
 
-const moduleSummary = computed(() => (plan.modules || []).map((m: any) => {
-  const courses = (m.subModules || []).flatMap((sm: any) => sm.courses || [])
-  return {
-    name: m.name, required: m.required, credits: m.credits,
-    courseCount: courses.length,
-    coreCount: courses.filter((c: any) => String(c.name).includes('★')).length,
-  }
-}))
-function moduleCourseCount(mod:any) { return (mod.subModules || []).reduce((sum:number, sm:any) => sum + (sm.courses || []).length, 0) }
-
-const MOD_COLORS = ['#4F46E5', '#0D9488', '#D97706', '#6366F1', '#0EA5E9', '#94A3B8', '#A855F7', '#E11D48']
-const creditDist = computed(() => (plan.modules || []).filter((m: any) => (m.credits || 0) > 0))
-const creditOption = computed(() => ({
-  tooltip: { trigger: 'item', formatter: '{b}：{c} 学分（{d}%）' },
-  legend: { type: 'scroll', orient: 'vertical', right: 0, top: 'center', itemWidth: 10, itemHeight: 10, textStyle: { color: '#64748B', fontSize: 11 } },
-  series: [{
-    type: 'pie', radius: ['46%', '72%'], center: ['32%', '50%'], avoidLabelOverlap: true,
-    itemStyle: { borderColor: '#fff', borderWidth: 2 }, label: { show: false },
-    data: creditDist.value.map((m: any, i: number) => ({ name: m.name, value: m.credits, itemStyle: { color: MOD_COLORS[i % MOD_COLORS.length] } })),
-  }],
-}))
+const moduleSummary = computed(() => plan.modules || [])
 
 async function loadPlan() {
   if (!selectedMajor.value) { hasPlan.value = false; resetPlan(); return }
-  loading.value = true
+  planLoading.value = true
   try {
     const d = await http.get('/v2/curriculum/plans/' + selectedMajor.value)
     if (d?.plan) {
@@ -393,37 +383,36 @@ async function loadPlan() {
         practiceMinimumCredits: d.creditEvidence?.practiceMinimumCredits,
         moduleRequirements: d.moduleRequirements || [],
         creditNote: d.creditEvidence?.note || '',
-        modules: (d.modules || []).map((m:any) => ({ name:m.name, credits:m.recordedCredits,
-          required:false, subModules:[{name:m.name,courses:(m.courses || []).map((c:any) => ({
-            code:c.courseId,name:c.courseName,credits:c.credits,hours:'—',term:c.suggestedTerm,dept:'—'
-          }))}] })),
+        modules: d.modules || [],
         graduationRequirements: d.requirements.map((x:any) => x.text),
         degreeRequirement: d.creditEvidence?.degreeRequirement || '',
         planVersion: d.plan.version || d.plan.planId,
         dataSource: d.creditEvidence?.sourceFile ? `真实培养方案原文（${d.creditEvidence.sourceFile}）` : '结构化方案课程表',
         coverageNote: `${d.coverage?.label || '覆盖状态待确认'}；${d.evidence.boundaryNote}`,
+        coverageLabel: d.coverage?.label || '待核验',
       })
       hasPlan.value = true
     }
     else { hasPlan.value = false; resetPlan() }
   } catch {
     hasPlan.value = false; resetPlan()
-  } finally { loading.value = false }
+  } finally { planLoading.value = false }
 }
 
 onMounted(async () => {
-  loading.value = true
+  optionsLoading.value = true
   try {
     const d = await http.get('/v2/curriculum/options')
     allPlans.value = d.plans || []
-    Object.assign(overview, await http.get('/v2/curriculum/management-overview'))
-    const first = allPlans.value.find(x => x.requirementCount > 0) || allPlans.value[0]
+    const requested=allPlans.value.find(x=>x.planId===String(route.query.plan_id||''))
+    const first = requested || allPlans.value.find(x => x.requirementCount > 0) || allPlans.value[0]
     if (first) {
       college.value=first.collegeName; grade.value=first.grade; major.value=first.majorName
-      selectedMajor.value=first.planId; await loadPlan()
+      selectedMajor.value=first.planId
     }
   } catch { hasPlan.value=false; resetPlan() }
-  finally { loading.value=false }
+  finally { optionsLoading.value=false }
+  loadActiveTab(activeTab.value)
 })
 </script>
 

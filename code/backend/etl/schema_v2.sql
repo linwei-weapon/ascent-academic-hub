@@ -446,6 +446,63 @@ CREATE TABLE IF NOT EXISTS student_plan_course_status (
     UNIQUE(student_id, plan_course_id, rule_version)
 );
 
+-- 学生培养方案模块评价。所有培养质量页面必须复用该表，避免分别以课程池行数推算进度。
+CREATE TABLE IF NOT EXISTS student_plan_module_status (
+    student_id TEXT NOT NULL,
+    plan_id TEXT NOT NULL,
+    module_name TEXT NOT NULL,
+    parent_module TEXT,
+    rule_type TEXT NOT NULL,
+    rule_label TEXT NOT NULL,
+    target_value REAL,
+    achieved_value REAL,
+    earned_credits REAL NOT NULL DEFAULT 0,
+    completed_courses INTEGER NOT NULL DEFAULT 0,
+    total_courses INTEGER NOT NULL DEFAULT 0,
+    failed_required_courses INTEGER NOT NULL DEFAULT 0,
+    due_candidate_courses INTEGER NOT NULL DEFAULT 0,
+    is_assessable INTEGER NOT NULL DEFAULT 0,
+    is_complete INTEGER NOT NULL DEFAULT 0,
+    evidence_status TEXT NOT NULL,
+    source_reference TEXT,
+    rule_version TEXT NOT NULL,
+    calculated_at TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT 'derived',
+    PRIMARY KEY(student_id, plan_id, module_name, rule_version)
+);
+
+-- 学生培养方案摘要。总览、学生进度和毕业准备共同读取，不再重复扫描课程池。
+CREATE TABLE IF NOT EXISTS student_plan_progress_summary (
+    student_id TEXT NOT NULL,
+    plan_id TEXT NOT NULL,
+    applicable_grade INTEGER,
+    current_study_term INTEGER,
+    earned_credits REAL NOT NULL DEFAULT 0,
+    module_count INTEGER NOT NULL DEFAULT 0,
+    assessable_modules INTEGER NOT NULL DEFAULT 0,
+    completed_modules INTEGER NOT NULL DEFAULT 0,
+    rule_coverage_rate REAL,
+    failed_required_courses INTEGER NOT NULL DEFAULT 0,
+    due_candidate_courses INTEGER NOT NULL DEFAULT 0,
+    explicit_gap_modules INTEGER NOT NULL DEFAULT 0,
+    candidate_modules INTEGER NOT NULL DEFAULT 0,
+    evidence_status TEXT NOT NULL,
+    binding_status TEXT NOT NULL,
+    rule_version TEXT NOT NULL,
+    calculated_at TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT 'derived',
+    PRIMARY KEY(student_id, plan_id, rule_version)
+);
+
+CREATE INDEX IF NOT EXISTS idx_plan_module_status_plan_student
+    ON student_plan_module_status(plan_id, student_id, rule_version);
+CREATE INDEX IF NOT EXISTS idx_plan_module_status_evidence
+    ON student_plan_module_status(evidence_status, plan_id, rule_version);
+CREATE INDEX IF NOT EXISTS idx_plan_progress_plan_status
+    ON student_plan_progress_summary(plan_id, evidence_status, rule_version);
+CREATE INDEX IF NOT EXISTS idx_plan_progress_student
+    ON student_plan_progress_summary(student_id, rule_version);
+
 CREATE TABLE IF NOT EXISTS student_growth_indicator (
     student_id TEXT NOT NULL,
     indicator_version TEXT NOT NULL,
@@ -568,6 +625,8 @@ CREATE INDEX IF NOT EXISTS idx_plan_status_rule_student
     ON student_plan_course_status(rule_version, student_id, plan_id, requirement_type, completion_status, is_overdue);
 CREATE INDEX IF NOT EXISTS idx_plan_status_rule_course
     ON student_plan_course_status(rule_version, course_id, requirement_type, completion_status, is_overdue, student_id);
+CREATE INDEX IF NOT EXISTS idx_plan_status_rule_module
+    ON student_plan_course_status(rule_version, student_id, plan_id, module, requirement_type, completion_status, is_overdue);
 CREATE INDEX IF NOT EXISTS idx_lesson_course_supply ON teaching_lesson(course_id, lesson_id);
 CREATE INDEX IF NOT EXISTS idx_lesson_teacher_lesson ON lesson_teacher(lesson_id, staff_id);
 CREATE INDEX IF NOT EXISTS idx_substitution_original ON student_course_substitution(original_course_id, substitution_id);

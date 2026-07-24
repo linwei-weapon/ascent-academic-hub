@@ -404,7 +404,7 @@ function resetPref(): void {
         :page-size="pageSizeInner"
         :total="props.data.length"
         layout="total, prev, pager, next"
-        small
+        size="small"
       />
     </div>
   </div>

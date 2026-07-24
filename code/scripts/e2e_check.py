@@ -443,16 +443,27 @@ def main():
             for x in rc["candidates"]))
 
     sc = http(base, "/api/admin/operation/schedule-changes")["data"]
-    check("schedule 调课次数", str(scalar(c, "SELECT COUNT(*) FROM fact_schedule_change WHERE kind='调课' AND semester_id=?", REAL)),
-          kpi_val(sc, "调课次数"))
+    check("schedule 调课记录", str(scalar(c, "SELECT COUNT(*) FROM fact_schedule_change WHERE kind='调课' AND semester_id=?", REAL)),
+          kpi_val(sc, "调课记录"))
     check("schedule 原因分布合计", scalar(c, "SELECT COUNT(*) FROM fact_schedule_change WHERE semester_id=?", REAL),
           sum(x["count"] for x in sc["reasonDist"]))
 
     tl = http(base, "/api/admin/operation/teacher-load")["data"]
-    check("teacher-load 职称分组合计==教师总数", scalar(c, "SELECT COUNT(*) FROM dim_teacher"),
+    effective_teachers = scalar(c, """
+        SELECT COUNT(*) FROM agg_teacher_load a
+        WHERE a.semester_id=?
+          AND COALESCE(a.classes,0)<=200
+          AND COALESCE(a.hours,0)<=1000
+          AND COALESCE(a.courses,0)<=20
+          AND a.teacher_id NOT IN (
+              SELECT entity_id FROM data_quality_issue
+              WHERE domain='operation' AND issue_type='teacher_lesson_overflow'
+                AND status IN ('open','reviewing') AND semester_id=?
+          )
+    """, REAL, REAL)
+    check("teacher-load 职称分组合计==有效授课教师数", effective_teachers,
           sum(x["count"] for x in tl["titleLoad"]))
-    check("teacher-load 负荷分布合计==授课教师数",
-          scalar(c, "SELECT COUNT(DISTINCT teacher_id) FROM agg_teacher_load WHERE semester_id=?", REAL),
+    check("teacher-load 负荷分布合计==有效授课教师数", effective_teachers,
           sum(x["count"] for x in tl["loadDist"]))
 
     # 12. 师资结构 + 教师明细
