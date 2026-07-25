@@ -39,8 +39,11 @@ const actions = ref<any[]>([])
 const labels:Record<string,string> = {
   'auth.login':'登录','auth.logout':'登出','auth.identity.switch':'切换工作身份',
   'data.student.detail.read':'查看学生明细','data.student.list.read':'查看学生名单','data.export':'导出授权数据',
-  'ai.analysis.run':'运行AI研判','ai.analysis_scheme.create':'创建分析方案','ai.analysis_scheme.test':'测试分析方案',
-  'ai.analysis_scheme.publish':'发布分析方案','ai.analysis_scheme.retire':'停用分析方案','ai.analysis_scheme.roles_update':'调整方案适用角色',
+  'ai.analysis.run':'运行AI研判','ai.analysis_scheme.create':'创建分析方案','ai.analysis_scheme.update':'修改分析方案',
+  'ai.analysis_scheme.test':'测试分析方案','ai.analysis_scheme.publish':'发布分析方案',
+  'ai.analysis_scheme.retire':'停用分析方案','ai.analysis_scheme.rollback':'回滚分析方案',
+  'ai.analysis_scheme.export':'导出分析方案','ai.analysis_scheme.import':'导入分析方案',
+  'ai.analysis_scheme.roles_update':'调整方案适用角色',
   'ai.expert.version.create':'创建专家版本','ai.expert.version.publish':'发布专家版本','ai.expert.version.rollback':'回滚专家版本',
   'rbac.user.create':'创建账号','rbac.user.update':'修改账号','rbac.user.delete':'删除账号','rbac.user.password_reset':'重置密码',
   'rbac.user.auth_identity_update':'更新统一身份映射','rbac.role.create':'创建角色','rbac.role.update':'修改角色',

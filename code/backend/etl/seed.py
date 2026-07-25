@@ -72,7 +72,6 @@ MENUS = [
     ("/admin/system/schemes", "分析方案管理", "Management", 306, "/admin/system"),
     ("/admin/system/audit", "审计日志", "Document", 307, "/admin/system"),
     ("/admin/settings", "系统参数", "Setting", 308, "/admin/system"),
-    ("/admin/system/decision-config", "决策配置", "MagicStick", 309, "/admin/system"),
 ]
 
 # ---- 角色→菜单可见性（优化后）----
@@ -124,7 +123,6 @@ ROLE_MENU = {
     "/admin/system/kpis":     ["dean"],
     "/admin/system/schemes":  ["dean"],
     "/admin/settings": ["dean"],
-    "/admin/system/decision-config": ["dean"],
 }
 
 DEMO_PASSWORD = "Demo@2026"

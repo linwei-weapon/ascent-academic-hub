@@ -645,6 +645,38 @@ CREATE TABLE IF NOT EXISTS sys_ai_analysis_scheme_role (
 CREATE INDEX IF NOT EXISTS idx_ai_analysis_scheme_role
 ON sys_ai_analysis_scheme_role(role_id,scheme_id);
 
+-- 学校分析方案运行真值：产品 Skill 默认配置 + 学校白名单参数覆写。
+CREATE TABLE IF NOT EXISTS sys_ai_skill_config (
+    config_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    skill_id TEXT NOT NULL,
+    version_no TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('draft','published','retired')),
+    scheme_name TEXT NOT NULL DEFAULT '',
+    config_json TEXT NOT NULL DEFAULT '{}',
+    change_reason TEXT NOT NULL,
+    base_protocol_version TEXT NOT NULL DEFAULT 'decision-skill/1.0',
+    test_status TEXT NOT NULL DEFAULT 'untested',
+    test_result_json TEXT NOT NULL DEFAULT '{}',
+    tested_by TEXT,
+    tested_at TEXT,
+    action TEXT NOT NULL DEFAULT 'override',
+    source_config_id INTEGER,
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    published_by TEXT,
+    published_at TEXT,
+    UNIQUE(skill_id,version_no)
+);
+CREATE INDEX IF NOT EXISTS idx_ai_skill_config_lookup
+ON sys_ai_skill_config(skill_id,status,config_id);
+CREATE TABLE IF NOT EXISTS sys_ai_skill_config_role (
+    config_id INTEGER NOT NULL,
+    role_id TEXT NOT NULL,
+    PRIMARY KEY(config_id,role_id)
+);
+CREATE INDEX IF NOT EXISTS idx_ai_skill_config_role
+ON sys_ai_skill_config_role(role_id,config_id);
+
 CREATE TABLE IF NOT EXISTS sys_kpi_config (
     kpi_id           TEXT PRIMARY KEY,
     module           TEXT NOT NULL,       -- 所属模块

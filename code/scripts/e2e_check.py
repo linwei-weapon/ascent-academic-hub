@@ -803,6 +803,21 @@ def main():
     })
     check("禁止页面创建任意 KPI 公式", 410, arbitrary_kpi["code"])
 
+    schemes = http(
+        base, "/api/admin/ai/decision/config/skills"
+    )["data"]
+    check("分析方案产品模板完整", 4, len(schemes["items"]))
+    check("分析方案模板标识唯一", 4, len({
+        item["skill_id"] for item in schemes["items"]
+    }))
+    check("分析方案数据就绪状态可核查", True, all(
+        "ready" in item["data_readiness"] for item in schemes["items"]
+    ))
+    check("决策配置已并入分析方案管理", False, any(
+        menu.get("path") == "/admin/system/decision-config"
+        for menu in me["data"]["menus"]
+    ))
+
     logout_token = http(base, "/api/auth/login", "POST",
         {"username": "college_dean", "password": DEMO_PASSWORD})["data"]["token"]
     check("安全登出接口", 0,

@@ -81,9 +81,39 @@ export function getDecisionSkillConfigs() {
   return http.get<{ items: SkillConfigInfo[] }>('/admin/ai/decision/config/skills')
 }
 
-export function createSkillConfigDraft(skillId: string, override: Record<string, any>, changeReason: string) {
+export interface AnalysisSchemeDraftPayload {
+  override: Record<string, any>
+  changeReason: string
+  schemeName?: string
+  roleIds?: string[]
+}
+
+export function createSkillConfigDraft(
+  skillId: string,
+  override: Record<string, any>,
+  changeReason: string,
+  schemeName = '',
+  roleIds: string[] = [],
+) {
   return http.post<any>(`/admin/ai/decision/config/skills/${encodeURIComponent(skillId)}/draft`,
-    { override, changeReason })
+    { override, changeReason, schemeName, roleIds })
+}
+
+export function updateSkillConfigDraft(
+  skillId: string,
+  configId: number,
+  body: AnalysisSchemeDraftPayload,
+) {
+  return http.put<any>(
+    `/admin/ai/decision/config/skills/${encodeURIComponent(skillId)}/draft/${configId}`,
+    body,
+  )
+}
+
+export function testSkillConfig(skillId: string, configId: number) {
+  return http.post<any>(
+    `/admin/ai/decision/config/skills/${encodeURIComponent(skillId)}/test/${configId}`,
+  )
 }
 
 export function publishSkillConfig(skillId: string, configId: number) {
@@ -94,6 +124,26 @@ export function publishSkillConfig(skillId: string, configId: number) {
 export function rollbackSkillConfig(skillId: string, configId: number, changeReason = '') {
   return http.post<any>(`/admin/ai/decision/config/skills/${encodeURIComponent(skillId)}/rollback`,
     { configId, changeReason })
+}
+
+export function retireSkillConfig(skillId: string, configId: number, changeReason = '') {
+  return http.post<any>(
+    `/admin/ai/decision/config/skills/${encodeURIComponent(skillId)}/retire`,
+    { configId, changeReason },
+  )
+}
+
+export function exportSkillConfig(skillId: string, configId: number) {
+  return http.get<any>(
+    `/admin/ai/decision/config/skills/${encodeURIComponent(skillId)}/export/${configId}`,
+  )
+}
+
+export function importSkillConfig(pkg: Record<string, any>, changeReason: string) {
+  return http.post<any>('/admin/ai/decision/config/schemes/import', {
+    package: pkg,
+    changeReason,
+  })
 }
 
 export interface LlmConfigView {

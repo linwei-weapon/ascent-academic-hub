@@ -20,6 +20,7 @@ from ...skills.registry import get_skill, list_skills
 from ..deps import (get_current_user, get_db, get_db_rw, get_v2_db,
                     require_admin)
 from ..envelope import ApiError, ok
+from ..security_governance import write_audit
 from ..settings import CURRENT_SEMESTER
 
 router = APIRouter(prefix="/api/admin/ai/decision", tags=["ai-decision"])
@@ -40,11 +41,18 @@ class AskIn(BaseModel):
 class SkillConfigDraftIn(BaseModel):
     override: dict = Field(default_factory=dict)
     changeReason: str = Field(min_length=2, max_length=200)
+    schemeName: str = Field(default="", max_length=80)
+    roleIds: list[str] = Field(default_factory=list, max_length=12)
 
 
 class ConfigActionIn(BaseModel):
     configId: int
     changeReason: str = Field(default="", max_length=200)
+
+
+class SchemeImportIn(BaseModel):
+    package: dict
+    changeReason: str = Field(min_length=2, max_length=200)
 
 
 class LlmConfigIn(BaseModel):
@@ -79,7 +87,9 @@ def skills(user: dict = Depends(get_current_user),
     items = []
     for skill in list_skills():
         readiness = skill.check_readiness(legacy, v2)
-        _config, version = config_store.resolve_config(rw, skill)
+        _config, version = config_store.resolve_config(
+            rw, skill, user.get("role_id")
+        )
         items.append({
             "skill_id": skill.skill_id,
             "name": skill.name,
@@ -105,7 +115,9 @@ def run_skill(skill_id: str, user: dict = Depends(get_current_user),
     skill = get_skill(skill_id)
     if not skill:
         raise ApiError("Skill不存在", code=404, status_code=404)
-    config, version = config_store.resolve_config(rw, skill)
+    config, version = config_store.resolve_config(
+        rw, skill, user.get("role_id")
+    )
     ctx = SkillContext(user=user, legacy=legacy, v2=v2, config=config,
                        config_version=version, semester=CURRENT_SEMESTER)
     result = skill.run(ctx)
@@ -377,25 +389,131 @@ def chat(body: ChatIn, user: dict = Depends(get_current_user),
 
 @router.get("/config/skills")
 def skill_config_list(admin: dict = Depends(require_admin),
-                      rw: sqlite3.Connection = Depends(get_db_rw)):
-    """全部Skill的默认值、可覆写边界、生效覆写与版本链。"""
+                      rw: sqlite3.Connection = Depends(get_db_rw),
+                      legacy: sqlite3.Connection = Depends(get_db),
+                      v2: sqlite3.Connection = Depends(get_v2_db)):
+    """学校分析方案工作台：产品模板、生效方案、草稿与版本链。"""
     items = []
     for skill in list_skills():
         override, version = config_store.active_override(rw, skill.skill_id)
         config, _ = config_store.resolve_config(rw, skill)
+        active = config_store.active_metadata(rw, skill.skill_id)
+        versions = config_store.list_versions(rw, skill.skill_id)
         items.append({
             "skill_id": skill.skill_id,
             "name": skill.name,
             "management_question": skill.management_question,
             "description": skill.description,
+            "briefing_tier": skill.briefing_tier,
+            "data_boundary": skill.data_boundary,
             "default_config": skill.default_config,
             "config_bounds": skill.config_bounds,
             "active_config": config,
             "active_override": override,
             "config_version": version,
-            "versions": config_store.list_versions(rw, skill.skill_id),
+            "active_scheme": active,
+            "versions": versions,
+            "data_readiness": skill.check_readiness(legacy, v2),
         })
-    return ok({"items": items})
+    versions = [version for item in items for version in item["versions"]]
+    llm_status = _masked_llm(llm_config.load_config(rw))
+    return ok({
+        "items": items,
+        "summary": {
+            "templates": len(items),
+            "schoolActive": sum(
+                1 for item in items if item["active_scheme"]
+            ),
+            "drafts": sum(
+                1 for row in versions if row["status"] == "draft"
+            ),
+            "attention": sum(
+                1 for item in items
+                if not item["data_readiness"].get("ready")
+            ) + sum(
+                1 for row in versions
+                if row["status"] == "draft"
+                and row["test_status"] != "passed"
+            ),
+        },
+        "roleIds": config_store.ANALYSIS_ROLE_IDS,
+        "llm": {
+            "enabled": llm_status["enabled"],
+            "ready": llm_status["ready"],
+            "model": llm_status["model"],
+        },
+        "boundary": (
+            "学校方案只调整已登记的管理参数和适用角色；"
+            "不改变正式指标公式，不保存组织数据范围，不扩大用户权限。"
+        ),
+    })
+
+
+@router.get("/config/skills/{skill_id}/export/{config_id}")
+def skill_config_export(
+        skill_id: str, config_id: int,
+        admin: dict = Depends(require_admin),
+        rw: sqlite3.Connection = Depends(get_db_rw)):
+    """导出不含业务数据和密钥的学校分析方案包。"""
+    skill = get_skill(skill_id)
+    row = config_store.get_version(rw, skill_id, config_id)
+    if not skill or not row:
+        raise ApiError("分析方案不存在", code=404, status_code=404)
+    package = {
+        "schema": "analysis-scheme/1.0",
+        "skillId": skill_id,
+        "skillName": skill.name,
+        "schemeName": row["scheme_name"],
+        "sourceVersion": row["version_no"],
+        "baseProtocolVersion": row["base_protocol_version"],
+        "override": row["config"],
+        "roleIds": row["roleIds"],
+        "boundary": (
+            "方案包不包含学生、教师、成绩、组织范围或模型密钥；"
+            "导入后必须重新执行数据检查和影响预览。"
+        ),
+    }
+    write_audit(
+        rw, admin.get("username", ""), "ai.analysis_scheme.export",
+        "ai_skill_config", str(config_id), detail={
+            "skillId": skill_id, "version": row["version_no"],
+        },
+    )
+    rw.commit()
+    return ok(package)
+
+
+@router.post("/config/schemes/import")
+def skill_config_import(
+        body: SchemeImportIn, admin: dict = Depends(require_admin),
+        rw: sqlite3.Connection = Depends(get_db_rw)):
+    """导入方案包为新草稿；导入不会直接发布。"""
+    package = body.package or {}
+    if package.get("schema") != "analysis-scheme/1.0":
+        raise ApiError("不支持的分析方案包版本", code=400, status_code=400)
+    skill_id = str(package.get("skillId") or "")
+    skill = get_skill(skill_id)
+    if not skill:
+        raise ApiError("方案包引用的分析模板不存在",
+                       code=400, status_code=400)
+    try:
+        result = config_store.create_draft(
+            rw, skill, package.get("override") or {}, body.changeReason,
+            admin.get("username", ""),
+            str(package.get("schemeName") or f"{skill.name}导入方案"),
+            package.get("roleIds") or config_store.ANALYSIS_ROLE_IDS,
+        )
+    except ValueError as exc:
+        raise ApiError(str(exc), code=400, status_code=400)
+    write_audit(
+        rw, admin.get("username", ""), "ai.analysis_scheme.import",
+        "ai_skill_config", str(result["configId"]), detail={
+            "skillId": skill_id, "sourceVersion": package.get("sourceVersion"),
+            "changeReason": body.changeReason,
+        },
+    )
+    rw.commit()
+    return ok(result, msg="方案包已导入为草稿，发布前必须重新检查")
 
 
 @router.post("/config/skills/{skill_id}/draft")
@@ -409,10 +527,179 @@ def skill_config_draft(skill_id: str, body: SkillConfigDraftIn,
     try:
         result = config_store.create_draft(
             rw, skill, body.override, body.changeReason,
-            admin.get("username", ""))
+            admin.get("username", ""), body.schemeName,
+            body.roleIds or config_store.ANALYSIS_ROLE_IDS)
     except ValueError as exc:
         raise ApiError(str(exc), code=400, status_code=400)
+    write_audit(
+        rw, admin.get("username", ""), "ai.analysis_scheme.create",
+        "ai_skill_config", str(result["configId"]), detail={
+            "skillId": skill_id, "schemeName": result["schemeName"],
+            "version": result["version"], "roleIds": result["roleIds"],
+            "changeReason": body.changeReason,
+        },
+    )
     rw.commit()
+    return ok(result)
+
+
+@router.put("/config/skills/{skill_id}/draft/{config_id}")
+def skill_config_draft_update(
+        skill_id: str, config_id: int, body: SkillConfigDraftIn,
+        admin: dict = Depends(require_admin),
+        rw: sqlite3.Connection = Depends(get_db_rw)):
+    """修改草稿；任何修改都会使原发布前检查失效。"""
+    skill = get_skill(skill_id)
+    if not skill:
+        raise ApiError("分析模板不存在", code=404, status_code=404)
+    try:
+        result = config_store.update_draft(
+            rw, skill, config_id, body.override, body.changeReason,
+            body.schemeName, body.roleIds or config_store.ANALYSIS_ROLE_IDS,
+        )
+    except ValueError as exc:
+        raise ApiError(str(exc), code=400, status_code=400)
+    write_audit(
+        rw, admin.get("username", ""), "ai.analysis_scheme.update",
+        "ai_skill_config", str(config_id), detail={
+            "skillId": skill_id, "roleIds": result["roleIds"],
+            "changeReason": body.changeReason,
+        },
+    )
+    rw.commit()
+    return ok(result)
+
+
+def _severity_count(result) -> dict:
+    counts = {"critical": 0, "high": 0, "medium": 0, "low": 0}
+    for signal in result.signals:
+        if signal.severity in counts:
+            counts[signal.severity] += 1
+    return counts
+
+
+@router.post("/config/skills/{skill_id}/test/{config_id}")
+def skill_config_test(
+        skill_id: str, config_id: int,
+        admin: dict = Depends(require_admin),
+        legacy: sqlite3.Connection = Depends(get_db),
+        v2: sqlite3.Connection = Depends(get_v2_db),
+        rw: sqlite3.Connection = Depends(get_db_rw)):
+    """发布前检查：参数、数据、角色、协议和当前学校数据试运行。"""
+    skill = get_skill(skill_id)
+    if not skill:
+        raise ApiError("分析模板不存在", code=404, status_code=404)
+    row = config_store.get_version(rw, skill_id, config_id)
+    if not row:
+        raise ApiError("分析方案草稿不存在", code=404, status_code=404)
+    if row["status"] != "draft":
+        raise ApiError("只有草稿方案需要发布前检查",
+                       code=409, status_code=409)
+
+    parameter_errors = skill.validate_override(row["config"])
+    readiness = skill.check_readiness(legacy, v2)
+    invalid_roles = [
+        role_id for role_id in row["roleIds"]
+        if role_id not in config_store.ANALYSIS_ROLE_IDS
+    ]
+    checks = {
+        "parameterBoundary": not parameter_errors,
+        "dataReadiness": bool(readiness.get("ready")),
+        "roleBoundary": bool(row["roleIds"]) and not invalid_roles,
+        "protocolCurrent": (
+            row["base_protocol_version"] == "decision-skill/1.0"
+        ),
+        "sampleRun": False,
+    }
+    issues = list(parameter_errors)
+    issues.extend(
+        f"缺少必需数据表：{table}"
+        for table in readiness.get("missing_required", [])
+    )
+    if invalid_roles:
+        issues.append("存在不适用角色：" + "、".join(invalid_roles))
+    if not checks["protocolCurrent"]:
+        issues.append("草稿基于旧分析协议，需要重新生成")
+
+    impact = {
+        "available": False, "currentSignals": 0, "draftSignals": 0,
+        "signalDelta": 0, "currentHighPriority": 0,
+        "draftHighPriority": 0, "highPriorityDelta": 0,
+        "newSignalIds": [], "removedSignalIds": [],
+    }
+    can_run = all(
+        checks[key] for key in (
+            "parameterBoundary", "dataReadiness",
+            "roleBoundary", "protocolCurrent",
+        )
+    )
+    if can_run:
+        try:
+            current_config, current_version = config_store.resolve_config(
+                rw, skill, admin.get("role_id")
+            )
+            draft_config = dict(skill.default_config)
+            draft_config.update(row["config"])
+            current_result = skill.run(SkillContext(
+                user=admin, legacy=legacy, v2=v2,
+                config=current_config, config_version=current_version,
+                semester=CURRENT_SEMESTER,
+            ))
+            draft_result = skill.run(SkillContext(
+                user=admin, legacy=legacy, v2=v2,
+                config=draft_config, config_version=row["version_no"],
+                semester=CURRENT_SEMESTER,
+            ))
+            current_ids = {signal.signal_id for signal in current_result.signals}
+            draft_ids = {signal.signal_id for signal in draft_result.signals}
+            current_severity = _severity_count(current_result)
+            draft_severity = _severity_count(draft_result)
+            current_high = (
+                current_severity["critical"] + current_severity["high"]
+            )
+            draft_high = (
+                draft_severity["critical"] + draft_severity["high"]
+            )
+            impact = {
+                "available": True,
+                "currentSignals": len(current_ids),
+                "draftSignals": len(draft_ids),
+                "signalDelta": len(draft_ids) - len(current_ids),
+                "currentHighPriority": current_high,
+                "draftHighPriority": draft_high,
+                "highPriorityDelta": draft_high - current_high,
+                "newSignalIds": sorted(draft_ids - current_ids)[:10],
+                "removedSignalIds": sorted(current_ids - draft_ids)[:10],
+            }
+            checks["sampleRun"] = True
+        except Exception as exc:
+            issues.append(f"当前学校数据试运行失败：{exc}")
+
+    passed = all(checks.values())
+    result = {
+        "configId": config_id, "skillId": skill_id, "passed": passed,
+        "checks": checks, "issues": issues, "readiness": readiness,
+        "impact": impact, "testedVersion": row["version_no"],
+        "testedScope": "当前系统管理员的全校业务数据权限",
+        "boundary": "结果变化仅用于发布影响核查，不形成业务审批结论。",
+    }
+    try:
+        saved = config_store.save_test_result(
+            rw, skill_id, config_id, result, admin.get("username", "")
+        )
+    except ValueError as exc:
+        raise ApiError(str(exc), code=400, status_code=400)
+    write_audit(
+        rw, admin.get("username", ""), "ai.analysis_scheme.test",
+        "ai_skill_config", str(config_id),
+        result="success" if passed else "failed",
+        detail={
+            "skillId": skill_id, "checks": checks,
+            "issues": issues, "impact": impact,
+        },
+    )
+    rw.commit()
+    result.update(saved)
     return ok(result)
 
 
@@ -423,9 +710,36 @@ def skill_config_publish(skill_id: str, body: ConfigActionIn,
     """发布草稿：先生效后旧版自动退役。"""
     try:
         result = config_store.publish(rw, skill_id, body.configId,
-                                      admin.get("username", ""))
+                                      admin.get("username", ""),
+                                      require_test=True)
     except ValueError as exc:
         raise ApiError(str(exc), code=400, status_code=400)
+    write_audit(
+        rw, admin.get("username", ""), "ai.analysis_scheme.publish",
+        "ai_skill_config", str(body.configId), detail={
+            "skillId": skill_id, "version": result["version"],
+        },
+    )
+    rw.commit()
+    return ok(result)
+
+
+@router.post("/config/skills/{skill_id}/retire")
+def skill_config_retire(skill_id: str, body: ConfigActionIn,
+                        admin: dict = Depends(require_admin),
+                        rw: sqlite3.Connection = Depends(get_db_rw)):
+    """停用学校方案后，相关角色立即回退产品默认方案。"""
+    try:
+        result = config_store.retire(rw, skill_id, body.configId)
+    except ValueError as exc:
+        raise ApiError(str(exc), code=400, status_code=400)
+    write_audit(
+        rw, admin.get("username", ""), "ai.analysis_scheme.retire",
+        "ai_skill_config", str(body.configId), detail={
+            "skillId": skill_id, "version": result["version"],
+            "changeReason": body.changeReason,
+        },
+    )
     rw.commit()
     return ok(result)
 
@@ -441,6 +755,13 @@ def skill_config_rollback(skill_id: str, body: ConfigActionIn,
                                        body.changeReason)
     except ValueError as exc:
         raise ApiError(str(exc), code=400, status_code=400)
+    write_audit(
+        rw, admin.get("username", ""), "ai.analysis_scheme.rollback",
+        "ai_skill_config", str(result["configId"]), detail={
+            "skillId": skill_id, "sourceConfigId": body.configId,
+            "version": result["version"], "changeReason": body.changeReason,
+        },
+    )
     rw.commit()
     return ok(result)
 

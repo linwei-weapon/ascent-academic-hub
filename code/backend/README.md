@@ -48,6 +48,13 @@ PYTHONIOENCODING=utf-8 python -X utf8 -m uvicorn backend.api.main:app --reload -
 | GET | /api/admin/system/data-collection/runs/{run_id} | 管理校验、输入批次与技术证据 | etl_run + etl_run_batch |
 | GET | /api/admin/system/data-collection/checklist.csv | 学校数据接入核验清单 | data_source_definition |
 | POST | /api/admin/system/data-collection/trigger | 受控白名单异步重跑 | etl_run + sys_security_audit |
+| GET | /api/admin/ai/decision/config/skills | 四项产品模板、学校方案、数据就绪与版本 | sys_ai_skill_config |
+| POST/PUT | /api/admin/ai/decision/config/skills/{skill_id}/draft | 创建或修改学校方案草稿 | sys_ai_skill_config + role |
+| POST | /api/admin/ai/decision/config/skills/{skill_id}/test/{config_id} | 真实数据发布前检查与影响预览 | legacy + V2 + sys_ai_skill_config |
+| POST | /api/admin/ai/decision/config/skills/{skill_id}/publish | 发布已通过检查的学校方案 | sys_ai_skill_config |
+| POST | /api/admin/ai/decision/config/skills/{skill_id}/retire | 停用并回退产品默认 | sys_ai_skill_config |
+| POST | /api/admin/ai/decision/config/skills/{skill_id}/rollback | 基于历史版本生成新发布版本 | sys_ai_skill_config |
+| GET/POST | /api/admin/ai/decision/config/*/export / schemes/import | 无业务数据的方案包迁移 | sys_ai_skill_config |
 | GET | /api/admin/rbac/security-audit | 安全审计（管理员） | sys_security_audit |
 
 **培养方案**：真实方案仅 2 个专业（M017 安全工程 / M031 海洋油气工程，2022级）。

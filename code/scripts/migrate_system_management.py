@@ -24,6 +24,7 @@ from backend.api.security import verify_password
 from backend.etl import config
 from backend.etl.seed import DEMO_PASSWORD, hash_password
 from backend.metric_catalog import ensure_metric_catalog
+from backend.skills.config_store import ensure_tables as ensure_scheme_tables
 from scripts.migrate_menu import migrate as migrate_menu
 
 
@@ -50,6 +51,7 @@ def migrate(conn: sqlite3.Connection) -> dict:
     conn.executescript(AUTH_IDENTITY_DDL)
     _ensure_account_governance(conn)
     _ensure_tables(conn)
+    ensure_scheme_tables(conn)
     _ensure_kpi_config(conn)
     metric_count = ensure_metric_catalog(conn)
     _ensure_system_tables(conn)
@@ -93,7 +95,12 @@ def migrate(conn: sqlite3.Connection) -> dict:
         "systemParameters": conn.execute(
             "SELECT COUNT(*) FROM sys_system_parameter"
         ).fetchone()[0],
-        "analysisSchemes": len(schemes),
+        "analysisSchemes": conn.execute(
+            "SELECT COUNT(*) FROM sys_ai_skill_config"
+        ).fetchone()[0],
+        "analysisSchemeRoleBindings": conn.execute(
+            "SELECT COUNT(*) FROM sys_ai_skill_config_role"
+        ).fetchone()[0],
         "schemeRoleBindings": conn.execute(
             "SELECT COUNT(*) FROM sys_ai_analysis_scheme_role"
         ).fetchone()[0],

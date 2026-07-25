@@ -48,8 +48,16 @@ class SkillConfigFlowTest(unittest.TestCase):
     def tearDown(self):
         self.rw.close()
 
+    def mark_passed(self, skill_id: str, config_id: int):
+        config_store.save_test_result(
+            self.rw, skill_id, config_id,
+            {"passed": True, "checks": {"sampleRun": True}}, "admin",
+        )
+
     def test_list_skills_with_bounds_and_empty_versions(self):
-        data = _unwrap(ai_decision.skill_config_list(SYS_ADMIN, self.rw))
+        data = _unwrap(ai_decision.skill_config_list(
+            SYS_ADMIN, self.rw, self.rw, self.rw
+        ))
         self.assertEqual(len(data["items"]), 4)
         gap = [i for i in data["items"] if i["skill_id"] == "graduation-gap"][0]
         self.assertIn("target_grade", gap["config_bounds"])
@@ -67,12 +75,125 @@ class SkillConfigFlowTest(unittest.TestCase):
         _, version = config_store.active_override(self.rw, "course-quality")
         self.assertEqual(version, "product_default")
 
+        self.mark_passed("course-quality", draft["configId"])
         _unwrap(ai_decision.skill_config_publish(
             "course-quality", ai_decision.ConfigActionIn(configId=draft["configId"]),
             SYS_ADMIN, self.rw))
         override, version = config_store.active_override(self.rw, "course-quality")
         self.assertEqual(override, {"min_sample": 30})
         self.assertNotEqual(version, "product_default")
+
+    def test_publish_requires_passed_preflight(self):
+        draft = _unwrap(ai_decision.skill_config_draft(
+            "course-quality",
+            ai_decision.SkillConfigDraftIn(
+                override={"min_sample": 40}, changeReason="提高样本门槛",
+                schemeName="课程质量稳健方案",
+                roleIds=["dean", "college_dean"],
+            ),
+            SYS_ADMIN, self.rw,
+        ))
+        with self.assertRaises(ApiError) as ctx:
+            ai_decision.skill_config_publish(
+                "course-quality",
+                ai_decision.ConfigActionIn(configId=draft["configId"]),
+                SYS_ADMIN, self.rw,
+            )
+        self.assertIn("发布前检查", str(ctx.exception))
+
+    def test_role_specific_resolution_falls_back_to_product_default(self):
+        skill = get_skill("course-quality")
+        draft = config_store.create_draft(
+            self.rw, skill, {"min_sample": 40}, "学院角色试用",
+            "admin", "课程质量学院方案", ["college_dean"],
+        )
+        self.mark_passed("course-quality", draft["configId"])
+        config_store.publish(
+            self.rw, "course-quality", draft["configId"], "admin",
+            require_test=True,
+        )
+        college_config, college_version = config_store.resolve_config(
+            self.rw, skill, "college_dean"
+        )
+        school_config, school_version = config_store.resolve_config(
+            self.rw, skill, "school_leader"
+        )
+        self.assertEqual(40, college_config["min_sample"])
+        self.assertNotEqual("product_default", college_version)
+        self.assertEqual(skill.default_config["min_sample"],
+                         school_config["min_sample"])
+        self.assertEqual("product_default", school_version)
+
+    def test_editing_draft_invalidates_preflight_result(self):
+        skill = get_skill("alert-priority")
+        draft = config_store.create_draft(
+            self.rw, skill, {"top_n": 12}, "首次调整", "admin",
+            "本周预警核查方案", ["dean"],
+        )
+        self.mark_passed("alert-priority", draft["configId"])
+        before = config_store.get_version(
+            self.rw, "alert-priority", draft["configId"]
+        )
+        self.assertEqual("passed", before["test_status"])
+        config_store.update_draft(
+            self.rw, skill, draft["configId"], {"top_n": 15},
+            "再次调整", "本周预警核查方案", ["dean"],
+        )
+        after = config_store.get_version(
+            self.rw, "alert-priority", draft["configId"]
+        )
+        self.assertEqual("untested", after["test_status"])
+        self.assertEqual({}, after["testResult"])
+
+    def test_preflight_discloses_missing_data_and_persists_failure(self):
+        draft = _unwrap(ai_decision.skill_config_draft(
+            "graduation-gap",
+            ai_decision.SkillConfigDraftIn(
+                override={"target_grade": 2022}, changeReason="核对毕业届",
+                schemeName="毕业准备核查方案", roleIds=["dean"],
+            ),
+            SYS_ADMIN, self.rw,
+        ))
+        result = _unwrap(ai_decision.skill_config_test(
+            "graduation-gap", draft["configId"], SYS_ADMIN,
+            self.rw, self.rw, self.rw,
+        ))
+        self.assertFalse(result["passed"])
+        self.assertFalse(result["checks"]["dataReadiness"])
+        self.assertTrue(any("缺少必需数据表" in issue
+                            for issue in result["issues"]))
+        saved = config_store.get_version(
+            self.rw, "graduation-gap", draft["configId"]
+        )
+        self.assertEqual("failed", saved["test_status"])
+
+    def test_export_import_roundtrip_creates_untested_draft(self):
+        source = _unwrap(ai_decision.skill_config_draft(
+            "faculty-structure",
+            ai_decision.SkillConfigDraftIn(
+                override={"high_enrolled": 350}, changeReason="调整大课界线",
+                schemeName="大课师资保障方案",
+                roleIds=["dean", "college_dean"],
+            ),
+            SYS_ADMIN, self.rw,
+        ))
+        package = _unwrap(ai_decision.skill_config_export(
+            "faculty-structure", source["configId"], SYS_ADMIN, self.rw
+        ))
+        self.assertEqual("analysis-scheme/1.0", package["schema"])
+        self.assertNotIn("student", str(package).lower())
+        imported = _unwrap(ai_decision.skill_config_import(
+            ai_decision.SchemeImportIn(
+                package=package, changeReason="跨环境方案包验收"
+            ),
+            SYS_ADMIN, self.rw,
+        ))
+        row = config_store.get_version(
+            self.rw, "faculty-structure", imported["configId"]
+        )
+        self.assertEqual("draft", row["status"])
+        self.assertEqual("untested", row["test_status"])
+        self.assertEqual(["college_dean", "dean"], row["roleIds"])
 
     def test_draft_out_of_bounds_rejected(self):
         with self.assertRaises(ApiError) as ctx:
@@ -99,6 +220,7 @@ class SkillConfigFlowTest(unittest.TestCase):
             ai_decision.SkillConfigDraftIn(
                 override={"top_n": 12}, changeReason="扩大队列"),
             SYS_ADMIN, self.rw))
+        self.mark_passed("alert-priority", draft["configId"])
         _unwrap(ai_decision.skill_config_publish(
             "alert-priority", ai_decision.ConfigActionIn(configId=draft["configId"]),
             SYS_ADMIN, self.rw))
@@ -112,6 +234,7 @@ class SkillConfigFlowTest(unittest.TestCase):
             "alert-priority",
             ai_decision.SkillConfigDraftIn(override={"top_n": 10}, changeReason="版本一"),
             SYS_ADMIN, self.rw))
+        self.mark_passed("alert-priority", d1["configId"])
         _unwrap(ai_decision.skill_config_publish(
             "alert-priority", ai_decision.ConfigActionIn(configId=d1["configId"]),
             SYS_ADMIN, self.rw))
@@ -119,6 +242,7 @@ class SkillConfigFlowTest(unittest.TestCase):
             "alert-priority",
             ai_decision.SkillConfigDraftIn(override={"top_n": 20}, changeReason="版本二"),
             SYS_ADMIN, self.rw))
+        self.mark_passed("alert-priority", d2["configId"])
         _unwrap(ai_decision.skill_config_publish(
             "alert-priority", ai_decision.ConfigActionIn(configId=d2["configId"]),
             SYS_ADMIN, self.rw))

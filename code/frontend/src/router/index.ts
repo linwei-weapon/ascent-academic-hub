@@ -100,7 +100,8 @@ export const router = createRouter({
         { path: 'system/audit', component: () => import('@/views/admin/system/Audit.vue') },
         { path: 'system/kpis', component: () => import('@/views/admin/system/Kpis.vue') },
         { path: 'system/schemes', component: () => import('@/views/admin/system/Schemes.vue') },
-        { path: 'system/decision-config', component: () => import('@/views/admin/system/DecisionConfig.vue') },
+        // 旧“决策配置”已并入分析方案管理，保留书签兼容。
+        { path: 'system/decision-config', redirect: '/admin/system/schemes' },
         // M4：数据采集监控（批次台账 / ETL运行历史 / 手动触发 / 采集频率）
         { path: 'system/data-collection', component: () => import('@/views/admin/system/DataCollection.vue') },
 

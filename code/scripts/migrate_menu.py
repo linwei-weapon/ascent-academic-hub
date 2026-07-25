@@ -63,10 +63,8 @@ TARGET_MENUS = [
      "/admin/system/audit", "Document", 307),
     ("/admin/settings", "/admin/system", "系统参数",
      "/admin/settings", "Setting", 308),
-    ("/admin/system/decision-config", "/admin/system", "决策配置",
-     "/admin/system/decision-config", "MagicStick", 309),
     ("/admin/system/data-collection", "/admin/system", "数据采集监控",
-     "/admin/system/data-collection", "Monitor", 310),
+     "/admin/system/data-collection", "Monitor", 309),
 ]
 
 PARENT_IDS = {row[0] for row in TARGET_MENUS if row[1] is None}
@@ -93,6 +91,7 @@ LEGACY_GRANT_TRANSFER = {
 OBSOLETE = {
     "/admin/school", "/admin/sync", "/admin/practice",
     "/admin/alert/monitor", "/admin/alert/rules", "/admin/alert/discovery",
+    "/admin/system/decision-config",
     *LEGACY_GRANT_TRANSFER.keys(),
 }
 

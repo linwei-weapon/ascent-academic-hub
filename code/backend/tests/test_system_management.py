@@ -46,7 +46,7 @@ class SystemManagementTest(unittest.TestCase):
         first = migrate(conn)
         second = migrate(conn)
         self.assertEqual(first, second)
-        self.assertEqual(10, second["systemMenus"])
+        self.assertEqual(9, second["systemMenus"])
         self.assertEqual(len(PARAMETER_DEFAULTS), second["systemParameters"])
         # 8 条总览指标 + M1 新增 4 条课程质量三分层指标。
         self.assertEqual(12, second["registeredKpis"])
@@ -59,7 +59,7 @@ class SystemManagementTest(unittest.TestCase):
         self.assertEqual({
             "账号管理", "角色与功能权限", "菜单管理", "数据权限",
             "指标与口径管理", "分析方案管理", "审计日志", "系统参数",
-            "决策配置", "数据采集监控",
+            "数据采集监控",
         }, system_titles)
         conn.close()
 

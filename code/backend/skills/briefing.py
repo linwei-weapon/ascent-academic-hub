@@ -237,7 +237,9 @@ def run_all_skills(user: dict, legacy: sqlite3.Connection,
     results: list[SkillResult] = []
     tier_map: dict[str, str] = {}
     for skill in list_skills():
-        config, version = config_store.resolve_config(rw_conn, skill)
+        config, version = config_store.resolve_config(
+            rw_conn, skill, user.get("role_id")
+        )
         ctx = SkillContext(user=user, legacy=legacy, v2=v2, config=config,
                            config_version=version, semester=semester)
         results.append(skill.run(ctx))
@@ -252,7 +254,15 @@ def generate_briefing(user: dict, legacy: sqlite3.Connection,
     skey = scope_key(user)
     results, tier_map = run_all_skills(user, legacy, v2, rw_conn, semester)
     merged = merge_signals(results, tier_map)
-    fingerprint = briefing_fingerprint(merged["all_signals"])
+    # 配置版本属于结果语义的一部分。即使参数调整后信号数量暂未变化，
+    # 也不能继续复用旧配置版本生成的快照。
+    version_fingerprint = "|".join(sorted(
+        f"{result.skill_id}:{result.config_version}" for result in results
+    ))
+    fingerprint = (
+        briefing_fingerprint(merged["all_signals"])
+        + ":" + version_fingerprint
+    )
 
     if not force:
         cached = store.latest_snapshot(rw_conn, skey)
