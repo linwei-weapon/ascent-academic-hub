@@ -196,7 +196,7 @@
         </el-form>
       </template>
       <template #footer>
-        <el-button @click="closeEditor">取消</el-button>
+        <el-button @click="closeEditor()">取消</el-button>
         <el-button type="primary" :loading="saving" @click="saveDraft">保存草稿</el-button>
       </template>
     </el-drawer>
