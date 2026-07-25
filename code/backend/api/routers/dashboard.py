@@ -285,7 +285,7 @@ def dashboard(semester: Optional[str] = None,
         {"id": "teacher_count", "label": teacher_label, "value": f"{teachers:,}", "formula": "授权学生范围内有授课关系的教师去重；全校视角为教师维表去重", "trend": "", "up": True, "group": "在校生"},
         {"id": "alert_count", "label": "当前预警", "value": f"{alert_stu}人", "formula": "处于预警状态的学生数", "trend": "", "up": False, "group": "在校生"},
         {"id": "current_fail_rate", "label": "当前挂科学生率", "value": "—", "formula": "当前学期至少一门未通过的去重学生数÷当前学期有有效成绩的去重学生数", "trend": "", "up": False, "group": "在校生"},
-        {"id": "history_fail_rate", "label": "历史挂科经历率", "value": "—", "formula": "在校期间曾出现过未通过记录的去重学生数÷在籍学生数（包含后续补考或重修通过）", "trend": "", "up": False, "group": "在校生"},
+        {"id": "history_fail_rate", "label": "历史挂科经历率", "value": "—", "formula": "观察期内曾出现过未通过记录的去重学生数÷观察期内有历史有效成绩的去重学生数（包含后续补考或重修通过）", "trend": "", "up": False, "group": "在校生"},
     ]
 
     rows = dbm.query(conn, f"""SELECT c.college_id,c.name,COUNT(s.student_id) students
@@ -344,11 +344,18 @@ def dashboard(semester: Optional[str] = None,
         r["college_id"]: r["avg_gpa"]
         for r in college_term_rows if r["semester_id"] == previous_semester
     }
-    hist_fail_by_col = {r["college_id"]: r["n"] for r in dbm.query(conn, f"""
-        SELECT s.college_id, COUNT(DISTINCT g.student_id) AS n
+    history_rows = dbm.query(conn, f"""
+        SELECT s.college_id,
+          COUNT(DISTINCT CASE WHEN g.is_pass=0 THEN g.student_id END) AS n,
+          COUNT(DISTINCT CASE WHEN g.is_pass IS NOT NULL THEN g.student_id END)
+            AS result_students
         FROM fact_grade g JOIN dim_student s ON g.student_id=s.student_id
-        WHERE g.is_pass=0 AND g.source='real'{student_and}
-        GROUP BY s.college_id""", tuple(scope_params))}
+        WHERE g.source='real' AND g.is_pass IS NOT NULL{student_and}
+        GROUP BY s.college_id""", tuple(scope_params))
+    hist_fail_by_col = {r["college_id"]: r["n"] for r in history_rows}
+    history_results_by_col = {
+        r["college_id"]: r["result_students"] for r in history_rows
+    }
     colleges = []
     scope_alert_rate = _pct_number(alert_stu, students)
     for r in rows:
@@ -370,7 +377,10 @@ def dashboard(semester: Optional[str] = None,
             "id": r["college_id"], "name": r["name"], "students": r["students"],
             "avgScore": round(a.get("avg_score"), 1) if a.get("avg_score") is not None else None,
             "avgGpa": college_gpa,
-            "failRate": _pct(hist_fail_by_col.get(r["college_id"], 0) / r["students"]),
+            "failRate": _pct(
+                hist_fail_by_col.get(r["college_id"], 0)
+                / history_results_by_col.get(r["college_id"], 1)
+            ) if history_results_by_col.get(r["college_id"], 0) else "—",
             "currentFailRate": _pct_value(
                 cur_fail_by_col.get(r["college_id"], 0),
                 college_result_students),
@@ -543,8 +553,11 @@ def dashboard(semester: Optional[str] = None,
 
     total_cur = sum(cur_fail_by_col.values()) if cur_fail_by_col else 0
     total_hist = sum(hist_fail_by_col.values()) if hist_fail_by_col else 0
+    total_history_results = (
+        sum(history_results_by_col.values()) if history_results_by_col else 0
+    )
     kpi[4]["value"] = _pct_value(total_cur, students_with_results)
-    kpi[5]["value"] = _pct_value(total_hist, students)
+    kpi[5]["value"] = _pct_value(total_hist, total_history_results)
     kpi, kpi_config_applied = _apply_kpi_config(conn, kpi)
     current_coverage_rate = _pct_number(students_with_results, students)
 

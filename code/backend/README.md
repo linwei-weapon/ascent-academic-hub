@@ -36,7 +36,11 @@ PYTHONIOENCODING=utf-8 python -X utf8 -m uvicorn backend.api.main:app --reload -
 | GET | /api/admin/reports/custom?metrics=&dimension=&semester= | 自定义报表 | 真实学生/成绩/预警受控聚合 |
 | POST | /api/admin/settings/rules/discover | 运行规则自发现 | 真实数据历史关联候选，不直接生效 |
 | GET/PUT | /api/admin/settings/rules/discovered | 查询/采纳规则建议 | 采纳仅创建规则治理草稿 |
-| GET/PUT | /api/admin/settings/kpi-config | 注册 KPI 显示与排序治理 | sys_kpi_config |
+| GET | /api/admin/settings/metric-catalog/summary | 指标目录治理摘要 | sys_metric_definition |
+| GET | /api/admin/settings/metric-catalog | 指标目录分页、筛选和导出 | sys_metric_definition |
+| GET | /api/admin/settings/metric-catalog/{metric_id} | 指标定义、实现与页面证据 | sys_metric_definition + sys_metric_page_binding |
+| GET | /api/admin/settings/metric-catalog/pages | 页面引用一致性核验 | sys_metric_page_binding |
+| GET/PUT | /api/admin/settings/kpi-config | 旧 KPI 展示配置兼容接口 | sys_kpi_config |
 | GET | /api/admin/rbac/security-audit | 安全审计（管理员） | sys_security_audit |
 
 **培养方案**：真实方案仅 2 个专业（M017 安全工程 / M031 海洋油气工程，2022级）。

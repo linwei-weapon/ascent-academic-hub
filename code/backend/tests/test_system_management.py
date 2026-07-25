@@ -7,6 +7,12 @@ from backend.api.routers.system_management import (
     PARAMETER_DEFAULTS,
     _validate_parameter,
 )
+from backend.api.routers.settings import (
+    metric_catalog_detail,
+    metric_catalog_list,
+    metric_catalog_pages,
+    metric_catalog_summary,
+)
 from backend.etl.seed import DEMO_PASSWORD, hash_password
 from backend.permission_catalog import ACTION_CATALOG
 from backend.api.security import verify_password
@@ -44,6 +50,7 @@ class SystemManagementTest(unittest.TestCase):
         self.assertEqual(len(PARAMETER_DEFAULTS), second["systemParameters"])
         # 8 条总览指标 + M1 新增 4 条课程质量三分层指标。
         self.assertEqual(12, second["registeredKpis"])
+        self.assertGreaterEqual(second["metricDefinitions"], 200)
         system_titles = {
             row["title"] for row in conn.execute(
                 "SELECT title FROM sys_menu WHERE parent_id='/admin/system'"
@@ -82,6 +89,84 @@ class SystemManagementTest(unittest.TestCase):
         self.assertEqual("在籍状态学生去重计数", row["formula"])
         self.assertEqual("dim_student", row["data_source"])
         self.assertTrue(row["management_value"])
+        conn.close()
+
+    def test_metric_catalog_separates_definition_binding_and_legacy_status(self):
+        conn = make_conn()
+        result = migrate(conn)
+        self.assertGreaterEqual(result["metricDefinitions"], 200)
+        current = conn.execute("""
+            SELECT name,formula,definition_status,implementation_status,
+                   technical_kpi_id
+            FROM sys_metric_definition WHERE metric_id='O-10'
+        """).fetchone()
+        self.assertEqual("当前挂科学生率", current["name"])
+        self.assertIn("去重学生数", current["formula"])
+        self.assertEqual("published", current["definition_status"])
+        self.assertEqual("verified", current["implementation_status"])
+        self.assertEqual("current_fail_rate", current["technical_kpi_id"])
+
+        legacy = conn.execute("""
+            SELECT definition_status,implementation_status,page_refs
+            FROM sys_metric_definition WHERE metric_id='LEGACY-GRAD-RATE'
+        """).fetchone()
+        self.assertEqual("deprecated", legacy["definition_status"])
+        self.assertEqual("retired", legacy["implementation_status"])
+        self.assertEqual("[]", legacy["page_refs"])
+
+        registered = conn.execute("""
+            SELECT label,formula,version,enabled,page_refs
+            FROM sys_kpi_config WHERE kpi_id='current_fail_rate'
+        """).fetchone()
+        self.assertEqual("当前挂科学生率", registered["label"])
+        self.assertIn("去重学生数", registered["formula"])
+        self.assertEqual("2.0", registered["version"])
+        self.assertEqual(1, registered["enabled"])
+
+        retired = conn.execute("""
+            SELECT enabled,page_refs FROM sys_kpi_config
+            WHERE kpi_id='grad_rate'
+        """).fetchone()
+        self.assertEqual(0, retired["enabled"])
+        self.assertEqual("[]", retired["page_refs"])
+
+        orphan_bindings = conn.execute("""
+            SELECT COUNT(*) FROM sys_metric_page_binding b
+            LEFT JOIN sys_metric_definition d ON d.metric_id=b.metric_id
+            WHERE d.metric_id IS NULL
+        """).fetchone()[0]
+        self.assertEqual(0, orphan_bindings)
+        conn.close()
+
+    def test_metric_catalog_api_supports_summary_filter_paging_and_detail(self):
+        conn = make_conn()
+        migrate(conn)
+        summary = metric_catalog_summary(conn=conn, _={})["data"]
+        self.assertGreaterEqual(summary["total"], 200)
+        self.assertGreaterEqual(summary["verified"], 9)
+        self.assertGreaterEqual(summary["pendingConfirmation"], 190)
+        self.assertGreaterEqual(summary["boundPages"], 5)
+
+        listing = metric_catalog_list(
+            page=1, page_size=10, domain="教学数据总览",
+            definition_status=None, implementation_status=None, keyword="挂科",
+            conn=conn, _={},
+        )["data"]
+        self.assertGreaterEqual(listing["total"], 1)
+        self.assertLessEqual(len(listing["items"]), 10)
+        self.assertTrue(all(row["domain"] == "教学数据总览"
+                            for row in listing["items"]))
+
+        detail = metric_catalog_detail("O-10", conn=conn, _={})["data"]
+        self.assertEqual("current_fail_rate",
+                         detail["definition"]["technical_kpi_id"])
+        self.assertEqual("分析方案管理",
+                         detail["governance"]["thresholdManagedBy"])
+        self.assertTrue(detail["bindings"])
+
+        pages = metric_catalog_pages(conn=conn, _={})["data"]
+        self.assertTrue(any(row["page_path"] == "/admin/dashboard"
+                            for row in pages))
         conn.close()
 
     def test_parameter_validation_rejects_wrong_type_and_enum(self):

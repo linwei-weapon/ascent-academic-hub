@@ -23,6 +23,7 @@ from backend.api.routers.system_management import _ensure_system_tables
 from backend.api.security import verify_password
 from backend.etl import config
 from backend.etl.seed import DEMO_PASSWORD, hash_password
+from backend.metric_catalog import ensure_metric_catalog
 from scripts.migrate_menu import migrate as migrate_menu
 
 
@@ -50,6 +51,7 @@ def migrate(conn: sqlite3.Connection) -> dict:
     _ensure_account_governance(conn)
     _ensure_tables(conn)
     _ensure_kpi_config(conn)
+    metric_count = ensure_metric_catalog(conn)
     _ensure_system_tables(conn)
     hardened_admin = harden_legacy_demo_admin(conn)
 
@@ -98,6 +100,7 @@ def migrate(conn: sqlite3.Connection) -> dict:
         "registeredKpis": conn.execute(
             "SELECT COUNT(*) FROM sys_kpi_config"
         ).fetchone()[0],
+        "metricDefinitions": metric_count,
         "hardenedLegacyAdmin": hardened_admin,
     }
 

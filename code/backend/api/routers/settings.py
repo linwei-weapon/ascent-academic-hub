@@ -20,6 +20,7 @@ from .. import db as dbm
 from ..deps import get_db, get_db_rw, get_current_user, require_admin
 from ..envelope import ok, ApiError
 from ..permission_context import has_action
+from ...metric_catalog import ensure_metric_catalog
 
 router = APIRouter(prefix="/api/admin", tags=["settings"])
 
@@ -1046,6 +1047,240 @@ def update_discovery_config(body: DiscoveryConfigIn,
 
 # ── V1.1：KPI 指标体系配置 ──
 
+METRIC_STATUS_LABELS = {
+    "pending_confirmation": "待学校确认",
+    "published": "已发布",
+    "context": "范围背景",
+    "deprecated": "已停用",
+}
+METRIC_IMPLEMENTATION_LABELS = {
+    "verified": "已实现并验证",
+    "unverified": "待建立实现证据",
+    "mismatch": "定义与实现不一致",
+    "retired": "已退出页面",
+}
+
+
+def _ensure_metric_catalog_ready(conn: sqlite3.Connection) -> None:
+    exists = dbm.scalar(conn, """
+        SELECT 1 FROM sqlite_master
+        WHERE type='table' AND name='sys_metric_definition'
+    """)
+    if not exists or not dbm.scalar(
+        conn, "SELECT COUNT(*) FROM sys_metric_definition"
+    ):
+        ensure_metric_catalog(conn)
+
+
+def _metric_filters(domain: str | None, definition_status: str | None,
+                    implementation_status: str | None,
+                    keyword: str | None) -> tuple[str, list]:
+    conditions, params = [], []
+    if domain:
+        conditions.append("d.domain=?"); params.append(domain)
+    if definition_status:
+        conditions.append("d.definition_status=?"); params.append(definition_status)
+    if implementation_status:
+        conditions.append("d.implementation_status=?"); params.append(implementation_status)
+    if keyword and keyword.strip():
+        token = f"%{keyword.strip()}%"
+        conditions.append("""(
+            d.metric_id LIKE ? OR d.name LIKE ? OR d.formula LIKE ?
+            OR COALESCE(d.technical_kpi_id,'') LIKE ?
+        )""")
+        params.extend([token, token, token, token])
+    return (" WHERE " + " AND ".join(conditions)) if conditions else "", params
+
+
+@router.get("/settings/metric-catalog/summary")
+def metric_catalog_summary(conn: sqlite3.Connection = Depends(get_db_rw),
+                           _: dict = Depends(require_admin)):
+    _ensure_metric_catalog_ready(conn)
+    counts = {
+        row["key"]: row["n"] for row in dbm.query(conn, """
+            SELECT definition_status key,COUNT(*) n
+            FROM sys_metric_definition GROUP BY definition_status
+        """)
+    }
+    implementation = {
+        row["key"]: row["n"] for row in dbm.query(conn, """
+            SELECT implementation_status key,COUNT(*) n
+            FROM sys_metric_definition GROUP BY implementation_status
+        """)
+    }
+    return ok({
+        "total": dbm.scalar(conn, "SELECT COUNT(*) FROM sys_metric_definition") or 0,
+        "published": counts.get("published", 0),
+        "verified": implementation.get("verified", 0),
+        "pendingConfirmation": counts.get("pending_confirmation", 0),
+        "inconsistent": dbm.scalar(conn, """
+            SELECT COUNT(*) FROM sys_metric_definition
+            WHERE definition_status='published'
+              AND implementation_status NOT IN ('verified','retired')
+        """) or 0,
+        "retired": counts.get("deprecated", 0),
+        "boundPages": dbm.scalar(
+            conn, "SELECT COUNT(DISTINCT page_path) FROM sys_metric_page_binding"
+        ) or 0,
+        "domains": dbm.query(conn, """
+            SELECT domain label,COUNT(*) count FROM sys_metric_definition
+            GROUP BY domain ORDER BY domain
+        """),
+        "catalogVersion": "V0.8 / implementation-binding-1.0",
+    })
+
+
+@router.get("/settings/metric-catalog/pages")
+def metric_catalog_pages(conn: sqlite3.Connection = Depends(get_db_rw),
+                         _: dict = Depends(require_admin)):
+    _ensure_metric_catalog_ready(conn)
+    rows = dbm.query(conn, """
+        SELECT b.page_path,
+          COUNT(*) metric_count,
+          SUM(CASE WHEN b.verification_status='verified'
+                    AND b.definition_version=b.implementation_version
+                   THEN 1 ELSE 0 END) consistent_count,
+          SUM(CASE WHEN b.verification_status!='verified'
+                    OR b.definition_version!=b.implementation_version
+                   THEN 1 ELSE 0 END) issue_count,
+          MAX(b.updated_at) updated_at
+        FROM sys_metric_page_binding b
+        GROUP BY b.page_path ORDER BY b.page_path
+    """)
+    return ok(rows)
+
+
+@router.get("/settings/metric-catalog")
+def metric_catalog_list(
+    page: int = 1, page_size: int = 20, domain: str | None = None,
+    definition_status: str | None = None,
+    implementation_status: str | None = None, keyword: str | None = None,
+    conn: sqlite3.Connection = Depends(get_db_rw),
+    _: dict = Depends(require_admin),
+):
+    _ensure_metric_catalog_ready(conn)
+    page = max(1, page)
+    page_size = min(max(10, page_size), 100)
+    where, params = _metric_filters(
+        domain, definition_status, implementation_status, keyword
+    )
+    total = dbm.scalar(
+        conn, f"SELECT COUNT(*) FROM sys_metric_definition d{where}", tuple(params)
+    ) or 0
+    rows = dbm.query(conn, f"""
+        SELECT d.*,
+          (SELECT COUNT(*) FROM sys_metric_page_binding b
+           WHERE b.metric_id=d.metric_id) page_count
+        FROM sys_metric_definition d{where}
+        ORDER BY
+          CASE d.definition_status
+            WHEN 'published' THEN 0 WHEN 'pending_confirmation' THEN 1
+            WHEN 'context' THEN 2 ELSE 3 END,
+          d.domain,d.metric_id
+        LIMIT ? OFFSET ?
+    """, tuple(params + [page_size, (page - 1) * page_size]))
+    for row in rows:
+        row["definition_status_label"] = METRIC_STATUS_LABELS.get(
+            row["definition_status"], row["definition_status"]
+        )
+        row["implementation_status_label"] = METRIC_IMPLEMENTATION_LABELS.get(
+            row["implementation_status"], row["implementation_status"]
+        )
+    return ok({
+        "items": rows, "total": total, "page": page, "pageSize": page_size,
+    })
+
+
+@router.get("/settings/metric-catalog/export")
+def export_metric_catalog(
+    domain: str | None = None, definition_status: str | None = None,
+    implementation_status: str | None = None, keyword: str | None = None,
+    conn: sqlite3.Connection = Depends(get_db_rw),
+    _: dict = Depends(require_admin),
+):
+    _ensure_metric_catalog_ready(conn)
+    where, params = _metric_filters(
+        domain, definition_status, implementation_status, keyword
+    )
+    rows = dbm.query(conn, f"""
+        SELECT metric_id,name,domain,formula,boundary,management_value,
+          definition_status,implementation_status,data_source,grain,
+          update_cycle,version,page_refs
+        FROM sys_metric_definition d{where}
+        ORDER BY domain,metric_id
+    """, tuple(params))
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "指标编号", "指标名称", "业务域", "计算逻辑", "边界与待确认",
+        "管理价值", "定义状态", "实现状态", "数据来源", "统计粒度",
+        "更新周期", "版本", "页面引用",
+    ])
+    for row in rows:
+        writer.writerow([
+            row["metric_id"], row["name"], row["domain"], row["formula"],
+            row["boundary"], row["management_value"],
+            METRIC_STATUS_LABELS.get(row["definition_status"], row["definition_status"]),
+            METRIC_IMPLEMENTATION_LABELS.get(
+                row["implementation_status"], row["implementation_status"]
+            ),
+            row["data_source"], row["grain"], row["update_cycle"],
+            row["version"], row["page_refs"],
+        ])
+    return Response(
+        content="\ufeff" + output.getvalue(),
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition":
+                "attachment; filename*=UTF-8''metric_catalog_confirmation.csv"
+        },
+    )
+
+
+@router.get("/settings/metric-catalog/{metric_id}")
+def metric_catalog_detail(metric_id: str,
+                          conn: sqlite3.Connection = Depends(get_db_rw),
+                          _: dict = Depends(require_admin)):
+    _ensure_metric_catalog_ready(conn)
+    row = dbm.query_one(
+        conn, "SELECT * FROM sys_metric_definition WHERE metric_id=?", (metric_id,)
+    )
+    if not row:
+        raise ApiError("指标不存在", code=404, status_code=404)
+    bindings = dbm.query(conn, """
+        SELECT * FROM sys_metric_page_binding
+        WHERE metric_id=? ORDER BY page_path
+    """, (metric_id,))
+    legacy_config = None
+    history = []
+    if row.get("technical_kpi_id"):
+        legacy_config = dbm.query_one(
+            conn, "SELECT * FROM sys_kpi_config WHERE kpi_id=?",
+            (row["technical_kpi_id"],),
+        )
+        history = dbm.query(conn, """
+            SELECT history_id,change_reason,changed_by,changed_at,config_json
+            FROM sys_kpi_config_history WHERE kpi_id=?
+            ORDER BY history_id DESC LIMIT 30
+        """, (row["technical_kpi_id"],))
+    row["definition_status_label"] = METRIC_STATUS_LABELS.get(
+        row["definition_status"], row["definition_status"]
+    )
+    row["implementation_status_label"] = METRIC_IMPLEMENTATION_LABELS.get(
+        row["implementation_status"], row["implementation_status"]
+    )
+    return ok({
+        "definition": row,
+        "bindings": bindings,
+        "legacyDisplayConfig": legacy_config,
+        "displayHistory": history,
+        "governance": {
+            "definitionEditable": False,
+            "thresholdManagedBy": "分析方案管理",
+            "changeRule": "正式口径随版本化代码和迁移发布，页面不执行任意公式。",
+        },
+    })
+
 class KpiConfigIn(BaseModel):
     enabled: bool | None = None
     sort_order: int | None = None
@@ -1077,12 +1312,14 @@ KPI_DEFAULTS = [
     ("alert_count", "当前预警", 4, "count", "有效预警学生去重计数", "人",
      "fact_alert / alert_event", "学生", "预警重算后", "1.0",
      ["/admin/dashboard", "/admin/alert"], "提示当前需要优先核查的学生覆盖规模。"),
-    ("current_fail_rate", "当前挂科率", 5, "rate", "当前学期未通过成绩记录数÷有效成绩记录数", "%",
-     "fact_grade / grade_attempt", "成绩记录×学期", "成绩发布后", "1.0",
-     ["/admin/dashboard"], "观察本学期课程结果总体变化，不用于评价教师个人。"),
-    ("history_fail_rate", "历史挂科经历率", 6, "rate", "历史存在未通过记录学生数÷有成绩学生数", "%",
-     "fact_grade / grade_attempt", "学生", "成绩发布后", "1.0",
-     ["/admin/dashboard", "/admin/students/analysis"], "衡量学生群体既往学业受挫覆盖面。"),
+    ("current_fail_rate", "当前挂科学生率", 5, "rate",
+     "当前学期至少有1条明确未通过成绩的去重学生数÷当前学期至少有1条有效成绩的去重学生数；分母为0时不输出比率", "%",
+     "fact_grade / grade_attempt", "学生×学期", "成绩发布后", "2.0",
+     ["/admin/dashboard"], "比较不同学院、专业当期受影响学生比例，不等于成绩记录未通过率。"),
+    ("history_fail_rate", "历史挂科经历率", 6, "rate",
+     "观察期内存在至少1条明确未通过成绩的去重学生数÷观察期内有历史有效成绩的去重学生数；分母为0时不输出比率", "%",
+     "fact_grade / grade_attempt", "学生×观察期", "成绩发布后", "2.0",
+     ["/admin/dashboard", "/admin/students/analysis"], "分析学生群体历史受挫覆盖面，必须同时标注观察期。"),
     ("grad_rate", "应届毕业率", 7, "rate", "按期毕业人数÷应届毕业生人数", "%",
      "fact_graduation", "学生×毕业年度", "毕业数据同步后", "1.0",
      ["/admin/dashboard"], "观察按期完成学业情况，正式结果以学校审核为准。"),
@@ -1181,6 +1418,12 @@ def _ensure_kpi_config(conn: sqlite3.Connection) -> None:
                     json.dumps(page_refs, ensure_ascii=False), management_value,
                     kpi_id,
                 ))
+    # 毕业与学位结果当前只有合成证据，已退出教学数据总览正式管理结论。
+    dbm.execute(conn, """
+        UPDATE sys_kpi_config SET enabled=0,page_refs='[]',
+          updated_at=datetime('now','localtime')
+        WHERE kpi_id IN ('grad_rate','degree_rate')
+    """)
 
 
 @router.get("/settings/kpi-config")

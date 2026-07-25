@@ -2,6 +2,8 @@
 启动：PYTHONIOENCODING=utf-8 python -X utf8 -m uvicorn backend.api.main:app --reload --port 8000
 """
 import logging
+import os
+import threading
 import time
 from pathlib import Path
 
@@ -117,9 +119,7 @@ def health():
     return ok({"status": "up"})
 
 
-@app.on_event("startup")
-def warm_management_analysis_cache():
-    """服务启动时预热高频管理总览，避免首位用户承担全量历史计算等待。"""
+def _warm_management_analysis_cache() -> None:
     try:
         conn = dbm.get_conn()
         try:
@@ -131,6 +131,18 @@ def warm_management_analysis_cache():
     except Exception:
         # 预热失败不影响服务启动；首次请求仍会按正常链路计算并记录异常。
         access_logger.exception("faculty_assurance_cache_warm_failed")
+
+
+@app.on_event("startup")
+def warm_management_analysis_cache():
+    """可选后台预热；默认关闭，避免CPU型聚合与登录/API请求争用。"""
+    if os.getenv("BI_WARM_FACULTY_CACHE", "0") != "1":
+        return
+    threading.Thread(
+        target=_warm_management_analysis_cache,
+        name="faculty-cache-warm",
+        daemon=True,
+    ).start()
 
 
 app.include_router(auth.router)
