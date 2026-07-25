@@ -19,6 +19,7 @@ sys.path.insert(0, __file__.rsplit("scripts", 1)[0])
 
 from backend.etl import config
 from backend.etl.init_v2 import init_v2
+from backend.data_collection_catalog import ensure_data_collection_catalog
 
 ADMIN_ROLE = "dean"
 TRIGGER_ACTION = "etl.trigger"
@@ -27,7 +28,10 @@ TRIGGER_ACTION = "etl.trigger"
 def migrate(v2_db_path: Path | None = None, v1_db_path: Path | None = None) -> dict:
     v2_path = Path(v2_db_path or config.V2_DB_PATH)
     conn = init_v2(v2_path)
+    v1_path = Path(v1_db_path or config.DB_PATH)
+    legacy_for_catalog = sqlite3.connect(str(v1_path))
     try:
+        catalog = ensure_data_collection_catalog(conn, legacy_for_catalog)
         etl_run_ready = bool(conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='etl_run'"
         ).fetchone())
@@ -36,9 +40,9 @@ def migrate(v2_db_path: Path | None = None, v1_db_path: Path | None = None) -> d
         )]
         run_count = conn.execute("SELECT COUNT(*) FROM etl_run").fetchone()[0]
     finally:
+        legacy_for_catalog.close()
         conn.close()
 
-    v1_path = Path(v1_db_path or config.DB_PATH)
     v1 = sqlite3.connect(str(v1_path))
     v1.row_factory = sqlite3.Row
     try:
@@ -68,6 +72,9 @@ def migrate(v2_db_path: Path | None = None, v1_db_path: Path | None = None) -> d
         "etl_run_ready": etl_run_ready,
         "etl_run_indexes": sorted(indexes),
         "etl_run_rows": run_count,
+        "data_source_definitions": catalog["sourceDefinitions"],
+        "run_batch_links": catalog["runBatchLinks"],
+        "mirrored_room_batches": catalog["mirroredRoomBatches"],
         "trigger_action_grants": action_grants,
         "refresh_cron": refresh_param[0] if refresh_param else None,
     }

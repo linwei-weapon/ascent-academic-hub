@@ -425,6 +425,32 @@ CREATE TABLE IF NOT EXISTS etl_run (
     source TEXT NOT NULL DEFAULT 'etl'
 );
 
+-- 数据源目录属于平台接入配置，不维护学校业务主数据。
+CREATE TABLE IF NOT EXISTS data_source_definition (
+    source_code TEXT PRIMARY KEY,
+    source_name TEXT NOT NULL,
+    domain_code TEXT NOT NULL,
+    domain_name TEXT NOT NULL,
+    source_system TEXT NOT NULL,
+    delivery_mode TEXT NOT NULL,
+    update_cycle TEXT NOT NULL,
+    freshness_days INTEGER NOT NULL,
+    required_fields TEXT NOT NULL,
+    downstream_modules_json TEXT NOT NULL,
+    management_use TEXT NOT NULL,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    active INTEGER NOT NULL DEFAULT 1,
+    catalog_version TEXT NOT NULL
+);
+
+-- 一个ETL任务可消费多个源批次，一个源批次也可参与多个聚合任务。
+CREATE TABLE IF NOT EXISTS etl_run_batch (
+    run_id INTEGER NOT NULL,
+    batch_id TEXT NOT NULL,
+    relation_type TEXT NOT NULL DEFAULT 'input',
+    PRIMARY KEY(run_id,batch_id,relation_type)
+);
+
 CREATE TABLE IF NOT EXISTS student_plan_course_status (
     status_id TEXT PRIMARY KEY,
     student_id TEXT NOT NULL,
@@ -634,6 +660,12 @@ CREATE INDEX IF NOT EXISTS idx_difficulty_student ON student_difficulty_flag(stu
 CREATE INDEX IF NOT EXISTS idx_timeline_student ON student_timeline_event(student_id, event_date);
 CREATE INDEX IF NOT EXISTS idx_course_pass_stat_semester ON agg_course_pass_stat(semester_id, course_group);
 CREATE INDEX IF NOT EXISTS idx_etl_run_task_started ON etl_run(task, started_at);
+CREATE INDEX IF NOT EXISTS idx_data_batch_source_ingested
+    ON data_batch(source_code,ingested_at DESC);
+CREATE INDEX IF NOT EXISTS idx_data_batch_quality
+    ON data_batch(quality_status,ingested_at DESC);
+CREATE INDEX IF NOT EXISTS idx_etl_run_batch_batch
+    ON etl_run_batch(batch_id,run_id DESC);
 -- 同一任务同一时刻至多一条 running 记录（并发保护的硬约束）。
 CREATE UNIQUE INDEX IF NOT EXISTS uq_etl_run_running_task
     ON etl_run(task) WHERE status='running';

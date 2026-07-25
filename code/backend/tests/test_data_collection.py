@@ -16,8 +16,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from backend.api.envelope import ApiError
 from backend.api.routers.data_collection import (
-    TRIGGER_TASKS, TriggerIn, list_data_batches, list_etl_runs,
-    trigger_collection_task,
+    TRIGGER_TASKS, TriggerIn, data_collection_overview,
+    data_source_detail, etl_run_detail, export_data_source_checklist,
+    list_data_batches,
+    list_data_sources, list_etl_runs, trigger_collection_task,
+)
+from backend.data_collection_catalog import (
+    ensure_data_collection_catalog, link_run_batches,
 )
 from backend.etl.init_v2 import init_v2
 from backend.etl.run_log import (
@@ -69,6 +74,9 @@ class MigrationTest(unittest.TestCase):
             self.assertIn("uq_etl_run_running_task", second["etl_run_indexes"])
             self.assertEqual(1, second["trigger_action_grants"])
             self.assertIsNotNone(second["refresh_cron"])
+            self.assertEqual(18, second["data_source_definitions"])
+            self.assertEqual(first["data_source_definitions"],
+                             second["data_source_definitions"])
 
     def test_menu_migration_is_idempotent_and_admin_only(self):
         conn = _menu_conn()
@@ -159,8 +167,11 @@ class ApiContractTest(unittest.TestCase):
                   triggered_by="tester")
         finish_run(conn, 1, "success", rows_written=98,
                    checks={"grade_attempts": 98}, started_monotonic=None)
+        link_run_batches(conn, 1, ["grade-abc"])
         start_run(conn, "v2_course_pass_builder", triggered_by="tester")
         finish_run(conn, 2, "failed", error="disk full")
+        link_run_batches(conn, 2, ["grade-abc"])
+        ensure_data_collection_catalog(conn)
         conn.commit()
         conn.close()
 
@@ -170,12 +181,12 @@ class ApiContractTest(unittest.TestCase):
             self._seed_v2(path)
             conn = sqlite3.connect(path)
             conn.row_factory = sqlite3.Row
-            payload = list_data_batches({}, conn)["data"]
+            payload = list_data_batches(None, None, 1, 20, {}, conn)["data"]
             conn.close()
-            self.assertEqual(1, payload["summary"]["total"])
+            self.assertEqual(1, payload["total"])
             batch = payload["batches"][0]
             self.assertEqual("grade-abc", batch["batch_id"])
-            self.assertEqual("success", batch["last_run_status"])
+            self.assertEqual("failed", batch["last_run_status"])
             self.assertEqual(98, batch["accepted_count"])
 
     def test_runs_contract_pagination_and_filters(self):
@@ -188,15 +199,17 @@ class ApiContractTest(unittest.TestCase):
             self.assertEqual(2, all_runs["total"])
             required = {"run_id", "task", "status", "started_at", "finished_at",
                         "duration_ms", "rows_read", "rows_written",
-                        "checks_json", "error", "triggered_by", "source"}
+                        "errorSummary", "triggered_by", "source",
+                        "batch_count", "sourceNames", "taskName"}
             self.assertTrue(required <= set(all_runs["runs"][0].keys()))
 
             failed = list_etl_runs(None, "failed", 1, 20, {}, conn)["data"]
             self.assertEqual(1, failed["total"])
-            self.assertEqual("disk full", failed["runs"][0]["error"])
+            self.assertEqual("disk full", failed["runs"][0]["errorSummary"])
 
             by_task = list_etl_runs("v2_grade_loader", None, 1, 20, {}, conn)["data"]
             self.assertEqual(1, by_task["total"])
+            self.assertEqual(["成绩明细"], by_task["runs"][0]["sourceNames"])
 
             paged = list_etl_runs(None, None, 2, 1, {}, conn)["data"]
             self.assertEqual(1, len(paged["runs"]))
@@ -213,6 +226,72 @@ class ApiContractTest(unittest.TestCase):
                 list_etl_runs(None, "bogus", 1, 20, {}, conn)
             self.assertEqual(400, ctx.exception.status_code)
             conn.close()
+
+    def test_source_overview_separates_access_and_validation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "v2.sqlite"
+            self._seed_v2(path)
+            v2 = sqlite3.connect(path)
+            v2.row_factory = sqlite3.Row
+            legacy = sqlite3.connect(":memory:")
+            legacy.row_factory = sqlite3.Row
+            user = _user({"system.manage", "etl.trigger"})
+            overview = data_collection_overview(user, v2, legacy)["data"]
+            self.assertEqual(18, overview["expectedSources"])
+            self.assertEqual(1, overview["connectedSources"])
+            self.assertEqual(2, overview["attentionItems"])
+            self.assertTrue(overview["canTrigger"])
+            page = list_data_sources(
+                "achievement", "attention", None, 1, 20,
+                user, v2, legacy,
+            )["data"]
+            self.assertEqual(1, page["total"])
+            grade = page["sources"][0]
+            self.assertEqual("failed", grade["accessStatus"])
+            self.assertEqual("warning", grade["validationStatus"])
+            self.assertEqual(2, grade["attentionCount"])
+            legacy.close()
+            v2.close()
+
+    def test_source_and_run_details_are_management_readable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "v2.sqlite"
+            self._seed_v2(path)
+            v2 = sqlite3.connect(path)
+            v2.row_factory = sqlite3.Row
+            legacy = sqlite3.connect(":memory:")
+            legacy.row_factory = sqlite3.Row
+            source = data_source_detail(
+                "grade", _user({"system.manage"}), v2, legacy,
+            )["data"]
+            self.assertEqual("成绩明细", source["source"]["sourceName"])
+            self.assertEqual("成绩.xlsx", source["batches"][0]["source_file"])
+            detail = etl_run_detail(
+                1, _user({"system.manage"}), v2,
+            )["data"]
+            self.assertEqual("成绩尝试记录", detail["checks"][0]["label"])
+            self.assertEqual("成绩明细", detail["batches"][0]["source_name"])
+            legacy.close()
+            v2.close()
+
+    def test_checklist_export_contains_all_registered_sources(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "v2.sqlite"
+            self._seed_v2(path)
+            v2 = sqlite3.connect(path)
+            v2.row_factory = sqlite3.Row
+            legacy = sqlite3.connect(":memory:")
+            legacy.row_factory = sqlite3.Row
+            response = export_data_source_checklist(
+                _user({"system.manage"}), v2, legacy,
+            )
+            content = response.body.decode("utf-8")
+            self.assertTrue(content.startswith("\ufeff"))
+            self.assertIn("数据域,数据源,来源系统", content)
+            self.assertIn("实际教室占用", content)
+            self.assertEqual(19, len(content.splitlines()))
+            legacy.close()
+            v2.close()
 
     def test_trigger_requires_action_permission(self):
         conn = sqlite3.connect(":memory:")

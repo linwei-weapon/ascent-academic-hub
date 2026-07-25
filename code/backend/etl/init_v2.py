@@ -22,7 +22,8 @@ REQUIRED_TABLES = {
     "student_plan_progress_summary", "student_growth_indicator",
     "student_difficulty_flag", "student_timeline_event",
     "agg_course_pass_stat", "agg_course_offering", "agg_course_team", "agg_teacher_schedule_preference",
-    "access_scope_mapping", "etl_run",
+    "access_scope_mapping", "etl_run", "data_source_definition",
+    "etl_run_batch",
 }
 
 MIGRATION_COLUMNS = {

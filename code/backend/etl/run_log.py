@@ -18,6 +18,10 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
+from ..data_collection_catalog import (
+    TASK_SOURCE_CODES,
+    link_run_batches,
+)
 from .init_v2 import init_v2
 
 STATUS_RUNNING = "running"
@@ -99,6 +103,10 @@ def run_logged(task: str, db_path: Path | str | None = None,
     except Exception as exc:
         finish_run(conn, run_id, STATUS_FAILED, error=exc,
                    started_monotonic=started)
+        link_run_batches(
+            conn, run_id,
+            info.get("batch_ids") or latest_source_batches(conn, task),
+        )
         conn.commit()
         raise
     else:
@@ -108,6 +116,10 @@ def run_logged(task: str, db_path: Path | str | None = None,
             rows_written=info.get("rows_written"),
             checks=info.get("checks"),
             started_monotonic=started,
+        )
+        link_run_batches(
+            conn, run_id,
+            info.get("batch_ids") or latest_source_batches(conn, task),
         )
         conn.commit()
     finally:
@@ -123,3 +135,21 @@ def latest_run(conn: sqlite3.Connection, task: str) -> dict | None:
     if row is None:
         return None
     return dict(zip([col[0] for col in cursor.description], row))
+
+
+def latest_source_batches(conn: sqlite3.Connection, task: str) -> list[str]:
+    """按任务目录解析本次运行使用的数据源最新批次。
+
+    原型loader会在任务内部登记data_batch；任务完成后再取最新批次即可建立输入证据。
+    生产任务编排器可直接向run_logged写入精确batch_ids覆盖此默认关联。
+    """
+    result = []
+    for source_code in TASK_SOURCE_CODES.get(task, ()):
+        row = conn.execute(
+            "SELECT batch_id FROM data_batch WHERE source_code=? "
+            "ORDER BY ingested_at DESC,batch_id DESC LIMIT 1",
+            (source_code,),
+        ).fetchone()
+        if row:
+            result.append(row[0])
+    return result

@@ -41,6 +41,13 @@ PYTHONIOENCODING=utf-8 python -X utf8 -m uvicorn backend.api.main:app --reload -
 | GET | /api/admin/settings/metric-catalog/{metric_id} | 指标定义、实现与页面证据 | sys_metric_definition + sys_metric_page_binding |
 | GET | /api/admin/settings/metric-catalog/pages | 页面引用一致性核验 | sys_metric_page_binding |
 | GET/PUT | /api/admin/settings/kpi-config | 旧 KPI 展示配置兼容接口 | sys_kpi_config |
+| GET | /api/admin/system/data-collection/overview | 数据接入可信度、优先事项与动作能力 | data_source_definition + data_batch |
+| GET | /api/admin/system/data-collection/sources | 数据源目录分页与组合筛选 | data_source_definition + data_batch |
+| GET | /api/admin/system/data-collection/sources/{source_code} | 批次、映射、运行和下游影响证据 | data_batch + code_mapping + etl_run_batch |
+| GET | /api/admin/system/data-collection/runs | ETL运行历史分页筛选 | etl_run |
+| GET | /api/admin/system/data-collection/runs/{run_id} | 管理校验、输入批次与技术证据 | etl_run + etl_run_batch |
+| GET | /api/admin/system/data-collection/checklist.csv | 学校数据接入核验清单 | data_source_definition |
+| POST | /api/admin/system/data-collection/trigger | 受控白名单异步重跑 | etl_run + sys_security_audit |
 | GET | /api/admin/rbac/security-audit | 安全审计（管理员） | sys_security_audit |
 
 **培养方案**：真实方案仅 2 个专业（M017 安全工程 / M031 海洋油气工程，2022级）。
