@@ -4,6 +4,20 @@ __pycache__/
 *.pyc
 .venv/
 
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.pem
+*.key
+*.pfx
+*.p12
+*.jks
+*.keystore
+secrets/
+credentials/
+
 # Build output
 dist/
 *.egg-info/
