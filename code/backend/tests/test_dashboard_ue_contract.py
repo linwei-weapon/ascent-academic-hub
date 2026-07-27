@@ -230,8 +230,10 @@ class DashboardUeContractTest(unittest.TestCase):
         self.assertIn("path.startsWith('/admin/course/')", menu)
         self.assertIn("课程-学生学业画像", student_list)
         self.assertIn(":disabled=\"courseProfile\"", student_list)
-        self.assertIn("本课程成绩", student_list)
-        self.assertIn("本课程绩点", student_list)
+        self.assertIn("label: '课程成绩'", student_list)
+        self.assertIn("label: '课程成绩绩点(GP)'", student_list)
+        self.assertNotIn("label: '本课程成绩'", student_list)
+        self.assertNotIn("label: '本课程绩点'", student_list)
         self.assertNotIn("预警状态", student_list)
 
 

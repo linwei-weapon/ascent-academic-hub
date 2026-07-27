@@ -1,6 +1,6 @@
 ---
 goal: 教学数据总览07.26修改详细设计与开发方案
-version: 2.7
+version: 2.8
 date_created: 2026-07-26
 last_updated: 2026-07-27
 owner: 产品终稿任务
@@ -121,7 +121,7 @@ tags: [design, feature, dashboard, teaching-analysis, drilldown]
 | 课程学生画像筛选 | 学院、专业、年级、行政班、姓名/学号 | 现有直接可用 | `students.py:student_list()` 已支持 `college/major/grade/class_id/keyword` | 按来源范围决定锁定或可筛选 |
 | 课程学生画像筛选 | 预警状态 | 删除 | `student_list()` 不支持预警状态筛选，原始需求未提出 | 删除 |
 | 课程学生画像列 | 学号、姓名、学院、专业、行政班、年级、筛选期 GPA、未通过数、预警 | 现有直接可用 | `student_list()` 当前返回字段和 `List.vue:studentCols` | 保留既有字段 |
-| 课程学生画像列 | 课程成绩、课程 GP | 现有数据可计算 | `fact_grade.score/gpa/course_id/semester_id/student_id` | 新增；按所选课程和学期取每生最新有效记录 |
+| 课程学生画像列 | 课程成绩、课程成绩绩点(GP) | 现有数据可计算 | `fact_grade.score/gpa/course_id/semester_id/student_id` | 新增；按所选课程和学期取每生最新有效记录 |
 | 课程学生画像列 | 考试类型 | 删除 | V2 有 `grade_attempt.attempt_type`，但当前课程名单使用旧分析库且原始需求未提出该列 | 本次不跨库新增 |
 | 学生总 GPA | GPA、学分、有效课程结果 | 现有数据可计算 | `fact_grade.gpa/credits`、`academic_metrics.py:effective_course_outcomes_for_students()`、`weighted_gpa_expression()` | 基于现有公共函数扩展累计有效结果加权计算 |
 | 历史在籍分母 | 学期、学生、学院、专业、年级、班级、状态 | 现有源库只读可用 | `config.TS_DIR/{semester}.db` 已存在；`extract_ts.py` 已逐学期读取 `students` 表及 `student_id/college/major/grade_year/class_name` | 新增只读数据访问函数，查询时聚合并做进程内缓存；不落新表 |
@@ -468,7 +468,7 @@ limitation
 |---|---|---|---|---|
 | CSP-01 | 新增无菜单详情页 | 当前复用 `/admin/students/list` 并激活学生成长 | 新增 `/admin/course/:id/students`，页面标题“课程-学生学业画像”，菜单保持教学数据总览 | `router/index.ts`、`menu.ts`、`students/List.vue` |
 | CSP-02 | 现有功能增强 | 通用学生列表允许清空课程语境 | 课程画像模式锁定课程和学期，学院/专业/年级显示为已应用范围 | `students/List.vue` |
-| CSP-03 | 新增字段 | 学生表无课程成绩、课程 GP | 在筛选期 GPA 前增加课程成绩和课程 GP，仅课程画像模式显示 | `students.py:student_list()`、`students/List.vue:studentCols` |
+| CSP-03 | 新增字段 | 学生表无课程成绩、课程 GP | 在筛选期 GPA 前增加“课程成绩”和“课程成绩绩点(GP)”，仅课程画像模式显示 | `students.py:student_list()`、`students/List.vue:studentCols` |
 | CSP-04 | 现有功能修改 | 标题按查询条件拼成“学生学业画像” | 标题区显示课程名、课程代码、学期、来源范围和匹配学生数 | `students/List.vue:pageTitle` |
 
 页面标题：
@@ -490,10 +490,10 @@ limitation
 
 ```text
 学号、姓名、学院、专业、行政班、年级、
-课程成绩、课程GP、筛选期GPA、当前预警、操作
+课程成绩、课程成绩绩点(GP)、筛选期GPA、当前预警、操作
 ```
 
-`筛选期未通过门数`和`管理关注`作为现有可选列默认隐藏。来源上下文已经锁定学院、专业或年级时，对应组织列默认隐藏但仍可在列设置中打开。学号、姓名、课程成绩、课程 GP、操作为必选列，默认可见业务列最多 8 个。
+`筛选期未通过门数`和`管理关注`作为现有可选列默认隐藏。来源上下文已经锁定学院、专业或年级时，对应组织列默认隐藏但仍可在列设置中打开。学号、姓名、课程成绩、课程成绩绩点(GP)、操作为必选列，默认可见业务列最多 8 个。
 
 课程成绩与课程 GP 取数：
 
@@ -631,7 +631,7 @@ limitation
 | TASK-038 | 在 `router/index.ts` 新增 `/admin/course/:id/students`，路由准入按教学数据总览权限；保留原 `/admin/students/list`。 | ✅ | 2026-07-27 |
 | TASK-039 | 修改 `menu.ts`，新课程画像路由激活教学数据总览，通用学生名单仍激活学生成长与学业分析。依赖 TASK-038。 | ✅ | 2026-07-27 |
 | TASK-040 | 扩展 `students/List.vue` 的 courseProfile 模式，实现固定标题、范围条、锁定课程/学期、查询/重置和返回。依赖 TASK-022、TASK-038。 | ✅ | 2026-07-27 |
-| TASK-041 | 仅在 courseProfile 模式把课程成绩和课程 GP 插到筛选期 GPA 前，提升 DataTable configVersion并配置必选/默认隐藏列。依赖 TASK-015、TASK-040。 | ✅ | 2026-07-27 |
+| TASK-041 | 仅在 courseProfile 模式把“课程成绩”和“课程成绩绩点(GP)”插到筛选期 GPA 前，提升 DataTable configVersion并配置必选/默认隐藏列。依赖 TASK-015、TASK-040。 | ✅ | 2026-07-27 |
 | TASK-042 | 修改学生证据接口和 `StudentEvidenceDrawer.vue`，把当前 GPA 改为统一总 GPA并显示公式、纳入学分、排除数和版本。依赖 TASK-016。 | ✅ | 2026-07-27 |
 | TASK-043 | 修改 `alert.py:student_detail()` 和 `student/Detail.vue`，完整档案使用同一总 GPA；保留学期 GPA 趋势。依赖 TASK-016。 | ✅ | 2026-07-27 |
 | TASK-044 | 验证课程画像 → 学生证据 → 完整档案 → 原课程画像的返回链，恢复筛选、分页和滚动。依赖 TASK-039～TASK-043。 | ✅ | 2026-07-27 |

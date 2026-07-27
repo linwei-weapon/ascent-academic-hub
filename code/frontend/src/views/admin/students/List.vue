@@ -181,8 +181,8 @@ const studentCols = computed<DataTableColumn[]>(() => {
   const columns = [...baseStudentCols]
   const gpaIndex = columns.findIndex(column => column.key === 'gpa')
   columns.splice(gpaIndex, 0,
-    { key: 'courseScore', label: '本课程成绩', width: 104, align: 'right', required: true },
-    { key: 'courseGp', label: '本课程绩点', width: 104, align: 'right', required: true },
+    { key: 'courseScore', label: '课程成绩', width: 104, align: 'right', required: true },
+    { key: 'courseGp', label: '课程成绩绩点(GP)', width: 144, align: 'right', required: true },
   )
   return columns
 })
