@@ -164,6 +164,15 @@ class DashboardUeContractTest(unittest.TestCase):
         self.assertNotIn("sortSemesterValuesDescending", history_utils)
         self.assertNotIn("sortHistoryPeriodsDescending", history_utils)
         self.assertNotIn("DASHBOARD_SEMESTERS", history_utils)
+        self.assertNotIn("name: '人数/人次'", history)
+        self.assertNotIn("name: unit || '%'", history)
+        self.assertNotIn("'其余'", history)
+        self.assertIn("numeratorLabel", history)
+        self.assertIn("denominatorLabel", history)
+        self.assertIn("data: rows.map((row: any) => row.denominator)", history)
+        self.assertIn("barGap: '-100%'", history)
+        self.assertIn("`${Number(value).toLocaleString('zh-CN')}${countUnit}`", history)
+        self.assertIn("`${value}%`", history)
         for page_name in ("index.vue", "Detail.vue", "MajorDetail.vue"):
             page = (
                 FRONTEND / "views" / "admin" / "dashboard" / page_name

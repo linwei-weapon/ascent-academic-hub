@@ -204,29 +204,52 @@ const chartOption = computed(() => {
       }],
     }
   }
+  const numeratorLabel = data.value.metric?.numeratorLabel || '分子'
+  const denominatorLabel = data.value.metric?.denominatorLabel || '分母'
+  const rateLabel = data.value.metric?.label || '比率'
+  const countUnit = `${numeratorLabel}${denominatorLabel}`.includes('人次') ? '人次' : '人'
+  const countValueFormatter = (value: any) => value == null
+    ? '不可用' : `${Number(value).toLocaleString('zh-CN')}${countUnit}`
   return {
     tooltip: { trigger: 'axis' },
-    legend: { data: [data.value.metric?.numeratorLabel || '分子', '其余', data.value.metric?.label || '比率'], bottom: 0 },
-    grid: { left: 54, right: 54, top: 28, bottom: 64 },
+    legend: { data: [numeratorLabel, denominatorLabel, rateLabel], bottom: 0 },
+    grid: { left: 68, right: 60, top: 28, bottom: 64 },
     xAxis: { type: 'category', data: labels, axisLabel: { rotate: 24 } },
     yAxis: [
-      { type: 'value', name: '人数/人次', min: 0 },
-      { type: 'value', name: unit || '%', min: 0, max: unit === '%' ? 100 : undefined },
+      {
+        type: 'value',
+        min: 0,
+        axisLabel: {
+          formatter: (value: any) => `${Number(value).toLocaleString('zh-CN')}${countUnit}`,
+        },
+      },
+      {
+        type: 'value',
+        min: 0,
+        max: unit === '%' ? 100 : undefined,
+        axisLabel: { formatter: (value: any) => `${value}%` },
+      },
     ],
     series: [
       {
-        name: data.value.metric?.numeratorLabel || '分子', type: 'bar', stack: 'total',
-        data: rows.map((row: any) => row.numerator), itemStyle: { color },
+        name: numeratorLabel, type: 'bar', z: 2, barWidth: '52%',
+        data: rows.map((row: any) => row.numerator),
+        itemStyle: { color },
+        tooltip: { valueFormatter: countValueFormatter },
       },
       {
-        name: '其余', type: 'bar', stack: 'total',
-        data: rows.map((row: any) => row.denominator == null || row.numerator == null ? null : Math.max(row.denominator - row.numerator, 0)),
+        name: denominatorLabel, type: 'bar', z: 1, barWidth: '52%', barGap: '-100%',
+        data: rows.map((row: any) => row.denominator),
         itemStyle: { color: '#e2e8f0' },
+        tooltip: { valueFormatter: countValueFormatter },
       },
       {
-        name: data.value.metric?.label || '比率', type: 'line', yAxisIndex: 1, smooth: true,
+        name: rateLabel, type: 'line', yAxisIndex: 1, smooth: true,
         connectNulls: false, data: rows.map((row: any) => row.value),
         itemStyle: { color }, lineStyle: { color, width: 3 }, symbolSize: 7,
+        tooltip: {
+          valueFormatter: (value: any) => value == null ? '不可用' : `${Number(value).toFixed(1)}%`,
+        },
       },
     ],
   }
