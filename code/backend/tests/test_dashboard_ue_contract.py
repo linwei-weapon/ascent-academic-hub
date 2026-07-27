@@ -143,6 +143,9 @@ class DashboardUeContractTest(unittest.TestCase):
         history = (
             FRONTEND / "components" / "MetricHistoryDialog.vue"
         ).read_text(encoding="utf-8")
+        history_utils = (
+            FRONTEND / "utils" / "dashboardHistory.ts"
+        ).read_text(encoding="utf-8")
         for marker in (
             "历史指标查询条件",
             "起始学期",
@@ -152,8 +155,20 @@ class DashboardUeContractTest(unittest.TestCase):
             "当前范围暂无可绘制的历史数据",
             "正在按新条件更新，当前结果暂时保留",
             "restoreFocus",
+            "semesterOptions",
+            "option.label",
+            "option.value",
         ):
             self.assertIn(marker, history)
+        self.assertNotIn("semesterLabel", history_utils)
+        self.assertNotIn("sortSemesterValuesDescending", history_utils)
+        self.assertNotIn("sortHistoryPeriodsDescending", history_utils)
+        self.assertNotIn("DASHBOARD_SEMESTERS", history_utils)
+        for page_name in ("index.vue", "Detail.vue", "MajorDetail.vue"):
+            page = (
+                FRONTEND / "views" / "admin" / "dashboard" / page_name
+            ).read_text(encoding="utf-8")
+            self.assertIn(':semester-options="semesters"', page)
 
         major_alerts = (
             FRONTEND / "components" / "MajorAlertStudentsDialog.vue"
@@ -173,6 +188,17 @@ class DashboardUeContractTest(unittest.TestCase):
             "未通过人次", "有效成绩人次", "未通过人次率",
         ):
             self.assertIn(marker, grade_courses)
+        self.assertIn("{{ semester }}", grade_courses)
+
+        course_detail = (
+            FRONTEND / "views" / "admin" / "dashboard" / "CourseDetail.vue"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("sortHistoryPeriodsDescending", course_detail)
+        student_evidence = (
+            FRONTEND / "components" / "StudentEvidenceDrawer.vue"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("sortHistoryPeriodsDescending", student_evidence)
+        self.assertIn("return rows.reverse()", student_evidence)
 
         router = (FRONTEND / "router" / "index.ts").read_text(encoding="utf-8")
         menu = (FRONTEND / "utils" / "menu.ts").read_text(encoding="utf-8")

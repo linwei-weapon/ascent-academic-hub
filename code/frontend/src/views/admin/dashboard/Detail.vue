@@ -102,7 +102,7 @@
     </el-row>
     <MetricHistoryDialog v-model="historyVisible" :metric-id="historyMetricId"
       scope-type="college" :scope-id="collegeId" :scope-label="data.name"
-      :end-semester="fSemester" />
+      :end-semester="fSemester" :semester-options="semesters" />
     </template>
   </div>
 </template>

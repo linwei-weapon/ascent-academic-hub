@@ -176,6 +176,30 @@ class DashboardHistoryContractTest(unittest.TestCase):
         self.assertIn("dim_student", period["rosterSource"])
         self.assertTrue(period["mapping"]["currentCardAligned"])
 
+    def test_history_periods_and_labels_use_standard_descending_semesters(self):
+        with patch("backend.api.historical_roster.TS_DIR", self.root):
+            data = metric_history(
+                metric_id="valid_result_coverage_rate",
+                scope_type="school",
+                scope_id=None,
+                start_semester="2025-2026-1",
+                end_semester="2025-2026-2",
+                conn=self.conn,
+                user=ALL_USER,
+            )["data"]
+        self.assertEqual(
+            ["2025-2026-2", "2025-2026-1"],
+            [period["semester"] for period in data["periods"]],
+        )
+        self.assertEqual(
+            ["2025-2026-2", "2025-2026-1"],
+            [period["semesterLabel"] for period in data["periods"]],
+        )
+        self.assertEqual(
+            sorted(data["availableSemesters"], reverse=True),
+            data["availableSemesters"],
+        )
+
     def test_missing_alert_history_is_unavailable_not_zero(self):
         with patch("backend.api.historical_roster.TS_DIR", self.root):
             period = metric_history(

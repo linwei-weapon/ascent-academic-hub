@@ -21,15 +21,15 @@
       <label>
         <span>起始学期</span>
         <el-select v-model="draftStart" style="width: 190px">
-          <el-option v-for="semester in semesters" :key="semester"
-            :label="semesterLabel(semester)" :value="semester" />
+          <el-option v-for="option in semesters" :key="option.value"
+            :label="option.label" :value="option.value" />
         </el-select>
       </label>
       <label>
         <span>结束学期</span>
         <el-select v-model="draftEnd" style="width: 190px">
-          <el-option v-for="semester in semesters" :key="semester"
-            :label="semesterLabel(semester)" :value="semester" />
+          <el-option v-for="option in semesters" :key="option.value"
+            :label="option.label" :value="option.value" />
         </el-select>
       </label>
       <el-button type="primary" :loading="refreshing" @click="applyQuery">查询</el-button>
@@ -98,11 +98,8 @@ import { ElMessage } from 'element-plus'
 import DataTable, { type DataTableColumn } from '@/components/DataTable.vue'
 import EChart from '@/components/EChart.vue'
 import { http } from '@/utils/http'
-import {
-  DASHBOARD_HISTORY_METRICS,
-  DASHBOARD_SEMESTERS,
-  semesterLabel,
-} from '@/utils/dashboardHistory'
+import { DASHBOARD_HISTORY_METRICS } from '@/utils/dashboardHistory'
+import type { SemesterOpt } from '@/utils/meta'
 
 const props = withDefaults(defineProps<{
   modelValue: boolean
@@ -111,11 +108,13 @@ const props = withDefaults(defineProps<{
   scopeId?: string
   scopeLabel?: string
   endSemester?: string
+  semesterOptions?: SemesterOpt[]
 }>(), {
   scopeType: 'school',
   scopeId: '',
   scopeLabel: '',
   endSemester: '',
+  semesterOptions: () => [],
 })
 const emit = defineEmits<{ (event: 'update:modelValue', value: boolean): void }>()
 
@@ -123,21 +122,30 @@ const data = ref<any>({ periods: [], metric: {}, scope: {} })
 const loading = ref(false)
 const refreshing = ref(false)
 const loadError = ref('')
-const draftStart = ref(DASHBOARD_SEMESTERS[0])
-const draftEnd = ref(DASHBOARD_SEMESTERS[DASHBOARD_SEMESTERS.length - 1])
+const draftStart = ref('')
+const draftEnd = ref('')
 const appliedStart = ref(draftStart.value)
 const appliedEnd = ref(draftEnd.value)
 let requestSequence = 0
 let focusTarget: HTMLElement | null = null
 
-const semesters = computed(() => data.value.availableSemesters?.length
-  ? data.value.availableSemesters : [...DASHBOARD_SEMESTERS])
+const semesters = computed<SemesterOpt[]>(() => props.semesterOptions.length
+  ? props.semesterOptions
+  : (data.value.availableSemesters || []).map((value: string) => ({
+      value,
+      label: value,
+      current: value === props.endSemester,
+    })))
+const semesterValues = computed(() => semesters.value.map(option => option.value))
+const historyPeriods = computed(() => data.value.periods || [])
 const metricConfig = computed(() => DASHBOARD_HISTORY_METRICS[props.metricId])
 const dialogTitle = computed(() => `${props.scopeLabel || data.value.scope?.label || '当前范围'} · ${data.value.metric?.label || metricConfig.value?.label || '历史指标'}`)
 const filtersDirty = computed(() => draftStart.value !== appliedStart.value || draftEnd.value !== appliedEnd.value)
-const hasUnavailable = computed(() => (data.value.periods || []).some((row: any) => row.status !== 'available'))
-const chartableRows = computed(() => (data.value.periods || []).filter((row: any) => row.value != null))
-const appliedPeriodText = computed(() => `${semesterLabel(appliedStart.value)} 至 ${semesterLabel(appliedEnd.value)}`)
+const hasUnavailable = computed(() => historyPeriods.value.some((row: any) => row.status !== 'available'))
+const chartableRows = computed(() => historyPeriods.value.filter((row: any) => row.value != null))
+const displaySemester = (value: string) =>
+  semesters.value.find(option => option.value === value)?.label || value || '—'
+const appliedPeriodText = computed(() => `${displaySemester(appliedStart.value)} 至 ${displaySemester(appliedEnd.value)}`)
 const boundaryText = computed(() => [
   data.value.metric?.source ? `数据来源：${data.value.metric.source}` : '',
   data.value.boundary || '',
@@ -161,7 +169,7 @@ const tableColumns = computed<DataTableColumn[]>(() => {
   return base
 })
 
-const tableRows = computed(() => (data.value.periods || []).map((row: any) => {
+const tableRows = computed(() => historyPeriods.value.map((row: any) => {
   const unit = data.value.metric?.unit ?? metricConfig.value?.unit ?? ''
   const status = {
     available: { label: '可用', type: 'success' },
@@ -170,6 +178,7 @@ const tableRows = computed(() => (data.value.periods || []).map((row: any) => {
   }[row.status as 'available' | 'insufficient' | 'unavailable'] || { label: '待核验', type: 'warning' }
   return {
     ...row,
+    semesterLabel: displaySemester(row.semester),
     valueText: row.value == null ? '—' : `${Number(row.value).toFixed(unit === '%' ? 1 : 2)}${unit}`,
     changeText: row.change == null ? '—' : `${row.change > 0 ? '+' : ''}${Number(row.change).toFixed(unit === '%' ? 1 : 2)}${unit === '%' ? '个百分点' : ''}`,
     statusLabel: status.label,
@@ -178,8 +187,8 @@ const tableRows = computed(() => (data.value.periods || []).map((row: any) => {
 }))
 
 const chartOption = computed(() => {
-  const rows = data.value.periods || []
-  const labels = rows.map((row: any) => row.semesterLabel)
+  const rows = historyPeriods.value
+  const labels = rows.map((row: any) => displaySemester(row.semester))
   const unit = data.value.metric?.unit ?? metricConfig.value?.unit ?? ''
   const color = metricConfig.value?.color || '#4f46e5'
   if ((data.value.metric?.chart || metricConfig.value?.chart) === 'gpa') {
@@ -251,9 +260,9 @@ async function load() {
 }
 
 function applyQuery() {
-  const startIndex = semesters.value.indexOf(draftStart.value)
-  const endIndex = semesters.value.indexOf(draftEnd.value)
-  if (startIndex < 0 || endIndex < 0 || startIndex > endIndex) {
+  const startIndex = semesterValues.value.indexOf(draftStart.value)
+  const endIndex = semesterValues.value.indexOf(draftEnd.value)
+  if (startIndex < 0 || endIndex < 0 || startIndex < endIndex) {
     ElMessage.warning('起始学期不能晚于结束学期')
     return
   }
@@ -263,9 +272,9 @@ function applyQuery() {
 }
 
 function resetQuery() {
-  draftStart.value = semesters.value[0]
-  draftEnd.value = props.endSemester && semesters.value.includes(props.endSemester)
-    ? props.endSemester : semesters.value[semesters.value.length - 1]
+  draftStart.value = semesterValues.value[semesterValues.value.length - 1] || ''
+  draftEnd.value = props.endSemester && semesterValues.value.includes(props.endSemester)
+    ? props.endSemester : (semesterValues.value[0] || '')
   appliedStart.value = draftStart.value
   appliedEnd.value = draftEnd.value
   void load()
@@ -276,14 +285,21 @@ function restoreFocus() {
 }
 
 watch(
-  () => [props.modelValue, props.metricId, props.scopeType, props.scopeId, props.endSemester],
+  () => [
+    props.modelValue,
+    props.metricId,
+    props.scopeType,
+    props.scopeId,
+    props.endSemester,
+    props.semesterOptions,
+  ],
   ([open]) => {
     if (!open) return
     focusTarget = document.activeElement instanceof HTMLElement ? document.activeElement : null
     data.value = { periods: [], metric: {}, scope: {} }
-    draftStart.value = DASHBOARD_SEMESTERS[0]
-    draftEnd.value = props.endSemester && DASHBOARD_SEMESTERS.includes(props.endSemester as any)
-      ? props.endSemester as typeof draftEnd.value : DASHBOARD_SEMESTERS[DASHBOARD_SEMESTERS.length - 1]
+    draftStart.value = semesterValues.value[semesterValues.value.length - 1] || ''
+    draftEnd.value = props.endSemester && semesterValues.value.includes(props.endSemester)
+      ? props.endSemester : (semesterValues.value[0] || '')
     appliedStart.value = draftStart.value
     appliedEnd.value = draftEnd.value
     void load()

@@ -280,7 +280,10 @@ const totalGpaTone = computed<'teal' | 'amber' | 'danger'>(() => {
   return gpa >= 3 ? 'teal' : gpa < 2 ? 'danger' : 'amber'
 })
 const semesterRows = computed(() => {
-  const rows = (student.value.semesterSummary || []).map((row: any, index: number, all: any[]) => {
+  const chronological = [...(student.value.semesterSummary || [])].sort(
+    (left: any, right: any) => String(left.semester || '').localeCompare(String(right.semester || '')),
+  )
+  const rows = chronological.map((row: any, index: number, all: any[]) => {
     const previous = index ? all[index - 1] : null
     const gpaDelta = previous ? Number(row.gpa || 0) - Number(previous.gpa || 0) : null
     const failDelta = previous ? Number(row.failCount || 0) - Number(previous.failCount || 0) : null

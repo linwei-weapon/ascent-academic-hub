@@ -604,15 +604,14 @@ def metric_history(
         )
         periods.append({
             "semester": semester_id,
-            "semesterLabel": (
-                f"{semester_id[:-2]}学年 第{semester_id[-1]}学期"
-            ),
+            "semesterLabel": semester_id,
             **current,
             "change": change,
             "rosterSource": roster["source"],
             "mapping": roster["mapping"],
         })
         previous_value = value
+    periods.reverse()
 
     definition = _HISTORY_METRICS[metric_id]
     payload = {
@@ -631,7 +630,7 @@ def metric_history(
             "endSemester": end,
         },
         "periods": periods,
-        "availableSemesters": list(SEMESTERS),
+        "availableSemesters": list(reversed(SEMESTERS)),
         "definitionVersion": "dashboard-history-v1",
         "boundary": (
             "历史学期在籍分母只读来自各学期源库；趋势中的当前统计学期使用"

@@ -169,6 +169,7 @@
         scope-type="school"
         :scope-label="data.scope?.label || '全校'"
         :end-semester="fSemester"
+        :semester-options="semesters"
       />
     </template>
   </div>

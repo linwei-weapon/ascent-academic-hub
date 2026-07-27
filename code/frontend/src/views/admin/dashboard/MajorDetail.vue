@@ -85,7 +85,7 @@
       </el-collapse>
       <MetricHistoryDialog v-model="historyVisible" :metric-id="historyMetricId"
         scope-type="major" :scope-id="String(route.params.id)" :scope-label="data.name"
-        :end-semester="semLabel" />
+        :end-semester="semLabel" :semester-options="semesters" />
       <MajorAlertStudentsDialog v-model="alertVisible" :major-id="String(route.params.id)"
         :major-name="data.name" :college-name="data.college" />
       <GradeCoursesDrawer v-model="gradeCoursesVisible" :major-id="String(route.params.id)"
@@ -104,6 +104,7 @@ import DataTable, { type DataTableColumn } from '@/components/DataTable.vue'
 import MetricHistoryDialog from '@/components/MetricHistoryDialog.vue'
 import MajorAlertStudentsDialog from '@/components/MajorAlertStudentsDialog.vue'
 import GradeCoursesDrawer from '@/components/GradeCoursesDrawer.vue'
+import { getFilterMeta, type SemesterOpt } from '@/utils/meta'
 
 const route = useRoute()
 const router = useRouter()
@@ -116,6 +117,7 @@ const historyMetricId = ref('')
 const alertVisible = ref(false)
 const gradeCoursesVisible = ref(false)
 const selectedGrade = ref('')
+const semesters = ref<SemesterOpt[]>([])
 const data = reactive<any>({
   name:'', college:'', collegeId:'', kpi:[], gradeDetail:[],
   scope:{restricted:false}, evidence:{},
@@ -146,7 +148,14 @@ async function loadData() {
   }
 }
 
-onMounted(loadData)
+onMounted(async () => {
+  await Promise.allSettled([
+    loadData(),
+    getFilterMeta().then((meta) => {
+      semesters.value = meta.semesters.slice().reverse()
+    }),
+  ])
+})
 
 function kpiTone(label: string): 'primary'|'teal'|'danger'|'amber' {
   if (label.includes('预警')) return 'danger'

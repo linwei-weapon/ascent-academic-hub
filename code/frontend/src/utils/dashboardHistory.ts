@@ -6,18 +6,6 @@ export type DashboardHistoryMetric = {
   color: string
 }
 
-export const DASHBOARD_SEMESTERS = [
-  '2021-2022-2',
-  '2022-2023-1',
-  '2022-2023-2',
-  '2023-2024-1',
-  '2023-2024-2',
-  '2024-2025-1',
-  '2024-2025-2',
-  '2025-2026-1',
-  '2025-2026-2',
-] as const
-
 export const DASHBOARD_HISTORY_METRICS: Record<string, DashboardHistoryMetric> = {
   valid_result_coverage_rate: {
     id: 'valid_result_coverage_rate',
@@ -82,9 +70,4 @@ export const SUMMARY_HISTORY_METRIC_IDS: Record<string, string> = {
   current_fail_rate: 'current_fail_student_rate',
   average_gpa: 'average_student_gpa',
   active_alert_rate: 'active_alert_student_rate',
-}
-
-export function semesterLabel(value: string): string {
-  if (!value || value.length < 3) return value || '—'
-  return `${value.slice(0, -2)}学年 第${value.slice(-1)}学期`
 }
