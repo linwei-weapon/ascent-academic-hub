@@ -183,6 +183,8 @@ class DashboardUeContractTest(unittest.TestCase):
         self.assertNotIn("itemStyle: { color: '#e2e8f0' }", history)
         self.assertIn("value == null ? '-' :", history)
         self.assertNotIn("value == null ? '不可用' :", history)
+        self.assertIn("changeText: row.change == null ? '-' :", history)
+        self.assertNotIn("unit === '%' ? '个百分点' : ''", history)
         self.assertNotIn("key: 'status', label: '数据状态'", history)
         self.assertNotIn("#col-status", history)
         for page_name in ("index.vue", "Detail.vue", "MajorDetail.vue"):

@@ -190,7 +190,7 @@ const tableRows = computed(() => historyPeriods.value.map((row: any) => {
     ...row,
     semesterLabel: displaySemester(row.semester),
     valueText: row.value == null ? '-' : `${Number(row.value).toFixed(unit === '%' ? 1 : 2)}${unit}`,
-    changeText: row.change == null ? '-' : `${row.change > 0 ? '+' : ''}${Number(row.change).toFixed(unit === '%' ? 1 : 2)}${unit === '%' ? '个百分点' : ''}`,
+    changeText: row.change == null ? '-' : `${row.change > 0 ? '+' : ''}${Number(row.change).toFixed(unit === '%' ? 1 : 2)}`,
   }
 }))
 
