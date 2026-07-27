@@ -173,6 +173,14 @@ class DashboardUeContractTest(unittest.TestCase):
         self.assertIn("barGap: '-100%'", history)
         self.assertIn("`${Number(value).toLocaleString('zh-CN')}${countUnit}`", history)
         self.assertIn("`${value}%`", history)
+        self.assertIn("history-chart-legend", history)
+        self.assertIn("legend-swatch outline", history)
+        self.assertIn("legend-swatch bar", history)
+        self.assertIn("legend-swatch line", history)
+        self.assertIn("legend: { show: false }", history)
+        self.assertIn("color: 'transparent'", history)
+        self.assertIn("borderType: 'dashed'", history)
+        self.assertNotIn("itemStyle: { color: '#e2e8f0' }", history)
         for page_name in ("index.vue", "Detail.vue", "MajorDetail.vue"):
             page = (
                 FRONTEND / "views" / "admin" / "dashboard" / page_name

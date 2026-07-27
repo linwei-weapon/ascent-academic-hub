@@ -57,7 +57,24 @@
           <span class="extra">{{ appliedPeriodText }}</span>
         </div>
         <p class="history-purpose">用于纵向观察变化和识别需要核查的异常学期；空点表示数据不足或不适用。</p>
-        <EChart v-if="chartableRows.length" :option="chartOption" :height="330" />
+        <template v-if="chartableRows.length">
+          <EChart :option="chartOption" :height="330" />
+          <div v-if="isRatioChart" class="history-chart-legend" aria-label="历史比率图图例">
+            <span>
+              <i class="legend-swatch bar" :style="{ backgroundColor: historyColor }"></i>
+              {{ numeratorLegendLabel }}
+            </span>
+            <span>
+              <i class="legend-swatch outline"></i>
+              {{ denominatorLegendLabel }}（柱总高）
+            </span>
+            <span>
+              <i class="legend-swatch line"
+                :style="{ borderTopColor: historyColor, color: historyColor }"></i>
+              {{ rateLegendLabel }}
+            </span>
+          </div>
+        </template>
         <el-empty v-else description="当前范围暂无可绘制的历史数据" :image-size="72" />
         <div v-if="refreshing" class="history-refreshing">正在按新条件更新，当前结果暂时保留…</div>
       </section>
@@ -139,6 +156,12 @@ const semesters = computed<SemesterOpt[]>(() => props.semesterOptions.length
 const semesterValues = computed(() => semesters.value.map(option => option.value))
 const historyPeriods = computed(() => data.value.periods || [])
 const metricConfig = computed(() => DASHBOARD_HISTORY_METRICS[props.metricId])
+const isRatioChart = computed(() =>
+  (data.value.metric?.chart || metricConfig.value?.chart) === 'ratio')
+const historyColor = computed(() => metricConfig.value?.color || '#4f46e5')
+const numeratorLegendLabel = computed(() => data.value.metric?.numeratorLabel || '分子')
+const denominatorLegendLabel = computed(() => data.value.metric?.denominatorLabel || '分母')
+const rateLegendLabel = computed(() => data.value.metric?.label || '比率')
 const dialogTitle = computed(() => `${props.scopeLabel || data.value.scope?.label || '当前范围'} · ${data.value.metric?.label || metricConfig.value?.label || '历史指标'}`)
 const filtersDirty = computed(() => draftStart.value !== appliedStart.value || draftEnd.value !== appliedEnd.value)
 const hasUnavailable = computed(() => historyPeriods.value.some((row: any) => row.status !== 'available'))
@@ -212,8 +235,8 @@ const chartOption = computed(() => {
     ? '不可用' : `${Number(value).toLocaleString('zh-CN')}${countUnit}`
   return {
     tooltip: { trigger: 'axis' },
-    legend: { data: [numeratorLabel, denominatorLabel, rateLabel], bottom: 0 },
-    grid: { left: 68, right: 60, top: 28, bottom: 64 },
+    legend: { show: false },
+    grid: { left: 68, right: 60, top: 28, bottom: 52 },
     xAxis: { type: 'category', data: labels, axisLabel: { rotate: 24 } },
     yAxis: [
       {
@@ -238,9 +261,14 @@ const chartOption = computed(() => {
         tooltip: { valueFormatter: countValueFormatter },
       },
       {
-        name: denominatorLabel, type: 'bar', z: 1, barWidth: '52%', barGap: '-100%',
+        name: denominatorLabel, type: 'bar', z: 3, barWidth: '52%', barGap: '-100%',
         data: rows.map((row: any) => row.denominator),
-        itemStyle: { color: '#e2e8f0' },
+        itemStyle: {
+          color: 'transparent',
+          borderColor: '#94a3b8',
+          borderWidth: 1.5,
+          borderType: 'dashed',
+        },
         tooltip: { valueFormatter: countValueFormatter },
       },
       {
@@ -355,6 +383,40 @@ watch(
 .history-loading p { text-align: center; }
 .history-chart-card, .history-table-card { margin-bottom: 14px; position: relative; }
 .history-purpose { margin: -7px 0 8px; }
+.history-chart-legend {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 18px;
+  min-height: 22px;
+  color: var(--sa-muted);
+  font-size: 12px;
+}
+.history-chart-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend-swatch { display: inline-block; width: 20px; height: 10px; flex: none; }
+.legend-swatch.bar { border-radius: 2px; }
+.legend-swatch.outline {
+  border: 1.5px dashed #94a3b8;
+  border-radius: 2px;
+  background: transparent;
+}
+.legend-swatch.line {
+  position: relative;
+  height: 0;
+  border-top: 3px solid;
+}
+.legend-swatch.line::after {
+  content: '';
+  position: absolute;
+  top: -5px;
+  left: 7px;
+  width: 5px;
+  height: 5px;
+  border: 2px solid currentColor;
+  border-radius: 50%;
+  background: #fff;
+}
 .history-refreshing { position: absolute; inset: 0; display: grid; place-items: center; background: color-mix(in srgb, #fff 82%, transparent); color: var(--sa-primary); font-size: 13px; }
 @media (max-width: 720px) {
   .history-scope { grid-template-columns: 1fr; }
