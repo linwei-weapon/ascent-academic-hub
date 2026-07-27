@@ -150,7 +150,7 @@ class DashboardUeContractTest(unittest.TestCase):
             "历史指标查询条件",
             "起始学期",
             "结束学期",
-            "部分学期数据不可用",
+            "“-”：表示学年学期对应内容无数据或无计算结果。",
             "历史指标加载失败",
             "当前范围暂无可绘制的历史数据",
             "正在按新条件更新，当前结果暂时保留",
@@ -181,6 +181,10 @@ class DashboardUeContractTest(unittest.TestCase):
         self.assertIn("color: 'transparent'", history)
         self.assertIn("borderType: 'dashed'", history)
         self.assertNotIn("itemStyle: { color: '#e2e8f0' }", history)
+        self.assertIn("value == null ? '-' :", history)
+        self.assertNotIn("value == null ? '不可用' :", history)
+        self.assertNotIn("key: 'status', label: '数据状态'", history)
+        self.assertNotIn("#col-status", history)
         for page_name in ("index.vue", "Detail.vue", "MajorDetail.vue"):
             page = (
                 FRONTEND / "views" / "admin" / "dashboard" / page_name

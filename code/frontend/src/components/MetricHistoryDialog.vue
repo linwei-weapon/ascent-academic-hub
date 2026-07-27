@@ -44,7 +44,7 @@
       </template>
     </el-alert>
     <el-alert v-else-if="hasUnavailable" type="warning" :closable="false" show-icon
-      title="部分学期数据不可用" description="图表以断点展示；明细表保留不可用原因，不按 0 处理。" class="history-alert" />
+      title="“-”：表示学年学期对应内容无数据或无计算结果。" class="history-alert" />
 
     <div v-if="loading && !data.periods?.length" class="history-loading">
       <el-skeleton :rows="10" animated />
@@ -88,19 +88,12 @@
           :columns="tableColumns"
           :data="tableRows"
           :storage-key="`dashboard:metric-history:${metricId}`"
-          :max-business-columns="6"
-          :config-version="1"
+          :max-business-columns="5"
+          :config-version="2"
           :pagination="true"
           :page-size="10"
           size="small"
-        >
-          <template #col-status="{ row }">
-            <el-tooltip v-if="row.unavailableReason" :content="row.unavailableReason" placement="top">
-              <el-tag size="small" :type="row.statusType">{{ row.statusLabel }}</el-tag>
-            </el-tooltip>
-            <el-tag v-else size="small" :type="row.statusType">{{ row.statusLabel }}</el-tag>
-          </template>
-        </DataTable>
+        />
       </section>
 
       <el-alert type="info" :closable="false" show-icon title="数据来源与使用边界"
@@ -188,24 +181,16 @@ const tableColumns = computed<DataTableColumn[]>(() => {
       { key: 'denominator', label: data.value.metric?.denominatorLabel || '分母', width: 140, align: 'right' },
     )
   }
-  base.push({ key: 'status', label: '数据状态', width: 112, region: 'action', required: true })
   return base
 })
 
 const tableRows = computed(() => historyPeriods.value.map((row: any) => {
   const unit = data.value.metric?.unit ?? metricConfig.value?.unit ?? ''
-  const status = {
-    available: { label: '可用', type: 'success' },
-    insufficient: { label: '数据不足', type: 'warning' },
-    unavailable: { label: '不可用', type: 'info' },
-  }[row.status as 'available' | 'insufficient' | 'unavailable'] || { label: '待核验', type: 'warning' }
   return {
     ...row,
     semesterLabel: displaySemester(row.semester),
-    valueText: row.value == null ? '—' : `${Number(row.value).toFixed(unit === '%' ? 1 : 2)}${unit}`,
-    changeText: row.change == null ? '—' : `${row.change > 0 ? '+' : ''}${Number(row.change).toFixed(unit === '%' ? 1 : 2)}${unit === '%' ? '个百分点' : ''}`,
-    statusLabel: status.label,
-    statusType: status.type,
+    valueText: row.value == null ? '-' : `${Number(row.value).toFixed(unit === '%' ? 1 : 2)}${unit}`,
+    changeText: row.change == null ? '-' : `${row.change > 0 ? '+' : ''}${Number(row.change).toFixed(unit === '%' ? 1 : 2)}${unit === '%' ? '个百分点' : ''}`,
   }
 }))
 
@@ -216,7 +201,7 @@ const chartOption = computed(() => {
   const color = metricConfig.value?.color || '#4f46e5'
   if ((data.value.metric?.chart || metricConfig.value?.chart) === 'gpa') {
     return {
-      tooltip: { trigger: 'axis', valueFormatter: (value: any) => value == null ? '不可用' : Number(value).toFixed(2) },
+      tooltip: { trigger: 'axis', valueFormatter: (value: any) => value == null ? '-' : Number(value).toFixed(2) },
       legend: { data: ['学生平均 GPA'], bottom: 0 },
       grid: { left: 48, right: 24, top: 28, bottom: 64 },
       xAxis: { type: 'category', data: labels, axisLabel: { rotate: 24 } },
@@ -232,7 +217,7 @@ const chartOption = computed(() => {
   const rateLabel = data.value.metric?.label || '比率'
   const countUnit = `${numeratorLabel}${denominatorLabel}`.includes('人次') ? '人次' : '人'
   const countValueFormatter = (value: any) => value == null
-    ? '不可用' : `${Number(value).toLocaleString('zh-CN')}${countUnit}`
+    ? '-' : `${Number(value).toLocaleString('zh-CN')}${countUnit}`
   return {
     tooltip: { trigger: 'axis' },
     legend: { show: false },
@@ -276,7 +261,7 @@ const chartOption = computed(() => {
         connectNulls: false, data: rows.map((row: any) => row.value),
         itemStyle: { color }, lineStyle: { color, width: 3 }, symbolSize: 7,
         tooltip: {
-          valueFormatter: (value: any) => value == null ? '不可用' : `${Number(value).toFixed(1)}%`,
+          valueFormatter: (value: any) => value == null ? '-' : `${Number(value).toFixed(1)}%`,
         },
       },
     ],
