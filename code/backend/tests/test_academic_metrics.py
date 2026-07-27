@@ -3,6 +3,7 @@ import sqlite3
 import unittest
 
 from backend.api.academic_metrics import (
+    cumulative_gpa_summaries,
     earned_credit_map,
     effective_course_outcomes,
     effective_course_outcomes_for_students,
@@ -32,6 +33,7 @@ def make_conn() -> sqlite3.Connection:
             ('S1','C3','2024-2025-2',75,2.5,1,3,'real'),
             ('S1','C4','2024-2025-1',45,0.0,0,2,'real'),
             ('S1','C4','2024-2025-2',48,0.0,0,2,'real'),
+            ('S1','C5','2024-2025-2',60,NULL,1,0,'real'),
             ('S2','C1','2024-2025-1',80,3.0,1,2,'real'),
             ('S3','C9','2024-2025-2',NULL,NULL,NULL,2,'real');
     """)
@@ -60,6 +62,15 @@ class AcademicMetricsTest(unittest.TestCase):
             self.conn, ["S1"], "2024-2025-2"
         )
         self.assertEqual(7.0, term["S1"])
+
+    def test_total_gpa_uses_latest_result_per_course_and_discloses_exclusions(self):
+        summary = cumulative_gpa_summaries(self.conn, ["S1"])["S1"]
+        expected = (2.0 * 2 + 4.2 * 4 + 2.5 * 3 + 0.0 * 2) / 11
+        self.assertAlmostEqual(expected, summary["gpa"], places=4)
+        self.assertEqual(11.0, summary["includedCredits"])
+        self.assertEqual(4, summary["includedCourses"])
+        self.assertEqual(1, summary["excludedCourses"])
+        self.assertEqual("cumulative-gpa-v1", summary["ruleVersion"])
 
     def test_term_failed_rate_sets_use_graded_denominator(self):
         graded, failed = term_grade_and_failed_students(

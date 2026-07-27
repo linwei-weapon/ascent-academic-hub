@@ -9,7 +9,8 @@ from backend.api.routers.v2 import (
 
 class V2ApiTest(unittest.TestCase):
     def test_v2_routes_registered(self):
-        paths = {route.path for route in app.routes}
+        # FastAPI 新版本会延迟展开 include_router；OpenAPI 路径是稳定的公开契约。
+        paths = set(app.openapi()["paths"])
         expected = {"/api/v2/health", "/api/v2/meta/teaching-semesters", "/api/v2/students/difficult",
                     "/api/v2/students/{student_id}/growth",
                     "/api/v2/students/{student_id}/plan-courses",

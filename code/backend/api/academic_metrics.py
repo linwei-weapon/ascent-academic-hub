@@ -46,6 +46,7 @@ def per_student_weighted_gpa(
     for chunk in _chunks(ids):
         params: list = list(chunk)
         where = [
+            "source='real'",
             "gpa IS NOT NULL",
             "credits>0",
             "student_id IN (" + ",".join("?" * len(chunk)) + ")",
@@ -64,6 +65,76 @@ def per_student_weighted_gpa(
             row["student_id"]: row["gpa"]
             for row in rows if row["gpa"] is not None
         })
+    return result
+
+
+def cumulative_gpa_summaries(
+    conn: sqlite3.Connection,
+    student_ids: Iterable[str],
+) -> dict[str, dict]:
+    """按学生返回跨学期、按课程最新真实有效结果计算的总 GPA。
+
+    同一课程只取 ``semester_id、rowid`` 最大的一条真实有效结果。最新结果缺少
+    GP 或有效学分时不计入总 GPA，并通过 ``excludedCourses`` 明确披露。
+    """
+    ids = list(dict.fromkeys(str(value) for value in student_ids))
+    if not ids:
+        return {}
+    result: dict[str, dict] = {}
+    for chunk in _chunks(ids):
+        placeholders = ",".join("?" * len(chunk))
+        rows = dbm.query(conn, f"""
+            WITH ranked AS (
+                SELECT student_id,course_id,gpa,credits,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY student_id,course_id
+                           ORDER BY semester_id DESC,rowid DESC
+                       ) latest_rank
+                FROM fact_grade
+                WHERE source='real' AND is_pass IS NOT NULL
+                  AND course_id IS NOT NULL
+                  AND student_id IN ({placeholders})
+            )
+            SELECT student_id,
+                   SUM(CASE WHEN latest_rank=1 AND gpa IS NOT NULL AND credits>0
+                            THEN gpa*credits END) numerator,
+                   SUM(CASE WHEN latest_rank=1 AND gpa IS NOT NULL AND credits>0
+                            THEN credits END) denominator,
+                   SUM(CASE WHEN latest_rank=1 THEN 1 ELSE 0 END) latest_courses,
+                   SUM(CASE WHEN latest_rank=1
+                                  AND (gpa IS NULL OR credits IS NULL OR credits<=0)
+                            THEN 1 ELSE 0 END) excluded_courses
+            FROM ranked
+            GROUP BY student_id
+        """, tuple(chunk))
+        for row in rows:
+            numerator = (
+                float(row["numerator"])
+                if row["numerator"] is not None else None
+            )
+            denominator = (
+                float(row["denominator"])
+                if row["denominator"] is not None else 0.0
+            )
+            result[row["student_id"]] = {
+                "gpa": (
+                    round(numerator / denominator, 4)
+                    if numerator is not None and denominator > 0 else None
+                ),
+                "numerator": numerator,
+                "includedCredits": denominator,
+                "includedCourses": (
+                    int(row["latest_courses"] or 0)
+                    - int(row["excluded_courses"] or 0)
+                ),
+                "excludedCourses": int(row["excluded_courses"] or 0),
+                "ruleVersion": "cumulative-gpa-v1",
+                "formula": "Σ（课程绩点×课程学分）÷Σ计入GPA课程学分",
+                "boundary": (
+                    "每门课程只取最新真实有效结果；缺少课程绩点或有效学分的"
+                    "课程不计入总GPA。"
+                ),
+            }
     return result
 
 

@@ -39,7 +39,7 @@
         </div>
         <div class="management-grid">
           <button v-for="item in data.managementSummary || []" :key="item.id"
-            class="management-card" type="button" @click="handleSummaryAction(item)">
+            class="management-card" type="button" @click="openSummaryHistory(item)">
             <div class="management-label">{{ item.label }} <KpiLabel label="" :formula="`${item.formula}；管理用途：${item.managementUse}`" /></div>
             <div class="management-value">{{ displayMetric(item) }}</div>
             <div v-if="item.change != null" class="management-change" :class="changeClass(item)">
@@ -47,13 +47,13 @@
             </div>
             <div v-else class="management-change is-neutral">{{ item.supplement || '当前状态指标，不与上期简单比较' }}</div>
             <div class="management-use">{{ item.managementUse }}</div>
-            <div class="management-action">{{ item.actionLabel }} →</div>
+            <div class="management-action">查看历年学期变化 →</div>
           </button>
         </div>
       </section>
 
       <section v-if="data.managementFocus?.length" class="dashboard-section">
-        <div class="section-heading compact"><div><h3>优先核查事项</h3><p>只列本期最需要先打开证据的对象，不对所有对象平铺评价。</p></div></div>
+        <div class="section-heading compact"><div><h3>优先核查事项</h3><p>仅显示按影响范围与偏离程度排序后的全局 TOP1，点击进入证据。</p></div></div>
         <div class="focus-list">
           <button v-for="focus in data.managementFocus" :key="`${focus.targetType}:${focus.targetId}`"
             class="focus-item" :class="`is-${focus.level}`" type="button" @click="openFocus(focus)">
@@ -69,11 +69,13 @@
           <div><h3>课程结果辅助指标</h3><p>按 {{ fSemester }} 和当前授权学生范围统计，用于解释重点课程，不替代学生率。</p></div>
         </div>
         <div class="result-metrics">
-          <div v-for="k in passRateKpis" :key="k.label" class="result-metric">
+          <button v-for="k in passRateKpis" :key="k.label" class="result-metric" type="button"
+            @click="openHistory(k.metricId)">
             <span>{{ k.label }} <KpiLabel label="" :formula="k.hint" /></span>
             <b>{{ k.value }}</b>
             <small>{{ k.sub }}</small>
-          </div>
+            <i>查看历年变化 →</i>
+          </button>
         </div>
       </section>
 
@@ -160,6 +162,14 @@
           <p>合成毕业与学位结果仅保留在接口原型字段中，本页不将其作为正式管理结论。</p>
         </el-collapse-item>
       </el-collapse>
+
+      <MetricHistoryDialog
+        v-model="historyVisible"
+        :metric-id="historyMetricId"
+        scope-type="school"
+        :scope-label="data.scope?.label || '全校'"
+        :end-semester="fSemester"
+      />
     </template>
   </div>
 </template>
@@ -172,7 +182,9 @@ import KpiLabel from '@/components/KpiLabel.vue';
 import EChart from '@/components/EChart.vue';
 import BusinessPageContext from '@/components/BusinessPageContext.vue';
 import DataTable, { type DataTableColumn } from '@/components/DataTable.vue';
+import MetricHistoryDialog from '@/components/MetricHistoryDialog.vue';
 import { getFilterMeta, type SemesterOpt } from '@/utils/meta';
+import { SUMMARY_HISTORY_METRIC_IDS } from '@/utils/dashboardHistory';
 import { authStore } from '@/store/auth';
 import { useBusinessPageTitle } from '@/utils/businessPage';
 const pageTitle = useBusinessPageTitle('/admin/dashboard', '教学数据总览');
@@ -230,6 +242,8 @@ const pageLoading = ref(false);
 const loadError = ref('');
 const updatedAt = ref('');
 const collegeSortKey = ref('fail');
+const historyVisible = ref(false);
+const historyMetricId = ref('');
 const hasData = computed(() => !!data.definitionVersion);
 let dashboardRequestSeq = 0;
 const collegeRows = computed(() => {
@@ -250,16 +264,16 @@ const passRateKpis = computed(() => {
   const na = '当前范围暂无可计算数据';
   const fmtWan = (n: any) => (n == null ? '' : `${Number(n).toLocaleString()} 人次`);
   return [
-    { label: '首次通过率', value: pctText(c?.firstPassRate), tone: 'primary' as const,
+    { metricId: 'first_pass_rate', label: '首次通过率', value: pctText(c?.firstPassRate), tone: 'primary' as const,
       sub: c ? `首次修读 ${fmtWan(c.attempts?.first)}` : na,
       hint: '所选学期、当前授权范围内，首次修读（含缓考）通过人次数÷首次修读人次数' },
-    { label: '补考通过率', value: pctText(c?.makeupPassRate), tone: 'amber' as const,
+    { metricId: 'makeup_pass_rate', label: '补考通过率', value: pctText(c?.makeupPassRate), tone: 'amber' as const,
       sub: c ? `补考 ${fmtWan(c.attempts?.makeup)}` : na,
       hint: '所选学期、当前授权范围内，补考通过人次数÷补考人次数' },
-    { label: '重修通过率', value: pctText(c?.retakePassRate), tone: 'teal' as const,
+    { metricId: 'retake_pass_rate', label: '重修通过率', value: pctText(c?.retakePassRate), tone: 'teal' as const,
       sub: c ? `重修 ${fmtWan(c.attempts?.retake)}` : na,
       hint: '所选学期、当前授权范围内，重修通过人次数÷重修人次数' },
-    { label: '公共必修首次通过率', value: pctText(c?.publicRequiredFirstPassRate), tone: 'danger' as const,
+    { metricId: 'public_required_first_pass_rate', label: '公共必修首次通过率', value: pctText(c?.publicRequiredFirstPassRate), tone: 'danger' as const,
       sub: c ? '公共必修课组 · 重点关注' : na,
       hint: '所选学期、当前授权范围内公共必修课的首次通过率；公共必修通常影响面较大' },
   ];
@@ -377,9 +391,13 @@ function ppChangeText(value:any) {
 function scrollToSection(id:string) {
   document.getElementById(id)?.scrollIntoView({ behavior:'smooth', block:'start' });
 }
-function handleSummaryAction(item:any) {
-  if (item.actionTarget === 'alert') router.push({ path:'/admin/alert' });
-  else scrollToSection(item.actionTarget || 'college-compare');
+function openHistory(metricId:string) {
+  historyMetricId.value = metricId;
+  historyVisible.value = true;
+}
+function openSummaryHistory(item:any) {
+  const metricId = SUMMARY_HISTORY_METRIC_IDS[item.id];
+  if (metricId) openHistory(metricId);
 }
 function openFocus(focus:any) {
   if (focus.targetType === 'college') goCollege({ id:focus.targetId });
@@ -480,10 +498,12 @@ function goStudents() { router.push({ path:'/admin/students/list', query:{ semes
 .focus-action { flex:0 0 auto; color:var(--sa-primary); font-size:12px; }
 .course-result-strip { padding:12px 14px; border:1px solid var(--sa-border); border-radius:10px; background:#f8fafc; }
 .result-metrics { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; }
-.result-metric { display:grid; grid-template-columns:1fr auto; gap:2px 8px; padding:8px 10px; border-radius:8px; background:#fff; }
+.result-metric { display:grid; grid-template-columns:1fr auto; gap:2px 8px; padding:8px 10px; border:1px solid transparent; border-radius:8px; background:#fff; text-align:left; cursor:pointer; }
+.result-metric:hover,.result-metric:focus-visible { border-color:var(--sa-primary); outline:none; }
 .result-metric span { color:var(--sa-muted); font-size:12px; }
 .result-metric b { grid-row:span 2; align-self:center; color:var(--sa-text); font-size:18px; }
 .result-metric small { color:var(--sa-faint); font-size:11px; }
+.result-metric i { color:var(--sa-primary); font-size:11px; font-style:normal; }
 .risk-number { color:#b91c1c; }
 .delta { font-size:12px; }
 .reason-text { color:#475569; }

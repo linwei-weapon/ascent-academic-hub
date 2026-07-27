@@ -879,10 +879,14 @@ def alert_time_distribution(level: Optional[str] = None,
 
 
 @router.get("/options")
-def alert_filter_options(user: dict = Depends(get_current_user),
+def alert_filter_options(college: Optional[str] = None,
+                         major: Optional[str] = None,
+                         user: dict = Depends(get_current_user),
                          conn: sqlite3.Connection = Depends(get_db)):
     """按当前权限范围返回筛选选项，不依赖前端下载全量预警后去重。"""
-    base_sql, params = _base_sql(user, conn)
+    base_sql, params = _base_sql(
+        user, conn, college=college, major=major
+    )
     types = dbm.query(conn, f"""
         SELECT alert_type value,COUNT(*) record_count
         FROM ({base_sql}) option_base

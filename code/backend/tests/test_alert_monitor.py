@@ -126,6 +126,11 @@ class AlertMonitorTest(unittest.TestCase):
         self.assertEqual("pending_review", s01["managementState"])
         self.assertEqual("仍有待核查", s01["managementLabel"])
         self.assertEqual(2, len(s01["signals"]))
+        for field in (
+            "highestLevel", "primaryType", "alertCount",
+            "managementState", "latestAt", "signals",
+        ):
+            self.assertIn(field, s01)
 
     def test_management_filter_is_student_level(self):
         data = alert_students(
@@ -204,6 +209,16 @@ class AlertMonitorTest(unittest.TestCase):
         self.assertNotIn("college", data["organizations"])
         self.assertEqual({"M01"}, {
             row["value"] for row in data["organizations"]["major"]
+        })
+
+        major_data = alert_filter_options(
+            major="M01", user=self.dean, conn=self.conn,
+        )["data"]
+        self.assertEqual({"B01"}, {
+            row["value"] for row in major_data["organizations"]["class"]
+        })
+        self.assertNotIn("退学风险", {
+            row["value"] for row in major_data["types"]
         })
 
     def test_priority_queue_is_student_level_and_explainable(self):

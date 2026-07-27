@@ -18,21 +18,23 @@
 
     <template v-if="data.name">
       <div class="sa-kpi-row">
-        <KpiCard v-for="k in data.kpi" :key="k.label" :label="k.label" :value="k.value"
-          :tone="kpiTone(k.label)" :hint="k.formula" :sub="k.detail" />
+        <KpiCard v-for="k in data.kpi" :key="k.id || k.label" :label="k.label" :value="k.value"
+          :tone="kpiTone(k.label)" :hint="k.formula" :sub="k.detail"
+          :interactive="kpiInteractive(k.id)" :action-text="kpiAction(k.id)"
+          @drilldown="handleKpi(k.id)" />
       </div>
 
       <div class="sa-card">
         <div class="sa-card-title">
           年级风险核查
-          <span class="extra">按当前挂科学生率、成绩覆盖率和预警人数排序；默认展开最需关注年级</span>
+          <span class="extra">按入学年级倒序固定排列；风险排名和颜色仅用于提示核查优先级</span>
         </div>
         <div v-if="!data.gradeDetail.length" class="sa-faint">暂无年级数据</div>
         <el-collapse v-else v-model="activeGrade" accordion class="grade-collapse">
-          <el-collapse-item v-for="g in data.gradeDetail" :key="g.grade" :name="String(g.riskRank)">
+          <el-collapse-item v-for="g in data.gradeDetail" :key="g.grade" :name="g.grade">
             <template #title>
               <div class="grade-title">
-                <span class="rank" :class="{hot:g.failedStudents || g.alertCount}">{{ g.riskRank }}</span>
+                <span class="rank" :class="{hot:g.failedStudents || g.alertCount}" :title="`风险核查排序第${g.riskRank}`">{{ g.riskRank }}</span>
                 <b>{{ g.grade }}</b>
                 <span class="priority-reason">{{ g.priorityReason }}</span>
                 <span class="grade-stat">有效成绩 {{ g.studentsWithResults }}/{{ g.students }}人</span>
@@ -63,6 +65,11 @@
               <template #col-drill><span class="sa-faint">›</span></template>
             </DataTable>
             <div v-else class="sa-faint">该年级没有达到展示阈值的集中未通过课程</div>
+            <div class="more-courses">
+              <el-button size="small" type="primary" plain @click="openGradeCourses(g)">
+                更多课程（{{ g.courseCount || 0 }}）
+              </el-button>
+            </div>
           </el-collapse-item>
         </el-collapse>
       </div>
@@ -76,6 +83,14 @@
           <p class="sa-page-sub">{{ data.evidence.limitation }}</p>
         </el-collapse-item>
       </el-collapse>
+      <MetricHistoryDialog v-model="historyVisible" :metric-id="historyMetricId"
+        scope-type="major" :scope-id="String(route.params.id)" :scope-label="data.name"
+        :end-semester="semLabel" />
+      <MajorAlertStudentsDialog v-model="alertVisible" :major-id="String(route.params.id)"
+        :major-name="data.name" :college-name="data.college" />
+      <GradeCoursesDrawer v-model="gradeCoursesVisible" :major-id="String(route.params.id)"
+        :major-name="data.name" :college-id="data.collegeId" :college-name="data.college"
+        :grade="selectedGrade" :semester="semLabel" />
     </template>
   </div>
 </template>
@@ -86,6 +101,9 @@ import { reactive, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import KpiCard from '@/components/KpiCard.vue'
 import DataTable, { type DataTableColumn } from '@/components/DataTable.vue'
+import MetricHistoryDialog from '@/components/MetricHistoryDialog.vue'
+import MajorAlertStudentsDialog from '@/components/MajorAlertStudentsDialog.vue'
+import GradeCoursesDrawer from '@/components/GradeCoursesDrawer.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -93,6 +111,11 @@ const semLabel = (route.query.semester as string) || ''
 const pageLoading = ref(false)
 const loadError = ref('')
 const activeGrade = ref('')
+const historyVisible = ref(false)
+const historyMetricId = ref('')
+const alertVisible = ref(false)
+const gradeCoursesVisible = ref(false)
+const selectedGrade = ref('')
 const data = reactive<any>({
   name:'', college:'', collegeId:'', kpi:[], gradeDetail:[],
   scope:{restricted:false}, evidence:{},
@@ -114,7 +137,7 @@ async function loadData() {
     const d = await http.get('/admin/major/' + (route.params.id || 'M051') + qs)
     if (d) {
       Object.assign(data, d)
-      activeGrade.value = d.gradeDetail?.length ? String(d.gradeDetail[0].riskRank) : ''
+      activeGrade.value = d.gradeDetail?.length ? d.gradeDetail[0].grade : ''
     }
   } catch (error:any) {
     loadError.value = error?.message || '数据加载失败，请稍后重试'
@@ -130,6 +153,33 @@ function kpiTone(label: string): 'primary'|'teal'|'danger'|'amber' {
   if (label.includes('挂科')) return 'amber'
   if (label.includes('覆盖')) return 'teal'
   return 'primary'
+}
+function kpiInteractive(id:string) {
+  return [
+    'roster_students',
+    'active_alert_students',
+    'valid_result_coverage_rate',
+    'current_fail_student_rate',
+    'average_student_gpa',
+  ].includes(id)
+}
+function kpiAction(id:string) {
+  if (id === 'roster_students') return '查看本专业学生'
+  if (id === 'active_alert_students') return '查看预警学生名单'
+  return '查看历年学期变化'
+}
+function handleKpi(id:string) {
+  if (id === 'roster_students') return goStudents()
+  if (id === 'active_alert_students') {
+    alertVisible.value = true
+    return
+  }
+  historyMetricId.value = id
+  historyVisible.value = true
+}
+function openGradeCourses(row:any) {
+  selectedGrade.value = String(row.grade || '').replace(/级$/, '')
+  gradeCoursesVisible.value = true
 }
 function goStudents() {
   const majorId = route.params.id as string
@@ -168,6 +218,7 @@ function goCourse(row: any, gradeRow: any) {
 .grade-evidence { display:grid;grid-template-columns:1.5fr repeat(3,1fr);gap:10px;margin:4px 0 14px;padding:12px;background:#f8fafc;border-radius:10px; }
 .grade-evidence>div { display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;color:#64748b; }
 .course-caption { font-size:12px;color:#64748b;margin-bottom:8px; }
+.more-courses { margin-top:10px; text-align:right; }
 .actions { margin-top:16px;text-align:right; }
 .evidence-collapse { margin-top:16px; }
 :deep(.course-row-clickable) { cursor:pointer; }

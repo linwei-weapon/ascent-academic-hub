@@ -4,10 +4,10 @@
       <div>
         <el-breadcrumb separator="›" style="margin-bottom:4px">
           <el-breadcrumb-item :to="backTarget">{{ backLabel }}</el-breadcrumb-item>
-          <el-breadcrumb-item>学生学业画像</el-breadcrumb-item>
+          <el-breadcrumb-item>{{ courseProfile ? '课程-学生学业画像' : '学生学业画像' }}</el-breadcrumb-item>
         </el-breadcrumb>
         <h2 class="sa-page-title">{{ pageTitle }}</h2>
-        <p class="sa-page-sub">数据来源：学籍表 + 成绩表 · 快照+趋势+模式，从群体统计下钻到个体追踪</p>
+        <p class="sa-page-sub">{{ courseProfile ? '固定当前课程与学期，核查学生本课程成绩、绩点及完整学业证据' : '数据来源：学籍表 + 成绩表 · 快照+趋势+模式，从群体统计下钻到个体追踪' }}</p>
       </div>
     </div>
 
@@ -25,10 +25,10 @@
       <el-select v-model="fClass" size="small" style="width:140px" clearable filterable placeholder="全部班级">
         <el-option v-for="c in classOptions" :key="c.value" :label="c.label" :value="c.value" />
       </el-select>
-      <el-select v-model="fSemester" size="small" style="width:160px" clearable placeholder="全部学期" @change="onSemester">
+      <el-select v-model="fSemester" size="small" style="width:160px" :clearable="!courseProfile" :disabled="courseProfile" placeholder="全部学期" @change="onSemester">
         <el-option v-for="s in semesters" :key="s.value" :label="s.label" :value="s.value" />
       </el-select>
-      <el-select v-model="fYear" size="small" style="width:120px" clearable placeholder="全部学年" @change="onYear">
+      <el-select v-model="fYear" size="small" style="width:120px" clearable :disabled="courseProfile" placeholder="全部学年" @change="onYear">
         <el-option v-for="y in years" :key="y" :label="y + '学年'" :value="y" />
       </el-select>
       <el-select v-model="fRetake" size="small" style="width:100px" clearable placeholder="重修/非">
@@ -44,7 +44,7 @@
 
     <!-- 群体画像下钻与课程过滤标签 -->
     <div v-if="courseName || patternKey || migrationKey" class="drill-tags">
-      <el-tag v-if="courseName" closable type="warning" @close="removeCourse">当前课程：{{ courseName }}</el-tag>
+      <el-tag v-if="courseName" :closable="!courseProfile" type="warning" @close="removeCourse">当前课程：{{ courseName }}</el-tag>
       <el-tag v-if="patternKey" closable type="danger" @close="removePattern">挂科模式：{{ patternLabel }}</el-tag>
       <el-tag v-if="migrationKey" closable type="primary" @close="removeMigration">
         画像迁移：{{ migrationLabel }}（{{ fromSemester }} → {{ toSemester }}）
@@ -75,13 +75,19 @@
     <!-- 学生表格 -->
     <div class="sa-card student-table-card">
       <div class="sa-card-title list-title"><span>学生明细</span><span class="extra">点击姓名或“详情”在当前页面核查，筛选条件不会丢失</span></div>
-      <DataTable :columns="studentCols" :data="students" storage-key="students:list"
-        :max-business-columns="8" :config-version="2" stripe v-loading="loading"
+      <DataTable :columns="studentCols" :data="students" :storage-key="courseProfile ? 'dashboard:course-students' : 'students:list'"
+        :max-business-columns="courseProfile ? 10 : 8" :config-version="courseProfile ? 1 : 2" stripe v-loading="loading"
         class="student-table" v-model:page-size="pageSize">
         <template #col-sid="{row}"><span class="tnum sid">{{ row.sid }}</span></template>
         <template #col-name="{row}"><el-button link type="primary" class="name-link" @click.stop="openReview(row)">{{ row.name }}</el-button></template>
         <template #col-major="{row}"><span>{{ row.majorName || row.major }}</span></template>
         <template #col-class="{row}"><span>{{ row.className || row.class }}</span></template>
+        <template #col-courseScore="{row}">
+          <span class="tnum">{{ row.courseScore != null ? Number(row.courseScore).toFixed(1) : '—' }}</span>
+        </template>
+        <template #col-courseGp="{row}">
+          <span class="tnum">{{ row.courseGp != null ? Number(row.courseGp).toFixed(2) : '—' }}</span>
+        </template>
         <template #col-gpa="{row}">
           <span class="tnum" :style="{color: gpaColor(row.gpa), fontWeight:700}">{{ row.gpa != null ? row.gpa.toFixed(2) : '—' }}</span>
         </template>
@@ -130,6 +136,10 @@ import StudentEvidenceDrawer from '@/components/StudentEvidenceDrawer.vue'
 
 const route = useRoute()
 const router = useRouter()
+const courseProfile = computed(() => route.meta.courseProfile === true)
+const lockedCourseId = String(route.query.course || route.params.id || '')
+const lockedCourseName = String(route.query.courseName || '')
+const lockedSemester = String(route.query.semester || '')
 
 // ── 筛选状态 ──
 const fCollege = ref('')
@@ -153,7 +163,7 @@ watch(pageSize, () => {
 })
 
 // 学生明细表列定义（M6 DataTable）
-const studentCols: DataTableColumn[] = [
+const baseStudentCols: DataTableColumn[] = [
   { key: 'sid', label: '学号', width: 130, fixed: 'left', region: 'identity', required: true },
   { key: 'name', label: '姓名', width: 100, fixed: 'left', region: 'identity', required: true },
   { key: 'college', label: '学院', minWidth: 160, tooltip: true },
@@ -166,9 +176,19 @@ const studentCols: DataTableColumn[] = [
   { key: 'attention', label: '管理关注', width: 105, align: 'center' },
   { key: 'actions', label: '操作', width: 88, align: 'center', fixed: 'right', region: 'action', required: true },
 ]
+const studentCols = computed<DataTableColumn[]>(() => {
+  if (!courseProfile.value) return baseStudentCols
+  const columns = [...baseStudentCols]
+  const gpaIndex = columns.findIndex(column => column.key === 'gpa')
+  columns.splice(gpaIndex, 0,
+    { key: 'courseScore', label: '本课程成绩', width: 104, align: 'right', required: true },
+    { key: 'courseGp', label: '本课程绩点', width: 104, align: 'right', required: true },
+  )
+  return columns
+})
 // ── URL 参数预填 ──
-const courseName = ref(route.query.courseName as string || '')
-const courseId = ref(route.query.course as string || '')
+const courseName = ref(lockedCourseName)
+const courseId = ref(lockedCourseId)
 const patternKey = ref(route.query.pattern as string || '')
 const patternLabel = ref(route.query.patternLabel as string || '')
 const migrationKey = ref(route.query.migration as string || '')
@@ -264,6 +284,7 @@ const listEvidenceContext = computed(() => {
 
 // ── 页面标题 ──
 const pageTitle = computed(() => {
+  if (courseProfile.value) return `${courseName.value || '课程'} · 课程-学生学业画像`
   const parts: string[] = []
   if (courseName.value) parts.push(courseName.value)
   if (patternKey.value) parts.push(patternLabel.value || '挂科模式')
@@ -294,8 +315,14 @@ onMounted(async () => {
   if (route.query.retake) fRetake.value = route.query.retake as string
   if (route.query.required) fRequired.value = route.query.required as string
   if (route.query.keyword) keyword.value = route.query.keyword as string
-  if (route.query.course) courseId.value = route.query.course as string
-  if (route.query.courseName) courseName.value = route.query.courseName as string
+  if (courseProfile.value) {
+    courseId.value = lockedCourseId
+    courseName.value = lockedCourseName
+    fSemester.value = lockedSemester
+  } else {
+    if (route.query.course) courseId.value = route.query.course as string
+    if (route.query.courseName) courseName.value = route.query.courseName as string
+  }
   const restoredPageSize = Number(route.query.page_size || 20)
   pageSize.value = [10, 20, 50].includes(restoredPageSize) ? restoredPageSize : 20
   const restoredPage = Math.max(1, Number(route.query.page || 1) || 1)
@@ -385,10 +412,18 @@ function reset() {
   fCollege.value = ''; fMajor.value = ''; fGrade.value = ''
   fClass.value = ''; fSemester.value = ''; fYear.value = ''; fRetake.value = ''
   fRequired.value = ''; keyword.value = ''
-  courseId.value = ''; courseName.value = ''
+  courseId.value = courseProfile.value ? lockedCourseId : ''
+  courseName.value = courseProfile.value ? lockedCourseName : ''
+  fSemester.value = courseProfile.value ? lockedSemester : ''
   patternKey.value = ''; patternLabel.value = ''
   migrationKey.value = ''; migrationLabel.value = ''; fromSemester.value = ''; toSemester.value = ''
-  router.replace({ path: route.path, query: {} })
+  router.replace({ path: route.path, query: courseProfile.value ? {
+    course: lockedCourseId,
+    courseName: lockedCourseName,
+    semester: lockedSemester,
+    returnTo: route.query.returnTo,
+    returnLabel: route.query.returnLabel,
+  } : {} })
   page.value = 1; loadPage(1)
 }
 function clearRouteKeys(keys: string[]) {
@@ -397,6 +432,7 @@ function clearRouteKeys(keys: string[]) {
   router.replace({ path: route.path, query })
 }
 function removeCourse() {
+  if (courseProfile.value) return
   courseId.value = ''; courseName.value = ''; clearRouteKeys(['course', 'courseName']); search()
 }
 function removePattern() {

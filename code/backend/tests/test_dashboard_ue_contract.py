@@ -91,7 +91,7 @@ class DashboardUeContractTest(unittest.TestCase):
         ):
             self.assertIn(marker, backend)
         for marker in (
-            "专业偏离与优先核查",
+            "本学院所有专业偏离与核查",
             "优先核查课程 TOP6",
             "pageLoading",
             "loadError",
@@ -99,21 +99,21 @@ class DashboardUeContractTest(unittest.TestCase):
             self.assertIn(marker, college)
         for marker in (
             "年级风险核查",
-            "默认展开最需关注年级",
+            "按入学年级倒序固定排列",
             "activeGrade",
             "priorityReason",
         ):
             self.assertIn(marker, major)
         self.assertNotIn("毕业去向分布", major)
         for marker in (
-            "高风险行政班 TOP10",
-            "查看全部 {{ data.classDetail.length }} 个行政班",
-            "<el-drawer",
-            "topClassRows",
+            "全部行政班",
+            "有效成绩人次",
             ':pagination="true"',
             "watch(() => route.fullPath",
         ):
             self.assertIn(marker, course)
+        self.assertNotIn("topClassRows", course)
+        self.assertNotIn("classDrawer", course)
 
     def test_drill_navigation_preserves_list_and_scroll_context(self):
         college = (
@@ -138,6 +138,54 @@ class DashboardUeContractTest(unittest.TestCase):
         self.assertIn("page: page.value > 1 ? String(page.value)", student_list)
         self.assertIn("await syncListState()", student_list)
         self.assertIn("window.scrollTo({ top: restoredScroll", student_list)
+
+    def test_0726_history_and_new_drill_contracts_are_explicit(self):
+        history = (
+            FRONTEND / "components" / "MetricHistoryDialog.vue"
+        ).read_text(encoding="utf-8")
+        for marker in (
+            "历史指标查询条件",
+            "起始学期",
+            "结束学期",
+            "部分学期数据不可用",
+            "历史指标加载失败",
+            "当前范围暂无可绘制的历史数据",
+            "正在按新条件更新，当前结果暂时保留",
+            "restoreFocus",
+        ):
+            self.assertIn(marker, history)
+
+        major_alerts = (
+            FRONTEND / "components" / "MajorAlertStudentsDialog.vue"
+        ).read_text(encoding="utf-8")
+        for marker in (
+            "姓名或学号", "行政班", "风险等级", "预警类型", "核查状态",
+            "最高风险", "主要触发证据", "规则命中", "最近变化",
+            "AlertStudentDrawer",
+        ):
+            self.assertIn(marker, major_alerts)
+
+        grade_courses = (
+            FRONTEND / "components" / "GradeCoursesDrawer.vue"
+        ).read_text(encoding="utf-8")
+        for marker in (
+            "课程代码或名称", "课程代码", "课程名称",
+            "未通过人次", "有效成绩人次", "未通过人次率",
+        ):
+            self.assertIn(marker, grade_courses)
+
+        router = (FRONTEND / "router" / "index.ts").read_text(encoding="utf-8")
+        menu = (FRONTEND / "utils" / "menu.ts").read_text(encoding="utf-8")
+        student_list = (
+            FRONTEND / "views" / "admin" / "students" / "List.vue"
+        ).read_text(encoding="utf-8")
+        self.assertIn("course/:id/students", router)
+        self.assertIn("path.startsWith('/admin/course/')", menu)
+        self.assertIn("课程-学生学业画像", student_list)
+        self.assertIn(":disabled=\"courseProfile\"", student_list)
+        self.assertIn("本课程成绩", student_list)
+        self.assertIn("本课程绩点", student_list)
+        self.assertNotIn("预警状态", student_list)
 
 
 if __name__ == "__main__":

@@ -23,18 +23,23 @@
       title="证据与口径说明" :description="data.evidence.limitation" />
 
     <div class="sa-kpi-row">
-      <KpiCard v-for="k in data.kpi" :key="k.label" :label="k.label" :value="k.value" :tone="kpiTone(k.label)" :hint="k.formula" :sub="k.detail" />
+      <KpiCard v-for="k in data.kpi" :key="k.id || k.label" :label="k.label" :value="k.value"
+        :tone="kpiTone(k.label)" :hint="k.formula" :sub="k.detail"
+        :interactive="historyMetricIds.includes(k.id)" action-text="查看历年学期变化"
+        @drilldown="openHistory(k.id)" />
     </div>
 
     <!-- 各专业数据（全宽）-->
     <div class="sa-card" style="margin-bottom:16px">
-      <div class="sa-card-title">专业偏离与优先核查 <span class="extra">优先项置顶；点击专业查看年级与课程证据</span></div>
+      <div class="sa-card-title">本学院所有专业偏离与核查 <span class="extra">优先项置顶；点击专业查看年级与课程证据</span></div>
       <DataTable :columns="majorCols" :data="data.majors" storage-key="dashboard:college-majors"
-        :max-business-columns="6" :config-version="2" size="small"
+        :max-business-columns="7" :config-version="3" size="small"
         @row-click="goMajor" row-class-name="row-clickable">
         <template #col-name="{row}"><span class="link">{{ row.name }}</span></template>
         <template #col-priorityRank="{row}"><span class="rank" :class="{hot:row.needsPriorityReview}">{{ row.priorityRank }}</span></template>
         <template #col-gpa="{row}"><b v-if="row.gpa != null" class="tnum">{{ row.gpa }}</b><span v-else class="sa-faint">—</span></template>
+        <template #col-creditDone="{row}">{{ row.creditDone == null ? '—' : `${row.creditDone}%` }}</template>
+        <template #col-resultCoverageRate="{row}">{{ row.resultCoverageRate == null ? '—' : `${row.resultCoverageRate}%` }}</template>
         <template #col-currentFailRate="{row}"><span class="tnum" :style="{color:parseFloat(row.currentFailRate||'0')>10?'#DC2626':'#6B7280'}">{{ row.currentFailRate || '—' }}</span></template>
         <template #col-currentFailVsCollegePp="{row}">
           <span v-if="row.currentFailVsCollegePp != null" class="tnum" :class="row.currentFailVsCollegePp>=3?'risk-text':'muted-text'">
@@ -52,13 +57,18 @@
       </div>
     </div>
 
-    <!-- 各年级学分完成率 + 挂科集中课程 TOP6（同行）-->
+    <!-- 各年级修读结果 + 挂科集中课程 TOP6（同行）-->
     <el-row :gutter="16" style="margin-bottom:16px">
       <el-col :span="12">
         <div class="sa-card">
-          <div class="sa-card-title">各年级本学期修读结果 <KpiLabel label="" formula="柱形为当前学期已通过课程学分人次÷修读课程学分人次；同时核对有效成绩人数、GPA与挂科学生率，不代表培养方案完成度" /></div>
-          <EChart v-if="data.gradeCompare.length" :option="gradeOption" :height="Math.max(150, data.gradeCompare.length*46)" />
-          <div v-else class="sa-faint" style="font-size:12px">暂无年级数据</div>
+          <div class="sa-card-title">各年级本学期修读结果 <KpiLabel label="" formula="同时比较课程学分通过占比、有效成绩人数、学生平均GPA与挂科学生率；课程学分通过占比不代表培养方案完成度" /></div>
+          <DataTable v-if="data.gradeCompare.length" :columns="gradeCompareCols" :data="data.gradeCompare"
+            storage-key="dashboard:college-grade-results" :max-business-columns="5"
+            :config-version="1" size="small">
+            <template #col-creditDone="{row}">{{ row.creditDone == null ? '—' : `${row.creditDone}%` }}</template>
+            <template #col-gpaAvg="{row}">{{ row.gpaAvg == null ? '—' : Number(row.gpaAvg).toFixed(2) }}</template>
+          </DataTable>
+          <el-empty v-else description="本学期暂无可比较的年级修读结果" :image-size="64" />
         </div>
       </el-col>
       <el-col :span="12">
@@ -90,6 +100,9 @@
         </div>
       </el-col>
     </el-row>
+    <MetricHistoryDialog v-model="historyVisible" :metric-id="historyMetricId"
+      scope-type="college" :scope-id="collegeId" :scope-label="data.name"
+      :end-semester="fSemester" />
     </template>
   </div>
 </template>
@@ -100,8 +113,8 @@ import { http } from '@/utils/http';
 import { useRoute, useRouter } from 'vue-router'
 import KpiLabel from '@/components/KpiLabel.vue';
 import KpiCard from '@/components/KpiCard.vue';
-import EChart from '@/components/EChart.vue';
 import DataTable, { type DataTableColumn } from '@/components/DataTable.vue';
+import MetricHistoryDialog from '@/components/MetricHistoryDialog.vue';
 import { getFilterMeta, type SemesterOpt } from '@/utils/meta';
 const route = useRoute(); const router = useRouter();
 const collegeId = route.params.id as string;
@@ -111,20 +124,37 @@ const semesters = ref<SemesterOpt[]>([]);
 const fSemester = ref('');
 const pageLoading = ref(false);
 const loadError = ref('');
+const historyVisible = ref(false);
+const historyMetricId = ref('');
+const historyMetricIds = [
+  'valid_result_coverage_rate',
+  'current_fail_student_rate',
+  'average_student_gpa',
+  'active_alert_student_rate',
+];
 let requestSeq = 0;
 
 // 各专业数据表列定义（M6 DataTable；自定义渲染见模板 col-* / header-* 插槽）
 const majorCols: DataTableColumn[] = [
   { key: 'priorityRank', label: '序', width: 48, fixed: 'left', region: 'identity', required: true },
   { key: 'name', label: '专业', minWidth: 140, fixed: 'left', region: 'identity', required: true },
-  { key: 'students', label: '人数', width: 70, align: 'right' },
-  { key: 'resultCoverageRate', label: '成绩覆盖率', width: 98, align: 'right' },
-  { key: 'gpa', label: '平均GPA', width: 80, align: 'right' },
+  { key: 'creditDone', label: '课程学分通过占比', width: 130, align: 'right', required: true },
+  { key: 'studentsWithResults', label: '有效成绩人数', width: 108, align: 'right', required: true },
+  { key: 'gpa', label: '学生平均GPA', width: 105, align: 'right', required: true },
   { key: 'currentFailRate', label: '当前挂科学生率', width: 118, align: 'right', required: true },
-  { key: 'currentFailVsCollegePp', label: '较学院', width: 88, align: 'right', required: true },
-  { key: 'alertRate', label: '预警学生率', width: 98, align: 'right' },
-  { key: 'priorityReason', label: '优先核查原因', minWidth: 260, required: true },
+  { key: 'currentFailVsCollegePp', label: '较学院挂科率偏离值', width: 150, align: 'right', required: true },
+  { key: 'students', label: '在籍学生', width: 82, align: 'right', defaultVisible: false },
+  { key: 'resultCoverageRate', label: '成绩覆盖率', width: 98, align: 'right', defaultVisible: false },
+  { key: 'alertRate', label: '预警学生率', width: 98, align: 'right', defaultVisible: false },
+  { key: 'priorityReason', label: '优先核查原因', minWidth: 260, defaultVisible: false },
   { key: 'drill', label: '详情', width: 52, fixed: 'right', region: 'action', required: true },
+];
+const gradeCompareCols: DataTableColumn[] = [
+  { key: 'grade', label: '年级', width: 92, fixed: 'left', region: 'identity', required: true },
+  { key: 'creditDone', label: '课程学分通过占比', minWidth: 138, align: 'right', required: true },
+  { key: 'studentsWithResults', label: '有效成绩人数', minWidth: 110, align: 'right', required: true },
+  { key: 'gpaAvg', label: '学生平均 GPA', minWidth: 110, align: 'right', required: true },
+  { key: 'failRate', label: '挂科学生率', minWidth: 108, align: 'right', required: true },
 ];
 const collegeFailCourseCols: DataTableColumn[] = [
   { key: 'priorityRank', label: '序', width: 46, fixed: 'left', region: 'identity', required: true },
@@ -169,28 +199,14 @@ onMounted(async () => {
   loadData();
 });
 
-const gradeOption = computed(() => {
-  const gc = data.gradeCompare || [];
-  return {
-    grid: { left: 8, right: 36, top: 8, bottom: 4, containLabel: true },
-    tooltip: {
-      trigger: 'axis', axisPointer: { type: 'shadow' },
-      formatter: (ps: any) => { const g = gc[ps[0].dataIndex]; return `${g.grade}<br/>本学期课程学分通过占比 <b>${g.creditDone}%</b><br/>有效成绩 ${g.studentsWithResults}人 · GPA ${g.gpaAvg ?? '—'} · 挂科学生率 ${g.failRate}`; },
-    },
-    xAxis: { type: 'value', max: 100, axisLabel: { color: '#94A3B8', formatter: '{value}%' }, splitLine: { lineStyle: { color: '#EEF1F5' } } },
-    yAxis: { type: 'category', data: gc.map((g: any) => g.grade), axisLabel: { color: '#475569' }, axisLine: { lineStyle: { color: '#E2E8F0' } }, axisTick: { show: false } },
-    series: [{
-      type: 'bar', data: gc.map((g: any) => g.creditDone), barWidth: '52%',
-      itemStyle: { color: '#4F46E5', borderRadius: [0, 4, 4, 0] },
-      label: { show: true, position: 'right', formatter: '{c}%', color: '#64748B', fontSize: 11 },
-    }],
-  };
-});
-
 function kpiTone(label: string): 'primary'|'teal'|'danger'|'amber' {
   if (label.includes('预警')) return 'danger';
   if (label.includes('挂科')) return 'amber';
   return 'primary';
+}
+function openHistory(metricId:string) {
+  historyMetricId.value = metricId;
+  historyVisible.value = true;
 }
 function drillQuery(extra:Record<string,string>={}) { return { semester:fSemester.value, collegeId, collegeName:data.name, ...extra } }
 function goMajor(row: any) { router.push({ path:'/admin/major/'+row.id, query:drillQuery({majorId:row.id,majorName:row.name}) }); }

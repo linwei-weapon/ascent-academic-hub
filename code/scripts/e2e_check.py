@@ -193,8 +193,8 @@ def main():
     # 5. 专业详情 M051
     print("\n[5] 专业详情 M051")
     mj = http(base, "/api/admin/major/M051")["data"]
-    check("M051 在校生", str(scalar(c, "SELECT COUNT(*) FROM dim_student WHERE major_id='M051'")),
-          kpi_val(mj, "在校生"))
+    check("M051 在籍学生", str(scalar(c, "SELECT COUNT(*) FROM dim_student WHERE major_id='M051'")),
+          kpi_val(mj, "在籍学生"))
     exp_m_alert = scalar(c, """SELECT COUNT(DISTINCT a.student_id) FROM fact_alert a
         JOIN dim_student s ON a.student_id=s.student_id WHERE s.major_id='M051'
         AND COALESCE(a.is_active,1)=1""")
@@ -214,7 +214,7 @@ def main():
     counselor_major_data = http(base, f"/api/admin/major/{counselor_major}",
                                 token=counselor_scope_token)["data"]
     check("专业详情 辅导员班级范围", str(counselor_students),
-          kpi_val(counselor_major_data, "范围内学生"))
+          kpi_val(counselor_major_data, "在籍学生"))
     check("专业详情 返回正确学院编码",
           scalar(c, "SELECT college_id FROM dim_major WHERE major_id=?", counselor_major),
           counselor_major_data["collegeId"])

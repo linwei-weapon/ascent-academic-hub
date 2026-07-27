@@ -712,14 +712,47 @@ def student_list(semester: Optional[str] = None, grade: Optional[str] = None,
             x["student_id"]), reverse=reverse)
     else:
         candidate_students.sort(key=lambda x: x["student_id"], reverse=(order or "asc") == "desc")
-    for s in candidate_students[offset:offset + page_size]:
+    page_students = candidate_students[offset:offset + page_size]
+    course_results: dict[str, dict] = {}
+    if course and len(metric_sem_ids) == 1 and page_students:
+        page_ids = [row["student_id"] for row in page_students]
+        placeholders = ",".join("?" * len(page_ids))
+        grade_columns = {
+            row["name"]
+            for row in dbm.query(conn, "PRAGMA table_info(fact_grade)")
+        }
+        score_expression = "score" if "score" in grade_columns else "NULL"
+        gp_expression = "gpa" if "gpa" in grade_columns else "NULL"
+        rows = dbm.query(conn, f"""
+            WITH ranked AS (
+              SELECT student_id,{score_expression} score,{gp_expression} gpa,
+                     ROW_NUMBER() OVER (
+                       PARTITION BY student_id
+                       ORDER BY rowid DESC
+                     ) latest_rank
+              FROM fact_grade
+              WHERE source='real' AND is_pass IS NOT NULL
+                AND course_id=? AND semester_id=?
+                AND student_id IN ({placeholders})
+            )
+            SELECT student_id,score,gpa
+            FROM ranked WHERE latest_rank=1
+        """, tuple([course, metric_sem_ids[0]] + page_ids))
+        course_results = {row["student_id"]: row for row in rows}
+    for s in page_students:
         sid = s["student_id"]
         gpa = stu_gpa.get(sid)
+        course_result = course_results.get(sid) or {}
         students.append({
             "sid": sid, "name": s["name"] or sid, "college": cname.get(s["college_id"], s["college_id"]),
             "major": s["major_id"], "majorName": mname.get(s["major_id"], ""),
             "class": s["class_id"] or "—", "className": clname.get(s["class_id"], ""),
             "grade": (s["grade"] or "") + ("级" if s["grade"] else ""),
+            "courseScore": course_result.get("score"),
+            "courseGp": (
+                round(course_result["gpa"], 2)
+                if course_result.get("gpa") is not None else None
+            ),
             "gpa": round(gpa, 2) if gpa is not None else None,
             "failCount": stu_fail.get(sid, 0),
             "alertLevel": stu_alert_levels.get(sid, "—"),

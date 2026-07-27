@@ -39,7 +39,8 @@
         </el-descriptions>
 
         <div class="evidence-kpis">
-          <KpiCard label="当前GPA" :value="currentGpaText" hint="最新有成绩学期的学分加权GPA" :tone="currentGpaTone" />
+          <KpiCard label="总GPA" :value="totalGpaText" :hint="student.totalGpa?.formula || '各课程最新真实有效结果按学分加权'"
+            :sub="totalGpaDetail" :tone="totalGpaTone" />
           <KpiCard label="当前未解决课程" :value="`${currentFailures.length}门`"
             hint="历史曾未通过且最新有效修读结果仍未通过" :tone="currentFailures.length ? 'danger' : 'teal'" />
           <KpiCard label="重复未解决课程" :value="`${repeatedFailures.length}门`"
@@ -193,6 +194,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { http } from '@/utils/http'
 import DataTable, { type DataTableColumn } from '@/components/DataTable.vue'
 import KpiCard from '@/components/KpiCard.vue'
+import { withScrollPosition } from '@/utils/dashboardDrill'
 
 const props = withDefaults(defineProps<{
   modelValue: boolean
@@ -265,13 +267,15 @@ const curriculum = computed(() => student.value.curriculumProgress || {
   statusLabel: '培养方案进度暂不可正式计算',
   boundary: '当前未接入可信的结构化培养方案进度摘要。',
 })
-const latestSemester = computed(() => {
-  const rows = student.value.semesterSummary || []
-  return rows[rows.length - 1] || null
+const totalGpaText = computed(() => student.value.totalGpa?.gpa == null ? '—' : Number(student.value.totalGpa.gpa).toFixed(2))
+const totalGpaDetail = computed(() => {
+  const total = student.value.totalGpa || {}
+  if (total.gpa == null) return total.boundary || '暂无可计算的真实有效成绩'
+  const excluded = Number(total.excludedCourses || 0)
+  return `纳入 ${Number(total.includedCredits || 0).toFixed(1)} 学分${excluded ? `；${excluded} 门课程因缺少学分或绩点未纳入` : ''}`
 })
-const currentGpaText = computed(() => latestSemester.value?.gpa == null ? '—' : Number(latestSemester.value.gpa).toFixed(2))
-const currentGpaTone = computed<'teal' | 'amber' | 'danger'>(() => {
-  const gpa = latestSemester.value?.gpa
+const totalGpaTone = computed<'teal' | 'amber' | 'danger'>(() => {
+  const gpa = student.value.totalGpa?.gpa
   if (gpa == null) return 'amber'
   return gpa >= 3 ? 'teal' : gpa < 2 ? 'danger' : 'amber'
 })
@@ -361,10 +365,9 @@ async function load() {
 
 function openFullProfile() {
   if (!student.value.code) return
-  const returnQuery = {
-    ...(props.context?.returnQuery || route.query),
-    scrollY: String(Math.round(window.scrollY)),
-  }
+  const returnQuery = withScrollPosition(
+    props.context?.returnQuery || route.query,
+  )
   const returnTo = router.resolve({
     path: route.path,
     query: returnQuery,

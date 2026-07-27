@@ -52,34 +52,21 @@
 
     <div class="sa-card">
       <div class="sa-card-title">
-        高风险行政班 TOP10
+        全部行政班
         <span class="extra">共 {{ data.classSummary?.totalAdministrativeClasses || 0 }} 个行政班；{{ data.classSummary?.sort }}</span>
         <KpiLabel label="" formula="当前数据按修读学生所属行政班聚合，并非教学班。未通过人次率=该行政班未通过有效成绩人次÷有效成绩人次×100%" />
       </div>
-      <DataTable :columns="classCols" :data="topClassRows"
+      <DataTable :columns="classCols" :data="data.classDetail"
         storage-key="dashboard:course-class-distribution" :max-business-columns="4"
-        :config-version="2" size="small">
+        :config-version="3" :pagination="true" :default-page-size="20" size="small">
         <template #col-riskRank="{row}"><span class="rank" :class="{hot:row.riskRank<=3}">{{ row.riskRank }}</span></template>
         <template #col-avgScore="{row}"><b class="tnum" :style="{color:row.avgScore<60?'#E11D48':'#1E293B'}">{{ row.avgScore }}</b></template>
         <template #col-failRate="{row}"><span class="tnum" :style="{color:parseFloat(row.failRate)>25?'#E11D48':'#D97706',fontWeight:600}">{{ row.failRate }}</span></template>
       </DataTable>
-      <div v-if="data.classDetail.length>10" class="table-actions">
-        <el-button size="small" @click="classDrawer=true">查看全部 {{ data.classDetail.length }} 个行政班</el-button>
-      </div>
     </div>
     <div style="margin-top:16px"><el-button type="primary" @click="goStudents">查看全部修读学生 →</el-button></div>
     </template>
 
-    <el-drawer v-model="classDrawer" title="全部行政班修读结果" size="72%">
-      <p class="sa-page-sub">课程：{{ data.name }} · {{ data.analysisScope?.label }} · {{ data.classSummary?.sort }}</p>
-      <DataTable :columns="classCols" :data="data.classDetail"
-        storage-key="dashboard:course-class-distribution-all" :max-business-columns="4"
-        :config-version="1" :pagination="true" :default-page-size="20" size="small">
-        <template #col-riskRank="{row}"><span class="rank" :class="{hot:row.riskRank<=3}">{{ row.riskRank }}</span></template>
-        <template #col-avgScore="{row}"><b class="tnum" :style="{color:row.avgScore<60?'#E11D48':'#1E293B'}">{{ row.avgScore }}</b></template>
-        <template #col-failRate="{row}"><span class="tnum" :style="{color:parseFloat(row.failRate)>25?'#E11D48':'#D97706',fontWeight:600}">{{ row.failRate }}</span></template>
-      </DataTable>
-    </el-drawer>
   </div>
 </template>
 
@@ -91,16 +78,17 @@ import KpiLabel from '@/components/KpiLabel.vue';
 import KpiCard from '@/components/KpiCard.vue';
 import EChart from '@/components/EChart.vue';
 import DataTable, { type DataTableColumn } from '@/components/DataTable.vue';
+import { withReturnContext } from '@/utils/dashboardDrill';
 const route = useRoute(); const router = useRouter();
 const semLabel = (route.query.semester as string) || '';
 const pageLoading = ref(false);
 const loadError = ref('');
-const classDrawer = ref(false);
+let requestSeq = 0;
 const data = reactive<any>({ name:'', credits:0, type:'', college:'', kpi:[], scoreDistribution:[], classDetail:[], classSummary:{}, history:[], scope:{restricted:false}, analysisScope:{}, evidence:{} });
 const classCols: DataTableColumn[] = [
   { key: 'riskRank', label: '序', width: 48, fixed: 'left', region: 'identity', required: true },
   { key: 'className', label: '行政班', width: 150, fixed: 'left', region: 'identity', required: true },
-  { key: 'students', label: '人数', width: 70, align: 'right' },
+  { key: 'students', label: '有效成绩人次', width: 112, align: 'right' },
   { key: 'avgScore', label: '平均分', width: 80, align: 'right' },
   { key: 'failRate', label: '未通过人次率', width: 112, align: 'right', required: true },
   { key: 'teacher', label: '任课教师', minWidth: 120 },
@@ -113,6 +101,7 @@ function barColor(label: string) {
 }
 
 async function loadData() {
+  const currentRequest = ++requestSeq;
   pageLoading.value = true;
   loadError.value = '';
   const params = new URLSearchParams();
@@ -123,17 +112,17 @@ async function loadData() {
   const qs = params.toString() ? `?${params.toString()}` : '';
   try {
     const d = await http.get('/admin/course/' + (route.params.id || '100101C003') + qs);
-    if (d) Object.assign(data, d);
+    if (d && currentRequest === requestSeq) Object.assign(data, d);
   } catch (error:any) {
-    loadError.value = error?.message || '数据加载失败，请稍后重试';
+    if (currentRequest === requestSeq) {
+      loadError.value = error?.message || '数据加载失败，请稍后重试';
+    }
   } finally {
-    pageLoading.value = false;
+    if (currentRequest === requestSeq) pageLoading.value = false;
   }
 }
 onMounted(loadData);
 watch(() => route.fullPath, () => loadData());
-
-const topClassRows = computed(() => (data.classDetail || []).slice(0, 10));
 
 const scoreOption = computed(() => {
   const sd = data.scoreDistribution || [];
@@ -173,12 +162,12 @@ const historyOption = computed(() => {
 
 function kpiTone(label: string): 'primary'|'teal'|'danger'|'amber' {
   if (label.includes('预警')) return 'danger';
-  if (label.includes('挂科')) return 'amber';
+  if (label.includes('挂科') || label.includes('未通过')) return 'amber';
   if (label.includes('优秀') || label.includes('通过')) return 'teal';
   return 'primary';
 }
 function goStudents() {
-  const query:any = { course:String(route.params.id), courseName:data.name, semester:semLabel, returnTo:route.fullPath, returnLabel:'返回课程详情' };
+  const query:any = { course:String(route.params.id), courseName:data.name, semester:semLabel };
   if (route.query.collegeId) {
     query.college=route.query.collegeId; query.collegeName=route.query.collegeName;
   }
@@ -186,12 +175,14 @@ function goStudents() {
     query.major=route.query.majorId; query.majorName=route.query.majorName;
   }
   if (route.query.grade) query.grade=route.query.grade;
-  router.push({path:'/admin/students/list',query});
+  router.push({
+    path:`/admin/course/${String(route.params.id)}/students`,
+    query:withReturnContext(query, route.fullPath, '返回课程详情'),
+  });
 }
 </script>
 
 <style scoped>
-.table-actions { margin-top:10px;text-align:right; }
 .rank { display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:7px;background:#f1f5f9;color:#64748b;font-weight:700; }
 .rank.hot { background:#fff1f2;color:#be123c; }
 </style>

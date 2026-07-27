@@ -26,6 +26,7 @@ export const router = createRouter({
         { path: 'college/:id', component: () => import('@/views/admin/dashboard/Detail.vue') },
         { path: 'major/:id', component: () => import('@/views/admin/dashboard/MajorDetail.vue') },
         { path: 'course/:id', component: () => import('@/views/admin/dashboard/CourseDetail.vue') },
+        { path: 'course/:id/students', component: () => import('@/views/admin/students/List.vue'), meta: { courseProfile: true } },
         { path: 'student/:id', component: () => import('@/views/admin/student/Detail.vue') },
 
         // ====== 预警查看 ======

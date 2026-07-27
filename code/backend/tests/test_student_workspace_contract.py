@@ -118,7 +118,7 @@ class StudentWorkspaceContractTest(unittest.TestCase):
         ):
             self.assertIn(token, legacy_list)
         self.assertIn("props.context?.returnQuery || route.query", drawer)
-        self.assertIn("scrollY: String(Math.round(window.scrollY))", drawer)
+        self.assertIn("withScrollPosition(", drawer)
 
     def test_student_workspaces_have_local_retry_and_paginated_class_rows(self):
         analysis = self.read("frontend/src/views/admin/students/Analysis.vue")

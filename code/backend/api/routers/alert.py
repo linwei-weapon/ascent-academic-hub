@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from .. import db as dbm
 from ..academic_metrics import (
+    cumulative_gpa_summaries,
     earned_credit_map,
     effective_course_outcomes,
     term_earned_credit_map,
@@ -401,7 +402,17 @@ def student_detail(sid: str, user: dict = Depends(get_current_user),
             raise ApiError("无权限查看该学生", code=403, status_code=403)
 
     gpa_hist = _gpa_history(conn, sid)
-    cur_gpa = gpa_hist[-1] if gpa_hist else 0
+    total_gpa = cumulative_gpa_summaries(conn, [sid]).get(sid, {
+        "gpa": None,
+        "numerator": None,
+        "includedCredits": 0.0,
+        "includedCourses": 0,
+        "excludedCourses": 0,
+        "ruleVersion": "cumulative-gpa-v1",
+        "formula": "Σ（课程绩点×课程学分）÷Σ计入GPA课程学分",
+        "boundary": "当前没有可计入总GPA的真实有效课程结果。",
+    })
+    total_gpa_value = total_gpa.get("gpa")
     earned = earned_credit_map(conn, [sid]).get(sid, 0)
     all_alert_rows = dbm.query(conn, """
         SELECT a.alert_id,a.rule_id,a.level,a.type,a.trigger_detail detail,a.status,
@@ -453,8 +464,21 @@ def student_detail(sid: str, user: dict = Depends(get_current_user),
     }
 
     kpis = [
-        {"label": "当前GPA", "value": f"{cur_gpa:.2f}", "formula": "最新有成绩学期的学分加权GPA",
-         "color": "#DC2626" if cur_gpa < 2 else "#16A34A", "sub": "5分制"},
+        {"label": "总GPA",
+         "value": (
+             f"{total_gpa_value:.2f}"
+             if total_gpa_value is not None else "—"
+         ),
+         "formula": total_gpa["formula"],
+         "color": (
+             "#DC2626"
+             if total_gpa_value is not None and total_gpa_value < 2
+             else "#16A34A"
+         ),
+         "sub": (
+             f"计入{total_gpa['includedCredits']:.1f}学分"
+             f" · 排除{total_gpa['excludedCourses']}门"
+         )},
         {"label": "已修学分", "value": f"{earned:.0f}", "formula": "按课程去重后的历史通过学分合计",
          "color": "#2563EB", "sub": ""},
         {"label": "预警状态", "value": top_level, "formula": "当前最高预警等级",
@@ -585,6 +609,7 @@ def student_detail(sid: str, user: dict = Depends(get_current_user),
         "code": st["student_id"], "name": st["name"], "collegeId": st["college_id"],
         "collegeName": st["college"], "majorName": st["major"], "className": st["cls"],
         "enrollOn": st["enroll_on"], "kpis": kpis, "gpaHistory": gpa_hist,
+        "totalGpa": total_gpa,
         "alertHistory": [{"alertId": a["alert_id"], "eventId": a["event_id"],
                           "level": a["level"], "type": a["type"], "detail": a["detail"],
                           "time": a["time"], "active": bool(a["is_active"]),
@@ -608,11 +633,13 @@ def student_detail(sid: str, user: dict = Depends(get_current_user),
                 "dim_student", "fact_grade", "fact_alert", "alert_event",
                 "student_plan_progress_summary",
             ],
-            "ruleVersion": "academic-metrics-v1",
+            "ruleVersion": total_gpa["ruleVersion"],
             "calculatedAt": curriculum_progress.get("calculatedAt"),
             "boundary": (
-                "GPA使用有效课程学分加权口径；当前未解决课程按最新有效修读"
-                "结果识别；培养方案进度仅在结构化方案绑定和规则证据可用时展示。"
+                "总GPA按每门课程最新真实有效结果进行课程学分加权；缺少GP或"
+                "有效学分的课程不计入。学期GPA趋势继续按各学期有效成绩展示；"
+                "当前未解决课程按最新有效修读结果识别；培养方案进度仅在"
+                "结构化方案绑定和规则证据可用时展示。"
             ),
         },
     })
