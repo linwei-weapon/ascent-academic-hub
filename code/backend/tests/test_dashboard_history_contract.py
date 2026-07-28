@@ -200,6 +200,38 @@ class DashboardHistoryContractTest(unittest.TestCase):
             data["availableSemesters"],
         )
 
+    def test_current_coverage_change_uses_dashboard_comparison_denominator(self):
+        previous_source = sqlite3.connect(
+            self.root / "2025-2026-1.db"
+        )
+        previous_source.execute(
+            "DELETE FROM students WHERE student_id='S2'"
+        )
+        previous_source.commit()
+        previous_source.close()
+        self.conn.executemany(
+            """INSERT INTO fact_grade VALUES
+               (?, 'K1', '2025-2026-2', 'real', 80, 3.0, 2, 1)""",
+            [("S1",), ("S2",)],
+        )
+        self.conn.commit()
+
+        with patch("backend.api.historical_roster.TS_DIR", self.root):
+            periods = metric_history(
+                metric_id="valid_result_coverage_rate",
+                scope_type="school",
+                scope_id=None,
+                start_semester="2025-2026-1",
+                end_semester="2025-2026-2",
+                conn=self.conn,
+                user=ALL_USER,
+            )["data"]["periods"]
+
+        current, previous = periods
+        self.assertEqual(100.0, previous["value"])
+        self.assertEqual(66.7, current["value"])
+        self.assertEqual(0.0, current["change"])
+
     def test_missing_alert_history_is_unavailable_not_zero(self):
         with patch("backend.api.historical_roster.TS_DIR", self.root):
             period = metric_history(

@@ -598,9 +598,29 @@ def metric_history(
             unrestricted_school=(scope_type == "school" and not restricted),
         )
         value = current["value"]
+        comparison_previous_value = previous_value
+        if (
+            metric_id == "valid_result_coverage_rate"
+            and semester_id == CUR
+            and SEMESTERS.index(semester_id) > 0
+            and roster["available"]
+        ):
+            previous_semester_id = SEMESTERS[
+                SEMESTERS.index(semester_id) - 1
+            ]
+            previous_graded, _ = term_grade_and_failed_students(
+                conn,
+                roster["studentIds"],
+                previous_semester_id,
+            )
+            comparison_previous_value = _pct_number(
+                len(previous_graded),
+                len(roster["studentIds"]),
+            )
         change = (
-            round(value - previous_value, 2)
-            if value is not None and previous_value is not None else None
+            round(value - comparison_previous_value, 2)
+            if value is not None and comparison_previous_value is not None
+            else None
         )
         periods.append({
             "semester": semester_id,
