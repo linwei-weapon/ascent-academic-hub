@@ -200,12 +200,12 @@ class DashboardHistoryContractTest(unittest.TestCase):
             data["availableSemesters"],
         )
 
-    def test_current_coverage_change_uses_dashboard_comparison_denominator(self):
+    def test_current_coverage_change_equals_adjacent_period_difference(self):
         previous_source = sqlite3.connect(
             self.root / "2025-2026-1.db"
         )
         previous_source.execute(
-            "DELETE FROM students WHERE student_id='S2'"
+            "DELETE FROM students WHERE student_id='S3'"
         )
         previous_source.commit()
         previous_source.close()
@@ -216,21 +216,31 @@ class DashboardHistoryContractTest(unittest.TestCase):
         )
         self.conn.commit()
 
+        scopes = [
+            ("school", None),
+            ("college", "C1"),
+            ("major", "M1"),
+        ]
         with patch("backend.api.historical_roster.TS_DIR", self.root):
-            periods = metric_history(
-                metric_id="valid_result_coverage_rate",
-                scope_type="school",
-                scope_id=None,
-                start_semester="2025-2026-1",
-                end_semester="2025-2026-2",
-                conn=self.conn,
-                user=ALL_USER,
-            )["data"]["periods"]
-
-        current, previous = periods
-        self.assertEqual(100.0, previous["value"])
-        self.assertEqual(66.7, current["value"])
-        self.assertEqual(0.0, current["change"])
+            for scope_type, scope_id in scopes:
+                with self.subTest(
+                    scope_type=scope_type,
+                    scope_id=scope_id,
+                ):
+                    _METRIC_HISTORY_CACHE.clear()
+                    current, previous = metric_history(
+                        metric_id="valid_result_coverage_rate",
+                        scope_type=scope_type,
+                        scope_id=scope_id,
+                        start_semester="2025-2026-1",
+                        end_semester="2025-2026-2",
+                        conn=self.conn,
+                        user=ALL_USER,
+                    )["data"]["periods"]
+                    self.assertEqual(
+                        round(current["value"] - previous["value"], 2),
+                        current["change"],
+                    )
 
     def test_missing_alert_history_is_unavailable_not_zero(self):
         with patch("backend.api.historical_roster.TS_DIR", self.root):

@@ -598,29 +598,9 @@ def metric_history(
             unrestricted_school=(scope_type == "school" and not restricted),
         )
         value = current["value"]
-        comparison_previous_value = previous_value
-        if (
-            metric_id == "valid_result_coverage_rate"
-            and semester_id == CUR
-            and SEMESTERS.index(semester_id) > 0
-            and roster["available"]
-        ):
-            previous_semester_id = SEMESTERS[
-                SEMESTERS.index(semester_id) - 1
-            ]
-            previous_graded, _ = term_grade_and_failed_students(
-                conn,
-                roster["studentIds"],
-                previous_semester_id,
-            )
-            comparison_previous_value = _pct_number(
-                len(previous_graded),
-                len(roster["studentIds"]),
-            )
         change = (
-            round(value - comparison_previous_value, 2)
-            if value is not None and comparison_previous_value is not None
-            else None
+            round(value - previous_value, 2)
+            if value is not None and previous_value is not None else None
         )
         periods.append({
             "semester": semester_id,
@@ -651,10 +631,11 @@ def metric_history(
         },
         "periods": periods,
         "availableSemesters": list(reversed(SEMESTERS)),
-        "definitionVersion": "dashboard-history-v1",
+        "definitionVersion": "dashboard-history-v2",
         "boundary": (
             "历史学期在籍分母只读来自各学期源库；趋势中的当前统计学期使用"
             "总览卡片同一授权学籍名单；两类范围均与当前身份可见学生取交集。"
+            "每学期覆盖率使用该学期分子和分母，较上学期等于相邻两期指标值之差。"
             "无真实历史预警快照的学期显示不可用，不使用当前规则或当前记录填补。"
         ),
     }
@@ -700,6 +681,30 @@ def dashboard(semester: Optional[str] = None,
         FROM fact_grade g JOIN dim_student s ON g.student_id=s.student_id
         WHERE g.source='real' AND g.semester_id=? AND g.is_pass IS NOT NULL{student_and}
     """, tuple([cur] + scope_params)) or 0
+
+    def coverage_rate_for_period(semester_id: Optional[str]) -> Optional[float]:
+        if not semester_id:
+            return None
+        if semester_id == CUR:
+            return _pct_number(students_with_results, students)
+        roster = read_historical_roster(
+            conn,
+            semester_id,
+            scope_type="school",
+            scope_id=None,
+            authorized_student_ids=scoped_student_ids,
+            scope_fingerprint=scope_fingerprint,
+        )
+        return _metric_period_value(
+            conn,
+            "valid_result_coverage_rate",
+            semester_id,
+            roster,
+            unrestricted_school=not restricted,
+        )["value"]
+
+    current_coverage_rate = coverage_rate_for_period(cur)
+    previous_coverage_rate = coverage_rate_for_period(previous_semester)
     comparable_semesters = [value for value in (cur, previous_semester) if value]
     semester_marks = ",".join("?" * len(comparable_semesters))
     term_summary = {row["semester_id"]: row for row in dbm.query(conn, f"""
@@ -729,8 +734,6 @@ def dashboard(semester: Optional[str] = None,
         round(previous_term.get("avg_gpa"), 2)
         if previous_term.get("avg_gpa") is not None else None
     )
-    previous_coverage_rate = _pct_number(
-        previous_term.get("result_students"), students)
     if restricted:
         courses_cur = dbm.scalar(conn, f"""SELECT COUNT(DISTINCT g.course_id)
             FROM fact_grade g JOIN dim_student s ON g.student_id=s.student_id
@@ -1064,8 +1067,6 @@ def dashboard(semester: Optional[str] = None,
     kpi[4]["value"] = _pct_value(total_cur, students_with_results)
     kpi[5]["value"] = _pct_value(total_hist, total_history_results)
     kpi, kpi_config_applied = _apply_kpi_config(conn, kpi)
-    current_coverage_rate = _pct_number(students_with_results, students)
-
     def _change(current_value, previous_value, digits=1):
         if current_value is None or previous_value is None:
             return None
