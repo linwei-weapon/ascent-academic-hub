@@ -87,7 +87,7 @@
         scope-type="major" :scope-id="String(route.params.id)" :scope-label="data.name"
         :end-semester="semLabel" :semester-options="semesters" />
       <MajorAlertStudentsDialog v-model="alertVisible" :major-id="String(route.params.id)"
-        :major-name="data.name" :college-name="data.college" />
+        :major-name="data.name" :college-name="data.college" :semester="semLabel" />
       <GradeCoursesDrawer v-model="gradeCoursesVisible" :major-id="String(route.params.id)"
         :major-name="data.name" :college-id="data.collegeId" :college-name="data.college"
         :grade="selectedGrade" :semester="semLabel" />

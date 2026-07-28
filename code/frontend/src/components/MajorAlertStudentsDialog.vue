@@ -4,6 +4,7 @@
     @update:model-value="emit('update:modelValue', $event)">
     <div class="scope-strip">
       <span>固定范围</span><b>{{ collegeName }} / {{ majorName }}</b>
+      <span v-if="semester" class="scope-semester">统计学期：{{ semester }}</span>
       <small>{{ meta.currentSemester ? `当前预警周期：${meta.currentSemester}` : '按当前规则快照' }}</small>
     </div>
     <div class="alert-filters">
@@ -69,7 +70,8 @@ const props = withDefaults(defineProps<{
   majorId: string
   majorName: string
   collegeName?: string
-}>(), { collegeName: '' })
+  semester?: string
+}>(), { collegeName: '', semester: '' })
 const emit = defineEmits<{ (event: 'update:modelValue', value: boolean): void }>()
 
 const empty = () => ({ q: '', classId: '', level: '', type: '', management: '' })
@@ -183,6 +185,7 @@ watch(() => [props.modelValue, props.majorId], ([open]) => {
 <style scoped>
 .scope-strip { display:flex; align-items:center; gap:10px; padding:10px 12px; border:1px solid var(--sa-border); border-radius:9px; background:var(--sa-bg); }
 .scope-strip span,.scope-strip small { color:var(--sa-muted); font-size:12px; }
+.scope-strip .scope-semester { padding-left:10px; border-left:1px solid var(--sa-border); color:var(--sa-text); }
 .scope-strip small { margin-left:auto; }
 .alert-filters { display:flex; flex-wrap:wrap; gap:9px; margin:12px 0; }
 .dialog-loading { min-height:360px; }

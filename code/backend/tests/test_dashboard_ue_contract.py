@@ -199,9 +199,15 @@ class DashboardUeContractTest(unittest.TestCase):
         for marker in (
             "姓名或学号", "行政班", "风险等级", "预警类型", "核查状态",
             "最高风险", "主要触发证据", "规则命中", "最近变化",
-            "AlertStudentDrawer",
+            "AlertStudentDrawer", "统计学期：{{ semester }}",
         ):
             self.assertIn(marker, major_alerts)
+        self.assertIn("semester?: string", major_alerts)
+
+        major_detail = (
+            FRONTEND / "views" / "admin" / "dashboard" / "MajorDetail.vue"
+        ).read_text(encoding="utf-8")
+        self.assertIn(':semester="semLabel"', major_detail)
 
         grade_courses = (
             FRONTEND / "components" / "GradeCoursesDrawer.vue"
