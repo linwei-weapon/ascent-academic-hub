@@ -30,6 +30,32 @@ def make_conn() -> sqlite3.Connection:
 
 
 class MenuStructureTest(unittest.TestCase):
+    def test_four_root_menus_have_confirmed_order(self):
+        conn = make_conn()
+        migrate(conn)
+        roots = conn.execute("""SELECT title,sort_order FROM sys_menu
+                              WHERE parent_id IS NULL ORDER BY sort_order""").fetchall()
+        self.assertEqual(
+            [("教学管理分析", 1), ("AI管理决策", 2), ("基础报表", 3), ("系统管理", 4)],
+            [(row["title"], row["sort_order"]) for row in roots],
+        )
+        self.assertEqual(9, conn.execute(
+            "SELECT COUNT(*) FROM sys_menu WHERE parent_id='/admin/basic-reports'"
+        ).fetchone()[0])
+        conn.close()
+
+    def test_basic_report_default_grants_do_not_add_roles(self):
+        conn = make_conn(); migrate(conn)
+        grants = {(row[0], row[1]) for row in conn.execute(
+            "SELECT role_id,menu_id FROM sys_role_menu WHERE menu_id LIKE '/admin/basic-reports/%'"
+        )}
+        self.assertIn(("mentor", "/admin/basic-reports/failure-overview"), grants)
+        self.assertNotIn(("mentor", "/admin/basic-reports/major-gender-failure"), grants)
+        self.assertNotIn(("counselor", "/admin/basic-reports/major-makeup-comparison"), grants)
+        self.assertIn(("college_dean", "/admin/basic-reports/major-makeup-comparison"), grants)
+        self.assertNotIn("teacher", {role for role, _ in grants})
+        conn.close()
+
     def test_migration_is_idempotent_and_transfers_legacy_grants(self):
         conn = make_conn()
         conn.executemany(

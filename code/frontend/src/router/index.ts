@@ -93,6 +93,17 @@ export const router = createRouter({
         { path: 'reports/management-briefing', redirect: '/admin/reports/decision' },
         { path: 'reports/decision-simulation', redirect: '/admin/reports/decision' },
 
+        // ====== 基础报表（九张固定口径只读报表） ======
+        { path: 'basic-reports/failure-overview', component: () => import('@/views/admin/basic-reports/BasicReportPage.vue') },
+        { path: 'basic-reports/major-makeup-comparison', component: () => import('@/views/admin/basic-reports/BasicReportPage.vue') },
+        { path: 'basic-reports/major-gender-failure', component: () => import('@/views/admin/basic-reports/BasicReportPage.vue') },
+        { path: 'basic-reports/class-failure-count', component: () => import('@/views/admin/basic-reports/BasicReportPage.vue') },
+        { path: 'basic-reports/class-score-distribution', component: () => import('@/views/admin/basic-reports/BasicReportPage.vue') },
+        { path: 'basic-reports/course-makeup-comparison', component: () => import('@/views/admin/basic-reports/BasicReportPage.vue') },
+        { path: 'basic-reports/cet4-pass', component: () => import('@/views/admin/basic-reports/BasicReportPage.vue') },
+        { path: 'basic-reports/focus-students', component: () => import('@/views/admin/basic-reports/BasicReportPage.vue') },
+        { path: 'basic-reports/academic-warning-roster', component: () => import('@/views/admin/basic-reports/BasicReportPage.vue') },
+
         // ====== 系统管理（账号 / 菜单 / 角色） ======
         { path: 'system/accounts', component: () => import('@/views/admin/system/Accounts.vue') },
         { path: 'system/menus', component: () => import('@/views/admin/system/Menus.vue') },

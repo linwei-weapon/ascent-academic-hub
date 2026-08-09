@@ -1,4 +1,4 @@
-"""P1幂等迁移：把侧边栏统一为三个一级分组和业务模块二级菜单。
+"""幂等迁移：把侧边栏统一为四个一级分组和业务模块二级菜单。
 
 只修改 sys_menu / sys_role_menu，不重跑 seed，不触碰业务事实数据。
 sys_role_menu 最终只保存叶子菜单权限；父菜单由登录接口按叶子授权补齐。
@@ -22,12 +22,25 @@ STUDENT_WORKSPACE_ROLES = (
     "college_secretary", "dept_director", "counselor",
     "class_adviser", "mentor",
 )
+BASIC_REPORT_ROLES = STUDENT_WORKSPACE_ROLES
+BASIC_REPORT_LEAVES = (
+    "/admin/basic-reports/failure-overview",
+    "/admin/basic-reports/major-makeup-comparison",
+    "/admin/basic-reports/major-gender-failure",
+    "/admin/basic-reports/class-failure-count",
+    "/admin/basic-reports/class-score-distribution",
+    "/admin/basic-reports/course-makeup-comparison",
+    "/admin/basic-reports/cet4-pass",
+    "/admin/basic-reports/focus-students",
+    "/admin/basic-reports/academic-warning-roster",
+)
 
 # menu_id, parent_id, title, path, icon, sort_order
 TARGET_MENUS = [
     ("/admin/analysis", None, "教学管理分析", "/admin/analysis", "DataAnalysis", 1),
     ("/admin/decision", None, "AI管理决策", "/admin/decision", "MagicStick", 2),
-    ("/admin/system", None, "系统管理", "/admin/system", "Setting", 3),
+    ("/admin/basic-reports", None, "基础报表", "/admin/basic-reports", "Tickets", 3),
+    ("/admin/system", None, "系统管理", "/admin/system", "Setting", 4),
 
     ("/admin/dashboard", "/admin/analysis", "教学数据总览",
      "/admin/dashboard", "Odometer", 101),
@@ -47,24 +60,34 @@ TARGET_MENUS = [
     ("/admin/reports/decision-simulation", "/admin/decision", "决策研判",
      "/admin/reports/decision-simulation", "Opportunity", 202),
 
+    (BASIC_REPORT_LEAVES[0], "/admin/basic-reports", "入学年级总体挂科情况", BASIC_REPORT_LEAVES[0], "DataBoard", 301),
+    (BASIC_REPORT_LEAVES[1], "/admin/basic-reports", "各专业补考前后挂科率比较", BASIC_REPORT_LEAVES[1], "TrendCharts", 302),
+    (BASIC_REPORT_LEAVES[2], "/admin/basic-reports", "各专业整体与男女挂科率比较", BASIC_REPORT_LEAVES[2], "DataAnalysis", 303),
+    (BASIC_REPORT_LEAVES[3], "/admin/basic-reports", "各班级挂科门数具体情况", BASIC_REPORT_LEAVES[3], "Histogram", 304),
+    (BASIC_REPORT_LEAVES[4], "/admin/basic-reports", "各班级成绩分布", BASIC_REPORT_LEAVES[4], "PieChart", 305),
+    (BASIC_REPORT_LEAVES[5], "/admin/basic-reports", "补考前后课程通过情况对比", BASIC_REPORT_LEAVES[5], "Finished", 306),
+    (BASIC_REPORT_LEAVES[6], "/admin/basic-reports", "各班大学英语四级通过情况", BASIC_REPORT_LEAVES[6], "Reading", 307),
+    (BASIC_REPORT_LEAVES[7], "/admin/basic-reports", "重点关注学生名单", BASIC_REPORT_LEAVES[7], "Warning", 308),
+    (BASIC_REPORT_LEAVES[8], "/admin/basic-reports", "校级学业警示学生名单", BASIC_REPORT_LEAVES[8], "Bell", 309),
+
     ("/admin/system/accounts", "/admin/system", "账号管理",
-     "/admin/system/accounts", "User", 301),
+     "/admin/system/accounts", "User", 401),
     ("/admin/system/roles", "/admin/system", "角色与功能权限",
-     "/admin/system/roles", "UserFilled", 302),
+     "/admin/system/roles", "UserFilled", 402),
     ("/admin/system/menus", "/admin/system", "菜单管理",
-     "/admin/system/menus", "Menu", 303),
+     "/admin/system/menus", "Menu", 403),
     ("/admin/system/permissions", "/admin/system", "数据权限",
-     "/admin/system/permissions", "Key", 304),
+     "/admin/system/permissions", "Key", 404),
     ("/admin/system/kpis", "/admin/system", "指标与口径管理",
-     "/admin/system/kpis", "DataAnalysis", 305),
+     "/admin/system/kpis", "DataAnalysis", 405),
     ("/admin/system/schemes", "/admin/system", "分析方案管理",
-     "/admin/system/schemes", "Management", 306),
+     "/admin/system/schemes", "Management", 406),
     ("/admin/system/audit", "/admin/system", "审计日志",
-     "/admin/system/audit", "Document", 307),
+     "/admin/system/audit", "Document", 407),
     ("/admin/settings", "/admin/system", "系统参数",
-     "/admin/settings", "Setting", 308),
+     "/admin/settings", "Setting", 408),
     ("/admin/system/data-collection", "/admin/system", "数据采集监控",
-     "/admin/system/data-collection", "Monitor", 309),
+     "/admin/system/data-collection", "Monitor", 409),
 ]
 
 PARENT_IDS = {row[0] for row in TARGET_MENUS if row[1] is None}
@@ -148,6 +171,16 @@ def migrate(conn: sqlite3.Connection) -> None:
     for role_id in ("counselor", "class_adviser", "mentor"):
         cur.execute("""INSERT OR IGNORE INTO sys_role_menu(role_id,menu_id)
                        VALUES(?, '/admin/dashboard')""", (role_id,))
+    # 基础报表默认授权仅决定入口；接口继续使用当前身份范围和既有动作权限。
+    for role_id in BASIC_REPORT_ROLES:
+        allowed = set(BASIC_REPORT_LEAVES)
+        if role_id in {"counselor", "class_adviser"}:
+            allowed.discard(BASIC_REPORT_LEAVES[1])
+        if role_id == "mentor":
+            allowed = {BASIC_REPORT_LEAVES[0], BASIC_REPORT_LEAVES[7], BASIC_REPORT_LEAVES[8]}
+        for leaf_id in allowed:
+            cur.execute("""INSERT OR IGNORE INTO sys_role_menu(role_id,menu_id)
+                           VALUES(?,?)""", (role_id, leaf_id))
     for leaf_id in SYSTEM_LEAF_IDS:
         cur.execute("""DELETE FROM sys_role_menu
                        WHERE menu_id=? AND role_id<>?""",
@@ -162,14 +195,7 @@ def migrate(conn: sqlite3.Connection) -> None:
         if menu_id not in LEAF_IDS and menu_id not in PARENT_IDS:
             cur.execute("DELETE FROM sys_menu WHERE menu_id=?", (menu_id,))
 
-    # 删除不属于目标结构的其他菜单，确保三组两级结构是唯一真值。
-    placeholders = ",".join("?" for _ in TARGET_MENUS)
-    cur.execute(
-        f"DELETE FROM sys_role_menu WHERE menu_id NOT IN ({placeholders})",
-        tuple(row[0] for row in TARGET_MENUS))
-    cur.execute(
-        f"DELETE FROM sys_menu WHERE menu_id NOT IN ({placeholders})",
-        tuple(row[0] for row in TARGET_MENUS))
+    # 不删除目标清单外的学校自定义菜单；仅清理上面列明的历史菜单。
     conn.commit()
 
 

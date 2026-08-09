@@ -19,7 +19,7 @@ from .security_governance import write_audit
 from .routers import (auth, dashboard, alert, alert_monitor, alert_trajectory, curriculum,
                       reports, operation, faculty, settings as settings_router,
                       students, admin_rbac, meta, teacher, ai, ai_decision,
-                      system_management, data_collection)
+                      system_management, data_collection, basic_reports)
 from .routers import v2
 
 app = FastAPI(title="高校学业BI · 平台管理端 API", version="0.3.0")
@@ -43,6 +43,10 @@ def _sensitive_read_event(method: str, path: str) -> tuple[str, str, str] | None
         return "data.student.list.read", "student_list", "authorized_scope"
     if method == "GET" and path.endswith(".csv"):
         return "data.export", "authorized_export", path.rsplit("/", 1)[-1]
+    if method == "GET" and path.startswith("/api/admin/basic-reports/"):
+        if path.endswith("/export"):
+            return "data.export", "basic_report", path
+        return "data.basic_report.read", "basic_report", path
     if method == "POST" and path.startswith("/api/admin/ai/") and path.endswith("/interpret"):
         return "ai.analysis.run", "ai_analysis", path
     if method == "GET" and path.startswith("/api/admin/ai/") and (
@@ -164,6 +168,7 @@ app.include_router(system_management.router)
 app.include_router(data_collection.router)  # M4：数据采集监控
 app.include_router(teacher.router)  # V1.1新增：任课教师视图
 app.include_router(v2.router)       # V2真实数据验证接口（只读）
+app.include_router(basic_reports.router)  # 基础报表：只读查询与受控导出
 
 # 生产构建由同一个后台服务托管，避免原型运行依赖 Vite 开发服务器。
 # 前端使用 Hash 路由，因此根目录与静态资源可直接交由 StaticFiles 提供。

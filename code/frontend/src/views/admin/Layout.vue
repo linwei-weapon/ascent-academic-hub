@@ -62,7 +62,7 @@
       </el-header>
       <el-main>
         <router-view :key="refreshKey" />
-        <div class="data-source-footer">
+        <div v-if="!footerHiddenPaths.has(route.path)" class="data-source-footer">
           数据来源：教务系统 · 本系统仅做数据展示，不做数据干预
         </div>
       </el-main>
@@ -78,6 +78,16 @@ import {
   authStore, visibleMenus, logout, switchIdentity, type AuthMenu,
 } from '@/store/auth'
 import { menuKeyOfPath } from '@/utils/menu'
+
+const footerHiddenPaths = new Set([
+  '/admin/basic-reports/major-makeup-comparison',
+  '/admin/basic-reports/class-failure-count',
+  '/admin/basic-reports/class-score-distribution',
+  '/admin/basic-reports/course-makeup-comparison',
+  '/admin/basic-reports/cet4-pass',
+  '/admin/basic-reports/focus-students',
+  '/admin/basic-reports/academic-warning-roster',
+])
 
 const route = useRoute()
 const router = useRouter()

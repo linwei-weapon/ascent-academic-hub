@@ -66,6 +66,30 @@ async function request<T = any>(path: string, opts: RequestInit = {}, silent = f
   return body.data
 }
 
+async function download(path: string): Promise<void> {
+  const headers: Record<string, string> = {}
+  const token = getToken()
+  if (token) headers.Authorization = `Bearer ${token}`
+  const activeIdentity = getActiveIdentity()
+  if (token && activeIdentity) headers['X-Active-Identity'] = activeIdentity
+  const res = await fetch(`/api${path}`, { headers })
+  if (!res.ok) {
+    let message = '下载失败'
+    try { message = (await res.json())?.msg || message } catch { /* 二进制/空响应 */ }
+    if (res.status === 401) toLogin()
+    ElMessage.error(message)
+    throw new Error(message)
+  }
+  const blob = await res.blob()
+  const disposition = res.headers.get('content-disposition') || ''
+  const match = disposition.match(/filename\*=UTF-8''([^;]+)/i)
+  const filename = match ? decodeURIComponent(match[1]) : '基础报表.xlsx'
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url; anchor.download = filename; document.body.appendChild(anchor); anchor.click(); anchor.remove()
+  URL.revokeObjectURL(url)
+}
+
 export const http = {
   get: <T = any>(p: string) => request<T>(p),
   getSilent: <T = any>(p: string) => request<T>(p, {}, true),
@@ -74,4 +98,5 @@ export const http = {
   put: <T = any>(p: string, data?: unknown) =>
     request<T>(p, { method: 'PUT', body: JSON.stringify(data ?? {}) }),
   del: <T = any>(p: string) => request<T>(p, { method: 'DELETE' }),
+  download,
 }
