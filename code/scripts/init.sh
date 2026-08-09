@@ -10,8 +10,18 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-echo "[1/2] 运行 ETL 重建分析库（约 1-3 分钟，取决于机器）..."
-if ! PYTHONIOENCODING=utf-8 python -X utf8 -m backend.etl.run_etl; then
+echo "[1/2] 初始化分析库..."
+if [[ -f "$ROOT/../datasource/构造数据/2025-2026-2.db" ]]; then
+  echo "[INFO] 检测到教务源库，运行正式 ETL（约 1-3 分钟）..."
+  INIT_COMMAND=(python -X utf8 -m backend.etl.run_etl)
+elif [[ ! -f "$ROOT/backend/db/analytics.sqlite" ]]; then
+  echo "[INFO] 未检测到教务源库，生成 GitHub 交付用脱敏演示数据..."
+  INIT_COMMAND=(python -X utf8 scripts/bootstrap_demo_data.py)
+else
+  echo "[INFO] 未检测到教务源库，保留现有分析库，仅同步控制数据迁移。"
+  INIT_COMMAND=(true)
+fi
+if ! PYTHONIOENCODING=utf-8 "${INIT_COMMAND[@]}"; then
   echo
   echo "[X] ETL 失败。请确认：① 已 pip install -r backend/requirements.txt"
   echo "    ② datasource/构造数据 下有 9 个 *.db ③ datasource/培养方案docx 下有 2 个 .docx"
@@ -23,8 +33,10 @@ PYTHONIOENCODING=utf-8 python -X utf8 scripts/migrate_menu.py
 PYTHONIOENCODING=utf-8 python -X utf8 scripts/migrate_alert_rules.py
 PYTHONIOENCODING=utf-8 python -X utf8 scripts/migrate_permission_context.py
 PYTHONIOENCODING=utf-8 python -X utf8 scripts/migrate_staff_relationships.py
+PYTHONIOENCODING=utf-8 python -X utf8 scripts/migrate_etl_run.py
 PYTHONIOENCODING=utf-8 python -X utf8 scripts/migrate_system_management.py
 PYTHONIOENCODING=utf-8 python -X utf8 scripts/migrate_student_growth_indexes.py
+PYTHONIOENCODING=utf-8 python -X utf8 scripts/migrate_basic_reports.py
 
 echo
 echo "[OK] 分析库已生成: code/backend/db/analytics.sqlite"

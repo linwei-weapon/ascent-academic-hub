@@ -11,18 +11,27 @@ An internal data aggregation and analytics dashboard.
 ## Quick Start
 
 ```bash
-# Backend
+# 1. Install backend dependencies
 cd code/backend
 pip install -r requirements.txt
-python -m uvicorn backend.api.main:app --port 8000
+cd ..
 
-# Frontend
-cd code/frontend
+# 2. Initialize data. Teaching sources are used when present; otherwise a
+#    compact anonymized dataset is generated for all nine basic reports.
+# Windows: scripts\init.bat
+# macOS / Linux / Git-Bash:
+bash scripts/init.sh
+
+# 3. Start the frontend and backend in separate shells
+cd frontend
 pnpm install
 npx vite --port 3006
+# another shell, from code/:
+python -m uvicorn backend.api.main:app --port 8000
 ```
 
-Access: `http://localhost:3006`
+Access: `http://localhost:3006` · demo login: `admin / Demo@2026`.
+After initialization, a source-only GitHub checkout shows four top-level menus and query/export results for all nine reports under “基础报表”.
 
 ## Project Structure
 

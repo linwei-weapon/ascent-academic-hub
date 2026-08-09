@@ -35,16 +35,11 @@ WITH eligible_roles(role_id) AS (VALUES
  ('/admin/basic-reports/academic-warning-roster')
 )
 INSERT OR IGNORE INTO sys_role_menu(role_id,menu_id)
-SELECT r.role_id,m.menu_id FROM eligible_roles r CROSS JOIN report_menus m
-WHERE (r.role_id NOT IN ('counselor','class_adviser','mentor'))
-   OR (r.role_id IN ('counselor','class_adviser') AND m.menu_id<>'/admin/basic-reports/major-makeup-comparison')
-   OR (r.role_id='mentor' AND m.menu_id IN (
-       '/admin/basic-reports/failure-overview','/admin/basic-reports/focus-students',
-       '/admin/basic-reports/academic-warning-roster'));
+SELECT r.role_id,m.menu_id FROM eligible_roles r CROSS JOIN report_menus m;
 
 INSERT INTO sys_system_parameter(parameter_key,category,name,value_json,value_type,description,editable,options_json)
 VALUES
- ('basic_reports.rule_version','基础报表','基础报表口径版本','"basic-report-v1.4"','string','九张基础报表查询时计算规则版本；v1.4同步RPT-02专业人数、补考前后挂科学生数、留降级括号人数及学生通过率口径。',0,'[]'),
+ ('basic_reports.rule_version','基础报表','基础报表口径版本','"basic-report-v1.5"','string','九张基础报表查询时计算规则版本；v1.5限定RPT-02同一学年学期、同一补考前挂科学生课程集合，补考后在挂人数不得大于补考前已挂人数。',0,'[]'),
  ('basic_reports.cet4_source_mode','基础报表','四级报表来源模式','"cumulative_as_of_semester"','string','查询时读取截至所选学期的 external_exams 明细，按通过学生去重动态累计；不生成或保存统计快照。',0,'[]'),
  ('basic_reports.official_warning_source','基础报表','校级学业警示名单来源','"source_unavailable"','string','未接入正式名单时禁止使用系统推导预警冒充。',0,'[]')
 ON CONFLICT(parameter_key) DO UPDATE SET value_json=excluded.value_json,description=excluded.description,

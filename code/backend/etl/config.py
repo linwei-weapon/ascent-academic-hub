@@ -34,7 +34,7 @@ PLAN_DOCX = {
 }
 
 # 分析库产物（ETL 输出，重建后生成）
-DB_PATH = BACKEND_DIR / "db" / "analytics.sqlite"
+DB_PATH = Path(os.environ.get("DB_PATH", BACKEND_DIR / "db" / "analytics.sqlite"))
 SCHEMA_SQL = BACKEND_DIR / "etl" / "schema.sql"
 
 # V2 真实数据接入验证库。默认与现有演示库完全隔离，可分别通过环境变量覆盖。
