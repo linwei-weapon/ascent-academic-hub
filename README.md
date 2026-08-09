@@ -32,6 +32,7 @@ python -m uvicorn backend.api.main:app --port 8000
 
 Access: `http://localhost:3006` · demo login: `admin / Demo@2026`.
 After initialization, a source-only GitHub checkout shows four top-level menus and query/export results for all nine reports under “基础报表”.
+On Windows, running `scripts\start.bat` before setup is complete explains why dependencies and databases are not committed, lists the missing prerequisites, and prints the required setup order without installing or overwriting anything automatically.
 
 ## Project Structure
 
