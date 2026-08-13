@@ -242,7 +242,7 @@ const failureColumns = computed<DataTableColumn[]>(() => {
   const columns = [...baseFailureColumns]
   const failSemesterIndex = columns.findIndex(column => column.key === 'semesters')
   columns.splice(failSemesterIndex + 1, 0, {
-    key: 'resolvedSemester', label: '解决学期', width: 150, required: true,
+    key: 'resolvedSemester', label: '通过学期', width: 150, required: true,
   })
   return columns
 })
