@@ -53,7 +53,7 @@
       </section>
 
       <section v-if="data.managementFocus?.length" class="dashboard-section">
-        <div class="section-heading compact"><div><h3>优先核查事项</h3><p>仅显示按影响范围与偏离程度排序后的全局 TOP1，点击进入证据。</p></div></div>
+        <div class="section-heading compact"><div><h3>优先核查事项</h3><p>分别显示学院偏离与重点课程排序后的全局 TOP1，点击进入证据。</p></div></div>
         <div class="focus-list">
           <button v-for="focus in data.managementFocus" :key="`${focus.targetType}:${focus.targetId}`"
             class="focus-item" :class="`is-${focus.level}`" type="button" @click="openFocus(focus)">

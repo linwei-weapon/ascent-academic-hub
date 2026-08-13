@@ -19,8 +19,8 @@ def make_conn() -> sqlite3.Connection:
           is_pass INTEGER,source TEXT
         );
         CREATE TABLE fact_alert(student_id TEXT,is_active INTEGER);
-        INSERT INTO dim_semester VALUES('2025-2026-1'),('2025-2026-2');
-        INSERT INTO dim_college VALUES('C01','甲学院'),('C02','乙学院'),('C03','小样本学院');
+        INSERT INTO dim_semester VALUES('2025-2026-2');
+        INSERT INTO dim_college VALUES('C01','甲学院'),('C02','乙学院');
     """)
     for college in ("C01", "C02"):
         for index in range(12):
@@ -31,19 +31,7 @@ def make_conn() -> sqlite3.Connection:
             )
             conn.execute(
                 "INSERT INTO fact_grade VALUES(?,?,?,?,?,?,?)",
-                (
-                    student,
-                    "2025-2026-2",
-                    80 + index % 3,
-                    2,
-                    3.0,
-                    index >= (1 if college == "C01" else 2),
-                    "real",
-                ),
-            )
-            conn.execute(
-                "INSERT INTO fact_grade VALUES(?,?,?,?,?,?,?)",
-                (student, "2025-2026-1", 80 + index % 3, 2, 3.0, True, "real"),
+                (student, "2025-2026-2", 80 + index % 3, 2, 3.0, index != 0, "real"),
             )
         conn.execute(
             "INSERT INTO fact_alert VALUES(?,1)", (f"{college}-00",),
@@ -67,45 +55,6 @@ class ComparisonScopeTest(unittest.TestCase):
         self.assertFalse(rows["C02"]["canDrillDown"])
         self.assertIsNone(rows["C02"]["detailRoute"])
         self.assertNotIn("studentId", rows["C02"])
-        self.assertNotIn("C03", rows)
-        for row in rows.values():
-            for field in (
-                "currentFailVsScopePp",
-                "currentFailChangePp",
-                "avgGpaRank",
-                "comparisonCount",
-                "validResultCoverageRate",
-            ):
-                self.assertIn(field, row)
-            self.assertEqual(100.0, row["validResultCoverageRate"])
-            self.assertEqual(2, row["comparisonCount"])
-        self.assertEqual(-4.2, rows["C01"]["currentFailVsScopePp"])
-        self.assertEqual(4.2, rows["C02"]["currentFailVsScopePp"])
-        self.assertEqual(8.3, rows["C01"]["currentFailChangePp"])
-        self.assertEqual(16.7, rows["C02"]["currentFailChangePp"])
-        self.assertEqual(1, rows["C02"]["currentFailRank"])
-        conn.close()
-
-    def test_school_identity_sees_same_full_college_set_as_dashboard_home(self):
-        conn = make_conn()
-        conn.execute(
-            "INSERT INTO dim_student VALUES('C03-00','C03',NULL,NULL,2022)"
-        )
-        user = {"permission_context": {
-            "detailScope": {"type": "all", "sourceScopeIds": []},
-            "comparisonScope": {
-                "allowOtherOrganizations": True, "minimumGroupSize": 10,
-            },
-        }}
-
-        data = college_comparison("2025-2026-2", user, conn)["data"]
-
-        self.assertEqual(0, data["minimumGroupSize"])
-        self.assertEqual(
-            {"C01", "C02", "C03"},
-            {row["collegeId"] for row in data["items"]},
-        )
-        self.assertTrue(all(row["canDrillDown"] for row in data["items"]))
         conn.close()
 
     def test_class_identity_cannot_use_college_comparison(self):

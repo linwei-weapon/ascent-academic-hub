@@ -57,43 +57,6 @@
       </div>
     </div>
 
-    <div v-if="canCompareColleges" class="sa-card" data-testid="college-deviation-readonly" style="margin-bottom:16px">
-      <div class="sa-card-title">
-        学院偏离与变化
-        <span class="extra">与总览首页使用同一全校聚合口径；学院名称只读，不提供下钻</span>
-      </div>
-      <el-alert type="info" :closable="false" show-icon
-        title="学院名称只读；本表不提供学院详情或学生名单下钻。"
-        :description="collegeComparison.definition?.boundary" style="margin-bottom:10px" />
-      <div v-if="comparisonError" class="comparison-error">
-        <el-alert type="error" :closable="false" show-icon title="学院偏离与变化加载失败"
-          :description="comparisonError" />
-        <el-button size="small" @click="loadData">重新加载</el-button>
-      </div>
-      <DataTable v-else-if="collegeDeviationRows.length" :columns="collegeDeviationCols"
-        :data="collegeDeviationRows" storage-key="dashboard:college-detail-deviation"
-        :max-business-columns="7" :config-version="1" stripe size="small">
-        <template #toolbar>
-          <el-select v-model="collegeSortKey" size="small" style="width:190px">
-            <el-option label="按挂科学生率从高到低" value="fail" />
-            <el-option label="按较上期恶化排序" value="change" />
-            <el-option label="按平均 GPA 从低到高" value="gpa" />
-            <el-option label="按预警学生率从高到低" value="alert" />
-            <el-option label="按成绩覆盖率从低到高" value="coverage" />
-          </el-select>
-        </template>
-        <template #col-collegeName="{row}"><span>{{ row.collegeName }}</span><el-tag v-if="row.collegeId===collegeId" size="small" effect="plain" style="margin-left:6px">本院</el-tag></template>
-        <template #col-currentFailStudentRate="{row}"><b v-if="row.currentFailStudentRate != null" class="tnum risk-text">{{ row.currentFailStudentRate }}%</b><span v-else class="sa-faint">—</span></template>
-        <template #col-currentFailVsScopePp="{row}"><span :class="deviationClass(row.currentFailVsScopePp, false)">{{ ppText(row.currentFailVsScopePp, '全校均值') }}</span></template>
-        <template #col-currentFailChangePp="{row}"><span :class="deviationClass(row.currentFailChangePp, false)">{{ ppChangeText(row.currentFailChangePp) }}</span></template>
-        <template #col-averageGpa="{row}"><b v-if="row.averageGpa != null" class="tnum">{{ row.averageGpa }}</b><span v-else class="sa-faint">—</span></template>
-        <template #col-avgGpaRank="{row}"><span v-if="row.avgGpaRank">第 {{ row.avgGpaRank }}/{{ row.comparisonCount }}</span><span v-else class="sa-faint">—</span></template>
-        <template #col-activeAlertStudentRate="{row}">{{ row.activeAlertStudentRate == null ? '—' : `${row.activeAlertStudentRate}%` }}</template>
-        <template #col-validResultCoverageRate="{row}">{{ row.validResultCoverageRate == null ? '—' : `${row.validResultCoverageRate}%` }}</template>
-      </DataTable>
-      <el-empty v-else description="当前学期暂无达到聚合展示条件的学院数据" :image-size="64" />
-    </div>
-
     <!-- 各年级修读结果 + 挂科集中课程 TOP6（同行）-->
     <el-row :gutter="16" style="margin-bottom:16px">
       <el-col :span="12">
@@ -153,11 +116,9 @@ import KpiCard from '@/components/KpiCard.vue';
 import DataTable, { type DataTableColumn } from '@/components/DataTable.vue';
 import MetricHistoryDialog from '@/components/MetricHistoryDialog.vue';
 import { getFilterMeta, type SemesterOpt } from '@/utils/meta';
-import { authStore } from '@/store/auth';
 const route = useRoute(); const router = useRouter();
 const collegeId = route.params.id as string;
 const data = reactive<any>({ name:'', kpi:[], majors:[], gradeCompare:[], scope:{restricted:false}, evidence:{} });
-const collegeComparison = reactive<any>({ items:[], definition:{} });
 const failCourses = reactive([] as any[]);
 const semesters = ref<SemesterOpt[]>([]);
 const fSemester = ref('');
@@ -165,9 +126,6 @@ const pageLoading = ref(false);
 const loadError = ref('');
 const historyVisible = ref(false);
 const historyMetricId = ref('');
-const collegeSortKey = ref('fail');
-const comparisonError = ref('');
-const canCompareColleges = computed(() => !!authStore.user?.permissionContext?.comparisonScope?.allowOtherOrganizations);
 const historyMetricIds = [
   'valid_result_coverage_rate',
   'current_fail_student_rate',
@@ -214,50 +172,17 @@ const collegeFailCourseCols: DataTableColumn[] = [
   { key: 'retakePassRate', label: '重修通过率', width: 86, align: 'right' },
   { key: 'drill', label: '详情', width: 52, fixed: 'right', region: 'action', required: true },
 ];
-const collegeDeviationCols: DataTableColumn[] = [
-  { key: 'collegeName', label: '学院', minWidth: 170, fixed: 'left', region: 'identity', required: true },
-  { key: 'students', label: '在籍学生', width: 90, align: 'right', defaultVisible: false },
-  { key: 'currentFailStudentRate', label: '当前挂科学生率', width: 130, align: 'right', required: true },
-  { key: 'currentFailVsScopePp', label: '较全校均值', width: 110, align: 'right' },
-  { key: 'currentFailChangePp', label: '较上期变化', width: 105, align: 'right' },
-  { key: 'averageGpa', label: '平均 GPA', width: 100, align: 'right' },
-  { key: 'avgGpaRank', label: 'GPA 排名', width: 95, align: 'center' },
-  { key: 'activeAlertStudentRate', label: '有效预警学生率', width: 125, align: 'right' },
-  { key: 'validResultCoverageRate', label: '有效成绩覆盖率', width: 125, align: 'right' },
-];
-const collegeDeviationRows = computed(() => {
-  const rows = [...(collegeComparison.items || [])];
-  const value = (row:any, key:string, fallback:number) =>
-    row[key] == null ? fallback : Number(row[key]);
-  if (collegeSortKey.value === 'change') return rows.sort((a,b) => value(b,'currentFailChangePp',-999)-value(a,'currentFailChangePp',-999));
-  if (collegeSortKey.value === 'gpa') return rows.sort((a,b) => value(a,'averageGpa',999)-value(b,'averageGpa',999));
-  if (collegeSortKey.value === 'alert') return rows.sort((a,b) => value(b,'activeAlertStudentRate',-1)-value(a,'activeAlertStudentRate',-1));
-  if (collegeSortKey.value === 'coverage') return rows.sort((a,b) => value(a,'validResultCoverageRate',999)-value(b,'validResultCoverageRate',999));
-  return rows.sort((a,b) => value(b,'currentFailStudentRate',-1)-value(a,'currentFailStudentRate',-1));
-});
 
 async function loadData() {
   const currentRequest = ++requestSeq;
   pageLoading.value = true;
   loadError.value = '';
-  comparisonError.value = '';
   const id = route.params.id as string || 'C05';
   const qs = fSemester.value ? `?semester=${fSemester.value}` : '';
   try {
-    const comparePromise = canCompareColleges.value
-      ? http.get(`/admin/meta/college-comparison${qs}`)
-        .then(result => ({ data: result, error: '' }))
-        .catch((error:any) => ({ data: null, error: error?.message || '跨学院聚合数据加载失败，请稍后重试' }))
-      : Promise.resolve({ data: null, error: '' });
-    const [d, compareResult] = await Promise.all([
-      http.get('/admin/college/'+id+qs),
-      comparePromise,
-    ]);
+    const d = await http.get('/admin/college/'+id+qs);
     if (d && currentRequest === requestSeq) {
       Object.assign(data, d);
-      comparisonError.value = compareResult.error;
-      if (compareResult.data) Object.assign(collegeComparison, compareResult.data);
-      else collegeComparison.items = [];
       if (d.failCourses) { failCourses.length=0; failCourses.push(...d.failCourses.slice(0,6)); }
     }
   } catch (error:any) {
@@ -279,23 +204,6 @@ function kpiTone(label: string): 'primary'|'teal'|'danger'|'amber' {
   if (label.includes('挂科')) return 'amber';
   return 'primary';
 }
-function ppText(value:any, baseline:string) {
-  if (value == null) return '—';
-  const number = Number(value);
-  if (number === 0) return `与${baseline}持平`;
-  return `${number > 0 ? '高' : '低'} ${Math.abs(number).toFixed(1)}pp`;
-}
-function ppChangeText(value:any) {
-  if (value == null) return '无可比基线';
-  const number = Number(value);
-  if (number === 0) return '持平';
-  return `${number > 0 ? '恶化' : '改善'} ${Math.abs(number).toFixed(1)}pp`;
-}
-function deviationClass(value:any, positiveIsGood=true) {
-  if (value == null || Number(value) === 0) return 'muted-text';
-  const good = positiveIsGood ? Number(value) > 0 : Number(value) < 0;
-  return good ? 'good-text' : 'risk-text';
-}
 function openHistory(metricId:string) {
   historyMetricId.value = metricId;
   historyVisible.value = true;
@@ -315,6 +223,4 @@ function goStudents() { router.push({ path:'/admin/students/list', query:{colleg
 .risk-text { color:#dc2626;font-weight:600; }
 .good-text { color:#0d9488;font-weight:600; }
 .muted-text { color:#64748b; }
-.comparison-error { display:flex;align-items:center;gap:12px; }
-.comparison-error :deep(.el-alert) { flex:1; }
 </style>

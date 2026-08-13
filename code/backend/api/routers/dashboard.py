@@ -131,6 +131,29 @@ def _pct_number(numerator, denominator, nd=1):
     return round((numerator or 0) * 100 / denominator, nd) if denominator else None
 
 
+def _select_management_focus(candidates: list[dict]) -> list[dict]:
+    """学院偏离和重点课程分别保留本类优先级最高的一项。"""
+    selected = []
+    for target_type in ("college", "course"):
+        category_candidates = [
+            item for item in candidates if item.get("targetType") == target_type
+        ]
+        if not category_candidates:
+            continue
+        top_item = sorted(
+            category_candidates,
+            key=lambda item: (
+                -(item.get("priorityScore") or 0),
+                item.get("title") or "",
+                item.get("targetId") or "",
+            ),
+        )[0]
+        selected.append({
+            key: value for key, value in top_item.items() if key != "priorityScore"
+        })
+    return selected
+
+
 def _gpa_bucket(value: float) -> str:
     for bucket, _, lower in reversed(_GPA_BANDS):
         if value >= lower:
@@ -1145,9 +1168,9 @@ def dashboard(semester: Optional[str] = None,
         )
         focus_candidates.append({
             "level": "warning",
-            "title": f"{leading_college['name']}当前挂科学生率高于范围均值",
+            "title": f"优先核查学院：{leading_college['name']}",
             "detail": (
-                f"高 {leading_college['currentFailVsScopePp']} 个百分点，"
+                f"当前挂科学生率高于范围均值 {leading_college['currentFailVsScopePp']} 个百分点，"
                 f"在 {leading_college['comparisonCount']} 个可比学院中风险排序第 "
                 f"{leading_college['currentFailRank']}。"
             ),
@@ -1165,14 +1188,7 @@ def dashboard(semester: Optional[str] = None,
             "targetId": top_course["id"],
             "priorityScore": top_course["affectedStudents"],
         })
-    focus_candidates.sort(key=lambda item: (
-        -item["priorityScore"],
-        item["targetType"],
-        item["title"],
-    ))
-    management_focus = focus_candidates[:1]
-    for item in management_focus:
-        item.pop("priorityScore", None)
+    management_focus = _select_management_focus(focus_candidates)
 
     payload = {"kpi": kpi, "colleges": colleges, "gpaDist": gpaDist,
                "gpaDistByCollege": gpaDistByCollege, "failCourses": failCourses,

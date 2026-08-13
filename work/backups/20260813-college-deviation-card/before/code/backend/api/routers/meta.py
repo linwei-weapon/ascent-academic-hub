@@ -7,7 +7,6 @@ import sqlite3
 from fastapi import APIRouter, Depends, Query
 
 from .. import db as dbm
-from ..academic_metrics import weighted_gpa_expression
 from ..deps import get_db, get_current_user
 from ..envelope import ApiError, ok
 from ..settings import CURRENT_SEMESTER
@@ -183,16 +182,10 @@ def college_comparison(
         conn, "SELECT 1 FROM dim_semester WHERE semester_id=?", (semester,)
     ):
         raise ApiError("学期不存在", code=400, status_code=400)
-    previous_semester = dbm.scalar(
-        conn,
-        "SELECT MAX(semester_id) FROM dim_semester WHERE semester_id<?",
-        (semester,),
-    )
     minimum = int(comparison.get("minimumGroupSize") or 10)
     detail = context.get("detailScope") or {}
-    effective_minimum = 0 if detail.get("type") == "all" else minimum
     own_ids = set(detail.get("sourceScopeIds") or [])
-    rows = dbm.query(conn, f"""
+    rows = dbm.query(conn, """
         WITH base AS (
           SELECT c.college_id,c.name,COUNT(DISTINCT s.student_id) students
           FROM dim_college c JOIN dim_student s ON s.college_id=c.college_id
@@ -202,69 +195,39 @@ def college_comparison(
             SUM(CASE WHEN g.score IS NOT NULL AND g.credits>0
                 THEN g.score*g.credits END)
               / NULLIF(SUM(CASE WHEN g.score IS NOT NULL AND g.credits>0
-                THEN g.credits END),0) avg_score
+                THEN g.credits END),0) avg_score,
+            COUNT(DISTINCT CASE WHEN g.is_pass IS NOT NULL
+              THEN g.student_id END) result_students,
+            COUNT(DISTINCT CASE WHEN g.is_pass=0 THEN g.student_id END) failed_students
           FROM fact_grade g JOIN dim_student s ON s.student_id=g.student_id
           WHERE g.source='real' AND g.semester_id=?
           GROUP BY s.college_id
-        ), student_term AS (
-          SELECT s.college_id,g.semester_id,g.student_id,
-            {weighted_gpa_expression("g")} student_gpa,
-            MAX(CASE WHEN g.is_pass=0 THEN 1 ELSE 0 END) failed
+        ), student_gpa AS (
+          SELECT s.college_id,g.student_id,AVG(g.gpa) student_gpa
           FROM fact_grade g JOIN dim_student s ON s.student_id=g.student_id
-          WHERE g.source='real' AND g.is_pass IS NOT NULL
-            AND g.semester_id IN (?,?)
-          GROUP BY s.college_id,g.semester_id,g.student_id
-        ), current_result AS (
-          SELECT college_id,COUNT(*) result_students,SUM(failed) failed_students,
-            AVG(student_gpa) avg_gpa
-          FROM student_term WHERE semester_id=? GROUP BY college_id
-        ), previous_result AS (
-          SELECT college_id,COUNT(*) result_students,SUM(failed) failed_students
-          FROM student_term WHERE semester_id=? GROUP BY college_id
+          WHERE g.source='real' AND g.semester_id=? AND g.gpa IS NOT NULL
+          GROUP BY s.college_id,g.student_id
+        ), gpa AS (
+          SELECT college_id,AVG(student_gpa) avg_gpa
+          FROM student_gpa GROUP BY college_id
         ), alerts AS (
           SELECT s.college_id,COUNT(DISTINCT a.student_id) alert_students
           FROM fact_alert a JOIN dim_student s ON s.student_id=a.student_id
           WHERE COALESCE(a.is_active,1)=1 GROUP BY s.college_id
         )
-        SELECT b.college_id,b.name,b.students,sc.avg_score,cr.avg_gpa,
-          COALESCE(cr.result_students,0) result_students,
-          COALESCE(cr.failed_students,0) failed_students,
-          COALESCE(pr.result_students,0) previous_result_students,
-          COALESCE(pr.failed_students,0) previous_failed_students,
+        SELECT b.college_id,b.name,b.students,sc.avg_score,gp.avg_gpa,
+          COALESCE(sc.result_students,0) result_students,
+          COALESCE(sc.failed_students,0) failed_students,
           COALESCE(a.alert_students,0) alert_students
         FROM base b LEFT JOIN score sc ON sc.college_id=b.college_id
-        LEFT JOIN current_result cr ON cr.college_id=b.college_id
-        LEFT JOIN previous_result pr ON pr.college_id=b.college_id
+        LEFT JOIN gpa gp ON gp.college_id=b.college_id
         LEFT JOIN alerts a ON a.college_id=b.college_id
-        ORDER BY b.college_id
-    """, (
-        semester,
-        semester,
-        previous_semester,
-        semester,
-        previous_semester,
-    ))
-    school_result_students = sum(row["result_students"] or 0 for row in rows)
-    school_failed_students = sum(row["failed_students"] or 0 for row in rows)
-    school_fail_rate = (
-        round(school_failed_students * 100 / school_result_students, 1)
-        if school_result_students else None
-    )
+        WHERE b.students>=? ORDER BY b.college_id
+    """, (semester, semester, minimum))
     items = []
     for row in rows:
         students = row["students"] or 0
-        if students < effective_minimum:
-            continue
         result_students = row["result_students"] or 0
-        current_fail_rate = (
-            round(row["failed_students"] * 100 / result_students, 1)
-            if result_students else None
-        )
-        previous_result_students = row["previous_result_students"] or 0
-        previous_fail_rate = (
-            round(row["previous_failed_students"] * 100 / previous_result_students, 1)
-            if previous_result_students else None
-        )
         can_drill = detail.get("type") == "all" or row["college_id"] in own_ids
         items.append({
             "collegeId": row["college_id"],
@@ -276,19 +239,9 @@ def college_comparison(
             "averageGpa": (
                 round(row["avg_gpa"], 2) if row["avg_gpa"] is not None else None
             ),
-            "currentFailStudentRate": (
-                current_fail_rate
-            ),
-            "currentFailVsScopePp": (
-                round(current_fail_rate - school_fail_rate, 1)
-                if current_fail_rate is not None and school_fail_rate is not None
-                else None
-            ),
-            "currentFailChangePp": (
-                round(current_fail_rate - previous_fail_rate, 1)
-                if current_fail_rate is not None and previous_fail_rate is not None
-                else None
-            ),
+            "currentFailStudentRate": round(
+                row["failed_students"] * 100 / result_students, 1
+            ) if result_students else None,
             "activeAlertStudentRate": round(
                 row["alert_students"] * 100 / students, 1
             ) if students else None,
@@ -301,39 +254,18 @@ def college_comparison(
                 f"/admin/dashboard/college/{row['college_id']}" if can_drill else None
             ),
         })
-    ranked_fail = sorted(
-        [item for item in items if item["currentFailStudentRate"] is not None],
-        key=lambda item: (-item["currentFailStudentRate"], item["collegeName"]),
-    )
-    ranked_gpa = sorted(
-        [item for item in items if item["averageGpa"] is not None],
-        key=lambda item: (-item["averageGpa"], item["collegeName"]),
-    )
-    fail_ranks = {
-        item["collegeId"]: index + 1 for index, item in enumerate(ranked_fail)
-    }
-    gpa_ranks = {
-        item["collegeId"]: index + 1 for index, item in enumerate(ranked_gpa)
-    }
-    comparison_count = max(len(ranked_fail), len(ranked_gpa))
-    for item in items:
-        item["currentFailRank"] = fail_ranks.get(item["collegeId"])
-        item["avgGpaRank"] = gpa_ranks.get(item["collegeId"])
-        item["comparisonCount"] = comparison_count
     return ok({
         "semester": semester,
-        "minimumGroupSize": effective_minimum,
+        "minimumGroupSize": minimum,
         "items": items,
         "definition": {
             "weightedAverageScore": "当前学期有效成绩按课程学分加权后的学院平均分。",
-            "averageGpa": "先计算每名学生当前学期课程学分加权GPA，再对学院有GPA学生求平均，避免课程门数不同造成偏移。",
+            "averageGpa": "先计算每名学生当前学期课程GPA均值，再对学院学生求平均，避免课程门数不同造成偏移。",
             "currentFailStudentRate": "当前学期至少一门未通过的去重学生数÷当前学期有有效成绩的去重学生数。",
-            "currentFailVsScopePp": "学院当前挂科学生率减全校同口径挂科学生率，单位为百分点。",
-            "currentFailChangePp": "学院本期挂科学生率减上一可比学期同口径挂科学生率，单位为百分点。",
             "activeAlertStudentRate": "当前有效预警去重学生数÷学院在籍学生数。",
             "validResultCoverageRate": "当前学期有有效成绩的去重学生数÷学院在籍学生数，用于判断成绩指标是否具备解释条件。",
-            "boundary": "校级身份与首页展示全部学院；学院身份查看他院时只返回达到最小群体规模的聚合结果，且不返回学生标识、名单、档案或明细路由。",
+            "boundary": "其他学院仅返回达到最小群体规模的聚合结果，不返回学生标识、名单、档案或明细路由。",
         },
-        "period": {"semester": semester, "previousSemester": previous_semester},
-        "definitionVersion": "dashboard-v3",
+        "period": {"semester": semester},
+        "definitionVersion": "dashboard-v2",
     })

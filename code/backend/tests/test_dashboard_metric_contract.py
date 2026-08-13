@@ -11,7 +11,12 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from backend.api.routers.dashboard import _pct_number, _pct_value, _v2_pass_stats
+from backend.api.routers.dashboard import (
+    _pct_number,
+    _pct_value,
+    _select_management_focus,
+    _v2_pass_stats,
+)
 
 
 class DashboardMetricContractTest(unittest.TestCase):
@@ -92,6 +97,43 @@ class DashboardMetricContractTest(unittest.TestCase):
         self.assertIsNone(_pct_number(0, 0))
         self.assertEqual("0.0%", _pct_value(0, 10))
         self.assertEqual(0.0, _pct_number(0, 10))
+
+    def test_management_focus_keeps_each_category_top_one(self):
+        candidates = [
+            {
+                "targetType": "college",
+                "targetId": "COL-2",
+                "title": "学院乙",
+                "priorityScore": 8,
+            },
+            {
+                "targetType": "course",
+                "targetId": "COURSE-2",
+                "title": "课程乙",
+                "priorityScore": 88,
+            },
+            {
+                "targetType": "college",
+                "targetId": "COL-1",
+                "title": "学院甲",
+                "priorityScore": 12,
+            },
+            {
+                "targetType": "course",
+                "targetId": "COURSE-1",
+                "title": "课程甲",
+                "priorityScore": 66,
+            },
+        ]
+
+        focus = _select_management_focus(candidates)
+
+        self.assertEqual(
+            [("college", "COL-1"), ("course", "COURSE-2")],
+            [(item["targetType"], item["targetId"]) for item in focus],
+        )
+        self.assertTrue(all("priorityScore" not in item for item in focus))
+        self.assertTrue(all("priorityScore" in item for item in candidates))
 
 
 if __name__ == "__main__":
