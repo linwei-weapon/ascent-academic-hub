@@ -201,6 +201,9 @@
         <el-table-column label="挂科学期" min-width="180">
           <template #default="{row}"><span v-for="(s,i) in (row.semesters||[])" :key="i"><el-tag size="small" type="danger" style="margin:1px">{{ s }}</el-tag></span></template>
         </el-table-column>
+        <el-table-column label="通过学期" width="130">
+          <template #default="{row}">{{ row.resolvedSemester || '—' }}</template>
+        </el-table-column>
       </el-table>
     </div>
 

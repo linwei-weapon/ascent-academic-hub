@@ -101,6 +101,20 @@ class StudentWorkspaceContractTest(unittest.TestCase):
         self.assertIn("预警与核查记录", drawer)
         self.assertIn("数据来源与适用边界", drawer)
 
+    def test_student_profile_failure_history_shows_pass_semester(self):
+        detail = self.read("frontend/src/views/admin/student/Detail.vue")
+        failure_history = detail.split("历史未通过课程", 1)[1].split(
+            "成绩明细", 1
+        )[0]
+
+        self.assertIn('label="挂科学期"', failure_history)
+        self.assertIn('label="通过学期"', failure_history)
+        self.assertIn("row.resolvedSemester || '—'", failure_history)
+        self.assertLess(
+            failure_history.index('label="挂科学期"'),
+            failure_history.index('label="通过学期"'),
+        )
+
     def test_growth_and_legacy_lists_restore_url_context(self):
         analysis = self.read("frontend/src/views/admin/students/Analysis.vue")
         legacy_list = self.read("frontend/src/views/admin/students/List.vue")
