@@ -260,6 +260,15 @@ const primarySignal = computed(() => props.row?.signals?.[0] || null)
 const failedScores = computed(() =>
   (student.value.scores || []).filter((item: any) => !item.passed),
 )
+const allFailedCourseCount = computed(() => {
+  const historicalCourses = student.value.studySummary?.failed?.historicalCourses
+  if (historicalCourses != null) return Number(historicalCourses)
+  return new Set(
+    (student.value.failTrace || []).map(
+      (item: any) => item.courseId || item.courseName,
+    ),
+  ).size
+})
 const primaryAssignee = computed(() =>
   workflow.value.assignees?.find((item: any) => item.is_primary)
   || workflow.value.assignees?.[0],
@@ -273,7 +282,7 @@ const studentKpis = computed(() => {
   return [
     { label: '总GPA', value: findKpi('总GPA') || '—' },
     { label: '已修学分', value: summary.passed?.credits ?? findKpi('已修学分') ?? '—' },
-    { label: '当前未解决课程', value: `${summary.failed?.courses ?? failedScores.value.length}门` },
+    { label: '所有未通过课程', value: `${allFailedCourseCount.value}门` },
     { label: '当前规则命中', value: `${props.row?.alertCount || 0}条` },
   ]
 })

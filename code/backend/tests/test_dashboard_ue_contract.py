@@ -226,6 +226,11 @@ class DashboardUeContractTest(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn('label="预警核查摘要" name="summary"', alert_student_drawer)
         self.assertNotIn('label="核查摘要" name="summary"', alert_student_drawer)
+        self.assertIn("label: '所有未通过课程'", alert_student_drawer)
+        self.assertIn("studySummary?.failed?.historicalCourses", alert_student_drawer)
+        self.assertIn("student.value.failTrace || []", alert_student_drawer)
+        self.assertIn("item.courseId || item.courseName", alert_student_drawer)
+        self.assertNotIn("label: '当前未解决课程'", alert_student_drawer)
         trajectory_card = (
             FRONTEND / "views" / "admin" / "alert" / "TrajectoryCard.vue"
         ).read_text(encoding="utf-8")
