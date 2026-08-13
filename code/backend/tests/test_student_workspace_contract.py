@@ -116,6 +116,12 @@ class StudentWorkspaceContractTest(unittest.TestCase):
             failure_history.index('label="通过学期"'),
         )
 
+    def test_student_profile_uses_business_growth_heading(self):
+        detail = self.read("frontend/src/views/admin/student/Detail.vue")
+
+        self.assertIn("学业成长指标", detail)
+        self.assertNotIn(">V2 成长指标 ", detail)
+
     def test_growth_and_legacy_lists_restore_url_context(self):
         analysis = self.read("frontend/src/views/admin/students/Analysis.vue")
         legacy_list = self.read("frontend/src/views/admin/students/List.vue")

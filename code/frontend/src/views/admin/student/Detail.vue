@@ -131,9 +131,9 @@
       <div class="sa-faint advice-footer">生成方式：{{ advice.generated_by }} · 当前未启用外部AI模型 · 正式课程、成绩和毕业审核以学校业务系统为准</div>
     </div>
 
-    <!-- V2 成长指标与困难证据 -->
+    <!-- 学业成长指标与困难证据 -->
     <div class="sa-card" v-if="v2Status==='ok' && v2Growth.indicator">
-      <div class="sa-card-title">V2 成长指标 <span class="extra">growth-v1 · 可回溯证据</span></div>
+      <div class="sa-card-title">学业成长指标 <span class="extra">growth-v1 · 可回溯证据</span></div>
       <el-row :gutter="12" class="v2-metrics">
         <el-col :span="4"><div class="metric"><b>{{ v2Growth.indicator.passed_courses }}</b><span>已通过课程</span></div></el-col>
         <el-col :span="4"><div class="metric danger"><b>{{ v2Growth.indicator.failed_courses }}</b><span>当前未通过</span></div></el-col>
