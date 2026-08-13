@@ -94,7 +94,6 @@ class DashboardUeContractTest(unittest.TestCase):
         for marker in (
             "本学院所有专业偏离与核查",
             "学院偏离与变化",
-            "学院名称只读；本表不提供学院详情或学生名单下钻",
             "学院偏离与变化加载失败",
             "comparisonError",
             "优先核查课程 TOP6",
@@ -108,6 +107,12 @@ class DashboardUeContractTest(unittest.TestCase):
         self.assertNotIn("@row-click", readonly_section)
         self.assertNotIn("goStudents", readonly_section)
         self.assertNotIn("key: 'drill'", readonly_section)
+        for removed_copy in (
+            "证据与口径说明",
+            "与总览首页使用同一全校聚合口径；学院名称只读，不提供下钻",
+            "学院名称只读；本表不提供学院详情或学生名单下钻。",
+        ):
+            self.assertNotIn(removed_copy, college)
         for marker in (
             "年级风险核查",
             "按入学年级倒序固定排列",

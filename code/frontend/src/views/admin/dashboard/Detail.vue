@@ -19,9 +19,6 @@
       <el-skeleton :rows="10" animated />
     </div>
     <template v-if="data.name">
-    <el-alert v-if="data.evidence?.limitation" type="warning" :closable="false" show-icon style="margin:12px 0"
-      title="证据与口径说明" :description="data.evidence.limitation" />
-
     <div class="sa-kpi-row">
       <KpiCard v-for="k in data.kpi" :key="k.id || k.label" :label="k.label" :value="k.value"
         :tone="kpiTone(k.label)" :hint="k.formula" :sub="k.detail"
@@ -58,13 +55,7 @@
     </div>
 
     <div v-if="canCompareColleges" class="sa-card" data-testid="college-deviation-readonly" style="margin-bottom:16px">
-      <div class="sa-card-title">
-        学院偏离与变化
-        <span class="extra">与总览首页使用同一全校聚合口径；学院名称只读，不提供下钻</span>
-      </div>
-      <el-alert type="info" :closable="false" show-icon
-        title="学院名称只读；本表不提供学院详情或学生名单下钻。"
-        :description="collegeComparison.definition?.boundary" style="margin-bottom:10px" />
+      <div class="sa-card-title">学院偏离与变化</div>
       <div v-if="comparisonError" class="comparison-error">
         <el-alert type="error" :closable="false" show-icon title="学院偏离与变化加载失败"
           :description="comparisonError" />
