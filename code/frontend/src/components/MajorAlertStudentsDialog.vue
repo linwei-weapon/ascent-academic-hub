@@ -96,7 +96,7 @@ const columns: DataTableColumn[] = [
   { key: 'primaryReason', label: '主要触发证据', minWidth: 250, tooltip: true, required: true },
   { key: 'alertCount', label: '规则命中', width: 88, align: 'right' },
   { key: 'managementLabel', label: '核查状态', width: 108, required: true },
-  { key: 'latestAt', label: '最近变化', width: 145, defaultVisible: false },
+  { key: 'latestAt', label: '最近变化时间', width: 145, defaultVisible: false },
   { key: 'action', label: '核查', width: 62, fixed: 'right', region: 'action', required: true },
 ]
 
