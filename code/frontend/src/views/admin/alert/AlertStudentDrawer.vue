@@ -49,7 +49,7 @@
       </div>
 
       <el-tabs v-else v-model="activeSection" class="review-tabs">
-        <el-tab-pane label="核查摘要" name="summary">
+        <el-tab-pane label="预警核查摘要" name="summary">
           <section class="summary-callout">
             <div>
               <span>为什么需要关注</span>

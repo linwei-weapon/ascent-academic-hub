@@ -221,6 +221,11 @@ class DashboardUeContractTest(unittest.TestCase):
         ):
             self.assertIn(marker, major_alerts)
         self.assertIn("semester?: string", major_alerts)
+        alert_student_drawer = (
+            FRONTEND / "views" / "admin" / "alert" / "AlertStudentDrawer.vue"
+        ).read_text(encoding="utf-8")
+        self.assertIn('label="预警核查摘要" name="summary"', alert_student_drawer)
+        self.assertNotIn('label="核查摘要" name="summary"', alert_student_drawer)
 
         major_detail = (
             FRONTEND / "views" / "admin" / "dashboard" / "MajorDetail.vue"
