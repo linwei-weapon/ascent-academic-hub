@@ -87,7 +87,7 @@
 
     <!-- 各年级修读结果 + 挂科集中课程 TOP6（同行）-->
     <el-row :gutter="16" style="margin-bottom:16px">
-      <el-col :span="12">
+      <el-col class="grade-result-column" :span="24" :lg="8">
         <div class="sa-card">
           <div class="sa-card-title">各年级本学期修读结果 <KpiLabel label="" formula="同时比较课程学分通过占比、有效成绩人数、学生平均GPA与挂科学生率；课程学分通过占比不代表培养方案完成度" /></div>
           <DataTable v-if="data.gradeCompare.length" :columns="gradeCompareCols" :data="data.gradeCompare"
@@ -99,7 +99,7 @@
           <el-empty v-else description="本学期暂无可比较的年级修读结果" :image-size="64" />
         </div>
       </el-col>
-      <el-col :span="12">
+      <el-col class="focus-course-column" :span="24" :lg="16">
         <div class="sa-card">
           <div class="sa-card-title">优先核查课程 TOP6 <span class="extra">按受影响学生数优先；点击课程查看趋势和班级证据</span></div>
           <DataTable :columns="collegeFailCourseCols" :data="failCourses"

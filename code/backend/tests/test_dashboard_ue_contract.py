@@ -107,6 +107,8 @@ class DashboardUeContractTest(unittest.TestCase):
         self.assertNotIn("@row-click", readonly_section)
         self.assertNotIn("goStudents", readonly_section)
         self.assertNotIn("key: 'drill'", readonly_section)
+        self.assertIn('class="grade-result-column" :span="24" :lg="8"', college)
+        self.assertIn('class="focus-course-column" :span="24" :lg="16"', college)
         for removed_copy in (
             "证据与口径说明",
             "与总览首页使用同一全校聚合口径；学院名称只读，不提供下钻",
