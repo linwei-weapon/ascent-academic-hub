@@ -679,19 +679,6 @@ def student_list(semester: Optional[str] = None, grade: Optional[str] = None,
         WHERE source='real' AND is_pass=0{gsem}{fail_extra}{stu_sub} GROUP BY student_id"""
     stu_fail = {r["student_id"]: r["fc"] for r in dbm.query(conn, fail_sql, tuple(gsemp + sparams))}
 
-    # 预警状态
-    alert_sql = f"""SELECT student_id, GROUP_CONCAT(DISTINCT level) levels
-        FROM fact_alert WHERE status='未处理' AND COALESCE(is_active,1)=1{stu_sub.replace('student_id IN','a.student_id IN').replace('dim_student','dim_student')}
-        GROUP BY student_id""" if scond else """SELECT student_id, GROUP_CONCAT(DISTINCT level) levels
-        FROM fact_alert WHERE status='未处理' AND COALESCE(is_active,1)=1 GROUP BY student_id"""
-    # Skip complex subquery rewrite — just query all alerts
-    stu_alert_levels: dict = {}
-    for r in dbm.query(conn, """SELECT student_id, level FROM fact_alert
-                                  WHERE status='未处理' AND COALESCE(is_active,1)=1"""):
-        prev = stu_alert_levels.get(r["student_id"], "")
-        if r["level"] not in prev:
-            stu_alert_levels[r["student_id"]] = (prev + " " + r["level"]).strip()
-
     # 名称映射
     cname = {r["college_id"]: r["name"] for r in dbm.query(conn, "SELECT college_id, name FROM dim_college")}
     mname = {r["major_id"]: r["name"] for r in dbm.query(conn, "SELECT major_id, name FROM dim_major")}
@@ -713,6 +700,22 @@ def student_list(semester: Optional[str] = None, grade: Optional[str] = None,
     else:
         candidate_students.sort(key=lambda x: x["student_id"], reverse=(order or "asc") == "desc")
     page_students = candidate_students[offset:offset + page_size]
+
+    # 当前有效预警与人工处置状态相互独立，只以 is_active=1 判定。
+    # 仅查询当前授权筛选结果的本页学生；一名学生命中多条规则时展示最高等级。
+    alert_rank = {"提醒": 1, "警告": 2, "严重": 3}
+    stu_alert_levels: dict[str, str] = {}
+    if page_students:
+        page_ids = [row["student_id"] for row in page_students]
+        placeholders = ",".join("?" * len(page_ids))
+        for row in dbm.query(conn, f"""SELECT student_id, level FROM fact_alert
+            WHERE COALESCE(is_active,1)=1
+              AND student_id IN ({placeholders})""", tuple(page_ids)):
+            level = row["level"]
+            previous = stu_alert_levels.get(row["student_id"])
+            if level in alert_rank and alert_rank[level] > alert_rank.get(previous, 0):
+                stu_alert_levels[row["student_id"]] = level
+
     course_results: dict[str, dict] = {}
     if course and len(metric_sem_ids) == 1 and page_students:
         page_ids = [row["student_id"] for row in page_students]

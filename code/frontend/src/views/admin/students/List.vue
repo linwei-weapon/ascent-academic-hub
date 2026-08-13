@@ -56,14 +56,6 @@
       共 <b class="tnum">{{ total }}</b> 名学生<span v-if="avgGpa !== null">，平均 GPA <b class="tnum" :style="{color: avgGpa >= 3.0 ? '#16A34A' : '#DC2626'}">{{ avgGpa }}</b></span>
     </div>
 
-    <el-alert class="ai-focus-alert" type="info" :closable="false" show-icon>
-      <template #title>
-        当前页识别出 <b>{{ currentPageAiFocus.length }}</b> 名 AI 重点学生
-      </template>
-      <template #default>
-        AI 只用于解释“低 GPA、较多挂科与严重预警同时出现”的复合风险，不对每名学生逐一生成评价。请先打开“详情”核查学期变化、挂科和历史预警，达到介入条件时再查看 AI 研判。
-      </template>
-    </el-alert>
     <el-alert v-if="loadError" class="ai-focus-alert" type="error" :closable="false" show-icon>
       <template #title>学生名单加载失败，已保留当前页面内容</template>
       <template #default>
@@ -228,7 +220,6 @@ const majorOptions = computed(() => fCollege.value
 const classOptions = computed(() => fMajor.value
   ? classes.value.filter(c => c.major === fMajor.value)
   : classes.value)
-const currentPageAiFocus = computed(() => students.value.filter(row => studentAttention(row).level === 'ai'))
 const selectedStudentNeedsAi = computed(() => selectedStudentRow.value && studentAttention(selectedStudentRow.value).level === 'ai')
 function currentListQuery() {
   return {

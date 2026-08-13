@@ -50,6 +50,10 @@ def make_conn() -> sqlite3.Connection:
           ('CUR','C1','S2','real',85,3.7,2,0,1,1),
           ('CUR','C3','S2','real',90,4.0,2,0,1,1),
           ('OTHER','C2','S2','real',90,3.5,2,0,1,1);
+        INSERT INTO fact_alert VALUES
+          ('CUR','警告','待处理',1),
+          ('CUR','提醒','已约谈',1),
+          ('CUR','严重','已解决',0);
     """)
     return conn
 
@@ -82,6 +86,7 @@ class DashboardDrillContractTest(unittest.TestCase):
         self.assertEqual("C1", result["appliedFilters"]["course"])
         self.assertEqual(85, result["students"][0]["courseScore"])
         self.assertEqual(3.7, result["students"][0]["courseGp"])
+        self.assertEqual("警告", result["students"][0]["alertLevel"])
         conn.close()
 
     def test_course_drill_without_period_is_explicitly_historical(self):

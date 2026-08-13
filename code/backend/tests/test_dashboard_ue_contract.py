@@ -272,6 +272,8 @@ class DashboardUeContractTest(unittest.TestCase):
         self.assertNotIn("label: '本课程成绩'", student_list)
         self.assertNotIn("label: '本课程绩点'", student_list)
         self.assertNotIn("预警状态", student_list)
+        self.assertNotIn("当前页识别出", student_list)
+        self.assertNotIn("AI 重点学生", student_list)
 
 
 if __name__ == "__main__":
