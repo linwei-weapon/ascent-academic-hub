@@ -126,11 +126,12 @@
               description="“历史已解决”只作为成长轨迹证据，不继续计入当前未解决风险；“重复未解决”是当前未解决课程的高优先子集。"
             />
             <DataTable
+              :key="failureView"
               :columns="failureColumns"
               :data="visibleFailures"
-              storage-key="student-evidence:failures"
-              :max-business-columns="5"
-              :config-version="1"
+              :storage-key="`student-evidence:failures:${failureView}`"
+              :max-business-columns="failureView === 'resolved' ? 6 : 5"
+              :config-version="2"
               size="small"
             >
               <template #col-status="{ row }">
@@ -228,14 +229,23 @@ const semesterColumns: DataTableColumn[] = [
   { key: 'failDeltaText', label: '较前一学期', width: 110, align: 'right' },
   { key: 'earnedCredits', label: '本学期获得学分', width: 130, align: 'right' },
 ]
-const failureColumns: DataTableColumn[] = [
+const baseFailureColumns: DataTableColumn[] = [
   { key: 'courseName', label: '课程', minWidth: 190, fixed: 'left', region: 'identity', required: true },
   { key: 'status', label: '当前状态', width: 112, required: true },
   { key: 'failCount', label: '未通过次数', width: 105, align: 'right', required: true },
-  { key: 'semesters', label: '发生学期', minWidth: 180 },
+  { key: 'semesters', label: '挂科学期', minWidth: 180 },
   { key: 'teacherName', label: '授课教师', width: 110 },
   { key: 'college', label: '开课单位', minWidth: 150 },
 ]
+const failureColumns = computed<DataTableColumn[]>(() => {
+  if (failureView.value !== 'resolved') return baseFailureColumns
+  const columns = [...baseFailureColumns]
+  const failSemesterIndex = columns.findIndex(column => column.key === 'semesters')
+  columns.splice(failSemesterIndex + 1, 0, {
+    key: 'resolvedSemester', label: '解决学期', width: 150, required: true,
+  })
+  return columns
+})
 const alertColumns: DataTableColumn[] = [
   { key: 'time', label: '生成时间', width: 150, fixed: 'left', region: 'identity', required: true },
   { key: 'active', label: '风险状态', width: 100, required: true },

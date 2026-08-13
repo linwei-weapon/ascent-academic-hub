@@ -35,7 +35,11 @@ def make_conn() -> sqlite3.Connection:
             ('S1','C4','2024-2025-2',48,0.0,0,2,'real'),
             ('S1','C5','2024-2025-2',60,NULL,1,0,'real'),
             ('S2','C1','2024-2025-1',80,3.0,1,2,'real'),
-            ('S3','C9','2024-2025-2',NULL,NULL,NULL,2,'real');
+            ('S3','C9','2024-2025-2',NULL,NULL,NULL,2,'real'),
+            ('S4','C6','2023-2024-1',50,0.0,0,2,'real'),
+            ('S4','C6','2023-2024-2',70,2.0,1,2,'real'),
+            ('S4','C6','2024-2025-1',55,0.0,0,2,'real'),
+            ('S4','C6','2024-2025-2',80,3.0,1,2,'real');
     """)
     return conn
 
@@ -82,7 +86,9 @@ class AcademicMetricsTest(unittest.TestCase):
     def test_effective_outcome_separates_resolved_and_unresolved(self):
         outcomes = effective_course_outcomes(self.conn, "S1")
         self.assertEqual("历史已解决", outcomes["C3"]["status"])
+        self.assertEqual("2024-2025-2", outcomes["C3"]["resolvedSemester"])
         self.assertEqual("当前未解决", outcomes["C4"]["status"])
+        self.assertIsNone(outcomes["C4"]["resolvedSemester"])
         self.assertTrue(outcomes["C4"]["repeatedUnresolved"])
         self.assertEqual(2, outcomes["C4"]["failCount"])
         batch = effective_course_outcomes_for_students(
@@ -96,6 +102,14 @@ class AcademicMetricsTest(unittest.TestCase):
         self.assertEqual({"C4"}, set(unresolved["S1"]))
         self.assertTrue(unresolved["S1"]["C4"]["repeatedUnresolved"])
         self.assertNotIn("S2", unresolved)
+
+    def test_resolved_semester_is_rebuilt_after_a_later_failure(self):
+        outcome = effective_course_outcomes(self.conn, "S4")["C6"]
+        self.assertEqual("历史已解决", outcome["status"])
+        self.assertEqual(
+            ["2023-2024-1", "2024-2025-1"], outcome["failSemesters"]
+        )
+        self.assertEqual("2024-2025-2", outcome["resolvedSemester"])
 
 
 if __name__ == "__main__":

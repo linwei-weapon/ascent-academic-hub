@@ -526,6 +526,9 @@ def student_detail(sid: str, user: dict = Depends(get_current_user),
             "status": (course_outcomes.get(r["course_id"]) or {}).get(
                 "status", "待核验"
             ),
+            "resolvedSemester": (course_outcomes.get(r["course_id"]) or {}).get(
+                "resolvedSemester"
+            ),
             "latestSemester": (course_outcomes.get(r["course_id"]) or {}).get(
                 "latestSemester"
             ),

@@ -254,6 +254,7 @@ def effective_course_outcomes_for_students(
                 "courseId": course_id,
                 "failCount": 0,
                 "failSemesters": [],
+                "resolvedSemester": None,
                 "latestSemester": None,
                 "latestPassed": None,
                 "latestCredits": 0.0,
@@ -264,6 +265,11 @@ def effective_course_outcomes_for_students(
                 item["failCount"] += 1
                 if row["semester_id"] not in item["failSemesters"]:
                     item["failSemesters"].append(row["semester_id"])
+                # 后续再次未通过时，之前的解决节点不再代表当前状态。
+                item["resolvedSemester"] = None
+            elif item["failCount"] and item["resolvedSemester"] is None:
+                # 最后一次未通过之后首次取得有效通过结果的学期。
+                item["resolvedSemester"] = row["semester_id"]
             item.update({
                 "latestSemester": row["semester_id"],
                 "latestPassed": row["is_pass"] == 1,
@@ -343,6 +349,7 @@ def unresolved_course_outcomes_for_students(
                     row["fail_semesters"].split(",")
                     if row["fail_semesters"] else []
                 ),
+                "resolvedSemester": None,
                 "latestSemester": row["semester_id"],
                 "latestPassed": False,
                 "latestCredits": float(row["credits"] or 0),
