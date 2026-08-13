@@ -35,11 +35,6 @@
       </div>
 
       <div class="traj-post" v-if="bucket.post">
-        <div class="traj-sub">
-          后续轨迹：可观察 <b class="tnum">{{ bucket.post.observable }}</b> 条
-          <span v-if="bucket.post.pending" class="sa-faint"> · 待观察 {{ bucket.post.pending }} 条（发生在当前学期，尚无后续学期数据，未计入下列分布）</span>
-        </div>
-
         <template v-if="bucket.post.observable">
           <div class="traj-row">
             <div class="traj-label">GPA 变化（均值 {{ fmtMean(bucket.post.gpaDelta.mean) }}）</div>

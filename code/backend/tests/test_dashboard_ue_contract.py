@@ -226,6 +226,12 @@ class DashboardUeContractTest(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn('label="预警核查摘要" name="summary"', alert_student_drawer)
         self.assertNotIn('label="核查摘要" name="summary"', alert_student_drawer)
+        trajectory_card = (
+            FRONTEND / "views" / "admin" / "alert" / "TrajectoryCard.vue"
+        ).read_text(encoding="utf-8")
+        self.assertIn("同类预警后续轨迹", trajectory_card)
+        self.assertNotIn("后续轨迹：可观察", trajectory_card)
+        self.assertNotIn("发生在当前学期，尚无后续学期数据", trajectory_card)
 
         major_detail = (
             FRONTEND / "views" / "admin" / "dashboard" / "MajorDetail.vue"
