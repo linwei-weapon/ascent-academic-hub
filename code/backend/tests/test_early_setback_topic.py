@@ -83,6 +83,19 @@ class EarlySetbackTopicTest(unittest.TestCase):
         self.assertEqual(["M1", "M2"], [x["value"] for x in major["major"]])
         self.assertEqual(["班级一", "班级二"], [x["value"] for x in major["class"]])
 
+        self.conn.execute(
+            "INSERT INTO dim_student VALUES(?,?,?,?,?,?,?)",
+            ("S7", "庚", 2021, "O1", "M1", "专业一", "班级旧"),
+        )
+        combined = early_setback_options(
+            organization_id="O1", major_code="M1", entry_grade=2022,
+            user=self.user, conn=self.conn,
+        )["data"]
+        self.assertEqual(
+            ["班级一", "班级二"],
+            [x["value"] for x in combined["class"]],
+        )
+
     def test_focus_dimension_and_rate_sort_follow_filters(self):
         all_scope = early_setback_topic(
             limit=50, offset=0, user=self.user, conn=self.conn,

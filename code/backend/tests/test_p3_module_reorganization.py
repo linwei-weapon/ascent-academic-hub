@@ -101,8 +101,24 @@ class P3ModuleReorganizationTest(unittest.TestCase):
         self.assertIn("focusDescription", page)
         self.assertIn("applyKpiPreset", page)
         self.assertIn("studentListSection", page)
+        self.assertLess(page.index('placeholder="年级"'), page.index('placeholder="班级"'))
+        student_columns = page[page.index("const studentColumns"):]
+        self.assertLess(
+            student_columns.index("{ key: 'organization_name', label: '学院'"),
+            student_columns.index("{ key: 'major_name', label: '专业'"),
+        )
+        self.assertLess(
+            student_columns.index("{ key: 'class_code', label: '班级'"),
+            student_columns.index("{ key: 'entry_grade', label: '年级'"),
+        )
         drawer = self.read("frontend/src/views/admin/alert/EarlySetbackDrawer.vue")
         self.assertIn("no_setback: '大一未出现未通过'", drawer)
+        self.assertNotIn("这是核查线索，不是个人原因判断", drawer)
+        self.assertNotIn("历史预警用于理解风险变化", drawer)
+        self.assertNotIn("本专题不自动建立帮扶任务", drawer)
+        self.assertIn("student.value.semesterSummary", drawer)
+        self.assertIn("point.semester", drawer)
+        self.assertNotIn("`学期${index + 1}`", drawer)
 
     def test_college_comparison_separates_compare_and_drill(self):
         dashboard = self.read("frontend/src/views/admin/dashboard/index.vue")

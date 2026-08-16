@@ -17,14 +17,6 @@
         </el-tag>
       </div>
 
-      <el-alert
-        type="info"
-        :closable="false"
-        show-icon
-        title="这是核查线索，不是个人原因判断"
-        :description="managementSuggestion"
-      />
-
       <div class="evidence-grid">
         <div><b>{{ row.first_setback_semester || '—' }}</b><span>首次未通过学期</span></div>
         <div><b>{{ row.first_year_failures || 0 }}条</b><span>大一未通过记录</span></div>
@@ -48,7 +40,7 @@
         <el-tab-pane label="成绩与变化" name="grades">
           <section class="section-card">
             <h4>GPA轨迹</h4>
-            <EChart v-if="student.gpaHistory?.length" :option="gpaOption" :height="190" />
+            <EChart v-if="gpaPoints.length" :option="gpaOption" :height="190" />
             <el-empty v-else description="暂无可用GPA轨迹" :image-size="65" />
           </section>
           <section class="section-card">
@@ -72,14 +64,10 @@
             </div>
             <el-empty v-else description="暂无历史预警记录" :image-size="70" />
           </section>
-          <p class="boundary">
-            历史预警用于理解风险变化，不表示当前仍需沿用历史标签。
-          </p>
         </el-tab-pane>
       </el-tabs>
 
       <div class="drawer-footer">
-        <span>本专题不自动建立帮扶任务，也不推断教师或学生个人原因。</span>
         <el-button type="primary" plain @click="openFullProfile">查看完整学业档案</el-button>
       </div>
     </div>
@@ -119,20 +107,29 @@ const gpaChange = computed(() => {
   const delta = later - first
   return `${delta > 0 ? '+' : ''}${delta.toFixed(2)}`
 })
-const managementSuggestion = computed(() => ({
-  no_setback: '该学生纳入低年级观察样本，但大一常规学期未出现未通过记录；只作为观察范围核查，不作为受挫或风险判断。',
-  persistent: '优先核对后续未通过课程是否集中于同类基础课程，并结合完整档案判断是否需要课程支持或持续关注。',
-  recovering: '后续仍有未通过记录但没有进一步增加，建议确认近期学习变化，避免仅依据大一记录持续贴标签。',
-  recovered: '后续成绩中未再出现未通过，建议作为改善证据保留，不纳入优先核查队列。',
-  pending_observation: '尚无后续常规学期成绩，不提前判断变化方向；待下次成绩发布后复核。',
-}[props.row?.recovery_status] || '结合课程、成绩和预警历史进行人工核查。'))
+const gpaPoints = computed(() => {
+  const summaries = (student.value.semesterSummary || [])
+    .filter((item: any) => item.semester && Number.isFinite(Number(item.gpa)))
+    .slice(-6)
+    .map((item: any) => ({ semester: String(item.semester), gpa: Number(item.gpa) }))
+  if (summaries.length) return summaries
+
+  const values = (student.value.gpaHistory || []).map((value: any) => Number(value))
+  const semesters = [...new Set(
+    (student.value.scores || []).map((item: any) => String(item.semester || '')).filter(Boolean),
+  )].sort().slice(-values.length)
+  return values.map((gpa: number, index: number) => ({
+    semester: semesters[index] || '—',
+    gpa,
+  }))
+})
 const gpaOption = computed(() => {
-  const values = student.value.gpaHistory || []
+  const values = gpaPoints.value
   return {
     grid: { left: 8, right: 16, top: 20, bottom: 8, containLabel: true },
     tooltip: { trigger: 'axis' },
     xAxis: {
-      type: 'category', data: values.map((_: number, index: number) => `学期${index + 1}`),
+      type: 'category', data: values.map((point: any) => point.semester),
       axisLabel: { color: '#64748b' }, axisTick: { show: false },
       axisLine: { lineStyle: { color: '#e2e8f0' } },
     },
@@ -142,7 +139,7 @@ const gpaOption = computed(() => {
       splitLine: { lineStyle: { color: '#eef2f7' } },
     },
     series: [{
-      type: 'line', data: values, smooth: true, symbolSize: 7,
+      type: 'line', data: values.map((point: any) => point.gpa), smooth: true, symbolSize: 7,
       lineStyle: { color: '#4f46e5', width: 3 },
       itemStyle: { color: '#4f46e5' },
       areaStyle: { color: 'rgba(79,70,229,.08)' },
@@ -187,5 +184,5 @@ watch(
 </script>
 
 <style scoped>
-.drawer-body{min-height:420px}.student-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;padding-bottom:14px;border-bottom:1px solid var(--sa-border)}.student-head h3{margin:0;color:var(--sa-text);font-size:20px}.student-head p{margin:5px 0 0;color:var(--sa-muted);font-size:12px}.drawer-body>.el-alert{margin:14px 0}.evidence-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:14px 0}.evidence-grid div{padding:12px;border:1px solid #e2e8f0;border-radius:9px;background:#f8fafc}.evidence-grid b,.evidence-grid span{display:block}.evidence-grid b{color:#1e293b;font-size:17px}.evidence-grid span{margin-top:4px;color:#64748b;font-size:10px}.drawer-loading{padding:22px 4px}.drawer-loading p{text-align:center;color:#94a3b8;font-size:11px}.section-card{margin-bottom:12px;padding:14px;border:1px solid #e2e8f0;border-radius:10px}.section-card h4{margin:0 0 10px;color:#334155;font-size:13px}.record-list div{display:flex;justify-content:space-between;gap:14px;padding:8px 0;border-bottom:1px dashed #e2e8f0;font-size:12px}.record-list div:last-child{border-bottom:0}.record-list span{color:#475569}.record-list b{color:#64748b;font-weight:500}.boundary{color:#94a3b8;font-size:11px}.drawer-footer{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-top:14px;padding-top:12px;border-top:1px solid #e2e8f0}.drawer-footer span{color:#94a3b8;font-size:11px}@media(max-width:760px){.evidence-grid{grid-template-columns:repeat(2,1fr)}}
+.drawer-body{min-height:420px}.student-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;padding-bottom:14px;border-bottom:1px solid var(--sa-border)}.student-head h3{margin:0;color:var(--sa-text);font-size:20px}.student-head p{margin:5px 0 0;color:var(--sa-muted);font-size:12px}.evidence-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:14px 0}.evidence-grid div{padding:12px;border:1px solid #e2e8f0;border-radius:9px;background:#f8fafc}.evidence-grid b,.evidence-grid span{display:block}.evidence-grid b{color:#1e293b;font-size:17px}.evidence-grid span{margin-top:4px;color:#64748b;font-size:10px}.drawer-loading{padding:22px 4px}.drawer-loading p{text-align:center;color:#94a3b8;font-size:11px}.section-card{margin-bottom:12px;padding:14px;border:1px solid #e2e8f0;border-radius:10px}.section-card h4{margin:0 0 10px;color:#334155;font-size:13px}.record-list div{display:flex;justify-content:space-between;gap:14px;padding:8px 0;border-bottom:1px dashed #e2e8f0;font-size:12px}.record-list div:last-child{border-bottom:0}.record-list span{color:#475569}.record-list b{color:#64748b;font-weight:500}.drawer-footer{display:flex;align-items:center;justify-content:flex-end;gap:16px;margin-top:14px;padding-top:12px;border-top:1px solid #e2e8f0}@media(max-width:760px){.evidence-grid{grid-template-columns:repeat(2,1fr)}}
 </style>

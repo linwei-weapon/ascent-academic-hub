@@ -36,11 +36,11 @@
         <el-select v-model="draft.major" clearable placeholder="专业" @change="handleCascadeChange('major')">
           <el-option v-for="item in options.major" :key="item.value" :label="item.label" :value="item.value" />
         </el-select>
-        <el-select v-model="draft.classCode" clearable placeholder="班级" @change="handleCascadeChange('class')">
-          <el-option v-for="item in options.class" :key="item.value" :label="item.label" :value="item.value" />
-        </el-select>
         <el-select v-model="draft.grade" clearable placeholder="年级" @change="handleCascadeChange('grade')">
           <el-option v-for="item in options.grade" :key="item.value" :label="item.label" :value="item.value" />
+        </el-select>
+        <el-select v-model="draft.classCode" clearable placeholder="班级" @change="handleCascadeChange('class')">
+          <el-option v-for="item in options.class" :key="item.value" :label="item.label" :value="item.value" />
         </el-select>
         <el-button type="primary" :loading="refreshing" @click="applyFilter">查询</el-button>
         <el-button :disabled="refreshing" @click="reset">重置</el-button>
@@ -150,8 +150,8 @@
           :columns="studentColumns"
           :data="data.students"
           storage-key="alert:early-setback:students"
-          config-version="2"
-          :max-business-columns="6"
+          config-version="3"
+          :max-business-columns="8"
           :page-size="pageSize"
           :page-sizes="[20, 50, 100]"
           size="small"
@@ -318,7 +318,9 @@ const courseColumns: DataTableColumn[] = [
 ]
 const studentColumns: DataTableColumn[] = [
   { key: 'student', label: '学生', required: true, region: 'identity', fixed: 'left', width: 125 },
+  { key: 'organization_name', label: '学院', region: 'business', minWidth: 170, tooltip: true },
   { key: 'major_name', label: '专业', region: 'business', minWidth: 150, tooltip: true },
+  { key: 'class_code', label: '班级', region: 'business', minWidth: 130, tooltip: true },
   { key: 'entry_grade', label: '年级', region: 'business', width: 75 },
   { key: 'first_setback_semester', label: '首次未通过学期', required: true, region: 'business', width: 125 },
   { key: 'first_year_failures', label: '大一未通过记录', region: 'business', width: 115 },
