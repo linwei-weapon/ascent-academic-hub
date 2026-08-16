@@ -103,6 +103,7 @@ const activeTab = ref('grades')
 let requestSequence = 0
 
 const statusName: Record<string, string> = {
+  no_setback: '大一未出现未通过',
   recovered: '后续未再出现未通过',
   recovering: '后续仍需观察',
   persistent: '后续持续出现未通过',
@@ -119,6 +120,7 @@ const gpaChange = computed(() => {
   return `${delta > 0 ? '+' : ''}${delta.toFixed(2)}`
 })
 const managementSuggestion = computed(() => ({
+  no_setback: '该学生纳入低年级观察样本，但大一常规学期未出现未通过记录；只作为观察范围核查，不作为受挫或风险判断。',
   persistent: '优先核对后续未通过课程是否集中于同类基础课程，并结合完整档案判断是否需要课程支持或持续关注。',
   recovering: '后续仍有未通过记录但没有进一步增加，建议确认近期学习变化，避免仅依据大一记录持续贴标签。',
   recovered: '后续成绩中未再出现未通过，建议作为改善证据保留，不纳入优先核查队列。',

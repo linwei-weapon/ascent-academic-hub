@@ -86,6 +86,24 @@ class P3ModuleReorganizationTest(unittest.TestCase):
         self.assertIn(".chart-card { height: 495px; }", monitor)
         self.assertIn("fourKpiPresetExpectedTotal", monitor)
 
+    def test_early_setback_followup_ui_contract(self):
+        page = self.read("frontend/src/views/admin/reports/EarlySetback.vue")
+        self.assertNotIn("群体筛查不等于个人原因判断", page)
+        self.assertNotIn("学生指标均按学号去重", page)
+        self.assertNotIn("不同年级的后续观察时长不同", page)
+        self.assertNotIn("用于识别基础课程支持方向", page)
+        self.assertIn("<b>观察条件</b>", page)
+        self.assertIn('placeholder="学院"', page)
+        self.assertIn('placeholder="专业"', page)
+        self.assertIn('placeholder="班级"', page)
+        self.assertIn('placeholder="年级"', page)
+        self.assertIn("focusTitle", page)
+        self.assertIn("focusDescription", page)
+        self.assertIn("applyKpiPreset", page)
+        self.assertIn("studentListSection", page)
+        drawer = self.read("frontend/src/views/admin/alert/EarlySetbackDrawer.vue")
+        self.assertIn("no_setback: '大一未出现未通过'", drawer)
+
     def test_college_comparison_separates_compare_and_drill(self):
         dashboard = self.read("frontend/src/views/admin/dashboard/index.vue")
         self.assertIn("/admin/meta/college-comparison", dashboard)

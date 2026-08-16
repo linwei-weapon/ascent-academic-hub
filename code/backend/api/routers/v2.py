@@ -718,31 +718,102 @@ def difficult_students(flag: Optional[str] = None, severity: Optional[str] = Non
     return ok({"items": rows, "total": total, "limit": limit, "offset": offset})
 
 
+def _early_setback_where(user: dict, conn: sqlite3.Connection,
+                         organization_id: Optional[str] = None,
+                         major_code: Optional[str] = None,
+                         class_code: Optional[str] = None,
+                         entry_grade: Optional[int] = None,
+                         ignore: Optional[str] = None) -> tuple[str, list]:
+    cond, params = ["s.entry_grade BETWEEN 2000 AND 2100"], []
+    scope, scope_params = _student_scope(user, conn, "s")
+    if scope:
+        cond.append(scope)
+        params.extend(scope_params)
+    filters = {
+        "college": (organization_id, "s.organization_id=?"),
+        "major": (major_code, "s.major_code=?"),
+        "class": (class_code, "s.class_code=?"),
+        "grade": (entry_grade, "s.entry_grade=?"),
+    }
+    for dimension, (value, expression) in filters.items():
+        if value is not None and dimension != ignore:
+            cond.append(expression)
+            params.append(value)
+    return " AND ".join(cond), params
+
+
+@router.get("/topics/early-setback/options")
+def early_setback_options(organization_id: Optional[str] = None,
+                          major_code: Optional[str] = None,
+                          class_code: Optional[str] = None,
+                          entry_grade: Optional[int] = None,
+                          conn: sqlite3.Connection = Depends(get_v2_db),
+                          user: dict = Depends(require_v2_reader)):
+    """返回当前身份授权范围内的学院、专业、班级和年级联动选项。"""
+    values = {}
+    dimensions = {
+        "college": (
+            "s.organization_id value,COALESCE(o.name,s.organization_id) label",
+            "LEFT JOIN dim_organization o ON o.organization_id=s.organization_id",
+            "s.organization_id IS NOT NULL",
+            "label,value",
+        ),
+        "major": (
+            "s.major_code value,COALESCE(s.major_name,s.major_code) label",
+            "",
+            "s.major_code IS NOT NULL",
+            "label,value",
+        ),
+        "class": (
+            "s.class_code value,s.class_code label", "",
+            "s.class_code IS NOT NULL", "label,value",
+        ),
+        "grade": (
+            "s.entry_grade value,CAST(s.entry_grade AS TEXT)||'级' label", "",
+            "s.entry_grade IS NOT NULL", "value DESC",
+        ),
+    }
+    for dimension, (select_sql, join_sql, present_sql, order_sql) in dimensions.items():
+        where, params = _early_setback_where(
+            user, conn, organization_id, major_code, class_code, entry_grade,
+            ignore=dimension,
+        )
+        values[dimension] = dbm.query(conn, f"""
+            SELECT DISTINCT {select_sql} FROM dim_student s {join_sql}
+            WHERE {where} AND {present_sql} ORDER BY {order_sql}
+        """, tuple(params))
+    return ok(values)
+
+
 @router.get("/topics/early-setback")
-def early_setback_topic(organization_id: Optional[str] = None, major_code: Optional[str] = None,
+def early_setback_topic(organization_id: Optional[str] = None,
+                        major_code: Optional[str] = None,
+                        class_code: Optional[str] = None,
                         entry_grade: Optional[int] = None,
+                        observation_status: Optional[str] = None,
                         limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0),
                         conn: sqlite3.Connection = Depends(get_v2_db), user: dict = Depends(require_v2_reader)):
     """大一首次挂科及后续恢复专题；只使用已发布、未作废且通过口径明确的成绩。"""
     cache_key = ("early_setback", _permission_cache_key(user),
-                 organization_id, major_code, entry_grade, limit, offset)
+                 organization_id, major_code, class_code, entry_grade,
+                 observation_status, limit, offset)
     cached = _query_cache_get(cache_key)
     if cached is not None:
         return ok(cached)
-    cond, params = ["s.entry_grade BETWEEN 2000 AND 2100"], []
-    scope, scope_params = _student_scope(user, conn, "s")
-    if scope:
-        cond.append(scope); params.extend(scope_params)
-    if organization_id:
-        cond.append("s.organization_id=?"); params.append(organization_id)
-    if major_code:
-        cond.append("s.major_code=?"); params.append(major_code)
-    if entry_grade:
-        cond.append("s.entry_grade=?"); params.append(entry_grade)
-    where = " AND ".join(cond)
+    valid_statuses = {
+        "eligible", "setback", "recovered", "persistent",
+        "pending_observation",
+    }
+    if observation_status and observation_status not in valid_statuses:
+        raise ApiError("不支持的低年级观察名单预设", code=400, status_code=400)
+    where, params = _early_setback_where(
+        user, conn, organization_id, major_code, class_code, entry_grade,
+    )
     cte = f"""
     WITH eligible AS (
-      SELECT s.* FROM dim_student s WHERE {where}
+      SELECT s.*,COALESCE(o.name,s.organization_id,'未说明学院') organization_name
+      FROM dim_student s LEFT JOIN dim_organization o ON o.organization_id=s.organization_id
+      WHERE {where}
     ), term_result AS (
       SELECT g.student_id,g.semester_id,
         CAST(substr(g.semester_id,1,4) AS INTEGER)-e.entry_grade+1 study_year,
@@ -753,7 +824,8 @@ def early_setback_topic(organization_id: Optional[str] = None, major_code: Optio
       WHERE g.is_published=1 AND g.is_void=0 AND g.is_pass IS NOT NULL
       GROUP BY g.student_id,g.semester_id
     ), student_result AS (
-      SELECT e.student_id,e.display_name,e.entry_grade,e.organization_id,e.major_code,e.major_name,e.class_code,
+      SELECT e.student_id,e.display_name,e.entry_grade,e.organization_id,e.organization_name,
+        e.major_code,e.major_name,e.class_code,
         SUM(CASE WHEN t.study_year=1 AND t.term_no IN ('1','2') THEN t.failures ELSE 0 END) first_year_failures,
         SUM(CASE WHEN t.study_year=1 AND t.term_no IN ('1','2') THEN t.attempts ELSE 0 END) first_year_attempts,
         SUM(CASE WHEN t.study_year>1 AND t.term_no IN ('1','2') THEN t.failures ELSE 0 END) later_failures,
@@ -775,31 +847,70 @@ def early_setback_topic(organization_id: Optional[str] = None, major_code: Optio
     """
     all_rows = dbm.query(conn, cte + "SELECT * FROM classified", tuple(params))
     setback_rows = [x for x in all_rows if x["first_year_failures"] > 0]
-    rank = {"persistent": 0, "recovering": 1, "pending_observation": 2, "recovered": 3}
-    setback_rows.sort(key=lambda x: (rank[x["recovery_status"]], -x["later_failures"],
-                                     -x["first_year_failures"], x["student_id"]))
-    total = len(setback_rows); students = setback_rows[offset:offset + limit]
+    rank = {"persistent": 0, "recovering": 1, "pending_observation": 2,
+            "recovered": 3, "no_setback": 4}
+    listed_rows = (
+        all_rows if observation_status == "eligible"
+        else setback_rows if not observation_status or observation_status == "setback"
+        else [x for x in setback_rows if x["recovery_status"] == observation_status]
+    )
+    listed_rows.sort(key=lambda x: (rank[x["recovery_status"]], -x["later_failures"],
+                                    -x["first_year_failures"], x["student_id"]))
+    total = len(listed_rows); students = listed_rows[offset:offset + limit]
     summary = {"eligible_students": len(all_rows), "setback_students": len(setback_rows),
       "recovered_students": sum(x["recovery_status"] == "recovered" for x in setback_rows),
       "recovering_students": sum(x["recovery_status"] == "recovering" for x in setback_rows),
       "persistent_students": sum(x["recovery_status"] == "persistent" for x in setback_rows),
       "pending_students": sum(x["recovery_status"] == "pending_observation" for x in setback_rows)}
-    grade_groups = defaultdict(list); major_groups = defaultdict(list)
+    grade_groups = defaultdict(list)
     for row in all_rows:
         grade_groups[row["entry_grade"]].append(row)
-        major_groups[(row["organization_id"], row["major_code"], row["major_name"])].append(row)
     by_grade = [{"entry_grade": grade, "eligible_students": len(rows),
       "setback_students": sum(x["first_year_failures"] > 0 for x in rows),
       "persistent_students": sum(x["recovery_status"] == "persistent" for x in rows),
       "improved_students": sum(x["recovery_status"] == "recovered" for x in rows)}
       for grade, rows in sorted(grade_groups.items())]
+    major_groups = defaultdict(list)
+    for row in all_rows:
+        major_groups[(row["organization_id"], row["major_code"],
+                      row["major_name"] or row["major_code"] or "未说明专业")].append(row)
     by_major = [{"organization_id": org, "major_code": code, "major_name": name,
       "eligible_students": len(rows), "setback_students": sum(x["first_year_failures"] > 0 for x in rows),
       "persistent_students": sum(x["recovery_status"] == "persistent" for x in rows),
       "improved_students": sum(x["recovery_status"] == "recovered" for x in rows)}
       for (org, code, name), rows in major_groups.items() if any(x["first_year_failures"] > 0 for x in rows)]
-    by_major.sort(key=lambda x: (-x["persistent_students"], -x["setback_students"])); by_major = by_major[:12]
-    courses = dbm.query(conn, f"""WITH eligible AS (SELECT s.* FROM dim_student s WHERE {where})
+    by_major.sort(key=lambda x: (-x["persistent_students"], -x["setback_students"], x["major_name"]))
+    by_major = by_major[:12]
+    focus_dimension = "class" if major_code or class_code else "major" if organization_id else "college"
+    focus_groups_map = defaultdict(list)
+    for row in all_rows:
+        if focus_dimension == "college":
+            key = (row["organization_id"], row["organization_name"])
+        elif focus_dimension == "major":
+            key = (row["major_code"], row["major_name"] or row["major_code"] or "未说明专业")
+        else:
+            key = (row["class_code"], row["class_code"] or "未说明班级")
+        focus_groups_map[key].append(row)
+    focus_groups = []
+    for (group_id, group_name), rows in focus_groups_map.items():
+        setback_count = sum(x["first_year_failures"] > 0 for x in rows)
+        if not setback_count:
+            continue
+        eligible_count = len(rows)
+        focus_groups.append({
+            "group_id": group_id, "group_name": group_name,
+            "major_name": group_name,
+            "eligible_students": eligible_count,
+            "setback_students": setback_count,
+            "setback_rate": round(setback_count * 100.0 / eligible_count, 1),
+            "persistent_students": sum(x["recovery_status"] == "persistent" for x in rows),
+            "improved_students": sum(x["recovery_status"] == "recovered" for x in rows),
+        })
+    focus_groups.sort(key=lambda x: (-x["setback_rate"], -x["setback_students"], x["group_name"] or ""))
+    focus_groups = focus_groups[:12]
+    courses = dbm.query(conn, f"""WITH eligible AS (
+        SELECT s.* FROM dim_student s WHERE {where}
+      )
       SELECT g.course_id,COALESCE(MAX(g.course_name),MAX(c.name),g.course_id) course_name,
       COUNT(*) failed_attempts,COUNT(DISTINCT g.student_id) affected_students
       FROM grade_attempt g JOIN eligible e ON e.student_id=g.student_id LEFT JOIN dim_course c ON c.course_id=g.course_id
@@ -808,7 +919,9 @@ def early_setback_topic(organization_id: Optional[str] = None, major_code: Optio
       GROUP BY g.course_id ORDER BY affected_students DESC,failed_attempts DESC LIMIT 10""", tuple(params))
     eligible = summary.get("eligible_students") or 0; setback = summary.get("setback_students") or 0
     summary["setback_rate"] = round(setback * 100.0 / eligible, 2) if eligible else 0
-    payload = {"summary": summary, "by_grade": by_grade, "by_major": by_major, "courses": courses,
+    payload = {"summary": summary, "by_grade": by_grade,
+               "by_major": by_major, "focus_groups": focus_groups,
+               "focus_dimension": focus_dimension, "courses": courses,
                "students": students, "total": total, "limit": limit, "offset": offset,
                "definition": {"first_year": "观察范围：有有效入学年，且大一第一或第二学期至少有1条有效成绩的去重学生。",
                  "setback": "大一第一或第二学期至少出现1条明确未通过成绩的去重学生；比例分母为纳入观察的学生。",
