@@ -66,9 +66,11 @@ class P3ModuleReorganizationTest(unittest.TestCase):
             "frontend/src/views/admin/curriculum/index.vue",
             "frontend/src/views/admin/faculty/Index.vue",
             "frontend/src/views/admin/students/Analysis.vue",
-            "frontend/src/views/admin/alert/Workspace.vue",
         ):
             self.assertIn("BusinessPageContext", self.read(page), page)
+        alert = self.read("frontend/src/views/admin/alert/Workspace.vue")
+        self.assertNotIn("BusinessPageContext", alert)
+        self.assertIn("最新预警统计时间", alert)
 
     def test_college_comparison_separates_compare_and_drill(self):
         dashboard = self.read("frontend/src/views/admin/dashboard/index.vue")

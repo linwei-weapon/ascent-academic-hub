@@ -47,7 +47,7 @@ def make_conn() -> sqlite3.Connection:
             ('S03','学生3','C01','M01','B01','2023','在籍','real'),
             ('S04','学生4','C01','M01','B01','2023','在籍','real'),
             ('S05','学生5','C01','M01','B01','2023','在籍','real'),
-            ('S06','学生6','C02','M02','B02','2023','在籍','real');
+            ('S06','学生6','C02','M02','B02','2022','在籍','real');
 
         INSERT INTO fact_alert VALUES
             (1,'S01','R1','GPA持续下降','严重','GPA下降0.8','待处理',
@@ -115,6 +115,21 @@ class AlertMonitorTest(unittest.TestCase):
         self.assertEqual(83.3, summary["alert_student_rate"])
         self.assertFalse(data["meta"]["historyComparison"]["available"])
 
+    def test_summary_denominator_follows_organization_and_grade_filters(self):
+        college = alert_summary(
+            college="C01", user=self.dean, conn=self.conn,
+        )["data"]["summary"]
+        self.assertEqual(4, college["current_students"])
+        self.assertEqual(5, college["eligible_students"])
+        self.assertEqual(80.0, college["alert_student_rate"])
+
+        grade = alert_summary(
+            grade="2022", user=self.dean, conn=self.conn,
+        )["data"]["summary"]
+        self.assertEqual(1, grade["current_students"])
+        self.assertEqual(1, grade["eligible_students"])
+        self.assertEqual(100.0, grade["alert_student_rate"])
+
     def test_student_rows_group_multiple_alerts(self):
         data = alert_students(
             page=1, page_size=10, user=self.dean, conn=self.conn,
@@ -138,6 +153,22 @@ class AlertMonitorTest(unittest.TestCase):
             user=self.dean, conn=self.conn,
         )["data"]
         self.assertEqual(["S03"], [row["studentId"] for row in data["items"]])
+
+    def test_highest_level_filter_is_student_level(self):
+        critical = alert_students(
+            page=1, page_size=10, highest_level="严重",
+            user=self.dean, conn=self.conn,
+        )["data"]
+        self.assertEqual(3, critical["pagination"]["total"])
+        self.assertEqual({"S01", "S02", "S06"}, {
+            row["studentId"] for row in critical["items"]
+        })
+
+        critical_pending = alert_students(
+            page=1, page_size=10, highest_level="严重",
+            management="pending_review", user=self.dean, conn=self.conn,
+        )["data"]
+        self.assertEqual(2, critical_pending["pagination"]["total"])
 
     def test_class_scope_and_inbox_are_enforced(self):
         counselor = user(
@@ -189,10 +220,10 @@ class AlertMonitorTest(unittest.TestCase):
         )["data"]
         self.assertEqual("major", scoped["dimension"])
         self.assertEqual({"M01"}, {row["id"] for row in scoped["items"]})
-        with self.assertRaises(ApiError):
-            alert_distribution(
-                dimension="college", user=college, conn=self.conn,
-            )
+        own_college = alert_distribution(
+            dimension="college", college="C01", user=college, conn=self.conn,
+        )["data"]
+        self.assertEqual({"C01"}, {row["id"] for row in own_college["items"]})
 
     def test_time_distribution_discloses_snapshot_boundary(self):
         data = alert_time_distribution(
@@ -201,14 +232,40 @@ class AlertMonitorTest(unittest.TestCase):
         self.assertEqual("snapshot_first_detected_month", data["mode"])
         self.assertFalse(data["comparison"]["available"])
         self.assertIn("不是各月历史新增趋势", data["definition"]["boundary"])
+        self.assertEqual("2026-07-05", data["latestGeneratedDate"])
+
+    def test_time_distribution_returns_latest_ten_data_months(self):
+        for index in range(11):
+            month = index + 1
+            alert_id = 100 + index
+            self.conn.execute(
+                """INSERT INTO fact_alert VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    alert_id, "S05", f"RX{index}", "测试预警", "提醒",
+                    "测试证据", "待处理", f"2025-{month:02d}-01",
+                    "2025-2026-2", "real", 1, "test-v1", None, None, None,
+                ),
+            )
+        data = alert_time_distribution(
+            user=self.dean, conn=self.conn,
+        )["data"]
+        self.assertEqual(10, len(data["items"]))
+        self.assertEqual("2025-04", data["items"][0]["month"])
+        self.assertEqual("2026-07", data["items"][-1]["month"])
+        self.assertEqual("2026-07-05", data["latestGeneratedDate"])
 
     def test_options_are_scoped_without_full_record_download(self):
         college = user("college_dean", "college", ["C01"])
         data = alert_filter_options(user=college, conn=self.conn)["data"]
         self.assertEqual("major", data["defaultDimension"])
-        self.assertNotIn("college", data["organizations"])
+        self.assertEqual({"C01"}, {
+            row["value"] for row in data["organizations"]["college"]
+        })
         self.assertEqual({"M01"}, {
             row["value"] for row in data["organizations"]["major"]
+        })
+        self.assertEqual({"2023"}, {
+            row["value"] for row in data["organizations"]["grade"]
         })
 
         major_data = alert_filter_options(
@@ -219,6 +276,48 @@ class AlertMonitorTest(unittest.TestCase):
         })
         self.assertNotIn("退学风险", {
             row["value"] for row in major_data["types"]
+        })
+
+        grade_data = alert_filter_options(
+            major="M01", grade="2023", user=self.dean, conn=self.conn,
+        )["data"]
+        self.assertEqual({"B01"}, {
+            row["value"] for row in grade_data["organizations"]["class"]
+        })
+
+    def test_organization_options_include_authorized_groups_without_alerts(self):
+        self.conn.execute("INSERT INTO dim_college VALUES ('C03','三院')")
+        self.conn.execute("INSERT INTO dim_major VALUES ('M03','C03','丙专业')")
+        self.conn.execute("INSERT INTO dim_class VALUES ('B03','M03','丙班')")
+        self.conn.execute(
+            "INSERT INTO dim_student VALUES (?,?,?,?,?,?,?,?)",
+            ("S07", "学生7", "C03", "M03", "B03", "2024", "在籍", "real"),
+        )
+        data = alert_filter_options(user=self.dean, conn=self.conn)["data"]
+        self.assertIn("C03", {
+            row["value"] for row in data["organizations"]["college"]
+        })
+        self.assertIn("M03", {
+            row["value"] for row in data["organizations"]["major"]
+        })
+        self.assertIn("B03", {
+            row["value"] for row in data["organizations"]["class"]
+        })
+
+    def test_options_for_counselor_stay_inside_managed_student_scope(self):
+        counselor = user(
+            "counselor", "class", ["B01"], username="counselor_a",
+        )
+        data = alert_filter_options(user=counselor, conn=self.conn)["data"]
+        organizations = data["organizations"]
+        self.assertEqual({"C01"}, {
+            row["value"] for row in organizations["college"]
+        })
+        self.assertEqual({"M01"}, {
+            row["value"] for row in organizations["major"]
+        })
+        self.assertEqual({"B01"}, {
+            row["value"] for row in organizations["class"]
         })
 
     def test_priority_queue_is_student_level_and_explainable(self):
@@ -245,6 +344,16 @@ class AlertMonitorTest(unittest.TestCase):
         self.assertIn("S01", content)
         self.assertNotIn("S06", content)
         self.assertIn("核查状态", content)
+
+        card_response = export_alert_students(
+            highest_level="严重", management="pending_review",
+            user=self.dean, conn=self.conn,
+        )
+        card_content = card_response.body.decode("utf-8-sig")
+        self.assertEqual("2", card_response.headers["x-export-count"])
+        self.assertIn("S01", card_content)
+        self.assertIn("S06", card_content)
+        self.assertNotIn("S02", card_content)
 
     def test_ai_group_insight_reuses_student_definition_and_trace(self):
         data = ai_alert_summary(user=self.dean, conn=self.conn)["data"]

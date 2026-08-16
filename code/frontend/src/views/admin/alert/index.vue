@@ -1,8 +1,10 @@
 <template>
   <div class="alert-monitor">
     <div v-if="!embedded" class="monitor-head">
-      <h2 class="sa-page-title">学业预警监控</h2>
-      <p class="sa-page-sub">按去重学生查看当前规则命中、核查状态和组织集中情况。</p>
+      <div class="monitor-title-line">
+        <h2 class="sa-page-title">学业预警监控</h2>
+        <span>最新预警统计时间：{{ latestGeneratedDate || '—' }}</span>
+      </div>
     </div>
 
     <div v-if="initialLoading" class="initial-loading" aria-live="polite">
@@ -27,30 +29,87 @@
       </el-alert>
 
       <div class="monitor-context">
-        <div>
-          <b>当前规则快照</b>
-          <span>{{ meta.currentSemester || '学期待确认' }}</span>
-          <span>{{ meta.scope?.label || '当前授权范围' }}</span>
-          <span>数据截止 {{ formatDate(meta.dataAsOf) }}</span>
+        <b>当前快照</b>
+        <div class="filter-grid">
+          <el-select
+            v-model="draft.college"
+            clearable
+            placeholder="学院"
+            @change="handleCascadeChange('college')"
+          >
+            <el-option
+              v-for="item in organizationOptions.college || []"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value"
+            />
+          </el-select>
+          <el-select
+            v-model="draft.major"
+            clearable
+            placeholder="专业"
+            @change="handleCascadeChange('major')"
+          >
+            <el-option
+              v-for="item in organizationOptions.major || []"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value"
+            />
+          </el-select>
+          <el-select
+            v-model="draft.grade"
+            clearable
+            placeholder="年级"
+            @change="handleCascadeChange('grade')"
+          >
+            <el-option
+              v-for="item in organizationOptions.grade || []"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value"
+            />
+          </el-select>
+          <el-select
+            v-model="draft.classId"
+            clearable
+            placeholder="行政班"
+            @change="handleCascadeChange('class')"
+          >
+            <el-option
+              v-for="item in organizationOptions.class || []"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value"
+            />
+          </el-select>
+          <el-select v-model="draft.type" clearable placeholder="预警类型">
+            <el-option
+              v-for="item in filterOptions.types || []"
+              :key="item.value"
+              :label="item.value"
+              :value="item.value"
+            />
+          </el-select>
+          <el-select v-model="draft.level" clearable placeholder="风险等级">
+            <el-option
+              v-for="item in filterOptions.levels || []"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value"
+            />
+          </el-select>
+          <div class="filter-actions">
+            <el-button type="primary" :loading="refreshing" @click="applyFilters">
+              查询
+            </el-button>
+            <el-button @click="resetAnalysisFilters">重置</el-button>
+          </div>
         </div>
-        <div class="context-boundary">
-          当前风险与人工核查状态分别统计
-          <KpiLabel
-            label=""
-            formula="当前规则仍命中，不代表尚未核查；已有核查记录，也不代表风险已经消失。"
-          />
-        </div>
+        <span v-if="appliedDescription" class="applied-summary">
+          已查询：{{ appliedDescription }}
+        </span>
       </div>
-
-      <el-alert
-        v-if="meta.historyComparison && !meta.historyComparison.available"
-        class="state-alert"
-        type="warning"
-        :closable="false"
-        show-icon
-        title="暂不展示新增、升级和持续风险指标"
-        :description="meta.historyComparison.reason"
-      />
 
       <div v-if="refreshing" class="refresh-feedback" aria-live="polite">
         <span>正在按新条件更新摘要、图表和学生名单，当前结果暂时保留…</span>
@@ -118,8 +177,7 @@
           <section class="sa-card chart-card">
             <div class="section-head compact">
               <div>
-                <h3>当前预警首次生成时间分布</h3>
-                <p>用于识别当前风险池中的长期滞留，不代表各月历史新增。</p>
+                <h3>当前预警时间分布</h3>
               </div>
               <KpiLabel label="" :formula="timeData.definition?.boundary || ''" />
             </div>
@@ -140,7 +198,6 @@
             <div class="section-head compact">
               <div>
                 <h3>{{ distributionTitle }}</h3>
-                <p>比例用于组织间比较，人数用于评估实际核查工作量。</p>
               </div>
               <KpiLabel label="" :formula="distribution.definition?.formula || ''" />
             </div>
@@ -158,82 +215,7 @@
         </el-col>
       </el-row>
 
-      <section class="sa-card filter-card">
-        <div class="section-head compact">
-          <div>
-            <h3>分析范围</h3>
-            <p>以下条件作用于指标、优先队列、图表和学生名单；调整后点击“应用范围”。</p>
-          </div>
-          <span v-if="appliedDescription" class="applied-summary">
-            已应用：{{ appliedDescription }}
-          </span>
-        </div>
-        <div class="filter-grid">
-          <el-select
-            v-if="organizationOptions.college?.length"
-            v-model="draft.college"
-            clearable
-            placeholder="学院"
-          >
-            <el-option
-              v-for="item in organizationOptions.college"
-              :key="item.value"
-              :label="item.label"
-              :value="item.value"
-            />
-          </el-select>
-          <el-select
-            v-if="organizationOptions.major?.length"
-            v-model="draft.major"
-            clearable
-            placeholder="专业"
-          >
-            <el-option
-              v-for="item in organizationOptions.major"
-              :key="item.value"
-              :label="item.label"
-              :value="item.value"
-            />
-          </el-select>
-          <el-select
-            v-if="organizationOptions.class?.length"
-            v-model="draft.classId"
-            clearable
-            placeholder="行政班"
-          >
-            <el-option
-              v-for="item in organizationOptions.class"
-              :key="item.value"
-              :label="item.label"
-              :value="item.value"
-            />
-          </el-select>
-          <el-select v-model="draft.type" clearable placeholder="预警类型">
-            <el-option
-              v-for="item in filterOptions.types || []"
-              :key="item.value"
-              :label="item.value"
-              :value="item.value"
-            />
-          </el-select>
-          <el-select v-model="draft.level" clearable placeholder="风险等级">
-            <el-option
-              v-for="item in filterOptions.levels || []"
-              :key="item.value"
-              :label="item.label"
-              :value="item.value"
-            />
-          </el-select>
-          <div class="filter-actions">
-            <el-button type="primary" :loading="refreshing" @click="applyFilters">
-              应用范围
-            </el-button>
-            <el-button @click="resetAnalysisFilters">恢复全部范围</el-button>
-          </div>
-        </div>
-      </section>
-
-      <section class="sa-card list-card">
+      <section ref="studentListSection" class="sa-card list-card">
         <div class="section-head compact">
           <div>
             <h3>当前预警学生</h3>
@@ -243,8 +225,7 @@
             <span v-if="listAppliedDescription" class="applied-summary">
               名单筛选：{{ listAppliedDescription }}
             </span>
-            <el-button :loading="exporting" @click="exportCurrentList">导出当前筛选</el-button>
-            <el-tag effect="plain" type="info">学生视图</el-tag>
+            <el-button :loading="exporting" @click="exportCurrentList">导出</el-button>
           </div>
         </div>
 
@@ -289,6 +270,12 @@
           @row-click="showStudent"
           @update:page-size="changePageSize"
         >
+          <template #header-primaryReason>
+            <KpiLabel
+              label="主要触发证据"
+              formula="显示最严重的最近一次触发的证据名称和证据内容结果"
+            />
+          </template>
           <template #col-student="{ row }">
             <div class="student-cell">
               <button type="button" @click.stop="showStudent(row)">{{ row.studentName }}</button>
@@ -359,7 +346,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { getActiveIdentity, getToken, http } from '@/utils/http'
@@ -371,6 +358,7 @@ import AIInsightDrawer from '@/components/AIInsightDrawer.vue'
 import AlertStudentDrawer from './AlertStudentDrawer.vue'
 
 withDefaults(defineProps<{ embedded?: boolean }>(), { embedded: false })
+const emit = defineEmits<{ (event: 'latest-date', value: string): void }>()
 
 const route = useRoute()
 const router = useRouter()
@@ -395,10 +383,13 @@ const aiDrawerVisible = ref(false)
 const aiLoading = ref(false)
 const aiInsight = ref<any>(null)
 const activePreset = ref('')
+const cardPreset = reactive({ highestLevel: '', management: '', mine: false })
 const exporting = ref(false)
+const studentListSection = ref<HTMLElement | null>(null)
+const optionsSequence = ref(0)
 
 const emptyFilter = () => ({
-  college: '', major: '', classId: '', type: '', level: '',
+  college: '', major: '', grade: '', classId: '', type: '', level: '',
 })
 const emptyListFilter = () => ({ q: '', management: '', mine: false })
 const draft = reactive(emptyFilter())
@@ -417,6 +408,7 @@ const appliedDescription = computed(() => {
     organizationOptions.value[dimension]?.find((item: any) => item.value === value)?.label || value
   if (applied.college) labels.push(`学院=${findLabel('college', applied.college)}`)
   if (applied.major) labels.push(`专业=${findLabel('major', applied.major)}`)
+  if (applied.grade) labels.push(`年级=${findLabel('grade', applied.grade)}`)
   if (applied.classId) labels.push(`班级=${findLabel('class', applied.classId)}`)
   if (applied.type) labels.push(`类型=${applied.type}`)
   if (applied.level) labels.push(`等级=${applied.level}`)
@@ -440,7 +432,7 @@ const kpiCards = computed(() => {
       key: 'current', label: '当前预警学生',
       value: `${summary.current_students || 0}人`, color: '#4f46e5',
       formula: definitionText('current_students'),
-      note: `${summary.current_alert_records || 0}条规则命中 · 点击查看全部`,
+      note: `${summary.current_alert_records || 0}次规则触发 · 点击查看全部`,
       filter: {},
     },
     {
@@ -448,14 +440,14 @@ const kpiCards = computed(() => {
       value: `${summary.critical_students || 0}人`, color: '#e11d48',
       formula: '按学生当前命中的最高风险等级去重统计；一名学生只计一次。',
       note: '点击筛选严重风险',
-      filter: { level: '严重' },
+      filter: { highestLevel: '严重' },
     },
     {
       key: 'criticalPending', label: '严重且待核查',
       value: `${summary.critical_pending_students || 0}人`, color: '#be123c',
       formula: definitionText('critical_pending_students'),
       note: '严重风险且仍有规则待核查',
-      filter: { level: '严重', management: 'pending_review' },
+      filter: { highestLevel: '严重', management: 'pending_review' },
     },
     {
       key: 'pending', label: '待核查学生',
@@ -535,11 +527,19 @@ const studentColumns = computed<DataTableColumn[]>(() => {
   return columns
 })
 
-const distributionTitle = computed(() => ({
-  college: '学院当前预警学生率',
-  major: '专业当前预警学生率',
-  class: '行政班当前预警学生率',
-}[distribution.dimension] || '组织当前预警学生率'))
+const distributionTitle = computed(() => {
+  if (applied.classId) {
+    const label = organizationOptions.value.class?.find(
+      (item: any) => item.value === applied.classId,
+    )?.label || applied.classId
+    return `${label}-当前预警学生率`
+  }
+  if (applied.major) return '各班级当前预警学生率'
+  if (applied.college) return '各专业当前预警学生率'
+  return '各学院当前预警学生率'
+})
+
+const latestGeneratedDate = computed(() => timeData.latestGeneratedDate || '')
 
 const distributionOption = computed(() => {
   const items = [...(distribution.items || [])].slice(0, 10).reverse()
@@ -644,6 +644,7 @@ function commonParams(source = applied) {
   if (source.type) params.set('type', source.type)
   if (source.college) params.set('college', source.college)
   if (source.major) params.set('major', source.major)
+  if (source.grade) params.set('grade', source.grade)
   if (source.classId) params.set('class_id', source.classId)
   return params
 }
@@ -654,6 +655,9 @@ function studentParams() {
   if (listApplied.q) params.set('q', listApplied.q)
   if (listApplied.management) params.set('management', listApplied.management)
   if (listApplied.mine) params.set('assigned_to_me', 'true')
+  if (cardPreset.highestLevel) params.set('highest_level', cardPreset.highestLevel)
+  if (cardPreset.management) params.set('management', cardPreset.management)
+  if (cardPreset.mine) params.set('assigned_to_me', 'true')
   return params
 }
 function query(path: string, params: URLSearchParams) {
@@ -665,9 +669,49 @@ function assignObject(target: Record<string, any>, source: any) {
   Object.assign(target, source || {})
 }
 
-async function loadOptions() {
-  const data: any = await http.get('/admin/alerts/options')
+async function loadOptions(source = draft) {
+  const sequence = ++optionsSequence.value
+  const params = new URLSearchParams()
+  if (source.college) params.set('college', source.college)
+  if (source.major) params.set('major', source.major)
+  if (source.grade) params.set('grade', source.grade)
+  if (source.classId) params.set('class_id', source.classId)
+  const data: any = await http.get(query('/admin/alerts/options', params))
+  if (sequence !== optionsSequence.value) return
   assignObject(filterOptions, data)
+  let removedInvalidValue = false
+  const fields: Record<string, string> = {
+    college: 'college', major: 'major', grade: 'grade', class: 'classId',
+  }
+  Object.entries(fields).forEach(([dimension, field]) => {
+    const value = source[field]
+    if (!value) return
+    const valid = data.organizations?.[dimension]?.some(
+      (item: any) => item.value === value,
+    )
+    if (!valid) {
+      source[field] = ''
+      removedInvalidValue = true
+    }
+  })
+  if (source.type && !data.types?.some((item: any) => item.value === source.type)) {
+    source.type = ''
+    removedInvalidValue = true
+  }
+  if (removedInvalidValue) await loadOptions(source)
+}
+async function handleCascadeChange(dimension: string) {
+  if (dimension === 'college') {
+    draft.major = ''
+    draft.classId = ''
+  } else if (dimension === 'major' || dimension === 'grade') {
+    draft.classId = ''
+  }
+  try {
+    await loadOptions(draft)
+  } catch (error: any) {
+    loadError.value = error?.message || '查询条件加载失败'
+  }
 }
 async function loadAll() {
   const sequence = ++requestSequence.value
@@ -675,13 +719,18 @@ async function loadAll() {
   loadError.value = ''
   try {
     const params = commonParams()
+    const distributionParams = commonParams()
+    distributionParams.set(
+      'dimension',
+      applied.major || applied.classId ? 'class' : applied.college ? 'major' : 'college',
+    )
     const priorityParams = commonParams()
     priorityParams.set('limit', '10')
     const [summaryData, studentData, distributionData, timeResult, priorityData] =
       await Promise.all([
         http.get<any>(query('/admin/alerts/summary', params)),
         http.get<any>(query('/admin/alerts/students', studentParams())),
-        http.get<any>(query('/admin/alerts/distribution', params)),
+        http.get<any>(query('/admin/alerts/distribution', distributionParams)),
         http.get<any>(query('/admin/alerts/time-distribution', params)),
         http.get<any>(query('/admin/alerts/priority', priorityParams)),
       ])
@@ -693,6 +742,7 @@ async function loadAll() {
     Object.assign(pagination, studentData.pagination || {})
     assignObject(distribution, distributionData)
     assignObject(timeData, timeResult)
+    emit('latest-date', timeResult.latestGeneratedDate || '')
     priorityRows.value = priorityData.items || []
   } catch (error: any) {
     if (sequence !== requestSequence.value) return
@@ -721,32 +771,34 @@ async function loadStudentPage() {
 function applyFilters() {
   Object.assign(applied, { ...draft })
   pagination.page = 1
-  activePreset.value = ''
+  clearCardPreset()
   syncRoute()
   loadAll()
 }
-function resetAnalysisFilters() {
+async function resetAnalysisFilters() {
   Object.assign(draft, emptyFilter())
   Object.assign(applied, emptyFilter())
   pagination.page = 1
-  activePreset.value = ''
+  clearCardPreset()
   syncRoute()
+  await loadOptions(draft)
   loadAll()
 }
-function resetFilters() {
+async function resetFilters() {
   Object.assign(draft, emptyFilter())
   Object.assign(applied, emptyFilter())
   Object.assign(listDraft, emptyListFilter())
   Object.assign(listApplied, emptyListFilter())
   pagination.page = 1
-  activePreset.value = ''
+  clearCardPreset()
   syncRoute()
+  await loadOptions(draft)
   loadAll()
 }
 function applyListFilters() {
   Object.assign(listApplied, { ...listDraft })
   pagination.page = 1
-  activePreset.value = ''
+  clearCardPreset()
   syncRoute()
   loadStudentPage()
 }
@@ -754,39 +806,28 @@ function resetListFilters() {
   Object.assign(listDraft, emptyListFilter())
   Object.assign(listApplied, emptyListFilter())
   pagination.page = 1
-  activePreset.value = ''
+  clearCardPreset()
   syncRoute()
   loadStudentPage()
 }
-function applyPreset(card: any) {
-  const nextAnalysis = { ...applied }
-  const nextList = { ...listApplied }
-  if (activePreset.value === card.key) {
-    if (card.filter?.level) nextAnalysis.level = ''
-    if (card.filter?.management) nextList.management = ''
-    if (card.filter?.mine) nextList.mine = false
-    activePreset.value = ''
-  } else {
-    if (card.key === 'current') {
-      nextAnalysis.level = ''
-      nextList.management = ''
-      nextList.mine = false
-    }
-    if (card.filter?.level !== undefined) nextAnalysis.level = card.filter.level
-    if (card.filter?.management !== undefined) {
-      nextList.management = card.filter.management
-    }
-    if (card.filter?.mine !== undefined) nextList.mine = card.filter.mine
-    activePreset.value = card.key
-  }
-  Object.assign(draft, nextAnalysis)
-  Object.assign(applied, nextAnalysis)
-  Object.assign(listDraft, nextList)
-  Object.assign(listApplied, nextList)
+function clearCardPreset() {
+  activePreset.value = ''
+  Object.assign(cardPreset, { highestLevel: '', management: '', mine: false })
+}
+async function applyPreset(card: any) {
+  Object.assign(listDraft, emptyListFilter())
+  Object.assign(listApplied, emptyListFilter())
+  Object.assign(cardPreset, {
+    highestLevel: card.filter?.highestLevel || '',
+    management: card.filter?.management || '',
+    mine: Boolean(card.filter?.mine),
+  })
+  activePreset.value = card.key
   pagination.page = 1
   syncRoute()
-  if (card.filter?.level !== undefined || card.key === 'current') loadAll()
-  else loadStudentPage()
+  await loadStudentPage()
+  await nextTick()
+  studentListSection.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 function changePageSize(value: number) {
   if (value === pagination.pageSize) return
@@ -801,6 +842,7 @@ function syncRoute() {
   if (applied.type) queryValue.type = applied.type
   if (applied.college) queryValue.college = applied.college
   if (applied.major) queryValue.major = applied.major
+  if (applied.grade) queryValue.grade = applied.grade
   if (applied.classId) queryValue.class_id = applied.classId
   if (listApplied.management) queryValue.management = listApplied.management
   if (listApplied.q) queryValue.q = listApplied.q
@@ -811,6 +853,7 @@ function restoreRoute() {
   Object.assign(draft, {
     college: String(route.query.college || ''),
     major: String(route.query.major || ''),
+    grade: String(route.query.grade || ''),
     classId: String(route.query.class_id || ''),
     type: String(route.query.type || ''),
     level: String(route.query.level || ''),
@@ -905,6 +948,7 @@ onMounted(async () => {
   restoreRoute()
   try {
     await loadOptions()
+    Object.assign(applied, { ...draft })
   } catch (error: any) {
     loadError.value = error?.message || '筛选条件加载失败'
   }
@@ -914,6 +958,8 @@ onMounted(async () => {
 
 <style scoped>
 .monitor-head { margin-bottom: 12px; }
+.monitor-title-line { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+.monitor-title-line > span { color: #64748b; font-size: 12px; }
 .initial-loading {
   padding: 18px; border: 1px solid var(--sa-border); border-radius: 12px; background: #fff;
 }
@@ -921,14 +967,16 @@ onMounted(async () => {
 .initial-loading > p { margin: 5px 0 18px; color: var(--sa-muted); font-size: 12px; }
 .state-alert { margin-bottom: 12px; }
 .monitor-context {
-  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center; gap: 12px;
   margin-bottom: 12px; padding: 10px 12px; border: 1px solid #dbeafe;
   border-radius: 9px; background: #f8fbff; color: #475569; font-size: 12px;
 }
-.monitor-context > div:first-child { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .monitor-context b { color: #1e3a8a; }
-.monitor-context span { padding-left: 10px; border-left: 1px solid #cbd5e1; }
-.context-boundary { display: flex; align-items: center; color: #64748b; white-space: nowrap; }
+.monitor-context .filter-grid {
+  display: grid; grid-template-columns: repeat(6, minmax(105px, 1fr)) auto;
+  gap: 8px; min-width: 0;
+}
 .refresh-feedback {
   margin-bottom: 12px; padding: 8px 12px; border-radius: 8px;
   background: #eef2ff; color: #4338ca; font-size: 12px;
@@ -973,9 +1021,8 @@ onMounted(async () => {
 .priority-card small { color: #94a3b8; }
 .chart-row { margin-bottom: 16px; }
 .chart-card { height: 330px; }
-.filter-card, .list-card { margin-bottom: 16px; }
-.filter-grid { display: grid; grid-template-columns: repeat(4, minmax(150px, 1fr)); gap: 10px; }
-.filter-actions { display: flex; gap: 8px; }
+.list-card { margin-bottom: 16px; scroll-margin-top: 16px; }
+.filter-actions { display: flex; gap: 8px; white-space: nowrap; }
 .applied-summary {
   max-width: 50%; overflow: hidden; color: #4338ca; font-size: 11px;
   text-overflow: ellipsis; white-space: nowrap;
@@ -1005,11 +1052,12 @@ onMounted(async () => {
 @media (max-width: 1200px) {
   .kpi-grid { grid-template-columns: repeat(3, 1fr); }
   .priority-grid { grid-template-columns: repeat(2, 1fr); }
-  .filter-grid { grid-template-columns: repeat(3, minmax(150px, 1fr)); }
+  .monitor-context { grid-template-columns: 1fr; }
+  .monitor-context .filter-grid { grid-template-columns: repeat(4, minmax(130px, 1fr)); }
   .list-filter-hint { display: none; }
 }
 @media (max-width: 760px) {
-  .kpi-grid, .priority-grid, .filter-grid { grid-template-columns: 1fr; }
+  .kpi-grid, .priority-grid, .monitor-context .filter-grid { grid-template-columns: 1fr; }
   .chart-row :deep(.el-col) { max-width: 100%; flex: 0 0 100%; }
   .monitor-context, .section-head { align-items: flex-start; flex-direction: column; }
   .list-head-actions, .list-filter-bar {

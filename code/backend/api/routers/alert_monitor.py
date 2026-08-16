@@ -89,13 +89,8 @@ def _validate_explicit_scope(user: dict, college: Optional[str],
     own_value = requested.get(scope_type)
     if own_value and own_value not in source_ids:
         raise ApiError("筛选条件超出当前数据权限范围", code=403, status_code=403)
-    # 受限身份不接受高于其授权粒度的显式组织筛选，避免返回空集时泄露存在性。
-    if scope_type in {"major", "class", "staff_relation", "teacher"} and college:
-        raise ApiError("当前身份不支持显式学院筛选", code=403, status_code=403)
-    if scope_type in {"class", "staff_relation", "teacher"} and major:
-        raise ApiError("当前身份不支持显式专业筛选", code=403, status_code=403)
-    if scope_type in {"staff_relation", "teacher"} and class_id:
-        raise ApiError("当前身份不支持显式班级筛选", code=403, status_code=403)
+    # 高于授权粒度的条件允许与服务端数据范围取交集，使辅导员、班主任、导师
+    # 仍能按学院/专业/班级查询，但永远不能扩大到关系范围外的学生。
 
 
 def _default_dimension(user: dict) -> str:
@@ -109,27 +104,15 @@ def _default_dimension(user: dict) -> str:
     return "class"
 
 
-def _validate_dimension(user: dict, dimension: str) -> None:
+def _validate_dimension(dimension: str) -> None:
     if dimension not in DIMENSIONS:
         raise ApiError("无效的组织分析维度", code=400, status_code=400)
-    scope_type = (
-        (user.get("permission_context") or {}).get("detailScope") or {}
-    ).get("type")
-    allowed = {
-        "all": DIMENSIONS,
-        "college": {"major", "class"},
-        "major": {"major", "class"},
-        "class": {"class"},
-        "staff_relation": {"class"},
-        "teacher": {"class"},
-    }.get(scope_type, set())
-    if dimension not in allowed:
-        raise ApiError("当前身份不支持该组织分析维度", code=403, status_code=403)
 
 
 def _population_where(user: dict, conn: sqlite3.Connection, *,
                       college: Optional[str] = None,
                       major: Optional[str] = None,
+                      grade: Optional[str] = None,
                       class_id: Optional[str] = None) -> tuple[str, list]:
     _validate_explicit_scope(user, college, major, class_id)
     conditions = ["COALESCE(st.status,'在籍')='在籍'"]
@@ -141,6 +124,7 @@ def _population_where(user: dict, conn: sqlite3.Connection, *,
     for column, value in (
         ("st.college_id", college),
         ("st.major_id", major),
+        ("st.grade", grade),
         ("st.class_id", class_id),
     ):
         if value:
@@ -152,6 +136,7 @@ def _population_where(user: dict, conn: sqlite3.Connection, *,
 def _base_sql(user: dict, conn: sqlite3.Connection, *,
               level: Optional[str] = None, alert_type: Optional[str] = None,
               college: Optional[str] = None, major: Optional[str] = None,
+              grade: Optional[str] = None,
               class_id: Optional[str] = None, keyword: Optional[str] = None
               ) -> tuple[str, list]:
     _validate_explicit_scope(user, college, major, class_id)
@@ -173,6 +158,9 @@ def _base_sql(user: dict, conn: sqlite3.Connection, *,
     if major:
         conditions.append("st.major_id=?")
         params.append(major)
+    if grade:
+        conditions.append("st.grade=?")
+        params.append(grade)
     if class_id:
         conditions.append("st.class_id=?")
         params.append(class_id)
@@ -334,6 +322,7 @@ def _meta(conn: sqlite3.Connection, user: dict, base_sql: str,
 @router.get("/summary")
 def alert_summary(level: Optional[str] = None, type: Optional[str] = None,
                   college: Optional[str] = None, major: Optional[str] = None,
+                  grade: Optional[str] = None,
                   class_id: Optional[str] = None,
                   user: dict = Depends(get_current_user),
                   conn: sqlite3.Connection = Depends(get_db)):
@@ -341,7 +330,7 @@ def alert_summary(level: Optional[str] = None, type: Optional[str] = None,
     _validate_common_filters(level, None)
     base_sql, params = _base_sql(
         user, conn, level=level, alert_type=type, college=college,
-        major=major, class_id=class_id,
+        major=major, grade=grade, class_id=class_id,
     )
     cte = _student_cte(base_sql)
     summary = dbm.query_one(conn, cte + """
@@ -365,13 +354,13 @@ def alert_summary(level: Optional[str] = None, type: Optional[str] = None,
     """, tuple(params)) or {}
     values = {key: int(value or 0) for key, value in summary.items()}
 
-    student_scope, student_params = student_data_scope(user, conn, "st")
-    eligible_where = ["COALESCE(st.status,'在籍')='在籍'"]
-    if student_scope:
-        eligible_where.append(student_scope)
+    eligible_where, student_params = _population_where(
+        user, conn, college=college, major=major, grade=grade,
+        class_id=class_id,
+    )
     eligible = dbm.scalar(conn, f"""
         SELECT COUNT(DISTINCT st.student_id) FROM dim_student st
-        WHERE {' AND '.join(eligible_where)}
+        WHERE {eligible_where}
     """, tuple(student_params)) or 0
     current_students = values.get("current_students", 0)
     values["eligible_students"] = int(eligible)
@@ -415,17 +404,21 @@ def alert_summary(level: Optional[str] = None, type: Optional[str] = None,
 @router.get("/students")
 def alert_students(page: int = 1, page_size: int = 20,
                    level: Optional[str] = None, type: Optional[str] = None,
+                   highest_level: Optional[str] = None,
                    management: Optional[str] = None,
                    assigned_to_me: bool = False,
                    college: Optional[str] = None, major: Optional[str] = None,
+                   grade: Optional[str] = None,
                    class_id: Optional[str] = None, q: Optional[str] = None,
                    user: dict = Depends(get_current_user),
                    conn: sqlite3.Connection = Depends(get_db)):
     """按学生聚合当前预警，服务端筛选和分页。"""
     _validate_common_filters(level, management, page, page_size)
+    if highest_level and highest_level not in RISK_LEVELS:
+        raise ApiError("无效的最高预警等级", code=400, status_code=400)
     base_sql, params = _base_sql(
         user, conn, level=level, alert_type=type, college=college,
-        major=major, class_id=class_id, keyword=q,
+        major=major, grade=grade, class_id=class_id, keyword=q,
     )
     cte = _student_cte(base_sql)
     outer_conditions = []
@@ -433,6 +426,9 @@ def alert_students(page: int = 1, page_size: int = 20,
     if management:
         outer_conditions.append("management_state=?")
         management_params.append(management)
+    if highest_level:
+        outer_conditions.append("level=?")
+        management_params.append(highest_level)
     if assigned_to_me:
         outer_conditions.append("assigned_to_current_student=1")
     management_where = (
@@ -532,6 +528,7 @@ def alert_priority(limit: int = 10,
                    level: Optional[str] = None, type: Optional[str] = None,
                    management: Optional[str] = None,
                    college: Optional[str] = None, major: Optional[str] = None,
+                   grade: Optional[str] = None,
                    class_id: Optional[str] = None,
                    user: dict = Depends(get_current_user),
                    conn: sqlite3.Connection = Depends(get_db)):
@@ -541,7 +538,7 @@ def alert_priority(limit: int = 10,
         raise ApiError("优先队列条数必须在1到30之间", code=400, status_code=400)
     base_sql, params = _base_sql(
         user, conn, level=level, alert_type=type, college=college,
-        major=major, class_id=class_id,
+        major=major, grade=grade, class_id=class_id,
     )
     cte = _student_cte(base_sql)
     management_where = (
@@ -667,22 +664,26 @@ def alert_priority(limit: int = 10,
 @router.get("/students.csv")
 def export_alert_students(level: Optional[str] = None,
                           type: Optional[str] = None,
+                          highest_level: Optional[str] = None,
                           management: Optional[str] = None,
                           assigned_to_me: bool = False,
                           college: Optional[str] = None,
                           major: Optional[str] = None,
+                          grade: Optional[str] = None,
                           class_id: Optional[str] = None,
                           q: Optional[str] = None,
                           user: dict = Depends(get_current_user),
                           conn: sqlite3.Connection = Depends(get_db)):
     """导出当前授权范围及筛选条件下的去重学生名单。"""
     _validate_common_filters(level, management)
+    if highest_level and highest_level not in RISK_LEVELS:
+        raise ApiError("无效的最高预警等级", code=400, status_code=400)
     context = user.get("permission_context") or {}
     if not context.get("authorized"):
         raise ApiError("当前工作身份没有有效数据范围", code=403, status_code=403)
     base_sql, params = _base_sql(
         user, conn, level=level, alert_type=type, college=college,
-        major=major, class_id=class_id, keyword=q,
+        major=major, grade=grade, class_id=class_id, keyword=q,
     )
     cte = _student_cte(base_sql)
     conditions = []
@@ -690,6 +691,9 @@ def export_alert_students(level: Optional[str] = None,
     if management:
         conditions.append("management_state=?")
         extra_params.append(management)
+    if highest_level:
+        conditions.append("level=?")
+        extra_params.append(highest_level)
     if assigned_to_me:
         conditions.append("assigned_to_current_student=1")
     outer_where = " WHERE " + " AND ".join(conditions) if conditions else ""
@@ -749,19 +753,21 @@ def alert_distribution(dimension: Optional[str] = None,
                        type: Optional[str] = None,
                        college: Optional[str] = None,
                        major: Optional[str] = None,
+                       grade: Optional[str] = None,
                        class_id: Optional[str] = None,
                        user: dict = Depends(get_current_user),
                        conn: sqlite3.Connection = Depends(get_db)):
     """返回角色适配的组织预警学生率，同时保留人数作为资源规模依据。"""
     _validate_common_filters(level, None)
     selected_dimension = dimension or _default_dimension(user)
-    _validate_dimension(user, selected_dimension)
+    _validate_dimension(selected_dimension)
     base_sql, params = _base_sql(
         user, conn, level=level, alert_type=type, college=college,
-        major=major, class_id=class_id,
+        major=major, grade=grade, class_id=class_id,
     )
     population_where, population_params = _population_where(
-        user, conn, college=college, major=major, class_id=class_id,
+        user, conn, college=college, major=major, grade=grade,
+        class_id=class_id,
     )
     columns = {
         "college": ("st.college_id", "c.name"),
@@ -839,6 +845,7 @@ def alert_time_distribution(level: Optional[str] = None,
                             type: Optional[str] = None,
                             college: Optional[str] = None,
                             major: Optional[str] = None,
+                            grade: Optional[str] = None,
                             class_id: Optional[str] = None,
                             user: dict = Depends(get_current_user),
                             conn: sqlite3.Connection = Depends(get_db)):
@@ -846,17 +853,25 @@ def alert_time_distribution(level: Optional[str] = None,
     _validate_common_filters(level, None)
     base_sql, params = _base_sql(
         user, conn, level=level, alert_type=type, college=college,
-        major=major, class_id=class_id,
+        major=major, grade=grade, class_id=class_id,
     )
     rows = dbm.query(conn, f"""
         SELECT substr(created_at,1,7) month,
                COUNT(*) alert_records,
-               COUNT(DISTINCT student_id) alert_students
+               COUNT(DISTINCT student_id) alert_students,
+               MAX(created_at) latest_generated_at
         FROM ({base_sql}) time_base
         WHERE created_at IS NOT NULL
         GROUP BY substr(created_at,1,7)
-        ORDER BY month
+        ORDER BY month DESC
+        LIMIT 10
     """, tuple(params))
+    rows = list(reversed(rows))
+    latest_generated_at = max(
+        (row["latest_generated_at"] for row in rows
+         if row["latest_generated_at"]),
+        default=None,
+    )
     capability = _history_capability(conn, base_sql, params)
     return ok({
         "mode": "snapshot_first_detected_month",
@@ -865,10 +880,13 @@ def alert_time_distribution(level: Optional[str] = None,
             "alertRecords": int(row["alert_records"] or 0),
             "alertStudents": int(row["alert_students"] or 0),
         } for row in rows],
+        "latestGeneratedDate": (
+            str(latest_generated_at)[:10] if latest_generated_at else None
+        ),
         "comparison": capability,
         "definition": {
-            "label": "当前预警首次生成时间分布",
-            "formula": "仅对当前仍命中的预警，按首次生成月份汇总",
+            "label": "当前预警时间分布",
+            "formula": "仅对当前仍命中的预警，按生成月份汇总最近10个有数据月份",
             "managementUse": "识别当前风险池中滞留时间较长的预警",
             "boundary": (
                 "这不是各月历史新增趋势；历史批次覆盖达到要求后再提供新增、升级和持续变化。"
@@ -881,11 +899,14 @@ def alert_time_distribution(level: Optional[str] = None,
 @router.get("/options")
 def alert_filter_options(college: Optional[str] = None,
                          major: Optional[str] = None,
+                         grade: Optional[str] = None,
+                         class_id: Optional[str] = None,
                          user: dict = Depends(get_current_user),
                          conn: sqlite3.Connection = Depends(get_db)):
     """按当前权限范围返回筛选选项，不依赖前端下载全量预警后去重。"""
     base_sql, params = _base_sql(
-        user, conn, college=college, major=major
+        user, conn, college=college, major=major, grade=grade,
+        class_id=class_id,
     )
     types = dbm.query(conn, f"""
         SELECT alert_type value,COUNT(*) record_count
@@ -893,32 +914,36 @@ def alert_filter_options(college: Optional[str] = None,
         WHERE alert_type IS NOT NULL
         GROUP BY alert_type ORDER BY record_count DESC,alert_type
     """, tuple(params))
-    scope_type = (
-        (user.get("permission_context") or {}).get("detailScope") or {}
-    ).get("type")
     organizations = {}
-    allowed_dimensions = {
-        "all": ("college", "major", "class"),
-        "college": ("major", "class"),
-        "major": ("major", "class"),
-        "class": ("class",),
-        "staff_relation": ("class",),
-        "teacher": ("class",),
-    }.get(scope_type, ())
     columns = {
-        "college": ("college_id", "college_name"),
-        "major": ("major_id", "major_name"),
-        "class": ("class_id", "class_name"),
+        "college": ("st.college_id", "c.name"),
+        "major": ("st.major_id", "m.name"),
+        "grade": ("st.grade", "st.grade"),
+        "class": ("st.class_id", "cl.name"),
     }
-    for dimension in allowed_dimensions:
+    for dimension in ("college", "major", "grade", "class"):
+        option_where, option_params = _population_where(
+            user, conn,
+            college=None if dimension == "college" else college,
+            major=None if dimension == "major" else major,
+            grade=None if dimension == "grade" else grade,
+            class_id=None if dimension == "class" else class_id,
+        )
         key, name = columns[dimension]
         organizations[dimension] = dbm.query(conn, f"""
-            SELECT {key} value,COALESCE({name},{key}) label,
-                   COUNT(DISTINCT student_id) student_count
-            FROM ({base_sql}) option_base
-            WHERE {key} IS NOT NULL
+            SELECT {key} value,
+                   CASE WHEN '{dimension}'='grade'
+                        THEN COALESCE({name},{key}) || '级'
+                        ELSE COALESCE({name},{key}) END label,
+                   COUNT(DISTINCT st.student_id) student_count
+            FROM dim_student st
+            LEFT JOIN dim_college c ON c.college_id=st.college_id
+            LEFT JOIN dim_major m ON m.major_id=st.major_id
+            LEFT JOIN dim_class cl ON cl.class_id=st.class_id
+            WHERE {option_where}
+              AND {key} IS NOT NULL
             GROUP BY {key},{name} ORDER BY label
-        """, tuple(params))
+        """, tuple(option_params))
     return ok({
         "levels": [
             {"value": "严重", "label": "严重"},
