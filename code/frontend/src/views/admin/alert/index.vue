@@ -29,7 +29,7 @@
       </el-alert>
 
       <div class="monitor-context">
-        <b>当前快照</b>
+        <b>查询条件</b>
         <div class="filter-grid">
           <el-select
             v-model="draft.college"
@@ -184,7 +184,7 @@
             <EChart
               v-if="timeData.items?.length"
               :option="timeOption"
-              :height="230"
+              :height="395"
             />
             <el-empty
               v-else
@@ -204,7 +204,7 @@
             <EChart
               v-if="distribution.items?.length"
               :option="distributionOption"
-              :height="230"
+              :height="395"
             />
             <el-empty
               v-else
@@ -260,8 +260,8 @@
           :columns="studentColumns"
           :data="rows"
           storage-key="alert:student-list"
-          config-version="2"
-          :max-business-columns="6"
+          config-version="3"
+          :max-business-columns="8"
           :page-size="pagination.pageSize"
           :page-sizes="[10, 20, 50]"
           size="small"
@@ -282,6 +282,7 @@
               <span>{{ row.studentId }}</span>
             </div>
           </template>
+          <template #col-grade="{ row }">{{ row.grade ? `${row.grade}级` : '—' }}</template>
           <template #col-highestLevel="{ row }">
             <el-tag :type="levelType(row.highestLevel)" size="small">
               {{ row.highestLevel }}
@@ -387,6 +388,12 @@ const cardPreset = reactive({ highestLevel: '', management: '', mine: false })
 const exporting = ref(false)
 const studentListSection = ref<HTMLElement | null>(null)
 const optionsSequence = ref(0)
+const organizationOptionCache = reactive<Record<string, any[]>>({
+  college: [], major: [], grade: [], class: [],
+})
+const organizationFieldMap: Record<string, string> = {
+  college: 'college', major: 'major', grade: 'grade', class: 'classId',
+}
 
 const emptyFilter = () => ({
   college: '', major: '', grade: '', classId: '', type: '', level: '',
@@ -470,7 +477,8 @@ const kpiCards = computed(() => {
       key: 'rate', label: '当前预警学生率',
       value: summary.alert_student_rate == null ? '—' : `${summary.alert_student_rate}%`,
       color: '#0f766e',
-      formula: definitionText('alert_student_rate'),
+      formula: definitions.alert_student_rate?.formula
+        || '当前预警学生率 = 当前预警去重学生数 ÷ 当前权限及查询条件查询结果范围内在籍学生数',
       note: `${summary.current_students || 0}/${summary.eligible_students || 0}人`,
       filter: null,
     })
@@ -500,7 +508,11 @@ const studentColumns = computed<DataTableColumn[]>(() => {
   columns.push(
     {
       key: 'className', label: '班级', width: 145, region: 'business',
-      tooltip: true, defaultVisible: meta.scope?.type !== 'all',
+      tooltip: true, defaultVisible: true,
+    },
+    {
+      key: 'grade', label: '年级', width: 84, region: 'business',
+      defaultVisible: true,
     },
     {
       key: 'highestLevel', label: '最高风险', width: 84,
@@ -539,13 +551,21 @@ const distributionTitle = computed(() => {
   return '各学院当前预警学生率'
 })
 
-const latestGeneratedDate = computed(() => timeData.latestGeneratedDate || '')
+function dateOnly(value: unknown) {
+  if (!value) return ''
+  const matched = String(value).match(/^\d{4}-\d{2}-\d{2}/)
+  return matched?.[0] || ''
+}
+
+const latestGeneratedDate = computed(() => dateOnly(
+  timeData.latestGeneratedDate || meta.dataAsOf,
+))
 
 const distributionOption = computed(() => {
   const items = [...(distribution.items || [])].slice(0, 10).reverse()
   const benchmark = distribution.benchmark?.alertStudentRate
   return {
-    grid: { left: 8, right: 45, top: 10, bottom: 8, containLabel: true },
+    grid: { left: 8, right: 45, top: 64, bottom: 8, containLabel: true },
     tooltip: {
       trigger: 'axis',
       axisPointer: { type: 'shadow' },
@@ -574,7 +594,19 @@ const distributionOption = computed(() => {
       markLine: benchmark == null ? undefined : {
         symbol: 'none',
         lineStyle: { color: '#f59e0b', type: 'dashed' },
-        label: { formatter: `范围平均 ${benchmark}%`, color: '#b45309' },
+        label: {
+          show: true,
+          formatter: `范围平均 ${benchmark}%`,
+          color: '#b45309',
+          position: 'insideEndTop',
+          rotate: 0,
+          align: 'center',
+          verticalAlign: 'bottom',
+          distance: 8,
+          backgroundColor: 'rgba(255, 255, 255, 0.9)',
+          padding: [2, 4],
+          borderRadius: 3,
+        },
         data: [{ xAxis: benchmark }],
       },
     }],
@@ -584,7 +616,7 @@ const distributionOption = computed(() => {
 const timeOption = computed(() => {
   const items = timeData.items || []
   return {
-    grid: { left: 8, right: 18, top: 18, bottom: 8, containLabel: true },
+    grid: { left: 8, right: 18, top: 38, bottom: 8, containLabel: true },
     tooltip: {
       trigger: 'axis', axisPointer: { type: 'shadow' },
       formatter: (params: any[]) => {
@@ -601,6 +633,9 @@ const timeOption = computed(() => {
     },
     yAxis: {
       type: 'value', name: '学生数',
+      nameLocation: 'end',
+      nameGap: 12,
+      nameTextStyle: { color: '#64748b', fontSize: 11, align: 'right' },
       axisLabel: { color: '#94a3b8' },
       splitLine: { lineStyle: { color: '#eef2f7' } },
     },
@@ -648,16 +683,16 @@ function commonParams(source = applied) {
   if (source.classId) params.set('class_id', source.classId)
   return params
 }
-function studentParams() {
+function studentParams(preset = cardPreset) {
   const params = commonParams()
   params.set('page', String(pagination.page))
   params.set('page_size', String(pagination.pageSize))
   if (listApplied.q) params.set('q', listApplied.q)
   if (listApplied.management) params.set('management', listApplied.management)
   if (listApplied.mine) params.set('assigned_to_me', 'true')
-  if (cardPreset.highestLevel) params.set('highest_level', cardPreset.highestLevel)
-  if (cardPreset.management) params.set('management', cardPreset.management)
-  if (cardPreset.mine) params.set('assigned_to_me', 'true')
+  if (preset.highestLevel) params.set('highest_level', preset.highestLevel)
+  if (preset.management) params.set('management', preset.management)
+  if (preset.mine) params.set('assigned_to_me', 'true')
   return params
 }
 function query(path: string, params: URLSearchParams) {
@@ -669,6 +704,22 @@ function assignObject(target: Record<string, any>, source: any) {
   Object.assign(target, source || {})
 }
 
+function preserveSelectedDimensionOptions(data: any, source: Record<string, any>) {
+  const organizations = { ...(data.organizations || {}) }
+  Object.entries(organizationFieldMap).forEach(([dimension, field]) => {
+    const incoming = Array.isArray(organizations[dimension]) ? organizations[dimension] : []
+    const cached = organizationOptionCache[dimension] || []
+    const selected = source[field]
+    if (selected && incoming.length < cached.length) {
+      organizations[dimension] = cached
+      return
+    }
+    organizations[dimension] = incoming
+    if (incoming.length) organizationOptionCache[dimension] = incoming
+  })
+  return { ...data, organizations }
+}
+
 async function loadOptions(source = draft) {
   const sequence = ++optionsSequence.value
   const params = new URLSearchParams()
@@ -676,14 +727,12 @@ async function loadOptions(source = draft) {
   if (source.major) params.set('major', source.major)
   if (source.grade) params.set('grade', source.grade)
   if (source.classId) params.set('class_id', source.classId)
-  const data: any = await http.get(query('/admin/alerts/options', params))
+  const response: any = await http.get(query('/admin/alerts/options', params))
   if (sequence !== optionsSequence.value) return
+  const data = preserveSelectedDimensionOptions(response, source)
   assignObject(filterOptions, data)
   let removedInvalidValue = false
-  const fields: Record<string, string> = {
-    college: 'college', major: 'major', grade: 'grade', class: 'classId',
-  }
-  Object.entries(fields).forEach(([dimension, field]) => {
+  Object.entries(organizationFieldMap).forEach(([dimension, field]) => {
     const value = source[field]
     if (!value) return
     const valid = data.organizations?.[dimension]?.some(
@@ -742,7 +791,7 @@ async function loadAll() {
     Object.assign(pagination, studentData.pagination || {})
     assignObject(distribution, distributionData)
     assignObject(timeData, timeResult)
-    emit('latest-date', timeResult.latestGeneratedDate || '')
+    emit('latest-date', dateOnly(timeResult.latestGeneratedDate || summaryData.meta?.dataAsOf))
     priorityRows.value = priorityData.items || []
   } catch (error: any) {
     if (sequence !== requestSequence.value) return
@@ -755,18 +804,30 @@ async function loadAll() {
   }
 }
 async function loadStudentPage() {
+  return fetchStudentPage({ ...cardPreset })
+}
+async function fetchStudentPage(preset: typeof cardPreset) {
   const sequence = ++requestSequence.value
   refreshing.value = true
+  loadError.value = ''
   try {
-    const data: any = await http.get(query('/admin/alerts/students', studentParams()))
+    const data: any = await http.get(query('/admin/alerts/students', studentParams(preset)))
     if (sequence !== requestSequence.value) return
     rows.value = data.items || []
     Object.assign(pagination, data.pagination || {})
+    return Number(data.pagination?.total || 0)
   } catch (error: any) {
     if (sequence === requestSequence.value) loadError.value = error?.message || '学生名单加载失败'
   } finally {
     if (sequence === requestSequence.value) refreshing.value = false
   }
+}
+function fourKpiPresetExpectedTotal(key: string) {
+  if (key === 'current') return Number(summary.current_students || 0)
+  if (key === 'critical') return Number(summary.critical_students || 0)
+  if (key === 'criticalPending') return Number(summary.critical_pending_students || 0)
+  if (key === 'pending') return Number(summary.pending_students || 0)
+  return null
 }
 function applyFilters() {
   Object.assign(applied, { ...draft })
@@ -817,15 +878,20 @@ function clearCardPreset() {
 async function applyPreset(card: any) {
   Object.assign(listDraft, emptyListFilter())
   Object.assign(listApplied, emptyListFilter())
-  Object.assign(cardPreset, {
+  const preset = {
     highestLevel: card.filter?.highestLevel || '',
     management: card.filter?.management || '',
     mine: Boolean(card.filter?.mine),
-  })
+  }
+  Object.assign(cardPreset, preset)
   activePreset.value = card.key
   pagination.page = 1
   syncRoute()
-  await loadStudentPage()
+  const total = await fetchStudentPage(preset)
+  const expectedTotal = fourKpiPresetExpectedTotal(card.key)
+  if (total != null && expectedTotal != null && total !== expectedTotal) {
+    loadError.value = `名单返回${total}人，与“${card.label}”指标${expectedTotal}人不一致，请重新加载后核查。`
+  }
   await nextTick()
   studentListSection.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
@@ -1020,7 +1086,7 @@ onMounted(async () => {
 }
 .priority-card small { color: #94a3b8; }
 .chart-row { margin-bottom: 16px; }
-.chart-card { height: 330px; }
+.chart-card { height: 495px; }
 .list-card { margin-bottom: 16px; scroll-margin-top: 16px; }
 .filter-actions { display: flex; gap: 8px; white-space: nowrap; }
 .applied-summary {

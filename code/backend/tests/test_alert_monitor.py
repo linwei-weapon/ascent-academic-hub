@@ -113,7 +113,30 @@ class AlertMonitorTest(unittest.TestCase):
         self.assertEqual(1, summary["closed_students"])
         self.assertEqual(6, summary["eligible_students"])
         self.assertEqual(83.3, summary["alert_student_rate"])
+        self.assertEqual(
+            "当前预警学生率 = 当前预警去重学生数 ÷ 当前权限及查询条件查询结果范围内在籍学生数",
+            data["definitions"]["alert_student_rate"]["formula"],
+        )
         self.assertFalse(data["meta"]["historyComparison"]["available"])
+
+    def test_four_kpi_student_presets_reconcile_with_summary(self):
+        summary = alert_summary(user=self.dean, conn=self.conn)["data"]["summary"]
+        cases = [
+            ({}, "current_students"),
+            ({"highest_level": "严重"}, "critical_students"),
+            ({"highest_level": "严重", "management": "pending_review"},
+             "critical_pending_students"),
+            ({"management": "pending_review"}, "pending_students"),
+        ]
+        for filters, summary_key in cases:
+            with self.subTest(summary_key=summary_key):
+                result = alert_students(
+                    page=1, page_size=10, user=self.dean, conn=self.conn,
+                    **filters,
+                )["data"]
+                self.assertEqual(
+                    summary[summary_key], result["pagination"]["total"],
+                )
 
     def test_summary_denominator_follows_organization_and_grade_filters(self):
         college = alert_summary(
@@ -283,6 +306,21 @@ class AlertMonitorTest(unittest.TestCase):
         )["data"]
         self.assertEqual({"B01"}, {
             row["value"] for row in grade_data["organizations"]["class"]
+        })
+
+        college_selected = alert_filter_options(
+            college="C01", user=self.dean, conn=self.conn,
+        )["data"]
+        self.assertEqual({"C01", "C02"}, {
+            row["value"]
+            for row in college_selected["organizations"]["college"]
+        })
+        major_selected = alert_filter_options(
+            major="M01", user=self.dean, conn=self.conn,
+        )["data"]
+        self.assertEqual({"M01", "M02"}, {
+            row["value"]
+            for row in major_selected["organizations"]["major"]
         })
 
     def test_organization_options_include_authorized_groups_without_alerts(self):

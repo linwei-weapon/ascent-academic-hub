@@ -72,6 +72,20 @@ class P3ModuleReorganizationTest(unittest.TestCase):
         self.assertNotIn("BusinessPageContext", alert)
         self.assertIn("最新预警统计时间", alert)
 
+    def test_alert_monitor_followup_ui_contract(self):
+        monitor = self.read("frontend/src/views/admin/alert/index.vue")
+        self.assertIn("<b>查询条件</b>", monitor)
+        self.assertNotIn("<b>当前快照</b>", monitor)
+        self.assertIn("key: 'grade', label: '年级'", monitor)
+        self.assertIn('config-version="3"', monitor)
+        self.assertIn("latestGeneratedDate || meta.dataAsOf", monitor)
+        self.assertIn("nameGap: 12", monitor)
+        self.assertIn("position: 'insideEndTop'", monitor)
+        self.assertIn("rotate: 0", monitor)
+        self.assertEqual(2, monitor.count(':height="395"'))
+        self.assertIn(".chart-card { height: 495px; }", monitor)
+        self.assertIn("fourKpiPresetExpectedTotal", monitor)
+
     def test_college_comparison_separates_compare_and_drill(self):
         dashboard = self.read("frontend/src/views/admin/dashboard/index.vue")
         self.assertIn("/admin/meta/college-comparison", dashboard)

@@ -390,7 +390,10 @@ def alert_summary(level: Optional[str] = None, type: Optional[str] = None,
         "alert_student_rate": {
             "label": "当前预警学生率",
             "unit": "%",
-            "formula": "当前预警去重学生数 ÷ 当前权限范围内在籍学生数",
+            "formula": (
+                "当前预警学生率 = 当前预警去重学生数 ÷ "
+                "当前权限及查询条件查询结果范围内在籍学生数"
+            ),
             "managementUse": "跨不同规模组织进行可比分析",
         },
     }
