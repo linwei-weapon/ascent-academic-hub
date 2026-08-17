@@ -144,7 +144,18 @@
             <h3>学生核查名单</h3>
             <p>共 {{ data.total || 0 }} 名学生；点击学生在抽屉中查看变化证据。</p>
           </div>
-          <el-tag effect="plain" type="info">不自动建立处置任务</el-tag>
+          <div class="student-list-actions">
+            <el-input
+              v-model="studentKeywordDraft"
+              class="student-keyword"
+              clearable
+              :disabled="refreshing"
+              placeholder="请输入学号或姓名"
+              @keyup.enter="applyStudentKeyword"
+            />
+            <el-button type="primary" :loading="refreshing" @click="applyStudentKeyword">查询</el-button>
+            <el-button :disabled="refreshing" @click="resetStudentKeyword">重置</el-button>
+          </div>
         </div>
         <DataTable
           :columns="studentColumns"
@@ -156,7 +167,7 @@
           :page-sizes="[20, 50, 100]"
           size="small"
           row-class-name="row-clickable"
-          empty-text="当前观察条件下没有符合名单条件的学生"
+          :empty-text="studentEmptyText"
           @row-click="showStudent"
           @update:page-size="changePageSize"
         >
@@ -238,6 +249,8 @@ const pageSize = ref(50)
 const requestId = ref(0)
 const optionsRequestId = ref(0)
 const listPreset = ref('')
+const studentKeywordDraft = ref('')
+const studentKeywordApplied = ref('')
 const studentListSection = ref<HTMLElement | null>(null)
 const drawerVisible = ref(false)
 const selectedStudent = ref<any>(null)
@@ -252,6 +265,9 @@ const statusName: Record<string, string> = {
   persistent: '后续持续出现未通过',
   pending_observation: '暂无后续成绩',
 }
+const studentEmptyText = computed(() => studentKeywordApplied.value
+  ? '未找到匹配该学号或姓名的学生'
+  : '当前观察条件下没有符合名单条件的学生')
 const kpis = computed(() => [
   {
     key: 'eligible', preset: 'eligible', count: data.summary.eligible_students || 0,
@@ -377,6 +393,8 @@ async function applyFilter() {
   appliedLabels.major = optionLabel('major', applied.major)
   appliedLabels.classCode = optionLabel('class', applied.classCode)
   listPreset.value = ''
+  studentKeywordDraft.value = ''
+  studentKeywordApplied.value = ''
   page.value = 1
   await load()
 }
@@ -385,12 +403,16 @@ async function reset() {
   Object.assign(applied, emptyFilter())
   Object.assign(appliedLabels, { college: '', major: '', classCode: '' })
   listPreset.value = ''
+  studentKeywordDraft.value = ''
+  studentKeywordApplied.value = ''
   page.value = 1
   await loadOptions(draft)
   await load()
 }
 async function applyKpiPreset(item: { preset: string, count: number }) {
   listPreset.value = item.preset
+  studentKeywordDraft.value = ''
+  studentKeywordApplied.value = ''
   page.value = 1
   const total = await load()
   if (typeof total === 'number' && total !== item.count) {
@@ -398,6 +420,17 @@ async function applyKpiPreset(item: { preset: string, count: number }) {
   }
   await nextTick()
   studentListSection.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+async function applyStudentKeyword() {
+  studentKeywordApplied.value = studentKeywordDraft.value.trim()
+  page.value = 1
+  await load()
+}
+async function resetStudentKeyword() {
+  studentKeywordDraft.value = ''
+  studentKeywordApplied.value = ''
+  page.value = 1
+  await load()
 }
 function changePageSize(value: number) {
   if (value === pageSize.value) return
@@ -420,6 +453,7 @@ async function load() {
     })
     appendFilters(query, applied)
     if (listPreset.value) query.set('observation_status', listPreset.value)
+    if (studentKeywordApplied.value) query.set('q', studentKeywordApplied.value)
     const result = await http.get<any>(`/v2/topics/early-setback?${query.toString()}`)
     if (id !== requestId.value) return undefined
     Object.assign(data, result)
@@ -589,6 +623,14 @@ onMounted(async () => {
 .student-list-section {
   scroll-margin-top: 16px;
 }
+.student-list-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.student-keyword {
+  width: 240px;
+}
 .student-cell {
   display: flex;
   flex-direction: column;
@@ -669,6 +711,18 @@ onMounted(async () => {
   }
   .filters .el-select {
     width: 100%;
+  }
+  .student-list-section .section-title {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .student-list-actions {
+    width: 100%;
+  }
+  .student-keyword {
+    width: auto;
+    min-width: 0;
+    flex: 1;
   }
 }
 </style>

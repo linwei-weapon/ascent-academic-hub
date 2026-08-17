@@ -106,9 +106,6 @@
             <el-button @click="resetAnalysisFilters">重置</el-button>
           </div>
         </div>
-        <span v-if="appliedDescription" class="applied-summary">
-          已查询：{{ appliedDescription }}
-        </span>
       </div>
 
       <div v-if="refreshing" class="refresh-feedback" aria-live="polite">
@@ -409,18 +406,6 @@ const hasAppliedFilters = computed(() =>
   Object.values(applied).some(Boolean) || Object.values(listApplied).some(Boolean),
 )
 const hasListFilters = computed(() => Object.values(listApplied).some(Boolean))
-const appliedDescription = computed(() => {
-  const labels: string[] = []
-  const findLabel = (dimension: string, value: string) =>
-    organizationOptions.value[dimension]?.find((item: any) => item.value === value)?.label || value
-  if (applied.college) labels.push(`学院=${findLabel('college', applied.college)}`)
-  if (applied.major) labels.push(`专业=${findLabel('major', applied.major)}`)
-  if (applied.grade) labels.push(`年级=${findLabel('grade', applied.grade)}`)
-  if (applied.classId) labels.push(`班级=${findLabel('class', applied.classId)}`)
-  if (applied.type) labels.push(`类型=${applied.type}`)
-  if (applied.level) labels.push(`等级=${applied.level}`)
-  return labels.join('、')
-})
 const listAppliedDescription = computed(() => {
   const labels: string[] = []
   if (listApplied.q) labels.push(`学生=${listApplied.q}`)

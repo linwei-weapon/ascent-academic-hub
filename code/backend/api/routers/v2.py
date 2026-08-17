@@ -791,12 +791,14 @@ def early_setback_topic(organization_id: Optional[str] = None,
                         class_code: Optional[str] = None,
                         entry_grade: Optional[int] = None,
                         observation_status: Optional[str] = None,
+                        q: Optional[str] = None,
                         limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0),
                         conn: sqlite3.Connection = Depends(get_v2_db), user: dict = Depends(require_v2_reader)):
     """大一首次挂科及后续恢复专题；只使用已发布、未作废且通过口径明确的成绩。"""
+    keyword = (q or "").strip()
     cache_key = ("early_setback", _permission_cache_key(user),
                  organization_id, major_code, class_code, entry_grade,
-                 observation_status, limit, offset)
+                 observation_status, keyword, limit, offset)
     cached = _query_cache_get(cache_key)
     if cached is not None:
         return ok(cached)
@@ -854,6 +856,13 @@ def early_setback_topic(organization_id: Optional[str] = None,
         else setback_rows if not observation_status or observation_status == "setback"
         else [x for x in setback_rows if x["recovery_status"] == observation_status]
     )
+    if keyword:
+        needle = keyword.casefold()
+        listed_rows = [
+            row for row in listed_rows
+            if needle in str(row.get("student_id") or "").casefold()
+            or needle in str(row.get("display_name") or "").casefold()
+        ]
     listed_rows.sort(key=lambda x: (rank[x["recovery_status"]], -x["later_failures"],
                                     -x["first_year_failures"], x["student_id"]))
     total = len(listed_rows); students = listed_rows[offset:offset + limit]

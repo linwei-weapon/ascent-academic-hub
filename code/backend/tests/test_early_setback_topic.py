@@ -152,6 +152,40 @@ class EarlySetbackTopicTest(unittest.TestCase):
                 self.assertEqual(total, result["total"])
                 self.assertEqual(total, len(result["students"]))
 
+    def test_student_keyword_fuzzy_filters_list_only(self):
+        base = early_setback_topic(
+            observation_status="eligible", limit=50, offset=0,
+            user=self.user, conn=self.conn,
+        )["data"]
+
+        by_id = early_setback_topic(
+            observation_status="eligible", q="s2", limit=50, offset=0,
+            user=self.user, conn=self.conn,
+        )["data"]
+        self.assertEqual(1, by_id["total"])
+        self.assertEqual("S2", by_id["students"][0]["student_id"])
+
+        by_name = early_setback_topic(
+            observation_status="eligible", q="乙", limit=50, offset=0,
+            user=self.user, conn=self.conn,
+        )["data"]
+        self.assertEqual(["S2"], [x["student_id"] for x in by_name["students"]])
+        self.assertEqual(base["summary"], by_name["summary"])
+        self.assertEqual(base["focus_groups"], by_name["focus_groups"])
+
+        outside_preset = early_setback_topic(
+            observation_status="setback", q="甲", limit=50, offset=0,
+            user=self.user, conn=self.conn,
+        )["data"]
+        self.assertEqual(0, outside_preset["total"])
+
+        counselor = {"role_id": "counselor", "username": "counselor"}
+        outside_scope = early_setback_topic(
+            observation_status="eligible", q="丙", limit=50, offset=0,
+            user=counselor, conn=self.conn,
+        )["data"]
+        self.assertEqual(0, outside_scope["total"])
+
     def test_options_and_results_do_not_escape_current_identity_scope(self):
         counselor = {"role_id": "counselor", "username": "counselor"}
         options = early_setback_options(user=counselor, conn=self.conn)["data"]
