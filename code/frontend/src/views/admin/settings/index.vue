@@ -260,7 +260,7 @@
         :current-page="candidatePage" @current-change="loadCandidates" />
       <template #footer><el-button type="primary" plain @click="downloadCandidates">导出候选 CSV</el-button></template>
     </el-dialog>
-    <el-dialog v-model="analysisVisible" title="规则变更影响分析" width="920px">
+    <el-dialog v-model="analysisVisible" title="规则变更影响分析" width="min(1120px, 94vw)">
       <div class="sa-card-title" style="font-size:13px">参数变更</div>
       <el-table :data="analysis.paramDiff || []" size="small" style="margin-bottom:16px">
         <el-table-column prop="key" label="参数" />
@@ -268,17 +268,32 @@
         <el-table-column prop="after" label="变更后" />
         <el-table-column label="是否变化"><template #default="{row}"><el-tag size="small" :type="row.changed?'warning':'info'">{{ row.changed?'已调整':'未调整' }}</el-tag></template></el-table-column>
       </el-table>
-      <el-tabs>
-        <el-tab-pane label="学院分布"><el-table :data="analysis.byCollege || []" size="small"><el-table-column prop="name" label="学院"/><el-table-column prop="total" label="涉及"/><el-table-column prop="new_count" label="新增"/><el-table-column prop="retained_count" label="保留"/><el-table-column prop="exited_count" label="退出"/></el-table></el-tab-pane>
-        <el-tab-pane label="专业分布"><el-table :data="analysis.byMajor || []" size="small" max-height="360"><el-table-column prop="name" label="专业"/><el-table-column prop="total" label="涉及"/><el-table-column prop="new_count" label="新增"/><el-table-column prop="exited_count" label="退出"/></el-table></el-tab-pane>
-        <el-tab-pane label="年级分布"><el-table :data="analysis.byGrade || []" size="small"><el-table-column prop="name" label="年级"/><el-table-column prop="total" label="涉及"/><el-table-column prop="new_count" label="新增"/><el-table-column prop="exited_count" label="退出"/></el-table></el-tab-pane>
-      </el-tabs>
+      <section class="distribution-section">
+        <div class="distribution-head">
+          <div>
+            <div class="sa-card-title distribution-title">学院专业年级分布</div>
+            <div class="distribution-note">统计当前变更单全部候选影响，包含新增、保留和退出学生。</div>
+          </div>
+          <div class="distribution-total">总影响 <strong>{{ analysisDistribution.total }}</strong> 人</div>
+        </div>
+        <el-table class="analysis-cross-table" :data="analysisDistribution.rows" border size="small"
+          max-height="430" empty-text="暂无变更影响数据" :span-method="analysisSpanMethod"
+          :row-class-name="analysisRowClassName">
+          <el-table-column prop="collegeName" label="学院" width="170" fixed show-overflow-tooltip />
+          <el-table-column prop="majorName" label="专业" width="170" fixed show-overflow-tooltip />
+          <el-table-column v-for="(grade, gradeIndex) in analysisDistribution.grades" :key="grade"
+            :label="grade" width="105" align="right" header-align="center">
+            <template #default="{row}">{{ row.counts?.[gradeIndex] || 0 }}</template>
+          </el-table-column>
+          <el-table-column prop="total" label="小计" width="110" align="right" header-align="center" fixed="right" />
+        </el-table>
+      </section>
     </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { computed, ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { http, getToken } from '@/utils/http'
 
@@ -305,6 +320,25 @@ const candidatePage = ref(1)
 const candidateChangeId = ref(0)
 const analysisVisible = ref(false)
 const analysis = ref<any>({})
+const analysisDistribution = computed(() => analysis.value?.organizationGradeDistribution || {
+  grades: [], rows: [], total: 0,
+})
+
+function analysisSpanMethod({ row, columnIndex }: {row:any;columnIndex:number}) {
+  if (row.rowType === 'grandTotal') {
+    if (columnIndex === 0) return [1, 2]
+    if (columnIndex === 1) return [0, 0]
+  }
+  if (columnIndex === 0) {
+    if (row.rowType === 'major' && row.collegeRowspan) return [row.collegeRowspan, 1]
+    return [0, 0]
+  }
+  return [1, 1]
+}
+
+function analysisRowClassName({ row }: {row:any}) {
+  return `analysis-${row.rowType || 'major'}`
+}
 
 function fmt(v: number | null): string {
   if (v === null || v === undefined) return '—'
@@ -505,6 +539,17 @@ onMounted(async () => {
 .cond-row-var { flex: 1; font-size: 13px; color: #475569; }
 .cond-row-op { flex: 0 0 auto; }
 .cond-row-unit { font-size: 12px; color: #64748B; min-width: 28px; }
+.distribution-section { margin-top: 4px; }
+.distribution-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; margin-bottom: 10px; }
+.distribution-title { margin-bottom: 4px; font-size: 13px; }
+.distribution-note { color: #64748b; font-size: 11px; line-height: 1.5; }
+.distribution-total { flex: 0 0 auto; color: #475569; font-size: 12px; white-space: nowrap; }
+.distribution-total strong { color: var(--sa-primary); font-size: 17px; font-variant-numeric: tabular-nums; }
+.analysis-cross-table { width: 100%; }
+.analysis-cross-table :deep(.cell) { font-variant-numeric: tabular-nums; }
+.analysis-cross-table :deep(.analysis-collegeSubtotal td.el-table__cell) { background: #f8fafc !important; font-weight: 650; color: #334155; }
+.analysis-cross-table :deep(.analysis-grandTotal td.el-table__cell) { background: #eef4ff !important; font-weight: 700; color: #1e3a8a; border-top-color: #bfdbfe; }
+@media(max-width:760px){.distribution-head{align-items:flex-start;flex-direction:column;gap:8px}}
 /* 规则自发现 */
 .disc-card {
   border: 1px solid var(--sa-border-2); border-radius: 8px; padding: 14px 16px;

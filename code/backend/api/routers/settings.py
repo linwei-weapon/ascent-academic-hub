@@ -541,6 +541,94 @@ def list_rule_change_candidates(change_id: int, action: str | None = None,
                "list": [dict(r) for r in rows]})
 
 
+def _organization_grade_distribution(conn: sqlite3.Connection, change_id: int) -> dict:
+    """按学院—专业—年级交叉汇总变更单全部候选学生，并生成小计与总计。"""
+    source_rows = dbm.query(conn, """SELECT
+        COALESCE(s.college_id,'__unknown_college__') college_id,
+        COALESCE(co.name,'未知学院') college_name,
+        COALESCE(s.major_id,'__unknown_major__') major_id,
+        COALESCE(m.name,'未知专业') major_name,
+        COALESCE(NULLIF(TRIM(CAST(s.grade AS TEXT)),''),'未知年级') grade_name,
+        COUNT(DISTINCT c.student_id) total
+        FROM alert_rule_change_candidate c
+        LEFT JOIN dim_student s ON c.student_id=s.student_id
+        LEFT JOIN dim_college co ON s.college_id=co.college_id
+        LEFT JOIN dim_major m ON s.major_id=m.major_id
+        WHERE c.change_id=?
+        GROUP BY COALESCE(s.college_id,'__unknown_college__'),
+                 COALESCE(co.name,'未知学院'),
+                 COALESCE(s.major_id,'__unknown_major__'),
+                 COALESCE(m.name,'未知专业'),
+                 COALESCE(NULLIF(TRIM(CAST(s.grade AS TEXT)),''),'未知年级')""",
+        (change_id,))
+
+    def grade_label(value: str) -> str:
+        text = str(value or "").strip()
+        if not text or text == "未知年级":
+            return "未知年级"
+        return text if text.endswith("级") else f"{text}级"
+
+    def grade_sort(value: str) -> tuple:
+        normalized = value[:-1] if value.endswith("级") else value
+        return (0, int(normalized)) if normalized.isdigit() else (1, value)
+
+    hierarchy: dict[tuple[str, str], dict[tuple[str, str], dict[str, int]]] = {}
+    grade_names: set[str] = set()
+    for source in source_rows:
+        college_key = (source["college_id"], source["college_name"])
+        major_key = (source["major_id"], source["major_name"])
+        grade = grade_label(source["grade_name"])
+        grade_names.add(grade)
+        major_counts = hierarchy.setdefault(college_key, {}).setdefault(major_key, {})
+        major_counts[grade] = major_counts.get(grade, 0) + int(source["total"] or 0)
+
+    grades = sorted(grade_names, key=grade_sort)
+    result_rows: list[dict] = []
+    grand_counts = [0] * len(grades)
+    for (college_id, college_name), majors in sorted(
+            hierarchy.items(), key=lambda item: (item[0][1], item[0][0])):
+        college_rows: list[dict] = []
+        college_counts = [0] * len(grades)
+        for (major_id, major_name), count_map in sorted(
+                majors.items(), key=lambda item: (item[0][1], item[0][0])):
+            counts = [int(count_map.get(grade, 0)) for grade in grades]
+            college_counts = [left + right for left, right in zip(college_counts, counts)]
+            college_rows.append({
+                "rowType": "major",
+                "collegeId": college_id,
+                "collegeName": college_name,
+                "majorId": major_id,
+                "majorName": major_name,
+                "counts": counts,
+                "total": sum(counts),
+            })
+        if college_rows:
+            college_rows[0]["collegeRowspan"] = len(college_rows) + 1
+        result_rows.extend(college_rows)
+        result_rows.append({
+            "rowType": "collegeSubtotal",
+            "collegeId": college_id,
+            "collegeName": college_name,
+            "majorId": None,
+            "majorName": "小计",
+            "counts": college_counts,
+            "total": sum(college_counts),
+        })
+        grand_counts = [left + right for left, right in zip(grand_counts, college_counts)]
+
+    if result_rows:
+        result_rows.append({
+            "rowType": "grandTotal",
+            "collegeId": None,
+            "collegeName": "合计",
+            "majorId": None,
+            "majorName": "",
+            "counts": grand_counts,
+            "total": sum(grand_counts),
+        })
+    return {"grades": grades, "rows": result_rows, "total": sum(grand_counts)}
+
+
 @router.get("/settings/rule-changes/{change_id}/analysis")
 def rule_change_analysis(change_id: int, user: dict = Depends(get_current_user),
                          conn: sqlite3.Connection = Depends(get_db_rw)):
@@ -585,6 +673,7 @@ def rule_change_analysis(change_id: int, user: dict = Depends(get_current_user),
         "byCollege": grouped("s.college_id", "COALESCE(co.name,'未知学院')"),
         "byMajor": grouped("s.major_id", "COALESCE(m.name,'未知专业')"),
         "byGrade": grouped("s.grade", "COALESCE(CAST(s.grade AS TEXT),'未知年级')"),
+        "organizationGradeDistribution": _organization_grade_distribution(conn, change_id),
         "byAction": by_action, "byLevel": by_level,
     })
 
