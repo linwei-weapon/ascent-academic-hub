@@ -248,22 +248,11 @@
       </template>
     </el-dialog>
     <el-dialog v-model="candidateVisible" title="规则候选学生明细" width="900px">
-      <div style="display:flex;gap:8px;margin-bottom:12px">
-        <el-radio-group v-model="candidateAction" size="small" @change="loadCandidates(1)">
-          <el-radio-button value="">全部</el-radio-button>
-          <el-radio-button value="new">新增</el-radio-button>
-          <el-radio-button value="retained">保留</el-radio-button>
-          <el-radio-button value="exited">退出</el-radio-button>
-        </el-radio-group>
-      </div>
       <el-table :data="candidateRows" size="small" v-loading="candidateLoading">
         <el-table-column prop="student_id" label="学号" width="130" />
         <el-table-column prop="student_name" label="姓名" width="90" />
         <el-table-column prop="college_name" label="学院" min-width="130" />
         <el-table-column prop="major_name" label="专业" min-width="120" />
-        <el-table-column label="变化" width="70">
-          <template #default="{row}"><el-tag size="small" :type="row.action==='new'?'danger':row.action==='exited'?'info':'success'">{{ actionLabel(row.action) }}</el-tag></template>
-        </el-table-column>
         <el-table-column prop="trigger_detail" label="候选命中说明" min-width="220" show-overflow-tooltip />
       </el-table>
       <el-pagination style="margin-top:12px;justify-content:flex-end" background small
@@ -313,7 +302,6 @@ const candidateLoading = ref(false)
 const candidateRows = ref<any[]>([])
 const candidateTotal = ref(0)
 const candidatePage = ref(1)
-const candidateAction = ref('')
 const candidateChangeId = ref(0)
 const analysisVisible = ref(false)
 const analysis = ref<any>({})
@@ -374,18 +362,15 @@ async function onRuleToggle(row: Rule) {
 
 function statusLabel(s:string) { return ({draft:'草稿',submitted:'待审核',approved:'已通过',rejected:'已拒绝',published:'配置已发布',activated:'预警已激活'} as any)[s] || s }
 function statusType(s:string) { return s==='approved'||s==='published'||s==='activated'?'success':s==='rejected'?'danger':s==='submitted'?'warning':'info' }
-function actionLabel(s:string) { return ({new:'新增',retained:'保留',exited:'退出'} as any)[s] || s }
 function openCandidates(row:RuleChange) {
   candidateChangeId.value = row.changeId
-  candidateAction.value = ''
   candidateVisible.value = true
   loadCandidates(1)
 }
 async function loadCandidates(page=1) {
   candidateLoading.value = true
   try {
-    const q = candidateAction.value ? `&action=${candidateAction.value}` : ''
-    const d = await http.get<any>(`/admin/settings/rule-changes/${candidateChangeId.value}/candidates?page=${page}&page_size=20${q}`)
+    const d = await http.get<any>(`/admin/settings/rule-changes/${candidateChangeId.value}/candidates?page=${page}&page_size=20`)
     candidateRows.value = d.list || []
     candidateTotal.value = d.total || 0
     candidatePage.value = page
