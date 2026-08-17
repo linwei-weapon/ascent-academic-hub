@@ -272,7 +272,6 @@
         <div class="distribution-head">
           <div>
             <div class="sa-card-title distribution-title">学院专业年级分布</div>
-            <div class="distribution-note">统计当前变更单全部候选影响，包含新增、保留和退出学生。</div>
           </div>
           <div class="distribution-total">总影响 <strong>{{ analysisDistribution.total }}</strong> 人</div>
         </div>
@@ -542,7 +541,6 @@ onMounted(async () => {
 .distribution-section { margin-top: 4px; }
 .distribution-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; margin-bottom: 10px; }
 .distribution-title { margin-bottom: 4px; font-size: 13px; }
-.distribution-note { color: #64748b; font-size: 11px; line-height: 1.5; }
 .distribution-total { flex: 0 0 auto; color: #475569; font-size: 12px; white-space: nowrap; }
 .distribution-total strong { color: var(--sa-primary); font-size: 17px; font-variant-numeric: tabular-nums; }
 .analysis-cross-table { width: 100%; }
