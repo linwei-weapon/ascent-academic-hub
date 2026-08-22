@@ -131,11 +131,16 @@
             </div>
           </div>
 
-          <TrajectoryCard
-            v-if="primarySignal"
-            :rule-id="primarySignal.ruleId"
-            :level="primarySignal.level"
-          />
+          <div v-if="criticalAlertHistory.length" class="sa-card trajectory-group">
+            <TrajectoryCard
+              v-for="(alert, index) in criticalAlertHistory"
+              :key="alert.alertId || `${alert.ruleId}-${alert.level}-${index}`"
+              :rule-id="alert.ruleId"
+              :level="alert.level"
+              :show-header="index === 0"
+              grouped
+            />
+          </div>
         </el-tab-pane>
 
         <el-tab-pane label="核查与跟进记录" name="records">
@@ -257,6 +262,9 @@ const workflowStatuses = [
 ]
 
 const primarySignal = computed(() => props.row?.signals?.[0] || null)
+const criticalAlertHistory = computed(() =>
+  (student.value.alertHistory || []).filter((alert: any) => alert.level === '严重'),
+)
 const failedScores = computed(() =>
   (student.value.scores || []).filter((item: any) => !item.passed),
 )
@@ -453,6 +461,7 @@ watch(
 .signal-item p { margin: 5px 0 2px; color: #475569; font-size: 12px; }
 .signal-item small { color: #94a3b8; }
 .evidence-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.trajectory-group { margin-bottom: 12px; padding: 0; overflow: hidden; }
 .evidence-list > div { display: flex; justify-content: space-between; gap: 10px; padding: 7px 0; border-bottom: 1px solid #f1f5f9; font-size: 12px; }
 .evidence-list > div:last-child { border-bottom: 0; }
 .evidence-list span { color: #475569; }

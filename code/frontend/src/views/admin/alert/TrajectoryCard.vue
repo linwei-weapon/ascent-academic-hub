@@ -1,6 +1,6 @@
 <template>
-  <div class="sa-card traj-card" style="margin-bottom:12px">
-    <div class="sa-card-title">
+  <div :class="['traj-card', { 'sa-card': !grouped, 'traj-card--grouped': grouped }]">
+    <div v-if="showHeader" class="sa-card-title">
       <span>同类预警后续轨迹
         <span class="extra">历史统计分布，不构成个体预测</span>
       </span>
@@ -83,7 +83,15 @@
 import { ref, watch } from 'vue'
 import { http } from '@/utils/http'
 
-const props = defineProps<{ ruleId?: string; level?: string }>()
+const props = withDefaults(defineProps<{
+  ruleId?: string
+  level?: string
+  showHeader?: boolean
+  grouped?: boolean
+}>(), {
+  showHeader: true,
+  grouped: false,
+})
 
 const loading = ref(false)
 const bucket = ref<any>(null)
@@ -121,6 +129,9 @@ watch(() => [props.ruleId, props.level], load, { immediate: true })
 
 <style scoped>
 .traj-card :deep(.sa-card-title) { display: flex; justify-content: space-between; align-items: center; }
+.traj-card:not(.traj-card--grouped) { margin-bottom: 12px; }
+.traj-card--grouped { padding: 16px 18px; }
+.traj-card--grouped + .traj-card--grouped { border-top: 1px solid var(--sa-border); }
 .traj-meta { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; font-size: 12px; color: var(--sa-muted); margin-bottom: 10px; }
 .traj-sub { font-size: 12px; color: var(--sa-muted); margin: 8px 0 6px; }
 .traj-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; }

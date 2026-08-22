@@ -239,6 +239,43 @@ def _student_cte(base_sql: str) -> str:
     """
 
 
+def _active_signals_for_students(conn: sqlite3.Connection,
+                                 student_ids: list[str]) -> dict[str, list]:
+    """批量加载学生的全部当前有效预警信号，供各学生入口统一复用。"""
+    signals: dict[str, list] = {student_id: [] for student_id in student_ids}
+    if not student_ids:
+        return signals
+
+    placeholders = ",".join("?" * len(student_ids))
+    signal_rows = dbm.query(conn, f"""
+        SELECT a.student_id,a.alert_id,e.event_id,a.rule_id,a.type,a.level,
+               a.trigger_detail,a.created_at,
+               COALESCE(a.rule_version,'legacy') rule_version,
+               COALESCE(e.workflow_status,'new') workflow_status
+        FROM fact_alert a
+        LEFT JOIN alert_event e ON e.alert_id=a.alert_id
+        WHERE COALESCE(a.is_active,1)=1
+          AND a.student_id IN ({placeholders})
+        ORDER BY a.student_id,
+                 CASE a.level WHEN '严重' THEN 3
+                              WHEN '警告' THEN 2 ELSE 1 END DESC,
+                 a.created_at DESC,a.alert_id DESC
+    """, tuple(student_ids))
+    for signal in signal_rows:
+        signals.setdefault(signal["student_id"], []).append({
+            "alertId": signal["alert_id"],
+            "eventId": signal["event_id"],
+            "ruleId": signal["rule_id"],
+            "type": signal["type"],
+            "level": signal["level"],
+            "reason": signal["trigger_detail"],
+            "managementStatus": signal["workflow_status"],
+            "ruleVersion": signal["rule_version"],
+            "detectedAt": signal["created_at"],
+        })
+    return signals
+
+
 def _history_capability(conn: sqlite3.Connection, where_sql: str,
                         params: list) -> dict:
     row = dbm.query_one(conn, f"""
@@ -458,35 +495,7 @@ def alert_students(page: int = 1, page_size: int = 20,
     total = int(rows[0]["total_count"] or 0) if rows else 0
 
     ids = [row["student_id"] for row in rows]
-    signals: dict[str, list] = {sid: [] for sid in ids}
-    if ids:
-        placeholders = ",".join("?" * len(ids))
-        signal_rows = dbm.query(conn, f"""
-            SELECT a.student_id,a.alert_id,e.event_id,a.rule_id,a.type,a.level,
-                   a.trigger_detail,a.created_at,
-                   COALESCE(a.rule_version,'legacy') rule_version,
-                   COALESCE(e.workflow_status,'new') workflow_status
-            FROM fact_alert a
-            LEFT JOIN alert_event e ON e.alert_id=a.alert_id
-            WHERE COALESCE(a.is_active,1)=1
-              AND a.student_id IN ({placeholders})
-            ORDER BY a.student_id,
-                     CASE a.level WHEN '严重' THEN 3
-                                  WHEN '警告' THEN 2 ELSE 1 END DESC,
-                     a.created_at DESC,a.alert_id DESC
-        """, tuple(ids))
-        for signal in signal_rows:
-            signals.setdefault(signal["student_id"], []).append({
-                "alertId": signal["alert_id"],
-                "eventId": signal["event_id"],
-                "ruleId": signal["rule_id"],
-                "type": signal["type"],
-                "level": signal["level"],
-                "reason": signal["trigger_detail"],
-                "managementStatus": signal["workflow_status"],
-                "ruleVersion": signal["rule_version"],
-                "detectedAt": signal["created_at"],
-            })
+    signals = _active_signals_for_students(conn, ids)
 
     items = []
     for row in rows:
@@ -552,7 +561,6 @@ def alert_priority(limit: int = 10,
     rows = dbm.query(conn, cte + f"""
         SELECT student_id,student_name,college_id,college_name,
                major_id,major_name,class_id,class_name,grade,
-               alert_id,event_id,rule_id,rule_version,
                level highest_level,alert_type primary_type,
                trigger_detail primary_reason,alert_count,
                management_state,assigned_to_current_student,
@@ -581,6 +589,9 @@ def alert_priority(limit: int = 10,
         LIMIT ?
     """, tuple(params + management_params + [limit]))
 
+    signals = _active_signals_for_students(
+        conn, [row["student_id"] for row in rows],
+    )
     items = []
     for row in rows:
         reasons = [f"{row['highest_level']}风险"]
@@ -615,20 +626,7 @@ def alert_priority(limit: int = 10,
             "openDays": int(row["open_days"] or 0),
             "priorityScore": int(row["priority_score"] or 0),
             "priorityReasons": reasons,
-            "signals": [{
-                "alertId": row["alert_id"],
-                "eventId": row["event_id"],
-                "ruleId": row["rule_id"],
-                "type": row["primary_type"],
-                "level": row["highest_level"],
-                "reason": row["primary_reason"],
-                "managementStatus": (
-                    "new" if row["management_state"] == "pending_review"
-                    else "review_pending"
-                ),
-                "ruleVersion": row["rule_version"],
-                "detectedAt": row["first_detected_at"],
-            }],
+            "signals": signals.get(row["student_id"], []),
             "scoreBreakdown": {
                 "risk": 50 if row["highest_level"] == "严重"
                         else 30 if row["highest_level"] == "警告" else 15,

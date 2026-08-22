@@ -76,8 +76,9 @@
               </template>
             </el-table-column>
             <el-table-column prop="createdBy" label="创建人" width="100" />
-            <el-table-column label="操作" width="220">
+            <el-table-column label="操作" width="320">
               <template #default="{row}">
+                <el-button v-if="row.status==='draft'&&hasPerm('edit')" size="small" text type="primary" @click="openTrialScript(row)">试算脚本维护</el-button>
                 <el-button v-if="row.status==='draft'&&hasPerm('edit')" size="small" text type="success" @click="changeAction(row,'evaluate')">影响试算</el-button>
                 <el-button v-if="row.impact?.candidateStatus==='evaluated'" size="small" text @click="openCandidates(row)">候选明细</el-button>
                 <el-button v-if="row.impact?.candidateStatus==='evaluated'" size="small" text @click="openAnalysis(row)">影响分析</el-button>
@@ -247,6 +248,34 @@
         <el-button size="small" type="primary" :loading="saving" @click="saveRule">创建变更单</el-button>
       </template>
     </el-dialog>
+    <el-dialog v-model="scriptDialogVisible" title="试算脚本维护" width="min(760px, 92vw)"
+      :close-on-click-modal="false" destroy-on-close>
+      <div v-loading="scriptLoading" class="trial-script-editor">
+        <div class="trial-script-meta">
+          <span>变更单 #{{ scriptChangeId }}</span>
+          <el-tag size="small" type="info">规则 {{ scriptRuleId }}</el-tag>
+        </div>
+        <el-form label-position="top">
+          <el-form-item label="脚本类型" required>
+            <el-radio-group v-model="scriptForm.scriptType">
+              <el-radio-button value="sql">普通SQL</el-radio-button>
+              <el-radio-button value="stored_procedure">存储过程</el-radio-button>
+            </el-radio-group>
+          </el-form-item>
+          <el-form-item label="脚本内容" required>
+            <el-input v-model="scriptForm.scriptContent" type="textarea" :rows="16"
+              maxlength="50000" show-word-limit resize="vertical" :placeholder="scriptPlaceholder"
+              class="trial-script-input" />
+          </el-form-item>
+        </el-form>
+        <el-alert type="info" :closable="false" show-icon
+          title="此处维护试算脚本配置，不会在保存时直接执行；脚本变更后需重新进行影响试算。" />
+      </div>
+      <template #footer>
+        <el-button @click="scriptDialogVisible=false">取消</el-button>
+        <el-button type="primary" :loading="scriptSaving" :disabled="scriptLoading" @click="saveTrialScript">保存</el-button>
+      </template>
+    </el-dialog>
     <el-dialog v-model="candidateVisible" title="规则候选学生明细" width="900px">
       <el-table :data="candidateRows" size="small" v-loading="candidateLoading">
         <el-table-column prop="student_id" label="学号" width="130" />
@@ -302,7 +331,11 @@ const embedded = props.embedded
 
 interface Condition { key: string; label: string; op: string; unit: string; value: number; min: number; max: number; step: number }
 interface Rule { id: string; name: string; level: string; triggerType: string; conditions: Condition[]; params: string; editable: boolean; enabled: boolean }
-interface RuleChange { changeId:number; ruleId:string; status:string; reason:string; impact:any; createdBy:string; isFresh?:boolean }
+interface RuleChange {
+  changeId:number; ruleId:string; status:string; reason:string; impact:any;
+  createdBy:string; isFresh?:boolean;
+  trialScript?:{scriptType:string;maintained:boolean;updatedBy?:string;updatedAt?:string}
+}
 
 const activeTab = ref(alertRules ? 'rules' : 'semester')
 const rules = reactive<Rule[]>([])
@@ -322,6 +355,15 @@ const analysis = ref<any>({})
 const analysisDistribution = computed(() => analysis.value?.organizationGradeDistribution || {
   grades: [], rows: [], total: 0,
 })
+const scriptDialogVisible = ref(false)
+const scriptLoading = ref(false)
+const scriptSaving = ref(false)
+const scriptChangeId = ref(0)
+const scriptRuleId = ref('')
+const scriptForm = reactive({ scriptType: 'sql', scriptContent: '' })
+const scriptPlaceholder = computed(() => scriptForm.scriptType === 'sql'
+  ? '请输入用于规则影响试算的 SQL 脚本'
+  : '请输入存储过程定义或调用脚本')
 
 function analysisSpanMethod({ row, columnIndex }: {row:any;columnIndex:number}) {
   if (row.rowType === 'grandTotal') {
@@ -395,6 +437,44 @@ async function onRuleToggle(row: Rule) {
 
 function statusLabel(s:string) { return ({draft:'草稿',submitted:'待审核',approved:'已通过',rejected:'已拒绝',published:'配置已发布',activated:'预警已激活'} as any)[s] || s }
 function statusType(s:string) { return s==='approved'||s==='published'||s==='activated'?'success':s==='rejected'?'danger':s==='submitted'?'warning':'info' }
+async function openTrialScript(row:RuleChange) {
+  scriptChangeId.value = row.changeId
+  scriptRuleId.value = row.ruleId
+  scriptForm.scriptType = row.trialScript?.scriptType || 'sql'
+  scriptForm.scriptContent = ''
+  scriptDialogVisible.value = true
+  scriptLoading.value = true
+  try {
+    const data = await http.get<any>(`/admin/settings/rule-changes/${row.changeId}/trial-script`)
+    scriptForm.scriptType = data.scriptType || 'sql'
+    scriptForm.scriptContent = data.scriptContent || ''
+  } catch (e:any) {
+    scriptDialogVisible.value = false
+    ElMessage.error(e?.message || '试算脚本加载失败')
+  } finally {
+    scriptLoading.value = false
+  }
+}
+async function saveTrialScript() {
+  if (!scriptForm.scriptContent.trim()) {
+    ElMessage.warning('请输入试算脚本内容')
+    return
+  }
+  scriptSaving.value = true
+  try {
+    await http.put(`/admin/settings/rule-changes/${scriptChangeId.value}/trial-script`, {
+      script_type: scriptForm.scriptType,
+      script_content: scriptForm.scriptContent.trim(),
+    })
+    scriptDialogVisible.value = false
+    ElMessage.success('试算脚本已保存，请重新执行影响试算')
+    await loadChanges()
+  } catch (e:any) {
+    ElMessage.error(e?.message || '试算脚本保存失败')
+  } finally {
+    scriptSaving.value = false
+  }
+}
 function openCandidates(row:RuleChange) {
   candidateChangeId.value = row.changeId
   candidateVisible.value = true
@@ -538,6 +618,9 @@ onMounted(async () => {
 .cond-row-var { flex: 1; font-size: 13px; color: #475569; }
 .cond-row-op { flex: 0 0 auto; }
 .cond-row-unit { font-size: 12px; color: #64748B; min-width: 28px; }
+.trial-script-editor { min-height: 430px; }
+.trial-script-meta { display:flex; align-items:center; gap:10px; margin-bottom:16px; color:#475569; font-size:13px; }
+.trial-script-input :deep(textarea) { font-family: Consolas, 'Courier New', monospace; line-height: 1.6; tab-size: 2; }
 .distribution-section { margin-top: 4px; }
 .distribution-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; margin-bottom: 10px; }
 .distribution-title { margin-bottom: 4px; font-size: 13px; }

@@ -593,6 +593,29 @@ CREATE TABLE sys_discovered_rule (
     approved_at   TEXT
 );
 
+CREATE TABLE IF NOT EXISTS sys_discovery_run (
+    run_id                 TEXT PRIMARY KEY,
+    semester_id            TEXT NOT NULL,
+    status                 TEXT NOT NULL,
+    manifest_fingerprint   TEXT NOT NULL,
+    table_count            INTEGER NOT NULL,
+    total_rows             INTEGER NOT NULL,
+    analyzable_students    INTEGER NOT NULL,
+    consent_by             TEXT NOT NULL,
+    consent_at             TEXT NOT NULL,
+    created_at             TEXT NOT NULL,
+    started_at             TEXT,
+    finished_at            TEXT,
+    candidate_count        INTEGER DEFAULT 0,
+    superseded_count       INTEGER DEFAULT 0,
+    engine_mode            TEXT NOT NULL,
+    model_status           TEXT,
+    model_summary          TEXT,
+    error_message          TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_sys_discovery_run_created
+    ON sys_discovery_run(created_at DESC);
+
 DROP TABLE IF EXISTS sys_config;
 CREATE TABLE sys_config (
     config_key    TEXT PRIMARY KEY,

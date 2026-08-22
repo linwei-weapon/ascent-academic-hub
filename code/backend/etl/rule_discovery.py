@@ -202,9 +202,9 @@ def _risk_ratio(data: list[dict], feature: str, threshold: float,
     return round(match_rate / overall_rate, 1) if overall_rate > 0 else 1.0, len(matched), match_pos
 
 
-def discover() -> list[dict]:
+def discover(db_path: Path = DB) -> list[dict]:
     """运行规则自发现，返回候选规则列表。"""
-    conn = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
     features = _build_features(conn)
     conn.close()
@@ -322,9 +322,9 @@ def discover() -> list[dict]:
     return rules[:10]
 
 
-def run_and_save(semester_id: str = "2025-2026-2"):
+def run_and_save(semester_id: str = "2025-2026-2", db_path: Path = DB):
     """执行发现并写入数据库（去重：相同条件组合不重复写入）。"""
-    conn = sqlite3.connect(str(DB))
+    conn = sqlite3.connect(str(db_path))
     conn.execute("PRAGMA journal_mode=WAL")
     conn.row_factory = sqlite3.Row
 
@@ -342,7 +342,7 @@ def run_and_save(semester_id: str = "2025-2026-2"):
     conn.execute("""UPDATE sys_discovered_rule SET status='superseded'
         WHERE semester_id=? AND status='pending'""", (semester_id,))
 
-    rules = discover()
+    rules = discover(db_path)
     for r in rules:
         cond_str = json.dumps(r["conditions"], ensure_ascii=False)
         # 已采纳/已启用的相同条件不重复建议。

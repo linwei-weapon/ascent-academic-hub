@@ -8,9 +8,83 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 FRONTEND = ROOT / "code" / "frontend" / "src"
+BACKEND = ROOT / "code" / "backend"
 
 
 class DashboardUeContractTest(unittest.TestCase):
+    def test_alert_student_list_query_and_reset_keep_the_list_baseline(self):
+        alert_page = (
+            FRONTEND / "views" / "admin" / "alert" / "index.vue"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            '@click="applyListFilters">\n            查询\n          </el-button>',
+            alert_page,
+        )
+        self.assertIn('@click="resetListFilters">重置</el-button>', alert_page)
+        self.assertNotIn(
+            '@click="applyListFilters">\n            筛选名单\n          </el-button>',
+            alert_page,
+        )
+        self.assertNotIn("清除名单筛选", alert_page)
+
+        apply_block = alert_page.split(
+            "function applyListFilters()", 1,
+        )[1].split("function resetListFilters()", 1)[0]
+        reset_block = alert_page.split(
+            "function resetListFilters()", 1,
+        )[1].split("function clearCardPreset()", 1)[0]
+        self.assertNotIn("clearCardPreset()", apply_block)
+        self.assertNotIn("clearCardPreset()", reset_block)
+        self.assertIn(
+            "Object.assign(listDraft, emptyListFilter())", reset_block,
+        )
+        self.assertIn(
+            "Object.assign(listApplied, emptyListFilter())", reset_block,
+        )
+
+    def test_rule_discovery_requires_manifest_consent_and_shows_run_status(self):
+        discovery = (
+            FRONTEND / "views" / "admin" / "alert" / "Discovery.vue"
+        ).read_text(encoding="utf-8")
+        for marker in (
+            "本次计算样本库表总数",
+            "样本数据总量",
+            "样本学生数",
+            "样本库表数据清单",
+            "数据脱敏说明",
+            "免责说明协议",
+            "拒绝",
+            "执行",
+            "/admin/settings/rules/discovery/preview",
+            "/admin/settings/rules/discovery/status",
+            "manifestFingerprint",
+            "consentAccepted",
+            ':disabled="!consentAccepted"',
+            "setInterval",
+            "新一轮分析运行中",
+        ):
+            self.assertIn(marker, discovery)
+        self.assertNotIn("新一轮分析会将当前待审核建议标记", discovery)
+        self.assertNotIn('class="model-boundary"', discovery)
+        self.assertNotIn("<span>数据总量</span>", discovery)
+        self.assertNotIn("<span>可分析学生</span>", discovery)
+        self.assertNotIn("<h4>库表数据清单</h4>", discovery)
+
+    def test_draft_rule_change_supports_trial_script_maintenance(self):
+        settings = (
+            FRONTEND / "views" / "admin" / "settings" / "index.vue"
+        ).read_text(encoding="utf-8")
+        for marker in (
+            "试算脚本维护",
+            "普通SQL",
+            "存储过程",
+            "scriptDialogVisible",
+            "/trial-script",
+            "保存",
+            "取消",
+        ):
+            self.assertIn(marker, settings)
+
     def test_data_table_supports_required_columns_limits_and_identity_scoping(self):
         source = (FRONTEND / "components" / "DataTable.vue").read_text(encoding="utf-8")
         for marker in (
@@ -231,10 +305,25 @@ class DashboardUeContractTest(unittest.TestCase):
         self.assertIn("student.value.failTrace || []", alert_student_drawer)
         self.assertIn("item.courseId || item.courseName", alert_student_drawer)
         self.assertNotIn("label: '当前未解决课程'", alert_student_drawer)
+        self.assertIn('v-for="(alert, index) in criticalAlertHistory"', alert_student_drawer)
+        self.assertIn('class="sa-card trajectory-group"', alert_student_drawer)
+        self.assertIn(':show-header="index === 0"', alert_student_drawer)
+        self.assertIn('grouped', alert_student_drawer)
+        self.assertIn("student.value.alertHistory || []", alert_student_drawer)
+        self.assertIn("alert.level === '严重'", alert_student_drawer)
+        self.assertIn(':rule-id="alert.ruleId"', alert_student_drawer)
+        self.assertNotIn('v-if="primarySignal"', alert_student_drawer)
+        alert_router = (
+            BACKEND / "api" / "routers" / "alert.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn('"ruleId": a["rule_id"]', alert_router)
         trajectory_card = (
             FRONTEND / "views" / "admin" / "alert" / "TrajectoryCard.vue"
         ).read_text(encoding="utf-8")
         self.assertIn("同类预警后续轨迹", trajectory_card)
+        self.assertIn('v-if="showHeader"', trajectory_card)
+        self.assertIn('grouped?: boolean', trajectory_card)
+        self.assertIn("'traj-card--grouped': grouped", trajectory_card)
         self.assertNotIn("后续轨迹：可观察", trajectory_card)
         self.assertNotIn("发生在当前学期，尚无后续学期数据", trajectory_card)
 

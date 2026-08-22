@@ -364,6 +364,10 @@ class AlertMonitorTest(unittest.TestCase):
         self.assertEqual(3, len(data["items"]))
         first = data["items"][0]
         self.assertEqual("S01", first["studentId"])
+        self.assertEqual(first["alertCount"], len(first["signals"]))
+        self.assertEqual({1, 2}, {
+            signal["alertId"] for signal in first["signals"]
+        })
         self.assertGreater(first["priorityScore"], data["items"][1]["priorityScore"])
         self.assertIn("2条当前规则同时命中", first["priorityReasons"])
         self.assertEqual(

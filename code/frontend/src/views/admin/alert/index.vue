@@ -247,9 +247,9 @@
             v-model="listDraft.mine"
           >只看我的待办</el-checkbox>
           <el-button type="primary" plain :loading="refreshing" @click="applyListFilters">
-            筛选名单
+            查询
           </el-button>
-          <el-button v-if="hasListFilters" link @click="resetListFilters">清除名单筛选</el-button>
+          <el-button @click="resetListFilters">重置</el-button>
           <span class="list-filter-hint">不改变上方管理指标和组织图表</span>
         </div>
 
@@ -405,7 +405,6 @@ const organizationOptions = computed(() => filterOptions.organizations || {})
 const hasAppliedFilters = computed(() =>
   Object.values(applied).some(Boolean) || Object.values(listApplied).some(Boolean),
 )
-const hasListFilters = computed(() => Object.values(listApplied).some(Boolean))
 const listAppliedDescription = computed(() => {
   const labels: string[] = []
   if (listApplied.q) labels.push(`学生=${listApplied.q}`)
@@ -844,7 +843,6 @@ async function resetFilters() {
 function applyListFilters() {
   Object.assign(listApplied, { ...listDraft })
   pagination.page = 1
-  clearCardPreset()
   syncRoute()
   loadStudentPage()
 }
@@ -852,7 +850,6 @@ function resetListFilters() {
   Object.assign(listDraft, emptyListFilter())
   Object.assign(listApplied, emptyListFilter())
   pagination.page = 1
-  clearCardPreset()
   syncRoute()
   loadStudentPage()
 }

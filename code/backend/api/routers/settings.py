@@ -11,9 +11,11 @@ import sqlite3
 import hashlib
 import csv
 import io
+import uuid
 from datetime import datetime
+from pathlib import Path
 
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, Response
 from pydantic import BaseModel, Field
 
 from .. import db as dbm
@@ -60,7 +62,11 @@ CREATE TABLE IF NOT EXISTS alert_rule_change (
     review_comment TEXT,
     published_by TEXT,
     published_at TEXT,
-    previous_snapshot TEXT
+    previous_snapshot TEXT,
+    trial_script_type TEXT,
+    trial_script_content TEXT,
+    trial_script_updated_by TEXT,
+    trial_script_updated_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_rule_change_status
 ON alert_rule_change(status, created_at);
@@ -97,6 +103,16 @@ CREATE TABLE IF NOT EXISTS sys_rule_governance_permission (
 
 def _ensure_governance(conn: sqlite3.Connection) -> None:
     conn.executescript(GOVERNANCE_DDL)
+    change_cols = {r["name"] if isinstance(r, sqlite3.Row) else r[1]
+                   for r in conn.execute("PRAGMA table_info(alert_rule_change)")}
+    for name, definition in {
+        "trial_script_type": "TEXT",
+        "trial_script_content": "TEXT",
+        "trial_script_updated_by": "TEXT",
+        "trial_script_updated_at": "TEXT",
+    }.items():
+        if name not in change_cols:
+            conn.execute(f"ALTER TABLE alert_rule_change ADD COLUMN {name} {definition}")
     conn.executemany("""INSERT OR IGNORE INTO sys_rule_governance_permission
         (role_id,permission) VALUES (?,?)""", [
         ("dean", "edit"), ("dean", "publish"), ("dean", "audit"),
@@ -349,6 +365,22 @@ class RuleChangeReviewIn(BaseModel):
     comment: str | None = None
 
 
+class RuleChangeTrialScriptIn(BaseModel):
+    script_type: str = Field(..., pattern="^(sql|stored_procedure)$")
+    script_content: str = Field(..., min_length=1, max_length=50000)
+
+
+def _trial_script_item(row: dict) -> dict:
+    return {
+        "changeId": row["change_id"],
+        "ruleId": row["rule_id"],
+        "scriptType": row.get("trial_script_type") or "sql",
+        "scriptContent": row.get("trial_script_content") or "",
+        "updatedBy": row.get("trial_script_updated_by"),
+        "updatedAt": row.get("trial_script_updated_at"),
+    }
+
+
 def _change_item(row: dict) -> dict:
     def load(value, fallback):
         try:
@@ -370,6 +402,12 @@ def _change_item(row: dict) -> dict:
         "reviewComment": row.get("review_comment"),
         "publishedBy": row.get("published_by"),
         "publishedAt": row.get("published_at"),
+        "trialScript": {
+            "scriptType": row.get("trial_script_type") or "sql",
+            "maintained": bool((row.get("trial_script_content") or "").strip()),
+            "updatedBy": row.get("trial_script_updated_by"),
+            "updatedAt": row.get("trial_script_updated_at"),
+        },
     }
 
 
@@ -444,6 +482,63 @@ def my_rule_permissions(user: dict = Depends(get_current_user),
     return ok({"roleId": user["role_id"], "permissions": permissions})
 
 
+@router.get("/settings/rule-changes/{change_id}/trial-script")
+def get_rule_change_trial_script(
+        change_id: int,
+        user: dict = Depends(get_current_user),
+        conn: sqlite3.Connection = Depends(get_db_rw)):
+    """读取草稿的试算脚本配置；脚本正文不随变更单列表批量返回。"""
+    _ensure_governance(conn)
+    _require_rule_permission(conn, user, "edit")
+    row = dbm.query_one(conn, "SELECT * FROM alert_rule_change WHERE change_id=?",
+                        (change_id,))
+    if not row:
+        raise ApiError("规则变更单不存在", code=404, status_code=404)
+    if row["status"] != "draft":
+        raise ApiError("仅草稿状态可以维护试算脚本", code=400, status_code=400)
+    return ok(_trial_script_item(row))
+
+
+@router.put("/settings/rule-changes/{change_id}/trial-script")
+def save_rule_change_trial_script(
+        change_id: int,
+        body: RuleChangeTrialScriptIn,
+        user: dict = Depends(get_current_user),
+        conn: sqlite3.Connection = Depends(get_db_rw)):
+    """保存普通 SQL 或存储过程脚本；本接口只维护配置，不执行用户脚本。"""
+    _ensure_governance(conn)
+    _require_rule_permission(conn, user, "edit")
+    row = dbm.query_one(conn, "SELECT * FROM alert_rule_change WHERE change_id=?",
+                        (change_id,))
+    if not row:
+        raise ApiError("规则变更单不存在", code=404, status_code=404)
+    if row["status"] != "draft":
+        raise ApiError("仅草稿状态可以维护试算脚本", code=400, status_code=400)
+    content = body.script_content.strip()
+    if not content:
+        raise ApiError("试算脚本内容不能为空", code=400, status_code=400)
+    now = datetime.now().astimezone().isoformat(timespec="seconds")
+    try:
+        previous_impact = json.loads(row.get("impact_json") or "{}")
+    except Exception:
+        previous_impact = {}
+    impact = {
+        "currentStudents": previous_impact.get("currentStudents", 0),
+        "candidateStatus": "pending",
+        "note": "试算脚本已更新，请重新执行影响试算",
+    }
+    dbm.execute(conn, "DELETE FROM alert_rule_change_candidate WHERE change_id=?",
+                (change_id,))
+    dbm.execute(conn, """UPDATE alert_rule_change
+        SET trial_script_type=?,trial_script_content=?,trial_script_updated_by=?,
+            trial_script_updated_at=?,impact_json=? WHERE change_id=?""",
+        (body.script_type, content, user["username"], now,
+         json.dumps(impact, ensure_ascii=False), change_id))
+    updated = dbm.query_one(conn, "SELECT * FROM alert_rule_change WHERE change_id=?",
+                            (change_id,))
+    return ok(_trial_script_item(updated), msg="试算脚本已保存，请重新执行影响试算")
+
+
 @router.post("/settings/rule-changes/{change_id}/evaluate")
 def evaluate_rule_change(change_id: int, user: dict = Depends(get_current_user),
                          conn: sqlite3.Connection = Depends(get_db_rw)):
@@ -453,6 +548,8 @@ def evaluate_rule_change(change_id: int, user: dict = Depends(get_current_user),
     row = dbm.query_one(conn, "SELECT * FROM alert_rule_change WHERE change_id=?", (change_id,))
     if not row or row["status"] != "draft":
         raise ApiError("仅草稿状态可以执行影响试算", code=400, status_code=400)
+    if not (row.get("trial_script_content") or "").strip():
+        raise ApiError("请先维护并保存试算脚本", code=400, status_code=400)
     try:
         import pandas as pd
         from backend.etl.alert_engine import run_engine
@@ -939,24 +1036,361 @@ class DiscoveredRuleAction(BaseModel):
     action: str  # "approve" | "reject"
 
 
-@router.post("/settings/rules/discover")
-def trigger_discovery(user: dict = Depends(get_current_user),
+class DiscoveryRunRequest(BaseModel):
+    consent: bool
+    manifestFingerprint: str = Field(min_length=64, max_length=64)
+
+
+DISCOVERY_RUN_DDL = """
+CREATE TABLE IF NOT EXISTS sys_discovery_run (
+    run_id TEXT PRIMARY KEY,
+    semester_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    manifest_fingerprint TEXT NOT NULL,
+    table_count INTEGER NOT NULL,
+    total_rows INTEGER NOT NULL,
+    analyzable_students INTEGER NOT NULL,
+    consent_by TEXT NOT NULL,
+    consent_at TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    started_at TEXT,
+    finished_at TEXT,
+    candidate_count INTEGER DEFAULT 0,
+    superseded_count INTEGER DEFAULT 0,
+    engine_mode TEXT NOT NULL,
+    model_status TEXT,
+    model_summary TEXT,
+    error_message TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_sys_discovery_run_created
+    ON sys_discovery_run(created_at DESC);
+"""
+
+
+DISCOVERY_TABLE_SPECS = (
+    ("dim_student", "学生维度表", "SELECT COUNT(*) FROM dim_student"),
+    ("fact_grade", "成绩事实表",
+     "SELECT COUNT(*) FROM fact_grade WHERE source='real'"),
+    ("fact_plan_course", "培养方案课程表",
+     "SELECT COUNT(*) FROM fact_plan_course"),
+    ("fact_alert", "学业预警事实表", """
+        SELECT COUNT(*) FROM fact_alert
+        WHERE level='严重' AND COALESCE(is_active,1)=1
+    """),
+    ("fact_attrition", "学籍异动事实表",
+     """SELECT COUNT(*) FROM fact_attrition
+         WHERE source='real' AND kind IN ('退学','留级','肄业')"""),
+    ("fact_major_req", "专业毕业学分要求表",
+     "SELECT COUNT(*) FROM fact_major_req WHERE total_req>0"),
+)
+
+
+DISCOVERY_ANONYMIZATION = {
+    "version": "discovery-mask-v1.0",
+    "summary": "仅向经学校批准的模型接入发送规则发现所需的脱敏特征，不发送学生姓名、学号原值、联系方式或原始明细文本。",
+    "rules": [
+        "学生标识替换为本次任务内有效、不可逆的随机盐哈希标识。",
+        "移除姓名、学号原值、联系方式、证件号码等直接身份字段。",
+        "不发送课程名称、教师姓名和组织名称，仅保留规则计算必需的数值特征。",
+        "正负样本均限量抽样，模型输出不得直接写入生产规则，候选仍按固定门槛校验。",
+        "任务日志只记录批次、数量、模型状态和候选数量，不保存推送的样本正文。",
+    ],
+}
+
+
+def _table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
+    return bool(dbm.scalar(
+        conn,
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+        (table_name,),
+    ))
+
+
+def _discovery_llm_status(conn: sqlite3.Connection) -> dict:
+    config = {}
+    discovery_config = {}
+    if _table_exists(conn, "sys_ai_decision_llm_config"):
+        raw = dbm.scalar(conn, """
+            SELECT config_value FROM sys_ai_decision_llm_config
+            WHERE config_key='decision.llm'
+        """)
+        try:
+            config = json.loads(raw or "{}")
+        except (TypeError, ValueError):
+            config = {}
+    if _table_exists(conn, "sys_config"):
+        raw = dbm.scalar(conn, """
+            SELECT config_value FROM sys_config
+            WHERE config_key='discovery.llm'
+        """)
+        try:
+            discovery_config = json.loads(raw or "{}")
+        except (TypeError, ValueError):
+            discovery_config = {}
+    discovery_mode = str(discovery_config.get("mode") or "off").lower()
+    discovery_enabled = discovery_mode not in ("off", "disabled", "none", "")
+    ready = bool(
+        discovery_enabled and config.get("enabled") and config.get("base_url")
+        and config.get("api_key") and config.get("model")
+    )
+    return {
+        "ready": ready,
+        "mode": "approved_model" if ready else "local_controlled",
+        "provider": config.get("provider") if ready else None,
+        "model": config.get("model") if ready else None,
+        "label": (
+            f"学校已批准模型：{config.get('model')}"
+            if ready else "规则自发现模型推送未启用，将使用本地受控分析引擎"
+        ),
+        "boundary": (
+            "模型仅接收脱敏特征并参与模式复核；候选门槛、风险倍数和建议等级仍由固定规则校验。"
+            if ready else "当前部署不会向外部服务推送数据；配置学校批准的模型后才启用脱敏特征推送。"
+        ),
+    }
+
+
+def _build_discovery_preview(conn: sqlite3.Connection) -> dict:
+    tables = []
+    for table_name, table_label, count_sql in DISCOVERY_TABLE_SPECS:
+        connected = _table_exists(conn, table_name)
+        row_count = int(dbm.scalar(conn, count_sql) or 0) if connected else 0
+        tables.append({
+            "tableName": table_name,
+            "tableLabel": table_label,
+            "rowCount": row_count,
+            "connected": connected,
+        })
+    analyzable = 0
+    if _table_exists(conn, "fact_grade"):
+        analyzable = int(dbm.scalar(conn, """
+            SELECT COUNT(*) FROM (
+                SELECT student_id FROM fact_grade
+                WHERE source='real' AND gpa IS NOT NULL
+                GROUP BY student_id
+                HAVING COUNT(DISTINCT semester_id)>=2
+            ) eligible
+        """) or 0)
+    summary = {
+        "tableCount": sum(1 for item in tables if item["connected"]),
+        "totalRows": sum(item["rowCount"] for item in tables),
+        "analyzableStudents": analyzable,
+    }
+    from ..settings import CURRENT_SEMESTER
+    fingerprint_payload = json.dumps({
+        "semester": CURRENT_SEMESTER,
+        "tables": [(item["tableName"], item["rowCount"]) for item in tables],
+        "anonymizationVersion": DISCOVERY_ANONYMIZATION["version"],
+    }, ensure_ascii=False, separators=(",", ":"))
+    return {
+        "semester": CURRENT_SEMESTER,
+        "summary": summary,
+        "tables": tables,
+        "anonymization": DISCOVERY_ANONYMIZATION,
+        "model": _discovery_llm_status(conn),
+        "agreement": {
+            "required": True,
+            "text": "我已阅读并同意上述数据脱敏方案；在学校已批准的大模型接入启用时，同意将本次脱敏样本特征推送给该模型执行规则自发现。",
+        },
+        "manifestFingerprint": hashlib.sha256(
+            fingerprint_payload.encode("utf-8")
+        ).hexdigest(),
+    }
+
+
+def _ensure_discovery_run_table(conn: sqlite3.Connection) -> None:
+    conn.executescript(DISCOVERY_RUN_DDL)
+
+
+def _latest_discovery_run(conn: sqlite3.Connection) -> dict:
+    if not _table_exists(conn, "sys_discovery_run"):
+        return {"status": "idle"}
+    row = dbm.query_one(conn, """
+        SELECT * FROM sys_discovery_run
+        ORDER BY created_at DESC, run_id DESC LIMIT 1
+    """)
+    if not row:
+        return {"status": "idle"}
+    return {
+        "runId": row["run_id"],
+        "semester": row["semester_id"],
+        "status": row["status"],
+        "candidateCount": row["candidate_count"] or 0,
+        "supersededCount": row["superseded_count"] or 0,
+        "engineMode": row["engine_mode"],
+        "modelStatus": row["model_status"],
+        "createdAt": row["created_at"],
+        "startedAt": row["started_at"],
+        "finishedAt": row["finished_at"],
+        "errorMessage": row["error_message"],
+    }
+
+
+def _database_path(conn: sqlite3.Connection) -> str:
+    row = conn.execute("PRAGMA database_list").fetchone()
+    return str(row[2] if row else "")
+
+
+def _anonymized_model_sample(db_path: str, run_id: str) -> dict:
+    from backend.etl.rule_discovery import _build_features
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        features = _build_features(conn)
+    finally:
+        conn.close()
+    salt = uuid.uuid4().hex
+    ranked = sorted(features, key=lambda item: hashlib.sha256(
+        f"{salt}:{item.get('student_id', '')}".encode("utf-8")
+    ).hexdigest())
+    positives = [item for item in ranked if item.get("label") == 1][:50]
+    negatives = [item for item in ranked if item.get("label") == 0][:50]
+    rows = []
+    for item in positives + negatives:
+        safe = {key: value for key, value in item.items() if key != "student_id"}
+        safe["sample_key"] = hashlib.sha256(
+            f"{salt}:{run_id}:{item.get('student_id', '')}".encode("utf-8")
+        ).hexdigest()[:16]
+        rows.append(safe)
+    return {"totalAnalyzable": len(features), "sampleRows": rows}
+
+
+def _execute_discovery_run(db_path: str, run_id: str, semester: str) -> None:
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    now = datetime.now().astimezone().isoformat(timespec="seconds")
+    try:
+        _ensure_discovery_run_table(conn)
+        dbm.execute(conn, """
+            UPDATE sys_discovery_run
+            SET status='running', started_at=? WHERE run_id=?
+        """, (now, run_id))
+        conn.commit()
+
+        model_status = "not_configured"
+        model_summary = ""
+        model_info = _discovery_llm_status(conn)
+        if model_info["ready"]:
+            from backend.skills.llm_client import chat_completion
+            from backend.skills.llm_config import load_config
+            payload = _anonymized_model_sample(db_path, run_id)
+            model_summary = chat_completion(load_config(conn), [
+                {"role": "system", "content": (
+                    "你是学业预警规则自发现复核器。只分析提供的脱敏数值特征，"
+                    "不得识别个人、不得发明新指标或改变固定候选门槛；输出简短的模式复核说明。"
+                )},
+                {"role": "user", "content": json.dumps({
+                    "fixedGates": {
+                        "minimumAnalyzableStudents": 100,
+                        "minimumMatchedStudents": 30,
+                        "minimumPositiveStudents": 5,
+                        "minimumRiskRatio": 2.0,
+                        "maximumCandidates": 10,
+                    },
+                    "anonymizedSamples": payload,
+                }, ensure_ascii=False)},
+            ], max_tokens=500, temperature=0)
+            model_status = "completed"
+
+        from backend.etl.rule_discovery import run_and_save
+        candidate_count = run_and_save(semester, db_path=Path(db_path))
+        finished = datetime.now().astimezone().isoformat(timespec="seconds")
+        dbm.execute(conn, """
+            UPDATE sys_discovery_run
+            SET status='completed', finished_at=?, candidate_count=?,
+                model_status=?, model_summary=?, error_message=NULL
+            WHERE run_id=?
+        """, (finished, candidate_count, model_status,
+              model_summary[:2000], run_id))
+        conn.commit()
+    except Exception as exc:
+        finished = datetime.now().astimezone().isoformat(timespec="seconds")
+        try:
+            dbm.execute(conn, """
+                UPDATE sys_discovery_run
+                SET status='failed', finished_at=?, error_message=?
+                WHERE run_id=?
+            """, (finished, str(exc)[:1000], run_id))
+            conn.commit()
+        except Exception:
+            pass
+    finally:
+        conn.close()
+
+
+@router.get("/settings/rules/discovery/preview")
+def discovery_preview(user: dict = Depends(get_current_user),
                       conn: sqlite3.Connection = Depends(get_db)):
-    """触发规则自发现分析，返回发现的规则数量。"""
+    """返回本轮真实样本清单、脱敏规则与确认令牌，不返回任何学生明细。"""
+    _require_rule_view(conn, user)
+    return ok(_build_discovery_preview(conn))
+
+
+@router.get("/settings/rules/discovery/status")
+def discovery_run_status(user: dict = Depends(get_current_user),
+                         conn: sqlite3.Connection = Depends(get_db)):
+    _require_rule_view(conn, user)
+    return ok(_latest_discovery_run(conn))
+
+
+@router.post("/settings/rules/discover")
+def trigger_discovery(body: DiscoveryRunRequest,
+                      background_tasks: BackgroundTasks,
+                      user: dict = Depends(get_current_user),
+                      conn: sqlite3.Connection = Depends(get_db_rw)):
+    """校验用户确认和样本清单后登记后台规则自发现任务。"""
     if not has_action(user, "rule.discovery.manage"):
         raise ApiError("当前角色无权运行规则自发现", code=403, status_code=403)
-    from backend.etl.rule_discovery import run_and_save
     from ..settings import CURRENT_SEMESTER
-    try:
-        n = run_and_save(CURRENT_SEMESTER)
-        return ok({"count": n, "semester": CURRENT_SEMESTER,
-                   "algorithmVersion": "association-v2",
-                   "evidence": {"level": "real-derived",
-                                "sources": ["真实成绩", "真实学籍异动", "当前严重预警"],
-                                "limitation": "历史关联不等于因果关系，采纳后仍须完成试算、复核、发布与激活。"}},
-                  msg=f"分析完成，发现 {n} 条候选规则")
-    except Exception as e:
-        raise ApiError(f"分析失败：{e}", code=500, status_code=500)
+    if not body.consent:
+        raise ApiError("必须同意数据脱敏与模型推送协议后才能执行",
+                       code=400, status_code=400)
+    preview = _build_discovery_preview(conn)
+    if body.manifestFingerprint != preview["manifestFingerprint"]:
+        raise ApiError("样本数据清单已变化，请重新确认后执行",
+                       code=409, status_code=409)
+    _ensure_discovery_run_table(conn)
+    active = dbm.query_one(conn, """
+        SELECT run_id FROM sys_discovery_run
+        WHERE status IN ('queued','running') ORDER BY created_at DESC LIMIT 1
+    """)
+    if active:
+        raise ApiError("已有一轮规则自发现正在运行", code=409, status_code=409)
+
+    now = datetime.now().astimezone().isoformat(timespec="seconds")
+    run_id = uuid.uuid4().hex
+    superseded_count = int(dbm.scalar(conn, """
+        SELECT COUNT(*) FROM sys_discovered_rule
+        WHERE semester_id=? AND status='pending'
+    """, (CURRENT_SEMESTER,)) or 0)
+    dbm.execute(conn, """
+        UPDATE sys_discovered_rule SET status='superseded'
+        WHERE semester_id=? AND status='pending'
+    """, (CURRENT_SEMESTER,))
+    model_info = preview["model"]
+    dbm.execute(conn, """
+        INSERT INTO sys_discovery_run(
+            run_id,semester_id,status,manifest_fingerprint,table_count,
+            total_rows,analyzable_students,consent_by,consent_at,created_at,
+            superseded_count,engine_mode,model_status
+        ) VALUES(?,?,'queued',?,?,?,?,?,?,?,?,?,?)
+    """, (
+        run_id, CURRENT_SEMESTER, preview["manifestFingerprint"],
+        preview["summary"]["tableCount"], preview["summary"]["totalRows"],
+        preview["summary"]["analyzableStudents"], user.get("username") or "",
+        now, now, superseded_count, model_info["mode"],
+        "queued" if model_info["ready"] else "not_configured",
+    ))
+    conn.commit()
+    background_tasks.add_task(
+        _execute_discovery_run, _database_path(conn), run_id, CURRENT_SEMESTER,
+    )
+    return ok({
+        "runId": run_id,
+        "status": "queued",
+        "semester": CURRENT_SEMESTER,
+        "supersededCount": superseded_count,
+        "engineMode": model_info["mode"],
+    }, msg="规则自发现已进入后台运行")
 
 
 @router.get("/settings/rules/discovered")
