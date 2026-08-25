@@ -85,6 +85,17 @@ class OperationIndicatorTrustTest(unittest.TestCase):
         self.assertEqual(["A2"], [row["course_id"] for row in payload["focusCourses"]])
         self.assertEqual(["甲学院"], [row["name"] for row in payload["deptCourses"]])
         self.assertEqual("C01", payload["filters"]["college"])
+        kpis = {row["label"]: row for row in payload["kpis"]}
+        self.assertNotIn("开课门数", kpis)
+        self.assertNotIn("合班率", kpis)
+        self.assertEqual(
+            "教学任务中成功关联课程主数据的去重课程数",
+            kpis["已关联课程"]["formula"],
+        )
+        self.assertEqual(
+            "触发大班额、单班集中或单一教师多班覆盖提示的去重课程数",
+            kpis["需核查课程"]["formula"],
+        )
 
     def test_course_supply_rejects_explicit_college_outside_scope(self):
         conn = self.build_course_conn()
