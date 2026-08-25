@@ -90,6 +90,16 @@ class P3ModuleReorganizationTest(unittest.TestCase):
         self.assertNotIn("row-clickable", page)
         self.assertNotIn("历史趋势暂不展示", page)
         self.assertNotIn("V2 真实教学任务证据", page)
+        self.assertIn("return { label:'优先关注', type:'danger' }", page)
+        self.assertIn("return { label:'需关注', type:'warning' }", page)
+        self.assertNotIn("label:'AI重点'", page)
+        self.assertNotIn("label:'需核查'", page)
+        self.assertIn(">查看</el-button>", page)
+        self.assertIn("｜开课保障信息", page)
+        self.assertNotIn("开课保障核查", page)
+        self.assertNotIn("先核查运行证据", page)
+        self.assertIn("查看开课保障研判", page)
+        self.assertNotIn("查看 AI 开课保障研判", page)
         self.assertIn(
             "按大班额、单一教师多班覆盖和单班集中供给排序，不是课程质量排名",
             page,

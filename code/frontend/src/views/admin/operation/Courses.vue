@@ -53,8 +53,8 @@
       </div>
       <DataTable :columns="offeringTopCols" :data="decisionOfferings.slice(0,10)" storage-key="operation:courses-top10" size="small" stripe>
         <template #col-attention="{row}"><el-tag size="small" :type="offeringAttentionLevel(row).type">{{ offeringAttentionLevel(row).label }}</el-tag></template>
-        <template #col-reasons="{row}"><span v-if="row.attention.length">{{ row.attention.join('；') }}</span><span v-else class="sa-faint">规模较大，建议常规核查</span></template>
-        <template #col-actions="{row}"><el-button link type="primary" @click.stop="openOfferingReview(row)">核查</el-button></template>
+        <template #col-reasons="{row}"><span v-if="row.attention.length">{{ row.attention.join('；') }}</span><span v-else class="sa-faint">规模较大，建议常规关注</span></template>
+        <template #col-actions="{row}"><el-button link type="primary" @click.stop="openOfferingReview(row)">查看</el-button></template>
       </DataTable>
     </div>
 
@@ -119,11 +119,8 @@
       </DataTable>
       <el-pagination v-model:current-page="offeringDrawer.page" :page-size="offeringDrawer.pageSize" :total="offeringDrawer.total" layout="total,prev,pager,next" style="justify-content:flex-end;margin-top:14px" @current-change="loadOfferingPage" />
     </el-drawer>
-    <el-drawer v-model="offeringReviewVisible" :title="`${selectedOffering.course_name || '课程'}｜开课保障核查`" size="720px">
-      <el-alert type="info" :closable="false" show-icon title="先核查运行证据，再决定是否需要 AI">
-        <template #default>大班额、单班集中或单一教师多班覆盖只是运行核查线索，不直接代表课程质量问题。只有命中复合线索或平均班额达到高影响阈值，才开放 AI 管理研判。</template>
-      </el-alert>
-      <el-descriptions :column="3" border style="margin:14px 0">
+    <el-drawer v-model="offeringReviewVisible" :title="`${selectedOffering.course_name || '课程'}｜开课保障信息`" size="720px">
+      <el-descriptions :column="3" border style="margin-bottom:14px">
         <el-descriptions-item label="课程代码">{{ selectedOffering.course_id || '—' }}</el-descriptions-item>
         <el-descriptions-item label="教学班">{{ selectedOffering.lesson_count || 0 }} 个</el-descriptions-item>
         <el-descriptions-item label="授课教师">{{ selectedOffering.teacher_count || 0 }} 人</el-descriptions-item>
@@ -132,16 +129,16 @@
         <el-descriptions-item label="管理关注"><el-tag :type="offeringAttentionLevel(selectedOffering).type">{{ offeringAttentionLevel(selectedOffering).label }}</el-tag></el-descriptions-item>
       </el-descriptions>
       <div class="review-reasons">
-        <b>本次核查线索</b>
+        <b>本次关注内容</b>
         <ul v-if="selectedOffering.attention?.length"><li v-for="item in selectedOffering.attention" :key="item">{{ item }}</li></ul>
         <p v-else>当前未命中明确运行异常线索，按常规开课供给查看即可。</p>
       </div>
       <div class="review-actions">
         <span v-if="!offeringNeedsAi(selectedOffering)" class="sa-faint">当前未达到复合风险 AI 介入条件。</span>
-        <el-button v-else type="primary" plain @click="openOfferingAi(selectedOffering)">查看 AI 开课保障研判</el-button>
+        <el-button v-else type="primary" plain @click="openOfferingAi(selectedOffering)">查看开课保障研判</el-button>
       </div>
     </el-drawer>
-    <AIInsightDrawer v-model="aiDrawerVisible" :insight="aiInsight" :loading="aiLoading" title="开课供给AI研判" />
+    <AIInsightDrawer v-model="aiDrawerVisible" :insight="aiInsight" :loading="aiLoading" title="开课保障研判" />
   </div>
 </template>
 
@@ -185,7 +182,7 @@ const aiInsight = ref<any>(null)
 function offeringWithAttention(row:any) {
   const avgClassSize = row.lesson_count ? Math.round(row.enrolled / row.lesson_count) : 0
   const attention:string[] = []
-  if (avgClassSize >= 120) attention.push('平均班额≥120，核查是否拆班')
+  if (avgClassSize >= 120) attention.push('平均班额≥120，关注是否需要拆班')
   else if (avgClassSize >= 80) attention.push('平均班额偏大')
   if (row.teacher_count === 1 && row.lesson_count >= 3) attention.push('多班次由单一教师覆盖')
   if (row.lesson_count === 1 && row.enrolled >= 80) attention.push('单班集中供给')
@@ -196,8 +193,8 @@ function offeringNeedsAi(row:any) {
 }
 function offeringAttentionLevel(row:any):{label:string;type:'danger'|'warning'|'info'} {
   const normalized = row?.attention ? row : offeringWithAttention(row || {})
-  if (offeringNeedsAi(normalized)) return { label:'AI重点', type:'danger' }
-  if ((normalized.attention || []).length) return { label:'需核查', type:'warning' }
+  if (offeringNeedsAi(normalized)) return { label:'优先关注', type:'danger' }
+  if ((normalized.attention || []).length) return { label:'需关注', type:'warning' }
   return { label:'常规', type:'info' }
 }
 const decisionOfferings = computed(() => (data.focusCourses || [])
@@ -214,7 +211,7 @@ const offeringTopCols: DataTableColumn[] = [
   { key: 'enrolled', label: '选课人次', width: 90, align: 'right', required:true },
   { key: 'avgClassSize', label: '平均班额', width: 90, align: 'right', required:true },
   { key: 'attention', label: '管理关注', width: 95, required:true },
-  { key: 'reasons', label: '优先核查原因', minWidth: 250 },
+  { key: 'reasons', label: '优先关注原因', minWidth: 250 },
   { key: 'actions', label: '操作', width: 88, required:true, region:'action', fixed:'right' },
 ]
 const deptCourseCols:DataTableColumn[] = [
