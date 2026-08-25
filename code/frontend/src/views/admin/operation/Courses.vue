@@ -33,15 +33,16 @@
     <el-alert v-if="data.dataQuality.excludedLessons" type="warning" :closable="false" show-icon style="margin-bottom:12px"
       :title="`数据质量排除：${data.dataQuality.excludedTeachers} 名异常教师、${data.dataQuality.excludedLessons} 条排课记录未计入统计`"
       :description="`${data.dataQuality.reason}（阈值>${data.dataQuality.threshold}）`" />
-    <el-collapse v-if="qualityIssues.length" style="margin-bottom:12px">
+    <el-collapse v-if="data.dataQuality.excludedTeachers" style="margin-bottom:12px">
       <el-collapse-item :title="`查看 ${data.dataQuality.excludedTeachers} 条数据质量问题明细`" name="quality">
-        <el-table :data="qualityIssues" size="small" stripe max-height="300">
+        <el-table v-if="qualityIssues.length" :data="qualityIssues" size="small" stripe max-height="300">
           <el-table-column prop="semester_id" label="学期" width="120" />
           <el-table-column label="教师" width="150"><template #default="{row}">{{ row.entity_name || row.entity_id }}（{{ row.entity_id }}）</template></el-table-column>
           <el-table-column prop="affected_rows" label="影响记录" width="90" align="right" />
           <el-table-column prop="detail" label="问题说明" min-width="210" />
           <el-table-column prop="recommendation" label="处置建议" min-width="250" />
         </el-table>
+        <el-empty v-else description="数据质量问题明细暂未返回，请刷新页面重试" :image-size="64" />
       </el-collapse-item>
     </el-collapse>
 
