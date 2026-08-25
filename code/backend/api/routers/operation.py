@@ -7,7 +7,7 @@ import time
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
 from .. import db as dbm
@@ -52,7 +52,7 @@ def _anomalous_filter(conn, sem_ids: list, alias: str = "l") -> tuple[str, list]
     if not bad:
         return ("1=1", [])
     bph = ",".join("?" * len(bad))
-    return (f"{alias}.teacher_id NOT IN ({bph})", bad)
+    return (f"({alias}.teacher_id IS NULL OR {alias}.teacher_id NOT IN ({bph}))", bad)
 
 
 def _anomaly_summary(conn, sem_ids: list) -> dict:
@@ -64,6 +64,150 @@ def _anomaly_summary(conn, sem_ids: list) -> dict:
         AND semester_id IN ({ph})""", sem_ids)
     return {"excludedTeachers": len(rows), "excludedLessons": sum(r["lessons"] for r in rows),
             "threshold": _TEACHER_CAP, "reason": "单教师单学期教学班数超过质量阈值"}
+
+
+def _course_filter_where(
+        conn: sqlite3.Connection, user: dict, college: Optional[str],
+        semester: Optional[str], campus: Optional[str],
+        course_nature: Optional[str], category: Optional[str],
+        size: Optional[str], year: Optional[str] = None,
+        keyword: Optional[str] = None, *, exclude_anomalies: bool = True,
+) -> tuple[list[str], str, tuple]:
+    """构造开课供给统一筛选条件，并在服务端校验显式学院范围。"""
+    sem_ids = _sem_ids(conn, semester, year, REAL)
+    sem_ph = ",".join("?" * len(sem_ids))
+    conds, params = [f"l.semester_id IN ({sem_ph})"], list(sem_ids)
+
+    college_scope, college_scope_params = college_data_scope(user, conn)
+    visible_colleges = dbm.query(
+        conn,
+        "SELECT college_id,name FROM dim_college" +
+        (f" WHERE {college_scope}" if college_scope else "") +
+        " ORDER BY college_id",
+        tuple(college_scope_params),
+    )
+    if college:
+        selected = next(
+            (row for row in visible_colleges if row["college_id"] == college), None,
+        )
+        if not selected:
+            exists = dbm.scalar(
+                conn, "SELECT 1 FROM dim_college WHERE college_id=?", (college,),
+            )
+            if exists and college_scope:
+                raise ApiError("无权查看该学院开课供给", code=403, status_code=403)
+            raise ApiError("学院不存在", code=400, status_code=400)
+        conds.append("co.dept=?")
+        params.append(selected["name"])
+    elif college_scope:
+        names = [row["name"] for row in visible_colleges]
+        if not names:
+            conds.append("1=0")
+        else:
+            conds.append(f"co.dept IN ({','.join('?' * len(names))})")
+            params.extend(names)
+
+    if campus:
+        conds.append("l.campus=?")
+        params.append(campus)
+    if course_nature:
+        conds.append("co.course_nature=?")
+        params.append(course_nature)
+    if category:
+        conds.append("co.category=?")
+        params.append(category)
+    size_range = _SIZE_RANGE.get(size or "")
+    if size_range:
+        conds.append("l.enrolled>=? AND l.enrolled<?")
+        params.extend(size_range)
+    if keyword and keyword.strip():
+        conds.append("(l.course_id LIKE ? OR co.name LIKE ?)")
+        term = f"%{keyword.strip()}%"
+        params.extend([term, term])
+    if exclude_anomalies:
+        anomaly_sql, anomaly_params = _anomalous_filter(conn, sem_ids)
+        conds.append(anomaly_sql)
+        params.extend(anomaly_params)
+    return sem_ids, " AND ".join(conds), tuple(params)
+
+
+def _course_quality_rows(
+        conn: sqlite3.Connection, user: dict, college: Optional[str],
+        semester: Optional[str], campus: Optional[str],
+        course_nature: Optional[str], category: Optional[str],
+        size: Optional[str], year: Optional[str] = None,
+        status: Optional[str] = None,
+) -> list[dict]:
+    """返回当前开课筛选切片实际命中的异常教师，一名教师一条记录。"""
+    _, where, params = _course_filter_where(
+        conn, user, college, semester, campus, course_nature, category,
+        size, year, exclude_anomalies=False,
+    )
+    status_sql = "q.status=?" if status else "q.status IN ('open','reviewing')"
+    status_params = (status,) if status else ()
+    return dbm.query(conn, f"""
+        SELECT MIN(q.issue_id) issue_id,'operation' domain,
+               'teacher_lesson_overflow' issue_type,q.semester_id,
+               'teacher' entity_type,q.entity_id,MAX(q.severity) severity,
+               MIN(q.status) status,MAX(q.detail) detail,
+               MAX(q.recommendation) recommendation,
+               t.name entity_name,t.dept entity_dept,
+               COUNT(DISTINCT l.lesson_id) affected_rows
+        FROM fact_lesson l
+        JOIN dim_course co ON co.course_id=l.course_id
+        JOIN data_quality_issue q
+          ON q.entity_id=l.teacher_id AND q.semester_id=l.semester_id
+         AND q.domain='operation' AND q.issue_type='teacher_lesson_overflow'
+        LEFT JOIN dim_teacher t ON t.teacher_id=q.entity_id
+        WHERE {where} AND {status_sql}
+        GROUP BY q.semester_id,q.entity_id,t.name,t.dept
+        ORDER BY severity DESC,affected_rows DESC,issue_id
+    """, params + status_params)
+
+
+def _course_quality_summary(rows: list[dict]) -> dict:
+    return {
+        "excludedTeachers": len(rows),
+        "excludedLessons": sum(int(row.get("affected_rows") or 0) for row in rows),
+        "threshold": _TEACHER_CAP,
+        "reason": "单教师单学期教学班数超过质量阈值",
+    }
+
+
+def _course_offering_rows(conn: sqlite3.Connection, where: str,
+                          params: tuple, sort: str = "attention") -> list[dict]:
+    rows = dbm.query(conn, f"""
+        SELECT l.semester_id,l.course_id,COALESCE(co.name,l.course_id) course_name,
+               co.dept,co.category,co.course_nature nature,
+               COUNT(*) lesson_count,
+               COUNT(DISTINCT NULLIF(TRIM(l.teacher_id),'')) teacher_count,
+               SUM(COALESCE(l.enrolled,0)) enrolled
+        FROM fact_lesson l JOIN dim_course co ON co.course_id=l.course_id
+        WHERE {where}
+        GROUP BY l.semester_id,l.course_id,co.name,co.dept,co.category,co.course_nature
+    """, params)
+    for row in rows:
+        lesson_count = int(row.get("lesson_count") or 0)
+        enrolled = int(row.get("enrolled") or 0)
+        teacher_count = int(row.get("teacher_count") or 0)
+        average = enrolled / lesson_count if lesson_count else 0
+        row["attention_score"] = (
+            (2 if average >= 120 else 1 if average >= 80 else 0)
+            + (2 if teacher_count == 1 and lesson_count >= 3 else 0)
+            + (2 if lesson_count == 1 and enrolled >= 80 else 0)
+        )
+    if sort == "scale":
+        rows.sort(key=lambda row: (
+            -int(row.get("lesson_count") or 0),
+            -int(row.get("enrolled") or 0), row.get("course_id") or "",
+        ))
+    else:
+        rows.sort(key=lambda row: (
+            -int(row.get("attention_score") or 0),
+            -int(row.get("enrolled") or 0),
+            -int(row.get("lesson_count") or 0), row.get("course_id") or "",
+        ))
+    return rows
 
 
 def _teacher_anomaly_ids(conn: sqlite3.Connection, sem_ids: list[str]) -> set[str]:
@@ -353,78 +497,37 @@ def courses(college: Optional[str] = None, semester: Optional[str] = None,
             year: Optional[str] = None, keyword: Optional[str] = None,
             user: dict = Depends(get_current_user),
             conn: sqlite3.Connection = Depends(get_db)):
-    # 数据范围：受限角色仅可见被授权学院的开课数据
-    col_scope, col_params = college_data_scope(user, conn)
-    if col_scope and not college:
-        scoped = dbm.query_one(
-            conn, f"SELECT college_id FROM dim_college WHERE {col_scope}", col_params)
-        if scoped:
-            college = scoped["college_id"]
-    sem_ids = _sem_ids(conn, semester, year, REAL)
-    sem_ph = ",".join("?" * len(sem_ids))
-    cname = _college_name(conn, college)
-    sz = _SIZE_RANGE.get(size or "")
-    # 预计算异常教师黑名单（源库通识课拆分缺陷：单师单学期>200教学班）
-    anom_frag, anom_params = _anomalous_filter(conn, sem_ids)
-    # 维度过滤：学院(co.dept)/校区(l.campus)/课程性质(co.course_nature)/类别(co.category)/班额
-    conds, bp = [f"l.semester_id IN ({sem_ph})"], list(sem_ids)
-    if cname:
-        conds.append("co.dept=?"); bp.append(cname)
-    if campus:
-        conds.append("l.campus=?"); bp.append(campus)
-    if course_nature:
-        conds.append("co.course_nature=?"); bp.append(course_nature)
-    if category:
-        conds.append("co.category=?"); bp.append(category)
-    if sz:
-        conds.append("l.enrolled>=? AND l.enrolled<?"); bp += [sz[0], sz[1]]
-    if keyword:
-        conds.append("(l.course_id LIKE ? OR co.name LIKE ?)"); bp += [f"%{keyword.strip()}%"] * 2
-    conds.append(anom_frag); bp += anom_params
-    base = ("FROM fact_lesson l JOIN dim_course co ON l.course_id=co.course_id WHERE "
-            + " AND ".join(conds))
-    bp = tuple(bp)
+    sem_ids, where, bp = _course_filter_where(
+        conn, user, college, semester, campus, course_nature, category, size,
+        year, keyword,
+    )
+    base = "FROM fact_lesson l JOIN dim_course co ON l.course_id=co.course_id WHERE " + where
     tot_courses = dbm.scalar(conn, f"SELECT COUNT(DISTINCT l.course_id) {base}", bp) or 0
     tot_lessons = dbm.scalar(conn, f"SELECT COUNT(*) {base}", bp) or 0
-    avg_size = dbm.scalar(conn, f"SELECT AVG(l.enrolled) {base}", bp) or 0
-    merged = dbm.scalar(
-        conn, f"SELECT COUNT(*) {base} AND l.class_names LIKE '%;%'", bp) or 0
+    total_enrolled = dbm.scalar(conn, f"SELECT SUM(COALESCE(l.enrolled,0)) {base}", bp) or 0
+    offering_rows = _course_offering_rows(conn, where, bp, "attention")
+    attention_count = sum(1 for row in offering_rows if row["attention_score"] > 0)
     kpis = [
-        {"label": "开课门数", "value": f"{tot_courses:,}",
-         "formula": "COUNT(DISTINCT 课程) 当前学期排课", "trend": "", "up": True},
+        {"label": "已关联课程", "value": f"{tot_courses}门",
+         "formula": "当前筛选范围有效教学任务中的去重课程数", "tone": "primary"},
         {"label": "教学班数", "value": f"{tot_lessons:,}",
-         "formula": "教学班(排课记录)总数", "trend": "", "up": True},
-        {"label": "平均班额", "value": f"{round(avg_size, 1)}人",
-         "formula": "AVG(选课人数) 每教学班", "trend": "", "up": True},
-        {"label": "合班率", "value": f"{_pct(merged / tot_lessons if tot_lessons else 0)}%",
-         "formula": "多行政班教学班÷总教学班", "trend": "", "up": False},
+         "formula": "当前筛选范围排除异常教师后的教学班记录数", "tone": "primary"},
+        {"label": "平均班额", "value": f"{round(total_enrolled / tot_lessons) if tot_lessons else 0}人",
+         "formula": "当前筛选范围选课人次÷教学班数", "tone": "teal"},
+        {"label": "需核查课程", "value": f"{attention_count}门",
+         "formula": "触发大班额、单班集中或单一教师多班覆盖提示的课程数", "tone": "amber"},
     ]
 
-    # 按学院开课（course.dept = college.name 匹配）。学院视图下仅该院一行。
+    # 所有页面区域直接复用同一个 where/bp，避免筛选条件在卡片间漂移。
     deptCourses = []
-    dconds, dparams = [f"l.semester_id IN ({sem_ph})"], list(sem_ids)
-    if cname:
-        dconds.append("co.dept=?"); dparams.append(cname)
-    if campus:
-        dconds.append("l.campus=?"); dparams.append(campus)
-    if course_nature:
-        dconds.append("co.course_nature=?"); dparams.append(course_nature)
-    if category:
-        dconds.append("co.category=?"); dparams.append(category)
-    if sz:
-        dconds.append("l.enrolled>=? AND l.enrolled<?"); dparams += [sz[0], sz[1]]
-    if keyword:
-        dconds.append("(l.course_id LIKE ? OR co.name LIKE ?)"); dparams += [f"%{keyword.strip()}%"] * 2
-    dconds.append(anom_frag); dparams += anom_params
     rows = dbm.query(conn, f"""
         SELECT c.college_id, c.name,
                COUNT(DISTINCT l.course_id) courseCount, COUNT(*) lessonCount
         FROM fact_lesson l JOIN dim_course co ON l.course_id=co.course_id
         JOIN dim_college c ON co.dept=c.name
-        WHERE {' AND '.join(dconds)}
-          AND l.teacher_id IS NOT NULL
+        WHERE {where}
         GROUP BY c.college_id ORDER BY lessonCount DESC""",
-                     tuple(dparams))
+                     bp)
     for i, r in enumerate(rows):
         pct = round(r["lessonCount"] / tot_lessons * 100) if tot_lessons else 0
         if pct >= 12:
@@ -458,40 +561,74 @@ def courses(college: Optional[str] = None, semester: Optional[str] = None,
         sizeDist.append({"label": label, "count": c,
                          "pct": round(c / tot_lessons * 100) if tot_lessons else 0, "color": color})
 
-    # 学期趋势（真实存在的学期：真实快照 + 模拟学期）。学院视图下按该院课程收口。
-    if cname:
-        trend_sql = f"""
-            SELECT l.semester_id, COUNT(DISTINCT l.course_id) cc, COUNT(*) lc, AVG(l.enrolled) av
-            FROM fact_lesson l JOIN dim_course co ON l.course_id=co.course_id
-            WHERE co.dept=? AND {anom_frag}
-            GROUP BY l.semester_id ORDER BY l.semester_id"""
-        trend_params = (cname,) + tuple(anom_params)
-    else:
-        trend_sql = f"""
-            SELECT l.semester_id, COUNT(DISTINCT l.course_id) cc, COUNT(*) lc, AVG(l.enrolled) av
-            FROM fact_lesson l
-            WHERE {anom_frag}
-            GROUP BY l.semester_id ORDER BY l.semester_id"""
-        trend_params = tuple(anom_params)
-    trend = []
-    prev = None
-    for r in dbm.query(conn, trend_sql, trend_params):
-        avg = round(r["av"] or 0, 1)
-        change = round((r["lc"] - prev) / prev * 100, 1) if prev else 0
-        trend.append({"semester": r["semester_id"], "courseCount": r["cc"],
-                      "lessonCount": r["lc"], "avgSize": avg, "change": change})
-        prev = r["lc"]
-
-    course_list = dbm.query(conn, f"""SELECT l.course_id courseId,co.name courseName,
-        co.dept,co.course_nature courseNature,COUNT(*) lessonCount,
-        ROUND(AVG(l.enrolled),1) avgEnrolled,SUM(l.enrolled) studentCount
-        {base} GROUP BY l.course_id,co.name,co.dept,co.course_nature
-        ORDER BY lessonCount DESC,co.name LIMIT 100""", bp)
+    quality_issues = _course_quality_rows(
+        conn, user, college, semester, campus, course_nature, category, size,
+        year,
+    )
+    course_list = [{
+        "courseId": row["course_id"],
+        "courseName": row["course_name"],
+        "dept": row.get("dept"),
+        "courseNature": row.get("nature"),
+        "lessonCount": row.get("lesson_count") or 0,
+        "avgEnrolled": round(
+            (row.get("enrolled") or 0) / (row.get("lesson_count") or 1), 1,
+        ),
+        "studentCount": row.get("enrolled") or 0,
+    } for row in offering_rows[:100]]
 
     return ok({
         "kpis": kpis, "deptCourses": deptCourses, "typeDist": typeDist,
-        "sizeDist": sizeDist, "trend": trend, "totalCourses": tot_courses,
-        "courseList": course_list, "dataQuality": _anomaly_summary(conn, sem_ids)})
+        "sizeDist": sizeDist, "trend": [], "totalCourses": tot_courses,
+        "courseList": course_list,
+        "focusCourses": offering_rows[:10],
+        "courseSummary": {
+            "course_count": tot_courses, "lesson_count": tot_lessons,
+            "enrolled": total_enrolled, "attention_count": attention_count,
+        },
+        "qualityIssues": quality_issues,
+        "dataQuality": _course_quality_summary(quality_issues),
+        "filters": {
+            "semester": sem_ids[0] if len(sem_ids) == 1 else sem_ids,
+            "college": college, "campus": campus,
+            "courseNature": course_nature, "category": category, "size": size,
+        },
+    })
+
+
+@router.get("/courses/offerings")
+def course_offerings(
+        college: Optional[str] = None, semester: Optional[str] = None,
+        campus: Optional[str] = None, course_nature: Optional[str] = None,
+        category: Optional[str] = None, size: Optional[str] = None,
+        keyword: Optional[str] = None,
+        sort: str = Query("scale", pattern="^(scale|attention)$"),
+        limit: int = Query(20, ge=1, le=200),
+        offset: int = Query(0, ge=0),
+        user: dict = Depends(get_current_user),
+        conn: sqlite3.Connection = Depends(get_db),
+):
+    sem_ids, where, params = _course_filter_where(
+        conn, user, college, semester, campus, course_nature, category, size,
+        keyword=keyword,
+    )
+    rows = _course_offering_rows(conn, where, params, sort)
+    return ok({
+        "items": rows[offset:offset + limit],
+        "total": len(rows),
+        "semester": sem_ids[0] if len(sem_ids) == 1 else sem_ids,
+        "sort": sort,
+        "summary": {
+            "lesson_count": sum(int(row.get("lesson_count") or 0) for row in rows),
+            "enrolled": sum(int(row.get("enrolled") or 0) for row in rows),
+            "attention_count": sum(
+                1 for row in rows if int(row.get("attention_score") or 0) > 0
+            ),
+        },
+        "definition": {
+            "attention": "按大班额、单一教师多班覆盖和单班集中供给排序，不是课程质量排名",
+        },
+    })
 
 
 # ------------------------------------------------------------------ 教室利用率

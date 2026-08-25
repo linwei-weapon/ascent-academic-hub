@@ -3,10 +3,11 @@
     <div class="sa-head-row">
       <div>
         <h2 class="sa-page-title">开课与排课结果统计</h2>
-        <p class="sa-page-sub">数据来源：教学任务表(T_LESSONS) + 排课结果表 · {{ selectedSemesterLabel }}</p>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">
-        <el-input v-model="fKeyword" size="small" clearable placeholder="课程代码/名称" style="width:170px" @keyup.enter="applyFilters" />
+        <el-select v-model="fCollege" size="small" style="width:160px" clearable placeholder="全部学院">
+          <el-option v-for="c in colleges" :key="c.value" :label="c.label" :value="c.value" />
+        </el-select>
         <el-select v-model="fCampus" size="small" style="width:120px" clearable placeholder="全部校区">
           <el-option v-for="c in campuses" :key="c" :label="c" :value="c" />
         </el-select>
@@ -33,49 +34,21 @@
       :title="`数据质量排除：${data.dataQuality.excludedTeachers} 名异常教师、${data.dataQuality.excludedLessons} 条排课记录未计入统计`"
       :description="`${data.dataQuality.reason}（阈值>${data.dataQuality.threshold}）`" />
     <el-collapse v-if="qualityIssues.length" style="margin-bottom:12px">
-      <el-collapse-item :title="`查看 ${qualityIssues.length} 条数据质量问题明细`" name="quality">
+      <el-collapse-item :title="`查看 ${data.dataQuality.excludedTeachers} 条数据质量问题明细`" name="quality">
         <el-table :data="qualityIssues" size="small" stripe max-height="300">
           <el-table-column prop="semester_id" label="学期" width="120" />
           <el-table-column label="教师" width="150"><template #default="{row}">{{ row.entity_name || row.entity_id }}（{{ row.entity_id }}）</template></el-table-column>
           <el-table-column prop="affected_rows" label="影响记录" width="90" align="right" />
           <el-table-column prop="detail" label="问题说明" min-width="210" />
           <el-table-column prop="recommendation" label="处置建议" min-width="250" />
-          <el-table-column label="状态" width="90"><template #default="{row}"><el-tag size="small" :type="qualityStatusType(row.status)">{{ qualityStatusLabel(row.status) }}</el-tag></template></el-table-column>
-          <el-table-column label="核查" width="100"><template #default="{row}">
-            <el-button link @click="showQualityAudit(row)">处置轨迹</el-button>
-          </template></el-table-column>
         </el-table>
       </el-collapse-item>
     </el-collapse>
-    <el-dialog v-model="auditVisible" title="数据质量问题处置轨迹" width="680px">
-      <el-empty v-if="!qualityAudit.length" description="暂无处置记录" />
-      <el-timeline v-else>
-        <el-timeline-item v-for="(item,index) in qualityAudit" :key="index" :timestamp="item.operated_at" placement="top">
-          <div><b>{{ qualityStatusLabel(item.from_status) }} → {{ qualityStatusLabel(item.to_status) }}</b></div>
-          <div class="sa-faint">操作人：{{ item.operator }}</div>
-          <div>{{ item.comment }}</div>
-        </el-timeline-item>
-      </el-timeline>
-    </el-dialog>
 
-    <div v-if="collegeFilter" class="filter-banner">
-      <span>当前学院视图：<b>{{ collegeFilter.name }}</b>（仅显示该学院数据）</span>
-      <el-button size="small" type="primary" text @click="clearCollegeFilter">← 返回全院视图</el-button>
-    </div>
-
-    <el-alert v-if="v2OfferingError" type="error" :closable="false" show-icon style="margin-bottom:12px"
-      title="结构化开课供给加载失败" :description="v2OfferingError">
-      <template #default><el-button link type="primary" @click="loadV2Offering">重新加载</el-button></template>
-    </el-alert>
-    <el-alert v-else-if="v2OfferingLoading" type="info" :closable="false" show-icon style="margin-bottom:12px"
-      title="正在读取当前身份可见的结构化教学任务，请稍候…" />
-    <el-alert v-else type="success" :closable="false" show-icon style="margin-bottom:12px"
-      title="V2 真实教学任务证据"
-      :description="`${v2Offering.semester}已关联 ${v2Offering.total} 门课程的真实教学任务；该证据期可能与上方页面统计学期不同。首页显示需优先核查的10门，完整清单可分页查询。`" />
-    <div v-if="!v2OfferingError && !v2OfferingLoading" class="sa-card" style="margin-bottom:16px">
+    <div class="sa-card" style="margin-bottom:16px">
       <div class="sa-card-title">
-        <span>开课保障关注 TOP10 <span class="extra">按大班额、单一教师多班覆盖和单班集中供给排序，不是课程质量排名</span></span>
-        <el-button size="small" type="primary" plain @click="openOfferingDrawer">查看全部 {{ v2Offering.total }} 门</el-button>
+        <span>开课保障关注 TOP10 <KpiLabel label="" formula="按大班额、单一教师多班覆盖和单班集中供给排序，不是课程质量排名" /></span>
+        <el-button size="small" type="primary" plain @click="openOfferingDrawer">查看全部 {{ data.totalCourses }} 门</el-button>
       </div>
       <DataTable :columns="offeringTopCols" :data="decisionOfferings.slice(0,10)" storage-key="operation:courses-top10" size="small" stripe>
         <template #col-attention="{row}"><el-tag size="small" :type="offeringAttentionLevel(row).type">{{ offeringAttentionLevel(row).label }}</el-tag></template>
@@ -84,17 +57,17 @@
       </DataTable>
     </div>
 
-    <div v-if="!v2OfferingError && !v2OfferingLoading" class="sa-kpi-row">
-      <KpiCard v-for="k in realKpis" :key="k.label" :label="k.label" :value="k.value" :hint="k.formula" :tone="k.tone" />
+    <div class="sa-kpi-row">
+      <KpiCard v-for="k in kpis" :key="k.label" :label="k.label" :value="k.value" :hint="k.formula" :tone="k.tone" />
     </div>
 
     <el-row :gutter="16" style="margin-bottom:16px">
       <el-col :span="14">
         <div class="sa-card">
-          <div class="sa-card-title">学院教学供给规模 <span class="extra">用于观察教学任务承载与资源配置，不评价学院教学质量</span></div>
+          <div class="sa-card-title">学院教学供给规模</div>
           <DataTable :columns="deptCourseCols" :data="data.deptCourses" storage-key="operation:courses-college"
-            size="small" :max-business-columns="2" @row-click="goCollege" row-class-name="row-clickable">
-            <template #col-name="{row}"><span class="link">{{ row.name }}</span></template>
+            size="small" :max-business-columns="2">
+            <template #col-name="{row}"><span>{{ row.name }}</span></template>
             <template #col-courseCount="{row}">
               <div class="tnum" style="font-weight:700;font-size:14px;color:#1E293B">{{ row.courseCount }} <span style="font-size:12px;font-weight:400">门</span></div>
               <div class="sa-faint" style="font-size:11px">{{ row.lessonCount }} 个教学班</div>
@@ -129,9 +102,6 @@
       </el-col>
     </el-row>
 
-    <el-alert type="warning" :closable="false" show-icon
-      title="历史趋势暂不展示"
-      description="当前 V2 真实教学任务主要覆盖一个学期，旧原型趋势可能包含模拟学期。待接入连续真实教学任务后，再展示跨学期开课门数、教学班数和平均班额变化。" />
     <el-drawer v-model="offeringDrawer.visible" title="全部课程开课情况" size="980px">
       <div class="drawer-toolbar">
         <el-input v-model="offeringDrawer.keyword" clearable placeholder="输入课程代码或名称" style="width:260px" @keyup.enter="searchOfferings" @clear="searchOfferings" />
@@ -177,55 +147,34 @@
 <script setup lang="ts">
 import { http } from '@/utils/http'
 import { reactive, ref, computed, watch, onMounted, inject, type Ref } from 'vue'
-import { useRouter, useRoute } from 'vue-router'
 import KpiLabel from '@/components/KpiLabel.vue'
 import KpiCard from '@/components/KpiCard.vue'
 import EChart from '@/components/EChart.vue'
-import { COLLEGE_MAP } from '@/constants/colleges'
-import { getFilterMeta, type SemesterOpt } from '@/utils/meta'
-import { getV2TeachingSemester } from '@/utils/v2meta'
+import { getFilterMeta } from '@/utils/meta'
 import AIInsightDrawer from '@/components/AIInsightDrawer.vue'
 import DataTable, { type DataTableColumn } from '@/components/DataTable.vue'
 import { getOperationCourseAIInsight } from '@/utils/ai'
-const router = useRouter()
-const route = useRoute()
 
 const fSemester = inject<Ref<string>>('operationSemester', ref(''))
+const fCollege = ref('')
 const fCampus = ref('')
 const fNature = ref('')
 const fCategory = ref('')
 const fSize = ref('')
-const fKeyword = ref('')
-const collegeFilter = ref<{id:string;name:string}|null>(null)
-const collegeMap = COLLEGE_MAP
-function applyCollegeFilter() {
-  const cid = route.query.college as string
-  collegeFilter.value = (cid && collegeMap[cid]) ? { id: cid, name: collegeMap[cid] } : null
-}
-applyCollegeFilter()
-watch(() => route.query.college, () => { applyCollegeFilter(); load() })
-function clearCollegeFilter() { router.replace({ query: {} }) }
-function goCollege(row: any) { router.push({ query: { college: row.id } }) }
-
-const semesters = ref<SemesterOpt[]>([])
+const colleges = ref<{value:string;label:string}[]>([])
 const campuses = ref<string[]>([])
 const courseNatures = ref<string[]>([])
 const categories = ref<string[]>([])
 const sizeBuckets = ref<string[]>([])
-const selectedSemesterLabel = computed(() => semesters.value.find(s => s.value === fSemester.value)?.label || fSemester.value || '未选择学期')
 
 const kpis = ref<any[]>([])
-const data = reactive<{deptCourses:any[];typeDist:any[];sizeDist:any[];trend:any[];totalCourses:number;courseList:any[];dataQuality:any}>({
-  deptCourses: [], typeDist: [], sizeDist: [], trend: [], totalCourses: 0, courseList: [], dataQuality: {},
+const data = reactive<{deptCourses:any[];typeDist:any[];sizeDist:any[];trend:any[];totalCourses:number;focusCourses:any[];courseSummary:any;qualityIssues:any[];dataQuality:any}>({
+  deptCourses: [], typeDist: [], sizeDist: [], trend: [], totalCourses: 0,
+  focusCourses: [], courseSummary: {}, qualityIssues: [], dataQuality: {},
 })
-const qualityIssues = ref<any[]>([])
+const qualityIssues = computed(() => data.qualityIssues || [])
 const loading = ref(false)
 const loadError = ref('')
-const auditVisible = ref(false)
-const qualityAudit = ref<any[]>([])
-const v2Offering = reactive<any>({ items: [], total: 0, semester: '' })
-const v2OfferingLoading = ref(false)
-const v2OfferingError = ref('')
 const offeringDrawer = reactive<any>({ visible:false, loading:false, items:[], total:0, semester:'', keyword:'', page:1, pageSize:20 })
 const offeringReviewVisible = ref(false)
 const selectedOffering = ref<any>({})
@@ -250,11 +199,10 @@ function offeringAttentionLevel(row:any):{label:string;type:'danger'|'warning'|'
   if ((normalized.attention || []).length) return { label:'需核查', type:'warning' }
   return { label:'常规', type:'info' }
 }
-const decisionOfferings = computed(() => (v2Offering.items || [])
+const decisionOfferings = computed(() => (data.focusCourses || [])
   .map(offeringWithAttention)
-  .sort((a:any,b:any) => b.attention.length-a.attention.length || b.enrolled-a.enrolled)
   .map((row:any,index:number) => ({ ...row, aiPriority:index < 3 })))
-const hasResults = computed(() => !!kpis.value.length || !!data.totalCourses || !!v2Offering.total)
+const hasResults = computed(() => !!kpis.value.length || !!data.totalCourses)
 
 // 开课保障关注 TOP10 表列定义（M6 DataTable）
 const offeringTopCols: DataTableColumn[] = [
@@ -285,22 +233,25 @@ const offeringAllCols:DataTableColumn[] = [
   {key:'attention',label:'管理关注',width:95,required:true},
   {key:'actions',label:'操作',width:88,required:true,region:'action',fixed:'right'},
 ]
-const realKpis = computed(() => {
-  const lessons = v2Offering.summary?.lesson_count || 0
-  const enrolled = v2Offering.summary?.enrolled || 0
-  return [
-    {label:'已关联课程',value:`${v2Offering.total || 0}门`,formula:'真实教学任务中成功关联课程主数据的去重课程数',tone:'primary' as const},
-    {label:'教学班',value:`${lessons}个`,formula:'当前已接入真实学期的教学任务班次合计',tone:'primary' as const},
-    {label:'平均班额',value:lessons?`${Math.round(enrolled/lessons)}人`:'—',formula:'真实教学任务选课人次÷教学班数',tone:'teal' as const},
-    {label:'需核查课程',value:`${v2Offering.summary?.attention_count || 0}门`,formula:'触发大班、单班集中或单一教师多班覆盖提示的课程数',tone:'amber' as const},
-  ]
-})
+function buildCourseParams() {
+  const params = new URLSearchParams()
+  if (fSemester.value) params.set('semester', fSemester.value)
+  if (fCollege.value) params.set('college', fCollege.value)
+  if (fCampus.value) params.set('campus', fCampus.value)
+  if (fNature.value) params.set('course_nature', fNature.value)
+  if (fCategory.value) params.set('category', fCategory.value)
+  if (fSize.value) params.set('size', fSize.value)
+  return params
+}
 async function loadOfferingPage() {
   offeringDrawer.loading = true
   try {
-    const params = new URLSearchParams({semester:offeringDrawer.semester,limit:String(offeringDrawer.pageSize),offset:String((offeringDrawer.page-1)*offeringDrawer.pageSize),sort:'scale'})
+    const params = buildCourseParams()
+    params.set('limit', String(offeringDrawer.pageSize))
+    params.set('offset', String((offeringDrawer.page - 1) * offeringDrawer.pageSize))
+    params.set('sort', 'scale')
     if (offeringDrawer.keyword.trim()) params.set('keyword',offeringDrawer.keyword.trim())
-    const result = await http.get<any>('/v2/courses/offerings?' + params.toString())
+    const result = await http.get<any>('/admin/operation/courses/offerings?' + params.toString())
     Object.assign(offeringDrawer,{items:result?.items||[],total:result?.total||0})
   } finally { offeringDrawer.loading = false }
 }
@@ -310,27 +261,8 @@ function onOfferingPageSize(value:number) {
   loadOfferingPage()
 }
 async function openOfferingDrawer() {
-  offeringDrawer.visible = true; offeringDrawer.semester = v2Offering.semester; offeringDrawer.page = 1; offeringDrawer.keyword = ''
+  offeringDrawer.visible = true; offeringDrawer.semester = fSemester.value; offeringDrawer.page = 1; offeringDrawer.keyword = ''
   await loadOfferingPage()
-}
-async function loadV2Offering() {
-  v2OfferingLoading.value = true
-  v2OfferingError.value = ''
-  try {
-    const realSemester = await getV2TeachingSemester()
-    if (!realSemester) {
-      Object.assign(v2Offering, { items: [], total: 0, semester: '' })
-      v2OfferingError.value = '当前工作身份没有已接入的结构化教学任务学期；这不等同于开课数为0。'
-      return
-    }
-    const result = await http.get<any>(`/v2/courses/offerings?semester=${encodeURIComponent(realSemester)}&limit=10&sort=attention`)
-    Object.assign(v2Offering, result)
-  } catch (error:any) {
-    Object.assign(v2Offering, { items: [], total: 0, semester: '' })
-    v2OfferingError.value = error?.message || '结构化开课供给加载失败，请稍后重试。'
-  } finally {
-    v2OfferingLoading.value = false
-  }
 }
 async function searchOfferings() { offeringDrawer.page = 1; await loadOfferingPage() }
 function openOfferingReview(row:any) {
@@ -340,27 +272,21 @@ function openOfferingReview(row:any) {
 async function openOfferingAi(row:any) {
   const courseId = row.course_id || row.courseId
   if (!courseId) return
-  const semester = row.semester_id || row.semester || offeringDrawer.semester || v2Offering.semester || fSemester.value
+  const semester = row.semester_id || row.semester || offeringDrawer.semester || fSemester.value
   aiDrawerVisible.value = true
   aiLoading.value = true
   aiInsight.value = null
   try { aiInsight.value = await getOperationCourseAIInsight(courseId, semester) }
   finally { aiLoading.value = false }
 }
-const qualityStatusLabel = (status:string) => ({open:'待处理',reviewing:'复核中',closed:'已关闭'} as Record<string,string>)[status] || status
-const qualityStatusType = (status:string) => ({open:'danger',reviewing:'warning',closed:'success'} as Record<string,any>)[status] || 'info'
-async function showQualityAudit(row:any) {
-  qualityAudit.value = await http.get(`/admin/operation/data-quality/${encodeURIComponent(row.issue_id)}/audit`) || []
-  auditVisible.value = true
-}
 const totalCourses = computed(() => data.totalCourses)
 function applyFilters() { load() }
 function resetFilters() {
+  fCollege.value = ''
   fCampus.value = ''
   fNature.value = ''
   fCategory.value = ''
   fSize.value = ''
-  fKeyword.value = ''
   load()
 }
 
@@ -368,23 +294,10 @@ async function load() {
   loading.value = true
   loadError.value = ''
   try {
-  const cid = route.query.college as string
-  const params = new URLSearchParams()
-  if (cid && collegeMap[cid]) params.set('college', cid)
-  if (fSemester.value) params.set('semester', fSemester.value)
-  if (fCampus.value) params.set('campus', fCampus.value)
-  if (fNature.value) params.set('course_nature', fNature.value)
-  if (fCategory.value) params.set('category', fCategory.value)
-  if (fSize.value) params.set('size', fSize.value)
-  if (fKeyword.value.trim()) params.set('keyword', fKeyword.value.trim())
+  const params = buildCourseParams()
   const qs = params.toString() ? `?${params.toString()}` : ''
   const d = await http.get('/admin/operation/courses' + qs)
   if (d) { kpis.value = d.kpis || []; Object.assign(data, d) }
-  const qParams = new URLSearchParams()
-  if (fSemester.value) qParams.set('semester', fSemester.value)
-  const q = await http.get<any>('/admin/operation/data-quality?' + qParams.toString())
-  qualityIssues.value = q?.list || []
-  await loadV2Offering()
   } catch (error:any) {
     loadError.value = error?.message || '开课供给数据加载失败，请稍后重试。'
   } finally {
@@ -393,7 +306,7 @@ async function load() {
 }
 onMounted(async () => {
   const meta = await getFilterMeta()
-  semesters.value = meta.semesters.slice().reverse()  // 最新在前
+  colleges.value = meta.colleges || []
   campuses.value = meta.campuses || []
   courseNatures.value = meta.courseNature || []
   categories.value = meta.categories || []
@@ -433,39 +346,12 @@ const sizeOption = computed(() => {
   }
 })
 
-const trendOption = computed(() => {
-  const t = data.trend || []
-  return {
-    grid: { left: 6, right: 24, top: 36, bottom: 4, containLabel: true },
-    tooltip: { trigger: 'axis' },
-    legend: { data: ['开课门数', '教学班数', '平均班额'], top: 0, textStyle: { color: '#64748B', fontSize: 12 }, itemWidth: 14, itemHeight: 8 },
-    xAxis: { type: 'category', data: t.map((x: any) => x.semester), axisLabel: { color: '#475569', fontSize: 11 }, axisLine: { lineStyle: { color: '#E2E8F0' } }, axisTick: { show: false } },
-    yAxis: [
-      { type: 'value', axisLabel: { color: '#94A3B8' }, splitLine: { lineStyle: { color: '#EEF1F5' } } },
-      { type: 'value', name: '平均班额', nameTextStyle: { color: '#94A3B8', fontSize: 11 }, axisLabel: { color: '#94A3B8' }, splitLine: { show: false } },
-    ],
-    series: [
-      { name: '开课门数', type: 'bar', data: t.map((x: any) => x.courseCount), itemStyle: { color: '#4F46E5', borderRadius: [4, 4, 0, 0] }, barWidth: '28%' },
-      { name: '教学班数', type: 'bar', data: t.map((x: any) => x.lessonCount), itemStyle: { color: '#A5B4FC', borderRadius: [4, 4, 0, 0] }, barWidth: '28%' },
-      { name: '平均班额', type: 'line', yAxisIndex: 1, smooth: true, data: t.map((x: any) => x.avgSize), itemStyle: { color: '#D97706' }, lineStyle: { width: 3 }, symbolSize: 7 },
-    ],
-  }
-})
 </script>
 
 <style scoped>
 .sa-head-row { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 14px; }
-.filter-banner {
-  background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 10px; padding: 8px 14px;
-  margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center;
-  font-size: 12px; color: var(--sa-primary);
-}
 .lvl-tag { font-size: 10px; padding: 2px 8px; border-radius: 99px; min-width: 56px; text-align: center; }
 .table-foot { display: flex; align-items: center; padding: 10px 12px; background: #f8fafc; border-top: 2px solid var(--sa-border-2); font-size: 12px; color: #475569; font-weight: 600; }
-.link { color: var(--sa-primary); cursor: pointer; font-weight: 500; }
-.link:hover { text-decoration: underline; }
-:deep(.row-clickable) { cursor: pointer; }
-:deep(.row-clickable:hover) { background: #eef2ff !important; }
 .management-note { margin:10px 0 0; padding-top:10px; border-top:1px solid var(--sa-border); color:#64748B; font-size:12px; line-height:1.7; }
 .drawer-toolbar { display:flex; align-items:center; gap:8px; margin-bottom:12px; }
 .drawer-toolbar span { margin-left:auto; color:#64748b; font-size:12px; }

@@ -62,7 +62,6 @@ class P3ModuleReorganizationTest(unittest.TestCase):
         self.assertIn("activeRoleName", component)
         for page in (
             "frontend/src/views/admin/dashboard/index.vue",
-            "frontend/src/views/admin/operation/Index.vue",
             "frontend/src/views/admin/curriculum/index.vue",
             "frontend/src/views/admin/faculty/Index.vue",
             "frontend/src/views/admin/students/Analysis.vue",
@@ -71,6 +70,27 @@ class P3ModuleReorganizationTest(unittest.TestCase):
         alert = self.read("frontend/src/views/admin/alert/Workspace.vue")
         self.assertNotIn("BusinessPageContext", alert)
         self.assertIn("最新预警统计时间", alert)
+        operation = self.read("frontend/src/views/admin/operation/Index.vue")
+        self.assertNotIn("BusinessPageContext", operation)
+        self.assertNotIn("当前数据覆盖", operation)
+
+    def test_course_supply_uses_one_filter_snapshot_without_college_drill(self):
+        page = self.read("frontend/src/views/admin/operation/Courses.vue")
+        self.assertIn('placeholder="全部学院"', page)
+        self.assertNotIn('placeholder="课程代码/名称"', page)
+        self.assertIn("const params = buildCourseParams()", page)
+        self.assertIn("data.dataQuality.excludedTeachers", page)
+        self.assertIn("qualityIssues: [], dataQuality: {}", page)
+        self.assertNotIn("/v2/courses/offerings", page)
+        self.assertNotIn("showQualityAudit", page)
+        self.assertNotIn('@row-click="goCollege"', page)
+        self.assertNotIn("row-clickable", page)
+        self.assertNotIn("历史趋势暂不展示", page)
+        self.assertNotIn("V2 真实教学任务证据", page)
+        self.assertIn(
+            "按大班额、单一教师多班覆盖和单班集中供给排序，不是课程质量排名",
+            page,
+        )
 
     def test_alert_monitor_followup_ui_contract(self):
         monitor = self.read("frontend/src/views/admin/alert/index.vue")
