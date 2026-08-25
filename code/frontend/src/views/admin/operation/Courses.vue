@@ -54,7 +54,7 @@
       <DataTable :columns="offeringTopCols" :data="decisionOfferings.slice(0,10)" storage-key="operation:courses-top10" size="small" stripe>
         <template #col-attention="{row}"><el-tag size="small" :type="offeringAttentionLevel(row).type">{{ offeringAttentionLevel(row).label }}</el-tag></template>
         <template #col-reasons="{row}"><span v-if="row.attention.length">{{ row.attention.join('；') }}</span><span v-else class="sa-faint">规模较大，建议常规关注</span></template>
-        <template #col-actions="{row}"><el-button link type="primary" @click.stop="openOfferingReview(row)">查看</el-button></template>
+        <template #col-actions="{row}"><el-button link type="primary" @click.stop="openOfferingReview(row)">详情</el-button></template>
       </DataTable>
     </div>
 
@@ -133,9 +133,8 @@
         <ul v-if="selectedOffering.attention?.length"><li v-for="item in selectedOffering.attention" :key="item">{{ item }}</li></ul>
         <p v-else>当前未命中明确运行异常线索，按常规开课供给查看即可。</p>
       </div>
-      <div class="review-actions">
-        <span v-if="!offeringNeedsAi(selectedOffering)" class="sa-faint">当前未达到复合风险 AI 介入条件。</span>
-        <el-button v-else type="primary" plain @click="openOfferingAi(selectedOffering)">查看开课保障研判</el-button>
+      <div v-if="offeringNeedsAi(selectedOffering)" class="review-actions">
+        <el-button type="primary" plain @click="openOfferingAi(selectedOffering)">查看开课保障研判</el-button>
       </div>
     </el-drawer>
     <AIInsightDrawer v-model="aiDrawerVisible" :insight="aiInsight" :loading="aiLoading" title="开课保障研判" />
@@ -357,5 +356,4 @@ const sizeOption = computed(() => {
 .review-reasons ul { margin:8px 0 0; padding-left:20px; }
 .review-reasons p { margin:8px 0 0; }
 .review-actions { display:flex; align-items:center; justify-content:flex-end; margin-top:16px; }
-.review-actions .sa-faint { margin-right:auto; }
 </style>

@@ -94,12 +94,15 @@ class P3ModuleReorganizationTest(unittest.TestCase):
         self.assertIn("return { label:'需关注', type:'warning' }", page)
         self.assertNotIn("label:'AI重点'", page)
         self.assertNotIn("label:'需核查'", page)
-        self.assertIn(">查看</el-button>", page)
+        self.assertIn('@click.stop="openOfferingReview(row)">详情</el-button>', page)
+        self.assertNotIn('@click.stop="openOfferingReview(row)">查看</el-button>', page)
         self.assertIn("｜开课保障信息", page)
         self.assertNotIn("开课保障核查", page)
         self.assertNotIn("先核查运行证据", page)
         self.assertIn("查看开课保障研判", page)
         self.assertNotIn("查看 AI 开课保障研判", page)
+        self.assertNotIn("当前未达到复合风险 AI 介入条件。", page)
+        self.assertIn('v-if="offeringNeedsAi(selectedOffering)" class="review-actions"', page)
         self.assertIn(
             "按大班额、单一教师多班覆盖和单班集中供给排序，不是课程质量排名",
             page,
