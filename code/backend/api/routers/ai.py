@@ -1345,50 +1345,90 @@ def graduation_readiness_course_insight(course_id: str,
 @router.get("/insight/operation/course-offering/{course_id}")
 def operation_course_offering_insight(course_id: str, semester: str = "2023-2024-1",
                                       user: dict = Depends(get_current_user),
-                                      conn: sqlite3.Connection = Depends(get_v2_db)):
+                                      conn: sqlite3.Connection = Depends(get_v2_db),
+                                      legacy_conn: sqlite3.Connection = Depends(get_db)):
+    v2_scope_sql, v2_scope_params = v2_lesson_scope(
+        user.get("permission_context") or {}, conn, "l",
+    )
+    v2_scope_filter = f" AND {v2_scope_sql}" if v2_scope_sql else ""
     course = dbm.query_one(conn, """
         SELECT course_id,name,category,nature,organization_id
         FROM dim_course WHERE course_id=?
     """, (course_id,)) or {"course_id": course_id, "name": course_id}
-    offering = dbm.query_one(conn, """
-        SELECT a.*,c.name course_name,c.category,c.nature,c.organization_id
-        FROM agg_course_offering a
-        LEFT JOIN dim_course c ON c.course_id=a.course_id
-        WHERE a.semester_id=? AND a.course_id=?
-    """, (semester, course_id))
-    if not offering:
+    legacy_source = False
+    offering = None
+    if not v2_scope_sql:
         offering = dbm.query_one(conn, """
+            SELECT a.*,c.name course_name,c.category,c.nature,c.organization_id
+            FROM agg_course_offering a
+            LEFT JOIN dim_course c ON c.course_id=a.course_id
+            WHERE a.semester_id=? AND a.course_id=?
+        """, (semester, course_id))
+    if not offering:
+        offering = dbm.query_one(conn, f"""
             SELECT ? semester_id,l.course_id,COUNT(DISTINCT l.lesson_id) lesson_count,
                    COUNT(DISTINCT lt.staff_id) teacher_count,
                    SUM(COALESCE(l.capacity,0)) capacity,
                    SUM(COALESCE(l.enrolled,0)) enrolled,
                    COALESCE(MAX(c.name),MAX(l.course_name),l.course_id) course_name,
-                   MAX(c.category) category,MAX(c.nature) nature,MAX(c.organization_id) organization_id
+                   MAX(c.category) category,MAX(c.nature) nature,
+                   COALESCE(MAX(l.organization_id),MAX(c.organization_id)) organization_id
             FROM teaching_lesson l
             LEFT JOIN lesson_teacher lt ON lt.lesson_id=l.lesson_id
             LEFT JOIN dim_course c ON c.course_id=l.course_id
-            WHERE l.semester_id=? AND l.course_id=?
+            WHERE l.semester_id=? AND l.course_id=?{v2_scope_filter}
             GROUP BY l.course_id
-        """, (semester, semester, course_id))
+        """, (semester, semester, course_id, *v2_scope_params))
+    if not offering:
+        scope_sql, scope_params = college_data_scope(user, legacy_conn)
+        scope_filter = (
+            f" AND dc.college_id IN (SELECT college_id FROM dim_college WHERE {scope_sql})"
+            if scope_sql else ""
+        )
+        offering = dbm.query_one(legacy_conn, f"""
+            SELECT l.semester_id,l.course_id,
+                   COUNT(DISTINCT l.lesson_id) lesson_count,
+                   COUNT(DISTINCT NULLIF(TRIM(l.teacher_id),'')) teacher_count,
+                   SUM(COALESCE(l.capacity,0)) capacity,
+                   SUM(COALESCE(l.enrolled,0)) enrolled,
+                   COALESCE(MAX(c.name),l.course_id) course_name,
+                   MAX(c.category) category,MAX(c.course_nature) nature,
+                   MAX(dc.college_id) organization_id,MAX(dc.name) organization_name
+            FROM fact_lesson l
+            LEFT JOIN dim_course c ON c.course_id=l.course_id
+            LEFT JOIN dim_college dc ON dc.name=c.dept
+            WHERE l.semester_id=? AND l.course_id=?{scope_filter}
+            GROUP BY l.semester_id,l.course_id
+        """, (semester, course_id, *scope_params))
+        if offering:
+            legacy_source = True
+            course = {
+                "course_id": course_id,
+                "name": offering.get("course_name") or course_id,
+                "category": offering.get("category"),
+                "nature": offering.get("nature"),
+                "organization_id": offering.get("organization_id"),
+            }
     if not offering:
         raise ApiError("暂无该课程开课供给数据", code=404, status_code=404)
 
-    raw_metrics = dbm.query_one(conn, """
+    raw_metrics = None if legacy_source else dbm.query_one(conn, f"""
         SELECT r.lesson_count,r.capacity,r.enrolled,COALESCE(t.teacher_count,0) teacher_count
         FROM (
-          SELECT COUNT(DISTINCT lesson_id) lesson_count,
-                 SUM(COALESCE(capacity,0)) capacity,
-                 SUM(COALESCE(enrolled,0)) enrolled
-          FROM teaching_lesson
-          WHERE semester_id=? AND course_id=?
+          SELECT COUNT(DISTINCT l.lesson_id) lesson_count,
+                 SUM(COALESCE(l.capacity,0)) capacity,
+                 SUM(COALESCE(l.enrolled,0)) enrolled
+          FROM teaching_lesson l
+          WHERE l.semester_id=? AND l.course_id=?{v2_scope_filter}
         ) r
         CROSS JOIN (
           SELECT COUNT(DISTINCT lt.staff_id) teacher_count
           FROM teaching_lesson l
           LEFT JOIN lesson_teacher lt ON lt.lesson_id=l.lesson_id
-          WHERE l.semester_id=? AND l.course_id=?
+          WHERE l.semester_id=? AND l.course_id=?{v2_scope_filter}
         ) t
-    """, (semester, course_id, semester, course_id))
+    """, (semester, course_id, *v2_scope_params,
+          semester, course_id, *v2_scope_params))
     if raw_metrics and raw_metrics.get("lesson_count"):
         offering["lesson_count"] = raw_metrics.get("lesson_count") or 0
         offering["teacher_count"] = raw_metrics.get("teacher_count") or 0
@@ -1401,7 +1441,7 @@ def operation_course_offering_insight(course_id: str, semester: str = "2023-2024
     capacity = offering.get("capacity") or 0
     avg_size = round(enrolled / lesson_count, 1) if lesson_count else 0
     fill_rate = round(enrolled / capacity * 100, 1) if capacity else None
-    schedule_cells = dbm.query(conn, """
+    schedule_cells = [] if legacy_source else dbm.query(conn, f"""
         SELECT m.weekday,
                CASE WHEN m.period_start<=4 THEN '上午'
                     WHEN m.period_start<=8 THEN '下午' ELSE '晚上' END day_part,
@@ -1409,28 +1449,58 @@ def operation_course_offering_insight(course_id: str, semester: str = "2023-2024
                COUNT(DISTINCT l.lesson_id) lesson_count
         FROM course_meeting m
         JOIN teaching_lesson l ON l.lesson_id=m.lesson_id
-        WHERE l.semester_id=? AND l.course_id=?
+        WHERE l.semester_id=? AND l.course_id=?{v2_scope_filter}
         GROUP BY m.weekday,CASE WHEN m.period_start<=4 THEN '上午'
                     WHEN m.period_start<=8 THEN '下午' ELSE '晚上' END
         ORDER BY meeting_count DESC
-    """, (semester, course_id))
+    """, (semester, course_id, *v2_scope_params))
     meeting_total = sum((r.get("meeting_count") or 0) for r in schedule_cells)
     top_cell = schedule_cells[0] if schedule_cells else {}
     evening = sum((r.get("meeting_count") or 0) for r in schedule_cells if r.get("day_part") == "晚上")
     evening_share = round(evening / meeting_total * 100, 1) if meeting_total else 0
-    teacher_rows = dbm.query(conn, """
+    teacher_rows = dbm.query(legacy_conn, """
+        SELECT COALESCE(t.name,l.teacher_id) teacher_name,l.teacher_id staff_id,
+               COUNT(DISTINCT l.lesson_id) lesson_count,
+               SUM(COALESCE(l.enrolled,0)) enrolled
+        FROM fact_lesson l
+        LEFT JOIN dim_teacher t ON t.teacher_id=l.teacher_id
+        WHERE l.semester_id=? AND l.course_id=?
+        GROUP BY l.teacher_id,COALESCE(t.name,l.teacher_id)
+        ORDER BY lesson_count DESC,enrolled DESC
+        LIMIT 5
+    """, (semester, course_id)) if legacy_source else dbm.query(conn, f"""
         SELECT COALESCE(s.display_name,lt.staff_id) teacher_name,lt.staff_id,
                COUNT(DISTINCT l.lesson_id) lesson_count,
                SUM(COALESCE(l.enrolled,0)) enrolled
         FROM teaching_lesson l
         LEFT JOIN lesson_teacher lt ON lt.lesson_id=l.lesson_id
         LEFT JOIN dim_staff s ON s.staff_id=lt.staff_id
-        WHERE l.semester_id=? AND l.course_id=?
+        WHERE l.semester_id=? AND l.course_id=?{v2_scope_filter}
         GROUP BY lt.staff_id,COALESCE(s.display_name,lt.staff_id)
         ORDER BY lesson_count DESC,enrolled DESC
         LIMIT 5
-    """, (semester, course_id))
+    """, (semester, course_id, *v2_scope_params))
     top_teacher = teacher_rows[0] if teacher_rows else {}
+    organization_name = offering.get("organization_name")
+    organization_id = offering.get("organization_id") or course.get("organization_id")
+    if not organization_name and organization_id and dbm.scalar(
+        conn, "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='dim_organization'",
+    ):
+        organization_name = dbm.scalar(
+            conn, "SELECT name FROM dim_organization WHERE organization_id=?",
+            (organization_id,),
+        )
+    organization_name = organization_name or organization_id
+    traceability = {}
+    if legacy_source:
+        traceability = {
+            "dataSources": ["fact_lesson", "dim_course", "dim_teacher", "dim_college"],
+            "calculationLogic": "按当前统计学期汇总开课供给页面同源教学任务，计算教学班、容量、选课人次、平均班额与教师覆盖。",
+            "rules": ["供给来自 fact_lesson.capacity/enrolled", "教师覆盖来自 fact_lesson.teacher_id", "学院范围按 dim_course.dept 与 dim_college 映射鉴权"],
+            "formula": "课程运行关注度 = 开课供给压力 + 教师覆盖不足 + 单班集中供给",
+            "boundary": "V1教学任务快照没有结构化排课时段，高频时段显示暂无；研判用于教学运行核查，不直接评价课程质量或教师表现。",
+            "ruleVersion": "AI-RULE-2026.07-v1",
+        }
 
     attention: list[str] = []
     if avg_size >= 120:
@@ -1464,7 +1534,7 @@ def operation_course_offering_insight(course_id: str, semester: str = "2023-2024
         "generatedAt": _now(),
         "summary": summary,
         "confidence": "高" if lesson_count and meeting_total else "中",
-        "profile": {"college": offering.get("organization_id") or course.get("organization_id"),
+        "profile": {"college": organization_name,
                     "major": offering.get("category") or course.get("category"),
                     "semester": semester},
         "evidence": [
@@ -1490,8 +1560,10 @@ def operation_course_offering_insight(course_id: str, semester: str = "2023-2024
         ],
         "limitations": [
             "当前研判基于已接入教学任务、排课时段和教师覆盖数据，尚未纳入未来开课计划审批结果。",
+            *(["当前课程来自开课供给页面同源 fact_lesson 快照，未接入结构化排课时段，因此不判断高频或晚间时段。"] if legacy_source else []),
             "班额阈值用于管理核查提示，不直接评价课程质量或教师教学效果。",
         ],
+        "traceability": traceability,
     })
 
 

@@ -514,7 +514,7 @@ def courses(college: Optional[str] = None, semester: Optional[str] = None,
          "formula": "当前筛选范围排除异常教师后的教学班记录数", "tone": "primary"},
         {"label": "平均班额", "value": f"{round(total_enrolled / tot_lessons) if tot_lessons else 0}人",
          "formula": "当前筛选范围选课人次÷教学班数", "tone": "teal"},
-        {"label": "需核查课程", "value": f"{attention_count}门",
+        {"label": "需关注课程", "value": f"{attention_count}门",
          "formula": "触发大班额、单班集中或单一教师多班覆盖提示的去重课程数", "tone": "amber"},
     ]
 

@@ -109,7 +109,6 @@
         <el-button type="primary" @click="searchOfferings">查询</el-button>
         <span>共 {{ offeringDrawer.total }} 门课程 · {{ offeringDrawer.semester }}</span>
       </div>
-      <el-alert type="info" :closable="false" show-icon style="margin-bottom:12px" title="完整清单按教学班数和选课人次排序，可搜索并分页；首页TOP10使用管理关注规则单独排序。" />
       <DataTable :columns="offeringAllCols" :data="offeringDrawer.items" storage-key="operation:courses-all"
         size="small" stripe v-loading="offeringDrawer.loading" max-height="620" :page-size="offeringDrawer.pageSize"
         :default-page-size="20" :max-business-columns="6" @update:page-size="onOfferingPageSize">
@@ -192,7 +191,7 @@ function offeringNeedsAi(row:any) {
 }
 function offeringAttentionLevel(row:any):{label:string;type:'danger'|'warning'|'info'} {
   const normalized = row?.attention ? row : offeringWithAttention(row || {})
-  if (offeringNeedsAi(normalized)) return { label:'优先关注', type:'danger' }
+  if (offeringNeedsAi(normalized)) return { label:'重点关注', type:'danger' }
   if ((normalized.attention || []).length) return { label:'需关注', type:'warning' }
   return { label:'常规', type:'info' }
 }
