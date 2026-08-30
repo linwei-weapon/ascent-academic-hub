@@ -3,65 +3,94 @@
     <div class="sa-head-row">
       <div>
         <h2 class="sa-page-title">{{ pageTitle }}</h2>
-        <p class="sa-page-sub">基于真实培养方案与学生课程记录，核查方案结构、学分要求和学生执行情况</p>
-      </div>
-      <div v-if="['plan','progress'].includes(activeTab)" class="plan-filter-area">
-        <div class="filter-scope-label">当前分析方案 <span>同时作用于“方案结构与要求”和“学生进度核查”</span></div>
-        <div class="plan-filters">
-        <el-select v-model="college" placeholder="学院" clearable filterable @change="resetCollege">
-          <el-option v-for="x in colleges" :key="x" :label="x" :value="x" />
-        </el-select>
-        <el-select v-model="grade" placeholder="年级" clearable @change="resetGrade">
-          <el-option v-for="x in grades" :key="x" :label="`${x}级`" :value="x" />
-        </el-select>
-        <el-select v-model="major" placeholder="专业" clearable filterable @change="resetMajor">
-          <el-option v-for="x in majorNames" :key="x" :label="x" :value="x" />
-        </el-select>
-        <el-select v-model="selectedMajor" placeholder="培养方案" filterable style="width:260px" @change="onPlanChanged">
-          <el-option v-for="x in availablePlans" :key="x.planId" :label="`${x.planName} · ${x.coverageLabel}`" :value="x.planId" />
-        </el-select>
-        </div>
       </div>
     </div>
-    <BusinessPageContext
-      source="培养方案、学籍、成绩、教学任务与课程替代数据"
-      :loading="pageLoading"
-      :period="analysisPeriod"
-    />
 
     <el-tabs v-model="activeTab">
       <el-tab-pane label="方案执行总览" name="overview">
-        <el-alert type="success" :closable="false" show-icon title="当前授权范围的方案执行总览" description="以下卡片和表格按当前工作身份的数据权限计算，不受单个培养方案查看条件影响。" style="margin-bottom:10px" />
-        <el-alert type="info" :closable="false" show-icon :title="overview.definition.boundary" style="margin-bottom:14px" />
+        <div class="overview-filter-area">
+          <el-form inline class="overview-filters" @submit.prevent="queryOverview">
+            <el-form-item label="年级" required>
+              <el-select v-model="overviewGrades" multiple collapse-tags collapse-tags-tooltip
+                placeholder="请选择年级" @change="onOverviewGradesChanged">
+                <el-option v-for="x in overviewGradeOptions" :key="x" :label="`${x}级`" :value="x" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="学院">
+              <el-select v-model="overviewCollege" clearable filterable placeholder="全部学院" @change="onOverviewCollegeChanged">
+                <el-option v-for="x in overviewCollegeOptions" :key="x" :label="x" :value="x" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="专业">
+              <el-select v-model="overviewMajor" clearable filterable placeholder="全部专业">
+                <el-option v-for="x in overviewMajorOptions" :key="x" :label="x" :value="x" />
+              </el-select>
+            </el-form-item>
+            <el-form-item class="overview-filter-actions">
+              <el-button type="primary" :loading="overviewLoading" @click="queryOverview">查询</el-button>
+              <el-button @click="resetOverviewFilters">重置</el-button>
+            </el-form-item>
+          </el-form>
+        </div>
         <div class="sa-kpi-row" v-loading="overviewLoading" element-loading-text="正在汇总方案覆盖与执行状态…">
-          <KpiCard label="已接入方案" :value="`${overview.summary.activePlans || 0}个`" hint="当前授权范围可见的已接入培养方案数" tone="primary" />
+          <KpiCard label="培养方案总数" :value="`${overview.summary.totalPlans || 0}个`" hint="当前查询范围内的培养方案总数" tone="primary" />
           <KpiCard label="可进行规则核查方案" :value="`${overview.summary.reviewablePlans || 0}个`" :hint="overview.definition.reviewablePlans" tone="teal" />
           <KpiCard label="适用学生绑定率" :value="overview.summary.bindingRate == null ? '—' : `${overview.summary.bindingRate}%`" :hint="overview.definition.bindingRate" tone="teal" />
-          <KpiCard label="明确培养要求问题" :value="`${overview.summary.actionRequiredStudents || 0}人`" :hint="overview.definition.actionRequiredStudents" tone="danger" />
-          <KpiCard label="数据候选学生" :value="`${overview.summary.verificationStudents || 0}人`" :hint="overview.definition.verificationStudents" tone="amber" />
+          <KpiCard label="必修未通过学生" :value="`${overview.summary.actionRequiredStudents || 0}人`" :hint="overview.definition.actionRequiredStudents" tone="danger" />
+          <KpiCard label="过期漏修学生" :value="`${overview.summary.verificationStudents || 0}人`" :hint="overview.definition.verificationStudents" tone="amber" />
         </div>
         <div class="sa-card" style="margin-top:16px">
-          <div class="sa-card-title">学院方案执行关注 <span class="extra">按明确问题、数据候选、绑定待核验依次排序</span></div>
+          <div class="sa-card-title">学院方案执行关注 <span class="extra">当前最多仅展示前 30 个学院</span></div>
           <DataTable :columns="collegeColumns" :data="overview.colleges" storage-key="curriculum:college-overview"
-            :max-business-columns="7" :config-version="2" size="small" stripe v-loading="overviewLoading">
+            :max-business-columns="8" :config-version="3" size="small" stripe v-loading="overviewLoading">
+            <template #header-bindingRate>
+              <span class="table-header-with-help">正确绑定率
+                <el-tooltip content="正确绑定学生/在籍学生*100%" placement="top">
+                  <el-icon class="table-help-icon" tabindex="0" aria-label="查看正确绑定率计算公式"><QuestionFilled /></el-icon>
+                </el-tooltip>
+              </span>
+            </template>
+            <template #header-bindingReview>
+              <span class="table-header-with-help">绑定待核验
+                <el-tooltip placement="top" :show-after="200">
+                  <template #content><div class="binding-review-tooltip">{{ overview.definition.bindingReviewStudents }}</div></template>
+                  <el-icon class="table-help-icon" tabindex="0" aria-label="查看绑定待核验规则"><QuestionFilled /></el-icon>
+                </el-tooltip>
+              </span>
+            </template>
             <template #col-bindingRate="{row}">{{row.bindingRate == null ? '—' : `${row.bindingRate}%`}}</template>
-            <template #col-actionRequired="{row}"><el-button link type="danger" :disabled="!row.actionRequired" @click="openStudents({college_name:row.collegeName,status:'明确需处理'},`${row.collegeName}｜明确问题`)">{{row.actionRequired}}</el-button></template>
-            <template #col-verification="{row}"><el-button link type="warning" :disabled="!row.verification" @click="openStudents({college_name:row.collegeName,status:'数据候选'},`${row.collegeName}｜数据候选`)">{{row.verification}}</el-button></template>
+            <template #col-actionRequired="{row}"><el-button link type="danger" :disabled="!row.actionRequired" @click="openStudents({college_name:row.collegeName,status:'明确需处理'},`${row.collegeName}｜必修未通过`)">{{row.actionRequired}}</el-button></template>
+            <template #col-verification="{row}"><el-button link type="warning" :disabled="!row.verification" @click="openStudents({college_name:row.collegeName,status:'数据候选'},`${row.collegeName}｜过期漏修`)">{{row.verification}}</el-button></template>
             <template #col-bindingReview="{row}"><el-button link type="warning" :disabled="!row.bindingReview" @click="openStudents({college_name:row.collegeName,status:'方案绑定待核验'},`${row.collegeName}｜绑定待核验`)">{{row.bindingReview}}</el-button></template>
-            <template #col-action="{row}"><el-button link type="primary" @click="openStudents({college_name:row.collegeName},`${row.collegeName}｜适用范围学生`)">核查名单</el-button></template>
+            <template #col-action="{row}"><el-button link type="primary" @click="openStudents({college_name:row.collegeName},`${row.collegeName}｜查询范围学生`)">核查名单</el-button></template>
           </DataTable>
         </div>
         <el-row :gutter="16" style="margin-top:16px">
           <el-col :span="13"><div class="sa-card">
-            <div class="sa-card-title">专业执行关注 <span class="extra">用于定位学院内部重点专业</span></div>
+            <div class="sa-card-title">专业执行关注 <span class="extra">当前最多仅展示前 50 个专业</span></div>
             <DataTable :columns="majorColumns" :data="overview.majors" storage-key="curriculum:major-overview"
-              :max-business-columns="6" :config-version="2" size="small" stripe max-height="420" v-loading="overviewLoading">
+              :max-business-columns="8" :config-version="3" size="small" stripe max-height="420" v-loading="overviewLoading">
+              <template #header-bindingRate>
+                <span class="table-header-with-help">正确绑定率
+                  <el-tooltip content="正确绑定学生/在籍学生*100%" placement="top">
+                    <el-icon class="table-help-icon" tabindex="0" aria-label="查看正确绑定率计算公式"><QuestionFilled /></el-icon>
+                  </el-tooltip>
+                </span>
+              </template>
+              <template #header-bindingReview>
+                <span class="table-header-with-help">绑定待核验
+                  <el-tooltip placement="top" :show-after="200">
+                    <template #content><div class="binding-review-tooltip">{{ overview.definition.bindingReviewStudents }}</div></template>
+                    <el-icon class="table-help-icon" tabindex="0" aria-label="查看绑定待核验规则"><QuestionFilled /></el-icon>
+                  </el-tooltip>
+                </span>
+              </template>
               <template #col-bindingRate="{row}">{{row.bindingRate == null ? '—' : `${row.bindingRate}%`}}</template>
-              <template #col-action="{row}"><el-button link type="primary" @click="openStudents({major_code:row.majorCode},`${row.majorName}｜执行核查`)">核查名单</el-button></template>
+              <template #col-action="{row}"><el-button link type="primary" @click="openStudents({college_name:row.collegeName,major_name:row.majorName},`${row.majorName}｜执行核查`)">核查名单</el-button></template>
             </DataTable>
           </div></el-col>
           <el-col :span="11"><div class="sa-card">
-            <div class="sa-card-title">必修课程瓶颈 <span class="extra">按影响学生数排序</span></div>
+            <div class="sa-card-title">必修课程瓶颈 <span class="extra">当前最多仅展示前 20 门课程</span></div>
             <DataTable :columns="courseColumns" :data="overview.bottleneckCourses" storage-key="curriculum:bottleneck-courses"
               :max-business-columns="4" :config-version="2" size="small" stripe max-height="420"
               v-loading="courseLoading" element-loading-text="正在按需提取课程证据…">
@@ -70,7 +99,7 @@
           </div></el-col>
         </el-row>
       </el-tab-pane>
-      <el-tab-pane label="方案结构与要求" name="plan">
+      <el-tab-pane v-if="showPlanStructure" label="方案结构与要求" name="plan">
         <template v-if="hasPlan">
           <el-alert type="info" :closable="false" style="margin-bottom:14px"
             :title="`${plan.dataSource || '培养方案'}：${plan.coverageNote || '按专业与年级匹配适用方案'}`" />
@@ -115,7 +144,27 @@
       </el-tab-pane>
 
       <el-tab-pane label="学生进度核查" name="progress">
-        <ProgressView v-if="activeTab === 'progress'" :major-id="selectedMajor" />
+        <div class="plan-filter-area">
+          <div class="plan-filters">
+            <el-select v-model="grade" placeholder="年级" clearable @change="resetGrade">
+              <el-option v-for="x in grades" :key="x" :label="`${x}级`" :value="x" />
+            </el-select>
+            <el-select v-model="college" placeholder="学院" clearable filterable @change="resetCollege">
+              <el-option v-for="x in colleges" :key="x" :label="x" :value="x" />
+            </el-select>
+            <el-select v-model="major" placeholder="专业" clearable filterable @change="resetMajor">
+              <el-option v-for="x in majorNames" :key="x" :label="x" :value="x" />
+            </el-select>
+            <el-select v-model="selectedMajor" class="plan-select" placeholder="培养方案" filterable @change="onPlanChanged">
+              <el-option v-for="x in availablePlans" :key="x.planId" :label="x.planName" :value="x.planId" />
+            </el-select>
+            <div class="plan-filter-actions">
+              <el-button type="primary" @click="queryProgress">查询</el-button>
+              <el-button @click="resetProgressFilters">重置</el-button>
+            </div>
+          </div>
+        </div>
+        <ProgressView v-if="activeTab === 'progress'" :key="`${appliedProgressPlan}:${progressQueryVersion}`" :major-id="appliedProgressPlan" />
       </el-tab-pane>
       <el-tab-pane label="毕业准备与课程保障" name="graduation-readiness">
         <div v-if="activeTab === 'graduation-readiness'" class="embedded-topic"><GraduationReadiness /></div>
@@ -130,12 +179,11 @@
       </DataTable>
     </el-drawer>
     <el-drawer v-model="studentDialog.visible" :title="`${studentDialog.title}｜方案执行学生名单`" size="980px">
-      <el-alert type="info" :closable="false" :title="studentDialog.definition" style="margin-bottom:12px" />
       <DataTable :columns="studentListColumns" :data="studentDialog.items"
-        storage-key="curriculum:management-students" :max-business-columns="7"
-        :config-version="2" :page-size="studentDialog.pageSize" @update:page-size="onStudentPageSize"
+        storage-key="curriculum:management-students" :max-business-columns="10"
+        :config-version="5" :page-size="studentDialog.pageSize" @update:page-size="onStudentPageSize"
         size="small" stripe v-loading="studentDialog.loading" element-loading-text="正在加载核查名单…">
-        <template #col-evidenceStatus="{row}"><el-tag size="small" :type="row.evidenceStatus==='明确需处理'?'danger':row.evidenceStatus==='数据候选'||row.evidenceStatus==='方案绑定待核验'?'warning':'info'">{{row.evidenceStatus}}</el-tag></template>
+        <template #col-evidenceStatus="{row}"><el-tag size="small" :type="row.evidenceStatus==='明确需处理'?'danger':row.evidenceStatus==='数据候选'||row.evidenceStatus==='方案绑定待核验'?'warning':'info'">{{studentEvidenceStatusLabel(row.evidenceStatus)}}</el-tag></template>
         <template #col-action="{row}"><el-button v-if="row.coverageStatus==='matched'" link type="primary" @click="studentProfile(row)">执行详情</el-button><span v-else class="sa-faint">先核验绑定</span></template>
       </DataTable>
       <el-pagination v-if="studentDialog.total" v-model:current-page="studentDialog.page"
@@ -144,25 +192,45 @@
     </el-drawer>
     <el-drawer v-model="studentEvidence.visible" :title="`${studentEvidence.data.student?.display_name || ''}｜培养方案执行详情`" size="760px" append-to-body>
       <div v-loading="studentEvidence.loading">
-        <el-alert type="warning" :closable="false" show-icon title="这是方案执行核查，不是学生综合档案" :description="studentEvidence.data.boundary" />
         <el-descriptions class="student-evidence-summary" :column="2" border>
           <el-descriptions-item label="学号">{{ studentEvidence.data.student?.student_id || '—' }}</el-descriptions-item>
           <el-descriptions-item label="年级">{{ studentEvidence.data.student?.entry_grade || '—' }}</el-descriptions-item>
           <el-descriptions-item label="专业">{{ studentEvidence.data.student?.major_name || '—' }}</el-descriptions-item>
           <el-descriptions-item label="培养方案">{{ studentEvidence.data.student?.plan_name || '—' }}</el-descriptions-item>
-          <el-descriptions-item label="明确未通过">{{ studentEvidence.data.summary?.failed_courses || 0 }} 门</el-descriptions-item>
-          <el-descriptions-item label="到期缺结果候选">{{ studentEvidence.data.summary?.candidate_courses || 0 }} 门</el-descriptions-item>
-          <el-descriptions-item label="无历史开课证据">{{ studentEvidence.data.summary?.courses_without_offering || 0 }} 门</el-descriptions-item>
+          <el-descriptions-item>
+            <template #label><span class="description-label-with-help">必修未通过
+              <el-tooltip content="该学生尚未达到要求的培养方案模块中，当前有效成绩仍为未通过的必修课程数" placement="top">
+                <el-icon class="description-help-icon" tabindex="0" aria-label="查看必修未通过计算说明"><QuestionFilled /></el-icon>
+              </el-tooltip>
+            </span></template>
+            {{ studentEvidence.data.summary?.failed_courses || 0 }} 门
+          </el-descriptions-item>
+          <el-descriptions-item>
+            <template #label><span class="description-label-with-help">到期缺修读结果
+              <el-tooltip content="该学生尚未达到要求的培养方案模块中，建议修读学期已过，但尚未形成明确修读结果的必修课程数" placement="top">
+                <el-icon class="description-help-icon" tabindex="0" aria-label="查看到期缺修读结果计算说明"><QuestionFilled /></el-icon>
+              </el-tooltip>
+            </span></template>
+            {{ studentEvidence.data.summary?.candidate_courses || 0 }} 门
+          </el-descriptions-item>
+          <el-descriptions-item>
+            <template #label><span class="description-label-with-help">无历史开课证据
+              <el-tooltip content="该学生的必修课程中，教学任务里没有找到任何历史教学班记录的课程数" placement="top">
+                <el-icon class="description-help-icon" tabindex="0" aria-label="查看无历史开课证据计算说明"><QuestionFilled /></el-icon>
+              </el-tooltip>
+            </span></template>
+            {{ studentEvidence.data.summary?.courses_without_offering || 0 }} 门
+          </el-descriptions-item>
           <el-descriptions-item label="有课程替代证据">{{ studentEvidence.data.summary?.courses_with_substitution || 0 }} 门</el-descriptions-item>
         </el-descriptions>
-        <h4 class="evidence-title">明确未通过必修课程 <small>可直接进入重修与课程保障核查</small></h4>
+        <h4 class="evidence-title">必修未通过课程</h4>
         <DataTable :columns="failedEvidenceColumns" :data="studentEvidence.data.failed_courses || []"
           storage-key="curriculum:overview-student-failed-evidence" :max-business-columns="5"
-          :config-version="2" size="small" empty-text="当前没有明确未通过必修课程" />
-        <h4 class="evidence-title">到期缺结果记录候选 <small>必须先核验选课、免修与认定数据</small></h4>
+          :config-version="2" size="small" empty-text="当前没有必修未通过课程" />
+        <h4 class="evidence-title">到期缺修读结果记录</h4>
         <DataTable :columns="candidateEvidenceColumns" :data="studentEvidence.data.candidate_courses || []"
           storage-key="curriculum:overview-student-candidate-evidence" :max-business-columns="4"
-          :config-version="2" size="small" max-height="280" empty-text="当前没有到期缺结果候选" />
+          :config-version="2" size="small" max-height="280" empty-text="当前没有到期缺修读结果" />
       </div>
     </el-drawer>
   </div>
@@ -172,8 +240,9 @@
 import { http } from '@/utils/http'
 import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
+import { QuestionFilled } from '@element-plus/icons-vue'
 import KpiCard from '@/components/KpiCard.vue'
-import BusinessPageContext from '@/components/BusinessPageContext.vue'
 import DataTable, { type DataTableColumn } from '@/components/DataTable.vue'
 import ProgressView from './Progress.vue'
 import GraduationReadiness from '../reports/GraduationReadiness.vue'
@@ -183,21 +252,28 @@ const route = useRoute()
 const router = useRouter()
 const pageTitle = useBusinessPageTitle('/admin/curriculum', '培养质量分析')
 const allPlans = ref<any[]>([])
+const progressPlans = ref<any[]>([])
 const college = ref('')
 const grade = ref<number | ''>('')
 const major = ref('')
 const selectedMajor = ref('')
-const curriculumTabs = new Set(['overview','plan','progress','graduation-readiness'])
+const appliedProgressPlan = ref('')
+const defaultProgressPlan = ref('')
+const progressQueryVersion = ref(0)
+const overviewFilterRows = ref<any[]>([])
+const overviewGrades = ref<number[]>([])
+const overviewCollege = ref('')
+const overviewMajor = ref('')
+const appliedOverviewFilters = reactive<{grades:number[];college:string;major:string}>({grades:[],college:'',major:''})
+// 当前产品终稿先隐藏“方案结构与要求”；保留实现，后续确认后可恢复。
+const showPlanStructure = false
+const curriculumTabs = new Set([
+  'overview',
+  ...(showPlanStructure ? ['plan'] : []),
+  'progress',
+  'graduation-readiness',
+])
 const activeTab = ref(curriculumTabs.has(String(route.query.tab)) ? String(route.query.tab) : 'overview')
-const selectedPlanPeriod = computed(() => {
-  const plan = allPlans.value.find((item:any) => item.planId === selectedMajor.value)
-  return plan ? `当前方案：${plan.planName}` : '尚未选择培养方案'
-})
-const analysisPeriod = computed(() => {
-  if (activeTab.value === 'overview') return '当前授权范围总览'
-  if (activeTab.value === 'graduation-readiness') return '当前授权范围毕业准备核查'
-  return selectedPlanPeriod.value
-})
 watch(activeTab, tab => {
   const query = { ...route.query }
   if (tab === 'overview') delete query.tab
@@ -207,17 +283,17 @@ watch(activeTab, tab => {
 })
 const optionsLoading=ref(false),overviewLoading=ref(false),courseLoading=ref(false),planLoading=ref(false)
 const overviewLoaded=ref(false),courseLoaded=ref(false)
-const pageLoading=computed(()=>optionsLoading.value||(activeTab.value==='overview'&&overviewLoading.value)||(activeTab.value==='plan'&&planLoading.value))
 const overview = reactive<any>({ summary:{}, colleges:[], majors:[], bottleneckCourses:[], definition:{ boundary:'' } })
 const studentDialog = reactive<any>({visible:false,loading:false,title:'',items:[],definition:'',params:{},page:1,pageSize:50,total:0})
 const studentEvidence = reactive<any>({visible:false,loading:false,data:{student:{},summary:{},failed_courses:[],candidate_courses:[],boundary:''}})
 const moduleDrawer=reactive<any>({visible:false,module:null})
 const collegeColumns:DataTableColumn[]=[
   {key:'collegeName',label:'学院',minWidth:180,fixed:'left',required:true,region:'identity'},
-  {key:'applicableStudents',label:'适用学生',width:90,align:'right'},
+  {key:'totalStudents',label:'学生总数',width:90,align:'right'},
+  {key:'matchedStudents',label:'正确绑定学生',width:110,align:'right'},
   {key:'bindingRate',label:'正确绑定率',width:100,align:'right',required:true},
-  {key:'actionRequired',label:'明确问题',width:90,align:'right'},
-  {key:'verification',label:'数据候选',width:90,align:'right'},
+  {key:'actionRequired',label:'必修未通过',width:100,align:'right'},
+  {key:'verification',label:'过期漏修',width:90,align:'right'},
   {key:'bindingReview',label:'绑定待核验',width:105,align:'right'},
   {key:'outsideSourceScope',label:'方案源未覆盖',width:110,align:'right',defaultVisible:false},
   {key:'action',label:'操作',width:90,fixed:'right',required:true,region:'action'},
@@ -225,17 +301,18 @@ const collegeColumns:DataTableColumn[]=[
 const majorColumns:DataTableColumn[]=[
   {key:'collegeName',label:'学院',minWidth:140,fixed:'left',required:true,region:'identity'},
   {key:'majorName',label:'专业',minWidth:150,fixed:'left',required:true,region:'identity'},
-  {key:'applicableStudents',label:'适用学生',width:90,align:'right'},
+  {key:'totalStudents',label:'学生总数',width:90,align:'right'},
+  {key:'matchedStudents',label:'正确绑定学生',width:110,align:'right'},
   {key:'bindingRate',label:'正确绑定率',width:100,align:'right'},
-  {key:'actionRequired',label:'明确问题',width:90,align:'right'},
-  {key:'verification',label:'数据候选',width:90,align:'right'},
-  {key:'bindingReview',label:'绑定待核验',width:105,align:'right',defaultVisible:false},
+  {key:'actionRequired',label:'必修未通过',width:100,align:'right'},
+  {key:'verification',label:'过期漏修',width:90,align:'right'},
+  {key:'bindingReview',label:'绑定待核验',width:105,align:'right'},
   {key:'action',label:'操作',width:105,fixed:'right',required:true,region:'action'},
 ]
 const courseColumns:DataTableColumn[]=[
   {key:'courseName',label:'课程',minWidth:170,fixed:'left',required:true,region:'identity',tooltip:true},
-  {key:'actionRequiredStudents',label:'明确未通过学生',width:120,align:'right',required:true},
-  {key:'verificationStudents',label:'数据候选学生',width:110,align:'right'},
+  {key:'actionRequiredStudents',label:'必修未通过',width:110,align:'right',required:true},
+  {key:'verificationStudents',label:'过期漏修',width:90,align:'right'},
   {key:'affectedMajors',label:'涉及专业',width:85,align:'right'},
   {key:'action',label:'操作',width:70,fixed:'right',required:true,region:'action'},
 ]
@@ -262,13 +339,18 @@ const studentListColumns:DataTableColumn[]=[
   {key:'grade',label:'年级',width:75},
   {key:'collegeName',label:'学院',minWidth:140},
   {key:'majorName',label:'专业',minWidth:140},
+  {key:'studentStatus',label:'学籍状态',width:90},
   {key:'completedModules',label:'已达到模块',width:100,align:'right'},
   {key:'assessableModules',label:'可核查模块',width:100,align:'right'},
-  {key:'failedRequired',label:'明确未通过',width:100,align:'right'},
-  {key:'verificationRequired',label:'数据候选',width:90,align:'right'},
+  {key:'failedRequired',label:'必修未通过',width:100,align:'right'},
+  {key:'verificationRequired',label:'过期漏修',width:90,align:'right'},
   {key:'evidenceStatus',label:'状态',width:140,required:true},
+  {key:'statusReason',label:'状态原因',minWidth:260,required:true,tooltip:true},
   {key:'action',label:'操作',width:85,fixed:'right',required:true,region:'action'},
 ]
+function studentEvidenceStatusLabel(status:string){
+  return ({'明确需处理':'必修未通过','数据候选':'过期漏修'} as Record<string,string>)[status] || status
+}
 const failedEvidenceColumns:DataTableColumn[]=[
   {key:'course_name',label:'课程',minWidth:160,fixed:'left',required:true,region:'identity',tooltip:true},
   {key:'effective_score',label:'成绩',width:70,align:'right'},
@@ -284,14 +366,56 @@ const candidateEvidenceColumns:DataTableColumn[]=[
 ]
 function openModuleCourses(row:any){moduleDrawer.module=row;moduleDrawer.visible=true}
 
-async function loadOverview(){
-  if(overviewLoaded.value)return
+const overviewGradeOptions = computed(() => [...new Set<number>(
+  overviewFilterRows.value.filter(x => x.grade != null).map(x => Number(x.grade)).filter(Number.isFinite)
+)].sort((a,b) => b-a))
+const overviewCollegeOptions = computed(() => [...new Set<string>(overviewFilterRows.value
+  .filter(x => !overviewGrades.value.length || overviewGrades.value.includes(Number(x.grade)))
+  .map(x => String(x.collegeName || '')).filter(Boolean))].sort())
+const overviewMajorOptions = computed(() => [...new Set<string>(overviewFilterRows.value
+  .filter(x => (!overviewGrades.value.length || overviewGrades.value.includes(Number(x.grade)))
+    && (!overviewCollege.value || x.collegeName === overviewCollege.value))
+  .map(x => String(x.majorName || '')).filter(Boolean))].sort())
+
+function onOverviewGradesChanged(){
+  if(overviewCollege.value && !overviewCollegeOptions.value.includes(overviewCollege.value)) overviewCollege.value=''
+  if(overviewMajor.value && !overviewMajorOptions.value.includes(overviewMajor.value)) overviewMajor.value=''
+}
+function onOverviewCollegeChanged(){
+  if(overviewMajor.value && !overviewMajorOptions.value.includes(overviewMajor.value)) overviewMajor.value=''
+}
+function appliedOverviewQuery():Record<string,string>{
+  const params:Record<string,string>={grades:appliedOverviewFilters.grades.join(',')}
+  if(appliedOverviewFilters.college)params.college_name=appliedOverviewFilters.college
+  if(appliedOverviewFilters.major)params.major_name=appliedOverviewFilters.major
+  return params
+}
+function overviewQueryString(extra:Record<string,string>={}):string{
+  return new URLSearchParams({...appliedOverviewQuery(),...extra}).toString()
+}
+async function queryOverview(){
+  if(!overviewGrades.value.length){ElMessage.warning('年级为必选项，请至少选择一个年级');return}
+  appliedOverviewFilters.grades=[...overviewGrades.value]
+  appliedOverviewFilters.college=overviewCollege.value
+  appliedOverviewFilters.major=overviewMajor.value
+  overviewLoaded.value=false;courseLoaded.value=false
+  await loadOverview(true)
+}
+async function resetOverviewFilters(){
+  overviewGrades.value=overviewGradeOptions.value.slice(0,4)
+  overviewCollege.value='';overviewMajor.value=''
+  await queryOverview()
+}
+async function loadOverview(force=false){
+  if(overviewLoaded.value&&!force)return
+  if(!appliedOverviewFilters.grades.length)return
   overviewLoading.value=true
-  try{Object.assign(overview,await http.get('/v2/curriculum/management-overview'));overviewLoaded.value=true}
+  try{Object.assign(overview,await http.get('/v2/curriculum/management-overview?'+overviewQueryString()));overviewLoaded.value=true}
   finally{overviewLoading.value=false}
-  if(!courseLoaded.value){
+  if(!courseLoaded.value||force){
     courseLoading.value=true
-    try{const result=await http.get('/v2/curriculum/management-courses?limit=20');overview.bottleneckCourses=result.items||[];courseLoaded.value=true}
+    overview.bottleneckCourses=[]
+    try{const result=await http.get('/v2/curriculum/management-courses?'+overviewQueryString({limit:'20'}));overview.bottleneckCourses=result.items||[];courseLoaded.value=true}
     finally{courseLoading.value=false}
   }
 }
@@ -301,7 +425,7 @@ function loadActiveTab(tab:string){
 }
 
 async function openStudents(params:Record<string,string>, title:string) {
-  studentDialog.visible=true;studentDialog.title=title;studentDialog.params=params;studentDialog.page=1
+  studentDialog.visible=true;studentDialog.title=title;studentDialog.params={...appliedOverviewQuery(),...params};studentDialog.page=1
   await loadStudentPage()
 }
 async function loadStudentPage(){
@@ -322,18 +446,38 @@ async function studentProfile(row:any) {
   finally { studentEvidence.loading=false }
 }
 
-const colleges = computed(() => [...new Set(allPlans.value.map(x => x.collegeName))].sort())
-const collegePlans = computed(() => allPlans.value.filter(x => !college.value || x.collegeName === college.value))
-const grades = computed(() => [...new Set<number>(collegePlans.value.map(x => x.grade))].sort((a,b) => b-a))
-const gradePlans = computed(() => collegePlans.value.filter(x => grade.value === '' || x.grade === grade.value))
-const majorNames = computed(() => [...new Set<string>(gradePlans.value.map(x => x.majorName))].sort())
-const availablePlans = computed(() => gradePlans.value.filter(x => !major.value || x.majorName === major.value))
+const grades = computed(() => [...new Set<number>(overviewFilterRows.value
+  .map(x => Number(x.grade)).filter(x => Number.isFinite(x)))]
+  .sort((a,b) => b-a).slice(0,5))
+const gradeFilterRows = computed(() => overviewFilterRows.value.filter(
+  x => grade.value === '' || Number(x.grade) === Number(grade.value)))
+const colleges = computed(() => [...new Set<string>(gradeFilterRows.value
+  .map(x => x.collegeName).filter(Boolean))].sort())
+const collegeFilterRows = computed(() => gradeFilterRows.value.filter(
+  x => !college.value || x.collegeName === college.value))
+const majorNames = computed(() => [...new Set<string>(collegeFilterRows.value
+  .map(x => x.majorName).filter(Boolean))].sort())
+const availablePlans = computed(() => progressPlans.value.filter(x =>
+  (grade.value === '' || Number(x.grade) === Number(grade.value))
+  && (!college.value || x.collegeName === college.value)
+  && (!major.value || x.majorName === major.value)))
 
 function pickFirst() { selectedMajor.value = availablePlans.value[0]?.planId || ''; onPlanChanged() }
-function resetCollege() { grade.value=''; major.value=''; pickFirst() }
-function resetGrade() { major.value=''; pickFirst() }
+function resetGrade() { college.value=''; major.value=''; pickFirst() }
+function resetCollege() { major.value=''; pickFirst() }
 function resetMajor() { pickFirst() }
 function onPlanChanged(){if(activeTab.value==='plan')loadPlan()}
+function queryProgress(){
+  if(!selectedMajor.value){ElMessage.warning('请选择培养方案');return}
+  appliedProgressPlan.value=selectedMajor.value
+  progressQueryVersion.value+=1
+}
+function resetProgressFilters(){
+  const first=progressPlans.value.find(x=>x.planId===defaultProgressPlan.value)
+  if(!first){grade.value='';college.value='';major.value='';selectedMajor.value='';appliedProgressPlan.value='';return}
+  grade.value=first.grade;college.value=first.collegeName;major.value=first.majorName;selectedMajor.value=first.planId
+  queryProgress()
+}
 
 const plan = reactive<any>({
   name: '', grade: '', college: '', totalCredits: 0, requiredCredits: 0,
@@ -404,11 +548,29 @@ onMounted(async () => {
   try {
     const d = await http.get('/v2/curriculum/options')
     allPlans.value = d.plans || []
-    const requested=allPlans.value.find(x=>x.planId===String(route.query.plan_id||''))
-    const first = requested || allPlans.value.find(x => x.requirementCount > 0) || allPlans.value[0]
+    const progressSource = Array.isArray(d.progressPlans)
+      ? d.progressPlans
+      : allPlans.value.filter(x=>Number(x.studentCount||0)>0)
+    progressPlans.value = [...progressSource].sort((a,b)=>
+      Number(a.grade??Number.MAX_SAFE_INTEGER)-Number(b.grade??Number.MAX_SAFE_INTEGER)
+      || String(a.planName||'').localeCompare(String(b.planName||''), 'zh-CN')
+      || String(a.planId||'').localeCompare(String(b.planId||'')))
+    overviewFilterRows.value = d.overviewFilters?.length ? d.overviewFilters : progressPlans.value.map(x=>({
+      grade:x.grade,collegeName:x.collegeName,majorCode:x.majorCode,majorName:x.majorName,
+    }))
+    overviewGrades.value = overviewGradeOptions.value.slice(0,4)
+    appliedOverviewFilters.grades = [...overviewGrades.value]
+    const requested=progressPlans.value.find(x=>x.planId===String(route.query.plan_id||'')
+      && grades.value.includes(Number(x.grade)))
+    grade.value=requested?.grade ?? grades.value[0] ?? ''
+    college.value=requested?.collegeName || ''
+    major.value=requested?.majorName || ''
+    const first = requested || availablePlans.value[0]
     if (first) {
-      college.value=first.collegeName; grade.value=first.grade; major.value=first.majorName
+      college.value=first.collegeName; major.value=first.majorName
       selectedMajor.value=first.planId
+      appliedProgressPlan.value=first.planId
+      defaultProgressPlan.value=first.planId
     }
   } catch { hasPlan.value=false; resetPlan() }
   finally { optionsLoading.value=false }
@@ -418,19 +580,32 @@ onMounted(async () => {
 
 <style scoped>
 .sa-head-row { display:block; margin-bottom:14px; }
-.plan-filter-area { width:100%; margin-top:12px; padding:10px 12px; border:1px solid #dbeafe; border-radius:9px; background:#f8fbff; }
-.filter-scope-label { margin-bottom:8px; color:#334155; font-size:12px; font-weight:600; }
-.filter-scope-label span { margin-left:8px; color:#64748b; font-weight:400; }
+.plan-filter-area { width:100%; margin-bottom:14px; padding:10px 12px; border:1px solid #dbeafe; border-radius:9px; background:#f8fbff; }
 .plan-filters { display:flex; gap:8px; flex-wrap:nowrap; align-items:center; width:100%; }
 .plan-filters .el-select { width:180px; flex:0 0 180px; }
-.plan-filters .el-select:last-child { width:300px !important; flex:1 1 300px; }
+.plan-filters .plan-select { width:300px; flex:1 1 300px; }
+.plan-filter-actions { display:flex; flex:0 0 auto; }
 @media (max-width:900px) { .plan-filters { overflow-x:auto; padding-bottom:4px; } }
+.overview-filter-area { margin-bottom:14px; padding:12px 14px 2px; border:1px solid #dbeafe; border-radius:9px; background:#f8fbff; }
+.overview-filters { display:flex; align-items:flex-start; gap:2px; }
+.overview-filters :deep(.el-form-item) { margin-right:12px; }
+.overview-filters :deep(.el-select) { width:210px; }
+.overview-filter-actions { margin-left:auto; }
+.table-header-with-help { display:inline-flex; align-items:center; justify-content:center; gap:4px; white-space:nowrap; }
+.table-help-icon { color:#64748b; cursor:help; font-size:14px; }
+.binding-review-tooltip { max-width:480px; white-space:pre-line; line-height:1.65; }
+@media (max-width:1100px) {
+  .overview-filters { flex-wrap:wrap; }
+  .overview-filter-actions { margin-left:0; }
+}
 .grad-row { padding: 8px 0; border-bottom: 1px solid var(--sa-border); font-size: 13px; display: flex; gap: 8px; align-items: flex-start; color: #334155; }
 .grad-row:last-child { border-bottom: none; }
 .plan-text-card :deep(.el-alert) { margin-bottom: 8px; }
 .requirement-collapse { border-top:0; }
 .requirement-collapse :deep(.el-collapse-item__header) { color:#475569; font-size:13px; }
-.student-evidence-summary { margin:14px 0 18px; }
+.student-evidence-summary { margin:0 0 18px; }
+.description-label-with-help { display:inline-flex; align-items:center; gap:4px; white-space:nowrap; }
+.description-help-icon { color:#64748b; cursor:help; font-size:14px; }
 .embedded-topic :deep(.crumb),
 .embedded-topic :deep(.sa-page-title),
 .embedded-topic :deep(.sa-page-sub),

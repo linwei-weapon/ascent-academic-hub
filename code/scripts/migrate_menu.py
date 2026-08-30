@@ -60,7 +60,7 @@ TARGET_MENUS = [
     ("/admin/reports/decision-simulation", "/admin/decision", "决策研判",
      "/admin/reports/decision-simulation", "Opportunity", 202),
 
-    (BASIC_REPORT_LEAVES[0], "/admin/basic-reports", "入学年级总体挂科情况", BASIC_REPORT_LEAVES[0], "DataBoard", 301),
+    (BASIC_REPORT_LEAVES[0], "/admin/basic-reports", "年级总体挂科情况", BASIC_REPORT_LEAVES[0], "DataBoard", 301),
     (BASIC_REPORT_LEAVES[1], "/admin/basic-reports", "各专业补考前后挂科率比较", BASIC_REPORT_LEAVES[1], "TrendCharts", 302),
     (BASIC_REPORT_LEAVES[2], "/admin/basic-reports", "各专业整体与男女挂科率比较", BASIC_REPORT_LEAVES[2], "DataAnalysis", 303),
     (BASIC_REPORT_LEAVES[3], "/admin/basic-reports", "各班级挂科门数具体情况", BASIC_REPORT_LEAVES[3], "Histogram", 304),

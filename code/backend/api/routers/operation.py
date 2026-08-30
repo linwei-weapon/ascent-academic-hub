@@ -17,7 +17,12 @@ from ..deps import (
 )
 from ..envelope import ok, ApiError
 from ..permission_context import has_action, v2_organization_scope
-from ..util import normalize_title, clean_dept
+from ..util import (
+    TEACHER_LOAD_ANOMALY_LIMITS,
+    clean_dept,
+    normalize_title,
+    teacher_load_anomaly_reasons,
+)
 from ..settings import LATEST_REAL_SEMESTER, CURRENT_SEMESTER
 
 router = APIRouter(prefix="/api/admin/operation", tags=["operation"])
@@ -210,28 +215,40 @@ def _course_offering_rows(conn: sqlite3.Connection, where: str,
     return rows
 
 
-def _teacher_anomaly_ids(conn: sqlite3.Connection, sem_ids: list[str]) -> set[str]:
-    """统一教师负荷异常集合：已登记质量问题 + 防漏启发式阈值。"""
+def _teacher_anomaly_rows(conn: sqlite3.Connection, sem_ids: list[str]) -> list[dict]:
+    """返回教师负荷启发式异常明细；每个学期、教师只返回一条。"""
     if not sem_ids:
-        return set()
+        return []
     placeholders = ",".join("?" * len(sem_ids))
-    ids = {
-        row["entity_id"] for row in dbm.query(conn, f"""
-            SELECT entity_id FROM data_quality_issue
-            WHERE domain='operation' AND issue_type='teacher_lesson_overflow'
-              AND status IN ('open','reviewing')
-              AND semester_id IN ({placeholders})
-        """, tuple(sem_ids))
-    }
-    ids.update(
-        row["teacher_id"] for row in dbm.query(conn, f"""
-            SELECT teacher_id FROM agg_teacher_load
-            WHERE semester_id IN ({placeholders})
-              AND (COALESCE(classes,0)>200 OR COALESCE(hours,0)>1000
-                   OR COALESCE(courses,0)>20)
-        """, tuple(sem_ids))
-    )
-    return ids
+    limits = TEACHER_LOAD_ANOMALY_LIMITS
+    rows = dbm.query(conn, f"""
+        SELECT a.semester_id,a.teacher_id entity_id,
+               COALESCE(t.name,a.teacher_id) entity_name,
+               COALESCE(a.classes,0) classes,COALESCE(a.hours,0) hours,
+               COALESCE(a.courses,0) courses
+        FROM agg_teacher_load a
+        LEFT JOIN dim_teacher t ON t.teacher_id=a.teacher_id
+        WHERE a.semester_id IN ({placeholders})
+          AND (COALESCE(a.classes,0)>? OR COALESCE(a.hours,0)>?
+               OR COALESCE(a.courses,0)>?)
+        ORDER BY a.semester_id,a.teacher_id
+    """, (*sem_ids, limits["classes"], limits["hours"], limits["courses"]))
+    result = []
+    for row in rows:
+        problems = teacher_load_anomaly_reasons(
+            row.get("classes"), row.get("hours"), row.get("courses"),
+        )
+        result.append({
+            **row,
+            "detail": "；".join(problems),
+            "recommendation": "核对源系统教师工号映射、课程合班及教学班生成逻辑；确认数据无误前继续排除统计。",
+        })
+    return result
+
+
+def _teacher_anomaly_ids(conn: sqlite3.Connection, sem_ids: list[str]) -> set[str]:
+    """教师负荷异常集合：仅使用教学班、学时和课程数启发式阈值。"""
+    return {row["entity_id"] for row in _teacher_anomaly_rows(conn, sem_ids)}
 
 
 def _nearest_rank(values: list[float], percentile: float) -> float:
@@ -891,20 +908,29 @@ def schedule_changes(college: Optional[str] = None, semester: Optional[str] = No
                      conn: sqlite3.Connection = Depends(get_db)):
     # 数据范围：受限角色仅可见被授权学院的调停课数据
     col_scope, col_params = college_data_scope(user, conn)
-    if col_scope and not college:
-        scoped = dbm.query_one(
-            conn, f"SELECT college_id FROM dim_college WHERE {col_scope}", col_params)
-        if scoped:
-            college = scoped["college_id"]
     # 调停课表自带 college_id + semester_id。学院/学期过滤即加 WHERE；无过滤=全校。
     sem = semester or REAL
-    valid = bool(_college_name(conn, college))
+    selected_college_name = _college_name(conn, college)
+    if college and not selected_college_name:
+        raise ApiError("学院不存在", code=400, status_code=400)
+    if college and col_scope and not dbm.scalar(
+        conn,
+        f"SELECT 1 FROM dim_college WHERE college_id=? AND ({col_scope})",
+        (college, *col_params),
+    ):
+        raise ApiError("无权查看该学院调停课", code=403, status_code=403)
+    valid = bool(selected_college_name)
 
     def _where(alias=""):
         a = f"{alias}." if alias else ""
         conds, params = [], []
         if valid:
             conds.append(f"{a}college_id=?"); params.append(college)
+        elif col_scope:
+            conds.append(
+                f"{a}college_id IN (SELECT college_id FROM dim_college WHERE {col_scope})"
+            )
+            params.extend(col_params)
         if sem:
             conds.append(f"{a}semester_id=?"); params.append(sem)
         clause = (" WHERE " + " AND ".join(conds)) if conds else ""
@@ -939,7 +965,7 @@ def schedule_changes(college: Optional[str] = None, semester: Optional[str] = No
          "formula": "原因文本非空记录数÷全部调停课记录数"},
     ]
 
-    # 各学院调课率：调课次数 / 该院教学班数(course.dept=college.name)
+    # 各学院调停课率：调停课去重记录数 / 该院教学班数(course.dept=college.name)
     sched_anom_frag, sched_anom_params = _anomalous_filter(conn, [sem])
     lesson_by_col = {r["college_id"]: r["n"] for r in dbm.query(conn, f"""
         SELECT c.college_id, COUNT(*) n FROM fact_lesson l
@@ -948,7 +974,7 @@ def schedule_changes(college: Optional[str] = None, semester: Optional[str] = No
         GROUP BY c.college_id""", (sem,) + tuple(sched_anom_params))}
     deptRanks = []
     for r in dbm.query(conn, f"""
-        SELECT s.college_id, c.name, COUNT(*) cnt FROM fact_schedule_change s
+        SELECT s.college_id, c.name, COUNT(DISTINCT s.change_id) cnt FROM fact_schedule_change s
         JOIN dim_college c ON s.college_id=c.college_id{sw}
         GROUP BY s.college_id ORDER BY cnt DESC""", sp):
         tl = lesson_by_col.get(r["college_id"], 0)
@@ -1024,15 +1050,28 @@ def teacher_load(college: Optional[str] = None, semester: Optional[str] = None,
                  conn: sqlite3.Connection = Depends(get_db)):
     # 数据范围：受限角色仅可见被授权学院教师及关联学生的负荷数据
     col_scope, col_params = college_data_scope(user, conn)
-    if col_scope and not college:
-        scoped = dbm.query_one(
-            conn, f"SELECT college_id FROM dim_college WHERE {col_scope}", col_params)
-        if scoped:
-            college = scoped["college_id"]
+    visible_colleges = dbm.query(
+        conn,
+        "SELECT college_id,name FROM dim_college" +
+        (f" WHERE {col_scope}" if col_scope else "") +
+        " ORDER BY college_id",
+        tuple(col_params),
+    )
+    selected_college = next(
+        (row for row in visible_colleges if row["college_id"] == college), None,
+    ) if college else None
+    if college and not selected_college:
+        exists = dbm.scalar(conn, "SELECT 1 FROM dim_college WHERE college_id=?", (college,))
+        if exists and col_scope:
+            raise ApiError("无权查看该学院教师负荷", code=403, status_code=403)
+        raise ApiError("学院不存在", code=400, status_code=400)
     # 同时获取学生视角的数据范围，用于后续生师比等学生计数查询
     stu_scope, stu_params = student_data_scope(user, conn)
     sem = semester or REAL
-    cname_filter = _college_name(conn, college)
+    cname_filter = selected_college["name"] if selected_college else None
+    allowed_college_names = (
+        {row["name"] for row in visible_colleges} if col_scope else None
+    )
     # 教师职称（规范化） + 当前学期负荷
     prof = {r["teacher_id"]: r["norm_title"] for r in dbm.query(
         conn, "SELECT teacher_id, norm_title FROM fact_teacher_profile")}
@@ -1041,19 +1080,23 @@ def teacher_load(college: Optional[str] = None, semester: Optional[str] = None,
                 for t in teachers}
     dept_of = {t["teacher_id"]: clean_dept(t["dept"]) for t in teachers}
     # 学院过滤：dept 命中该院；职称过滤：norm_title 命中该档。两者求交集收口口径。
-    if cname_filter or title:
+    if cname_filter or allowed_college_names is not None or title:
         in_college = set(title_of.keys())
         if cname_filter:
             in_college &= {tid for tid, d in dept_of.items() if d == cname_filter}
+        elif allowed_college_names is not None:
+            in_college &= {tid for tid, d in dept_of.items() if d in allowed_college_names}
         if title:
             in_college &= {tid for tid, t in title_of.items() if t == title}
     else:
         in_college = None
-    anomaly_ids = _teacher_anomaly_ids(conn, [sem])
-    scoped_anomaly_ids = {
-        teacher_id for teacher_id in anomaly_ids
-        if in_college is None or teacher_id in in_college
-    }
+    anomaly_rows = _teacher_anomaly_rows(conn, [sem])
+    anomaly_ids = {row["entity_id"] for row in anomaly_rows}
+    scoped_anomaly_rows = list({
+        row["entity_id"]: row for row in anomaly_rows
+        if in_college is None or row["entity_id"] in in_college
+    }.values())
+    scoped_anomaly_ids = {row["entity_id"] for row in scoped_anomaly_rows}
     load = {r["teacher_id"]: r for r in dbm.query(
         conn, "SELECT teacher_id, hours, courses, classes FROM agg_teacher_load WHERE semester_id=?",
         (sem,))
@@ -1194,7 +1237,7 @@ def teacher_load(college: Optional[str] = None, semester: Optional[str] = None,
     sum_c = sum(load[t]["courses"] or 0 for t in load)
     kpis = [
         {"label": "有效授课教师", "value": f"{n_teach}人", "color": "#1E3A5F",
-         "formula": "排除当前开放/复核中数据质量问题后，有有效教学任务的去重教师数"},
+         "formula": "剔除命中教学班、学时或课程数异常阈值后，有有效教学任务的去重教师数"},
         {"label": "人均学时", "value": str(round(sum_h / n_teach) if n_teach else 0), "color": "#1E3A5F",
          "formula": "有效教学任务总学时÷有效授课教师数；不是学校正式工作量"},
         {"label": "中位学时", "value": f"{median_hours:g}", "color": "#2563EB",
@@ -1203,17 +1246,17 @@ def teacher_load(college: Optional[str] = None, semester: Optional[str] = None,
          "formula": "有效授课教师学时的第90百分位，仅用于形成有限核查队列"},
         {"label": "人均课程门数", "value": str(round(sum_c / n_teach, 1) if n_teach else 0), "color": "#2563EB",
          "formula": "有效教学任务课程门数合计÷有效授课教师数"},
-        {"label": "已排除异常教师", "value": f"{len(scoped_anomaly_ids)}人", "color": "#DC2626",
-         "formula": "命中教学班>200、学时>1000、课程>20或已登记质量问题的教师数"},
+        {"label": "已排除异常教师", "value": f"{len(scoped_anomaly_rows)}人", "color": "#DC2626",
+         "formula": "命中教学班>200、学时>1000、课程>20"},
     ]
     return ok({
         "kpis": kpis, "titleLoad": titleLoad, "loadDist": loadDist,
         "reviewCandidates": topTeachers, "topTeachers": topTeachers,
         "deptLoad": deptLoad,
+        "qualityIssues": scoped_anomaly_rows,
         "dataQuality": {
-            "excludedTeachers": len(scoped_anomaly_ids),
+            "excludedTeachers": len(scoped_anomaly_rows),
             "excludedTeacherIds": sorted(scoped_anomaly_ids),
-            "policy": "开放或复核中的质量问题以及启发式异常不进入统计、排名和AI研判",
         },
         "workloadPolicy": {
             "configured": False,
@@ -1223,7 +1266,6 @@ def teacher_load(college: Optional[str] = None, semester: Optional[str] = None,
         "topTeacherPolicy": {
             "title": "负荷核查队列",
             "ranking": f"仅纳入当前范围总学时不低于P90（{p90_hours:g}学时）的教师，最多10人；同学时按学生覆盖人次、教学班数排序",
-            "boundary": "这是统计分布形成的核查顺序，不等同于教师超负荷认定；最终结论需结合学校工作量办法、合讲拆分及减免规则。"
         }})
 
 

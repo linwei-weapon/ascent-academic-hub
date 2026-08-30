@@ -99,12 +99,35 @@ def _assert_course_access(course_id: str, user: dict,
         raise ApiError("课程不存在或不在当前明细范围", code=404, status_code=404)
 
 
+def _curriculum_filter_conditions(grades: Optional[str] = None,
+                                  college_name: Optional[str] = None,
+                                  major_name: Optional[str] = None) -> tuple[list[str], list]:
+    """生成培养质量总览的业务筛选条件；权限范围仍由调用方单独追加。"""
+    conditions: list[str] = ["s.student_status='在校'"]
+    params: list = []
+    if grades:
+        try:
+            grade_values = sorted({int(value.strip()) for value in grades.split(",") if value.strip()})
+        except ValueError as exc:
+            raise ApiError("年级参数格式错误", code=422, status_code=422) from exc
+        if grade_values:
+            conditions.append(f"s.entry_grade IN ({','.join('?' for _ in grade_values)})")
+            params.extend(grade_values)
+    if college_name:
+        conditions.append("COALESCE(o.name,s.organization_id,'未映射学院')=?")
+        params.append(college_name)
+    if major_name:
+        conditions.append("COALESCE(s.major_name,s.major_code,'未映射专业')=?")
+        params.append(major_name)
+    return conditions, params
+
+
 @router.get("/curriculum/options")
 def curriculum_options(conn: sqlite3.Connection = Depends(get_v2_db),
                        user: dict = Depends(require_v2_reader)):
     """真实方案选择项：学院、年级、专业、方案四级联动所需的轻量元数据。"""
     scope, scope_params = _student_scope(user, conn, "s")
-    cache_key = ("curriculum_options", _permission_cache_key(user))
+    cache_key = ("curriculum_options_with_progress_plans_v2", _permission_cache_key(user))
     cached = _query_cache_get(cache_key)
     if cached is not None:
         return ok(cached)
@@ -116,7 +139,7 @@ def curriculum_options(conn: sqlite3.Connection = Depends(get_v2_db),
             MIN(COALESCE(o.organization_id,s.organization_id)) collegeId,
             MIN(COALESCE(o.name,s.organization_id,'未映射学院')) collegeName
           FROM dim_student s LEFT JOIN dim_organization o ON o.organization_id=s.organization_id
-          WHERE s.plan_id IS NOT NULL {scope_and} GROUP BY s.plan_id
+          WHERE s.plan_id IS NOT NULL AND s.student_status='在校' {scope_and} GROUP BY s.plan_id
         ), course_counts AS (
           SELECT plan_id,COUNT(*) courseCount FROM curriculum_plan_course GROUP BY plan_id
         ), requirement_counts AS (
@@ -140,35 +163,81 @@ def curriculum_options(conn: sqlite3.Connection = Depends(get_v2_db),
             "courses_only" if row["courseCount"] else "metadata_only")
         row["coverageLabel"] = {"document_and_courses": "原文与课程表齐全",
           "courses_only": "仅课程表，缺方案原文", "metadata_only": "仅方案元数据"}[row["coverageStatus"]]
-    return ok(_query_cache_put(cache_key, {"plans": rows, "total": len(rows)}))
+    progress_plans = sorted(
+        (row for row in rows if row["studentCount"] > 0),
+        key=lambda row: (
+            row["grade"] is None,
+            row["grade"] if row["grade"] is not None else 0,
+            row["planName"] or "",
+            row["planId"],
+        ),
+    )
+    filter_conditions, filter_params = _curriculum_filter_conditions()
+    if scope:
+        filter_conditions.insert(0, scope)
+    filter_where = "WHERE " + " AND ".join(filter_conditions) if filter_conditions else ""
+    overview_filters = dbm.query(conn, f"""SELECT DISTINCT s.entry_grade grade,
+        COALESCE(o.name,s.organization_id,'未映射学院') collegeName,
+        s.major_code majorCode,COALESCE(s.major_name,s.major_code,'未映射专业') majorName
+      FROM dim_student s LEFT JOIN dim_organization o ON o.organization_id=s.organization_id
+      {filter_where} ORDER BY s.entry_grade DESC,collegeName,majorName""",
+      tuple(list(scope_params) + filter_params))
+    return ok(_query_cache_put(cache_key, {
+      "plans": rows, "progressPlans": progress_plans, "total": len(rows),
+      "overviewFilters": overview_filters,
+    }))
 
 
 @router.get("/curriculum/management-overview")
-def curriculum_management_overview(conn: sqlite3.Connection = Depends(get_v2_db),
+def curriculum_management_overview(grades: Optional[str] = None,
+                                   college_name: Optional[str] = None,
+                                   major_name: Optional[str] = None,
+                                   conn: sqlite3.Connection = Depends(get_v2_db),
                                    user: dict = Depends(require_v2_reader)):
-    cache_key = ("curriculum_management_overview", _permission_cache_key(user))
+    cache_key = ("curriculum_management_overview", _permission_cache_key(user),
+                 grades or "", college_name or "", major_name or "")
     cached = _query_cache_get(cache_key)
     if cached is not None:
         return ok(cached)
     scope, scope_params = _student_scope(user, conn, "s")
-    student_where = f"WHERE {scope}" if scope else ""
+    student_conditions, filter_params = _curriculum_filter_conditions(
+        grades, college_name, major_name
+    )
+    if scope:
+        student_conditions.insert(0, scope)
+    student_where = "WHERE " + " AND ".join(student_conditions) if student_conditions else ""
+    student_params = list(scope_params) + filter_params
     students = dbm.query(conn, f"""WITH expected_plan AS (
-        SELECT grade,major_name,MIN(plan_id) plan_id FROM curriculum_plan
-        WHERE grade IS NOT NULL AND major_name IS NOT NULL GROUP BY grade,major_name
+        SELECT grade,major_code,major_name,MIN(plan_id) plan_id FROM curriculum_plan
+        WHERE grade IS NOT NULL AND (major_code IS NOT NULL OR major_name IS NOT NULL)
+        GROUP BY grade,major_code,major_name
       ) SELECT s.student_id,s.entry_grade,s.organization_id,s.major_code,s.major_name,s.plan_id,
         COALESCE(o.name,s.organization_id,'未映射学院') college_name,
-        COALESCE(CASE WHEN bp.grade=s.entry_grade AND bp.major_name=s.major_name THEN bp.plan_id END,
+        bp.plan_id bound_plan_id,bp.grade bound_plan_grade,bp.major_code bound_plan_major_code,
+        bp.major_name bound_plan_major_name,
+        COALESCE(CASE WHEN bp.grade=s.entry_grade AND (
+          (bp.major_code IS NOT NULL AND s.major_code IS NOT NULL AND bp.major_code=s.major_code)
+          OR ((bp.major_code IS NULL OR s.major_code IS NULL) AND bp.major_name=s.major_name)
+        ) THEN bp.plan_id END,
           ep.plan_id) expected_plan_id,
         ps.plan_id summary_plan_id,ps.binding_status,
         ps.evidence_status,ps.failed_required_courses,ps.due_candidate_courses,
         ps.module_count,ps.assessable_modules,ps.completed_modules,ps.rule_coverage_rate
       FROM dim_student s LEFT JOIN dim_organization o ON o.organization_id=s.organization_id
       LEFT JOIN curriculum_plan bp ON bp.plan_id=s.plan_id
-      LEFT JOIN expected_plan ep ON ep.grade=s.entry_grade AND ep.major_name=s.major_name
+      LEFT JOIN expected_plan ep ON ep.grade=s.entry_grade AND (
+        (ep.major_code IS NOT NULL AND s.major_code IS NOT NULL AND ep.major_code=s.major_code)
+        OR ((ep.major_code IS NULL OR s.major_code IS NULL) AND ep.major_name=s.major_name)
+      )
       LEFT JOIN student_plan_progress_summary ps ON ps.student_id=s.student_id
-        AND ps.rule_version='growth-v1' {student_where}""", tuple(scope_params))
+        AND ps.rule_version='growth-v1' {student_where}""", tuple(student_params))
     for student in students:
         if student["binding_status"] and student["binding_status"] != "matched":
+            student["coverage_status"] = "binding_review"
+        elif (student["entry_grade"] is None or not student["major_name"]
+              or (student["plan_id"] and (not student["bound_plan_id"]
+                  or student["bound_plan_grade"] is None
+                  or not student["bound_plan_major_name"]))):
             student["coverage_status"] = "binding_review"
         elif not student["expected_plan_id"]:
             student["coverage_status"] = "outside_source_scope"
@@ -177,7 +246,6 @@ def curriculum_management_overview(conn: sqlite3.Connection = Depends(get_v2_db)
             student["coverage_status"] = "matched"
         else:
             student["coverage_status"] = "binding_review"
-    visible_keys = {(x["major_name"], x["entry_grade"]) for x in students}
     plans = dbm.query(conn, """WITH course_counts AS (
         SELECT plan_id,COUNT(*) course_count FROM curriculum_plan_course GROUP BY plan_id
       ), module_counts AS (
@@ -186,11 +254,16 @@ def curriculum_management_overview(conn: sqlite3.Connection = Depends(get_v2_db)
         COALESCE(c.course_count,0) course_count,COALESCE(m.module_rule_count,0) module_rule_count
       FROM curriculum_plan p LEFT JOIN course_counts c ON c.plan_id=p.plan_id
       LEFT JOIN module_counts m ON m.plan_id=p.plan_id""")
-    if scope:
-        plans = [plan for plan in plans if (plan["major_name"], plan["grade"]) in visible_keys]
-    colleges = defaultdict(lambda: {"applicableStudents": 0, "matchedStudents": 0,
+    def plan_matches_student(plan: dict, student: dict) -> bool:
+        if plan["grade"] != student["entry_grade"]:
+            return False
+        if plan["major_code"] and student["major_code"]:
+            return plan["major_code"] == student["major_code"]
+        return bool(plan["major_name"] and plan["major_name"] == student["major_name"])
+    plans = [plan for plan in plans if any(plan_matches_student(plan, student) for student in students)]
+    colleges = defaultdict(lambda: {"totalStudents": 0, "applicableStudents": 0, "matchedStudents": 0,
       "bindingReview": 0, "outsideSourceScope": 0, "actionRequired": 0, "verification": 0})
-    majors = defaultdict(lambda: {"applicableStudents": 0, "matchedStudents": 0,
+    majors = defaultdict(lambda: {"totalStudents": 0, "applicableStudents": 0, "matchedStudents": 0,
       "bindingReview": 0, "outsideSourceScope": 0, "actionRequired": 0, "verification": 0})
     major_names = {}
     for student in students:
@@ -199,18 +272,19 @@ def curriculum_management_overview(conn: sqlite3.Connection = Depends(get_v2_db)
         major_row = majors[major_key]
         major_names[major_key] = student["major_name"] or student["major_code"] or "未映射专业"
         for target in (college_row, major_row):
+            target["totalStudents"] += 1
             target["outsideSourceScope"] += int(student["coverage_status"] == "outside_source_scope")
             if student["expected_plan_id"]:
                 target["applicableStudents"] += 1
             target["matchedStudents"] += int(student["coverage_status"] == "matched")
             target["bindingReview"] += int(student["coverage_status"] == "binding_review")
             target["actionRequired"] += int(student["coverage_status"] == "matched"
-              and student["evidence_status"] == "explicit_gap")
+              and (student["failed_required_courses"] or 0) > 0)
             target["verification"] += int(student["coverage_status"] == "matched"
-              and student["evidence_status"] == "candidate")
+              and (student["due_candidate_courses"] or 0) > 0)
     def finish_group(value: dict) -> dict:
-        applicable = value["applicableStudents"]
-        value["bindingRate"] = round(value["matchedStudents"] * 100 / applicable, 2) if applicable else None
+        total = value["totalStudents"]
+        value["bindingRate"] = round(value["matchedStudents"] * 100 / total, 2) if total else None
         return value
     college_rows = [{"collegeName": name, **finish_group(value)}
                     for name, value in colleges.items()]
@@ -226,27 +300,28 @@ def curriculum_management_overview(conn: sqlite3.Connection = Depends(get_v2_db)
     assessable = sum(x["assessable_modules"] or 0 for x in matched_students)
     module_count = sum((x["module_count"] or 0) for x in matched_students)
     summary = {
+      "totalPlans": len(plans),
       "activePlans": len(plans),
-      "reviewablePlans": sum(bool(x["course_count"] and x["module_rule_count"] and x["total_credits"] is not None) for x in plans),
+      "reviewablePlans": sum(bool(x["course_count"] and x["module_rule_count"]) for x in plans),
       "coveredStudents": len(students),
       "applicableStudents": len(applicable_students),
       "matchedStudents": len(matched_students),
       "bindingReviewStudents": sum(x["coverage_status"] == "binding_review" for x in students),
       "outsideSourceScopeStudents": sum(x["coverage_status"] == "outside_source_scope" for x in students),
       "bindingRate": round(len(matched_students) * 100 / len(applicable_students), 2) if applicable_students else None,
-      "actionRequiredStudents": sum(x["evidence_status"] == "explicit_gap" for x in matched_students),
-      "verificationStudents": sum(x["evidence_status"] == "candidate" for x in matched_students),
+      "actionRequiredStudents": sum((x["failed_required_courses"] or 0) > 0 for x in matched_students),
+      "verificationStudents": sum((x["due_candidate_courses"] or 0) > 0 for x in matched_students),
       "moduleRuleCoverageRate": round(assessable * 100 / module_count, 1) if module_count else None,
     }
     payload = {"summary": summary, "colleges": college_rows[:30], "majors": major_rows[:50],
       "bottleneckCourses": course_rows,
       "definition": {
-        "reviewablePlans": "同时具备课程表、模块规则和毕业最低总学分，可进行模块级执行核查的方案数。",
-        "bindingRate": "方案适用年级与专业范围内，正确绑定对应方案并生成统一摘要的学生数÷应绑定学生数。",
-        "bindingReviewStudents": "处于方案适用范围但未正确绑定，或学生年级、专业与绑定方案不一致的学生数。",
+        "reviewablePlans": "具备课程表、模块规则，可进行模块级执行核查的方案数",
+        "bindingRate": "方案适用年级与专业范围内，正确绑定对应方案的学生数÷应绑定学生数",
+        "bindingReviewStudents": "满足以下任一情况的学生进入“绑定待核验”：\n1. 学生绑定的方案与学生入学年级不一致。\n2. 学生绑定的方案专业与学生专业不一致。\n3. 学生或方案的年级、专业关键信息缺失，无法确认匹配。\n4. 已生成进度摘要，但摘要使用的方案不是该学生年级＋专业应适用的方案。\n5. 学生的年级＋专业存在已接入方案，但没有生成正确匹配的方案进度摘要。",
         "outsideSourceScopeStudents": "当前没有对应年级和专业培养方案源数据的学生，仅披露覆盖边界，不计为绑定异常。",
-        "actionRequiredStudents": "统一模块评价后模块仍未达到，且存在明确未通过必修课程证据的去重学生数。",
-        "verificationStudents": "统一模块评价后仍未达到，且存在已过建议学期但缺少结果记录的候选学生数；不直接认定漏选。",
+        "actionRequiredStudents": "模块尚未达到要求，存在明确未通过必修课程证据的去重学生数。",
+        "verificationStudents": "模块尚未达到要求，存在已过建议学期但缺少结果记录的候选学生数。",
         "boundary": "总览只用于发现方案覆盖、绑定和执行核查事项，不输出毕业审核、方案合规或教学质量结论。"
       }}
     return ok(_query_cache_put(cache_key, payload))
@@ -254,11 +329,19 @@ def curriculum_management_overview(conn: sqlite3.Connection = Depends(get_v2_db)
 
 @router.get("/curriculum/management-courses")
 def curriculum_management_courses(limit: int = Query(20, ge=1, le=200),
+                                  grades: Optional[str] = None,
+                                  college_name: Optional[str] = None,
+                                  major_name: Optional[str] = None,
                                   conn: sqlite3.Connection = Depends(get_v2_db),
                                   user: dict = Depends(require_v2_reader)):
     """按需返回统一模块评价仍未解决的课程证据。"""
     scope, scope_params = _student_scope(user, conn, "s")
-    course_scope = f" AND {scope}" if scope else ""
+    course_conditions, filter_params = _curriculum_filter_conditions(
+        grades, college_name, major_name
+    )
+    if scope:
+        course_conditions.insert(0, scope)
+    course_scope = " AND " + " AND ".join(course_conditions) if course_conditions else ""
     rows = dbm.query(conn, f"""SELECT x.course_id courseId,COALESCE(MAX(c.name),x.course_id) courseName,
       COUNT(DISTINCT CASE WHEN ms.evidence_status='explicit_gap'
         AND x.completion_status='failed' THEN x.student_id END) actionRequiredStudents,
@@ -268,44 +351,89 @@ def curriculum_management_courses(limit: int = Query(20, ge=1, le=200),
       FROM student_plan_course_status x JOIN dim_student s ON s.student_id=x.student_id
       JOIN student_plan_module_status ms ON ms.student_id=x.student_id AND ms.plan_id=x.plan_id
         AND ms.module_name=COALESCE(NULLIF(x.module,''),'未标注模块') AND ms.rule_version=x.rule_version
+      LEFT JOIN dim_organization o ON o.organization_id=s.organization_id
       LEFT JOIN dim_course c ON c.course_id=x.course_id
       WHERE x.rule_version='growth-v1' AND x.requirement_type='必修'
-        AND x.completion_status='failed' AND ms.evidence_status='explicit_gap' {course_scope}
-      GROUP BY x.course_id HAVING actionRequiredStudents>0
+        AND ((x.completion_status='failed' AND ms.evidence_status='explicit_gap')
+          OR (x.completion_status IN ('not_completed','unknown') AND x.is_overdue=1
+            AND ms.evidence_status='candidate')) {course_scope}
+      GROUP BY x.course_id HAVING actionRequiredStudents>0 OR verificationStudents>0
       ORDER BY actionRequiredStudents DESC,verificationStudents DESC LIMIT ?""",
-      tuple(scope_params + [limit]))
+      tuple(list(scope_params) + filter_params + [limit]))
     return ok({"items": rows, "total": len(rows), "limit": limit,
       "definition": "只包含统一模块评价后仍未解决的明确未通过或到期数据候选；课程池中的普通备选课程不进入。"})
 
 
+def _curriculum_binding_review_reason(row: dict) -> str:
+    if row.get("grade") is None or not row.get("majorName"):
+        return "学生年级或专业关键信息缺失，无法确认方案匹配"
+    if row.get("boundPlanReference"):
+        if not row.get("boundPlanId"):
+            return "学生绑定的培养方案不存在或尚未接入"
+        if row.get("boundPlanGrade") is None or not row.get("boundPlanMajorName"):
+            return "学生绑定方案的年级或专业关键信息缺失"
+        if row.get("boundPlanGrade") != row.get("grade"):
+            return "学生绑定的方案与学生入学年级不一致"
+        student_major_code = row.get("majorCode")
+        plan_major_code = row.get("boundPlanMajorCode")
+        major_matches = (
+            student_major_code == plan_major_code
+            if student_major_code and plan_major_code
+            else row.get("majorName") == row.get("boundPlanMajorName")
+        )
+        if not major_matches:
+            return "学生绑定的方案专业与学生专业不一致"
+    if (row.get("summaryPlanId") and row.get("expectedPlanId")
+            and row.get("summaryPlanId") != row.get("expectedPlanId")):
+        return "已生成进度摘要，但摘要方案不是该学生年级和专业应适用的方案"
+    if row.get("expectedPlanId"):
+        return "学生年级和专业存在已接入方案，但没有生成正确匹配的方案进度摘要"
+    return "学生方案绑定或进度摘要需要进一步核验"
+
+
 @router.get("/curriculum/management-students")
-def curriculum_management_students(college_name: Optional[str] = None, major_code: Optional[str] = None,
+def curriculum_management_students(college_name: Optional[str] = None,
+                                   organization_id: Optional[str] = None,
+                                   major_code: Optional[str] = None, major_name: Optional[str] = None,
+                                   plan_id: Optional[str] = None, grades: Optional[str] = None,
                                    course_id: Optional[str] = None, status: Optional[str] = None,
                                    limit: int = Query(200, ge=1, le=500),
                                    offset: int = Query(0, ge=0),
                                    conn: sqlite3.Connection = Depends(get_v2_db),
                                    user: dict = Depends(require_v2_reader)):
     scope, scope_params = _student_scope(user, conn, "s")
-    cond, params = [], []
-    if scope: cond.append(scope); params.extend(scope_params)
-    if college_name: cond.append("COALESCE(o.name,s.organization_id,'未映射学院')=?"); params.append(college_name)
+    cond, filter_params = _curriculum_filter_conditions(grades, college_name, major_name)
+    params = []
+    if scope: cond.insert(0, scope); params.extend(scope_params)
+    params.extend(filter_params)
+    if organization_id: cond.append("s.organization_id=?"); params.append(organization_id)
     if major_code: cond.append("s.major_code=?"); params.append(major_code)
+    if plan_id: cond.append("ps.plan_id=?"); params.append(plan_id)
     if course_id:
+        cond.append("ps.binding_status='matched'")
         cond.append("""EXISTS(SELECT 1 FROM student_plan_course_status x
           JOIN student_plan_module_status ms ON ms.student_id=x.student_id AND ms.plan_id=x.plan_id
             AND ms.module_name=COALESCE(NULLIF(x.module,''),'未标注模块') AND ms.rule_version=x.rule_version
-          WHERE x.student_id=s.student_id AND x.course_id=? AND x.rule_version='growth-v1'
+          WHERE x.student_id=s.student_id AND x.plan_id=ps.plan_id
+            AND x.course_id=? AND x.rule_version='growth-v1'
             AND ((ms.evidence_status='explicit_gap' AND x.completion_status='failed')
               OR (ms.evidence_status='candidate' AND x.is_overdue=1
                 AND x.completion_status IN ('not_completed','unknown'))))""")
         params.append(course_id)
     where = "WHERE " + " AND ".join(cond) if cond else ""
     rows = dbm.query(conn, f"""WITH expected_plan AS (
-        SELECT grade,major_name,MIN(plan_id) plan_id FROM curriculum_plan
-        WHERE grade IS NOT NULL AND major_name IS NOT NULL GROUP BY grade,major_name
+        SELECT grade,major_code,major_name,MIN(plan_id) plan_id FROM curriculum_plan
+        WHERE grade IS NOT NULL AND (major_code IS NOT NULL OR major_name IS NOT NULL)
+        GROUP BY grade,major_code,major_name
       ) SELECT s.student_id studentId,s.display_name name,s.entry_grade grade,
       COALESCE(o.name,s.organization_id,'未映射学院') collegeName,s.major_code majorCode,s.major_name majorName,
-      COALESCE(CASE WHEN bp.grade=s.entry_grade AND bp.major_name=s.major_name THEN bp.plan_id END,
+      COALESCE(NULLIF(s.student_status,''),'未知') studentStatus,
+      s.plan_id boundPlanReference,bp.plan_id boundPlanId,bp.grade boundPlanGrade,
+      bp.major_code boundPlanMajorCode,bp.major_name boundPlanMajorName,
+      COALESCE(CASE WHEN bp.grade=s.entry_grade AND (
+        (bp.major_code IS NOT NULL AND s.major_code IS NOT NULL AND bp.major_code=s.major_code)
+        OR ((bp.major_code IS NULL OR s.major_code IS NULL) AND bp.major_name=s.major_name)
+      ) THEN bp.plan_id END,
         ep.plan_id) expectedPlanId,
       ps.plan_id summaryPlanId,ps.binding_status bindingStatus,
       COALESCE(ps.failed_required_courses,0) failedRequired,
@@ -314,12 +442,20 @@ def curriculum_management_students(college_name: Optional[str] = None, major_cod
       ps.evidence_status summaryStatus
       FROM dim_student s LEFT JOIN dim_organization o ON o.organization_id=s.organization_id
       LEFT JOIN curriculum_plan bp ON bp.plan_id=s.plan_id
-      LEFT JOIN expected_plan ep ON ep.grade=s.entry_grade AND ep.major_name=s.major_name
+      LEFT JOIN expected_plan ep ON ep.grade=s.entry_grade AND (
+        (ep.major_code IS NOT NULL AND s.major_code IS NOT NULL AND ep.major_code=s.major_code)
+        OR ((ep.major_code IS NULL OR s.major_code IS NULL) AND ep.major_name=s.major_name)
+      )
       LEFT JOIN student_plan_progress_summary ps ON ps.student_id=s.student_id
         AND ps.rule_version='growth-v1' {where}""", tuple(params))
     items = []
     for row in rows:
         if row["bindingStatus"] and row["bindingStatus"] != "matched":
+            row["coverageStatus"] = "binding_review"
+            row["evidenceStatus"] = "方案绑定待核验"
+        elif (row["grade"] is None or not row["majorName"]
+              or (row["boundPlanReference"] and (not row["boundPlanId"]
+                  or row["boundPlanGrade"] is None or not row["boundPlanMajorName"]))):
             row["coverageStatus"] = "binding_review"
             row["evidenceStatus"] = "方案绑定待核验"
         elif not row["expectedPlanId"]:
@@ -340,10 +476,29 @@ def curriculum_management_students(college_name: Optional[str] = None, major_cod
             "未绑定已接入方案": "binding_review",
             "暂不在方案源覆盖范围": "outside_source_scope",
         }.get(status, status)
-        matches = (not status_alias
-          or status_alias == row["summaryStatus"]
-          or status_alias == row["coverageStatus"])
+        if status_alias == "explicit_gap":
+            matches = row["coverageStatus"] == "matched" and row["failedRequired"] > 0
+            if matches:
+                row["evidenceStatus"] = "明确需处理"
+        elif status_alias == "candidate":
+            matches = row["coverageStatus"] == "matched" and row["verificationRequired"] > 0
+            if matches:
+                row["evidenceStatus"] = "数据候选"
+        else:
+            matches = (not status_alias or status_alias == row["coverageStatus"])
         if matches:
+            if row["evidenceStatus"] == "明确需处理":
+                row["statusReason"] = f"存在{row['failedRequired']}门当前有效成绩仍为未通过的必修课程"
+            elif row["evidenceStatus"] == "数据候选":
+                row["statusReason"] = f"存在{row['verificationRequired']}门建议修读学期已过但尚未形成明确修读结果的必修课程"
+            elif row["evidenceStatus"] == "方案绑定待核验":
+                row["statusReason"] = _curriculum_binding_review_reason(row)
+            elif row["evidenceStatus"] == "暂不在方案源覆盖范围":
+                row["statusReason"] = "该学生年级和专业暂无已接入的适用培养方案"
+            elif row["evidenceStatus"] == "当前未发现到期问题":
+                row["statusReason"] = "当前未发现必修未通过或到期缺修读结果"
+            else:
+                row["statusReason"] = "当前方案执行证据需要进一步核验"
             items.append(row)
     rank = {"明确需处理": 0, "数据候选": 1, "方案绑定待核验": 2,
             "当前未发现到期问题": 3, "暂不在方案源覆盖范围": 4}
@@ -399,10 +554,27 @@ def curriculum_management_major(major_code: str, conn: sqlite3.Connection = Depe
 
 
 @router.get("/curriculum/course-supply/{course_id}")
-def curriculum_course_supply(course_id: str, conn: sqlite3.Connection = Depends(get_v2_db),
+def curriculum_course_supply(course_id: str, organization_id: Optional[str] = None,
+                             major_code: Optional[str] = None, plan_id: Optional[str] = None,
+                             grades: Optional[str] = None, conn: sqlite3.Connection = Depends(get_v2_db),
                              user: dict = Depends(require_v2_reader)):
     _assert_course_access(course_id, user, conn)
     scope, scope_params = _student_scope(user, conn, "s")
+    student_conditions, student_params = [], []
+    if scope:
+        student_conditions.append(scope); student_params.extend(scope_params)
+    if organization_id:
+        student_conditions.append("s.organization_id=?"); student_params.append(organization_id)
+    if major_code:
+        student_conditions.append("s.major_code=?"); student_params.append(major_code)
+    if grades:
+        try:
+            grade_values = sorted({int(value.strip()) for value in grades.split(",") if value.strip()})
+        except ValueError as exc:
+            raise ApiError("年级参数格式不正确", code=400, status_code=400) from exc
+        if grade_values:
+            student_conditions.append(f"s.entry_grade IN ({','.join('?' for _ in grade_values)})")
+            student_params.extend(grade_values)
     course = dbm.query_one(conn, "SELECT course_id courseId,name courseName,category,nature,organization_id organizationId FROM dim_course WHERE course_id=?", (course_id,))
     if not course: course = {"courseId": course_id, "courseName": course_id}
     offerings = dbm.query(conn, """SELECT l.semester_id semesterId,COUNT(DISTINCT l.lesson_id) lessonCount,
@@ -411,26 +583,39 @@ def curriculum_course_supply(course_id: str, conn: sqlite3.Connection = Depends(
       GROUP_CONCAT(DISTINCT l.student_grade) studentGrades,GROUP_CONCAT(DISTINCT l.schedule_text) schedules
       FROM teaching_lesson l LEFT JOIN lesson_teacher lt ON lt.lesson_id=l.lesson_id
       WHERE l.course_id=? GROUP BY l.semester_id ORDER BY l.semester_id DESC""", (course_id,))
-    substitution_scope = f" AND {scope}" if scope else ""
+    substitution_conditions = list(student_conditions)
+    substitution_params = list(student_params)
+    if plan_id:
+        substitution_conditions.append("ps.plan_id=?")
+        substitution_params.append(plan_id)
+    substitution_scope = (" AND " + " AND ".join(substitution_conditions)) if substitution_conditions else ""
     substitutions = dbm.query(conn, f"""SELECT scs.original_course_id originalCourseId,MAX(scs.original_course_name) originalCourseName,
       scs.substitute_course_id substituteCourseId,MAX(scs.substitute_course_name) substituteCourseName,
       COUNT(DISTINCT scs.student_id) studentCount,MAX(scs.approval_status) approvalStatus
       FROM student_course_substitution scs
       JOIN dim_student s ON s.student_id=scs.student_id
+      JOIN student_plan_progress_summary ps ON ps.student_id=s.student_id
+        AND ps.rule_version='growth-v1' AND ps.binding_status='matched'
       WHERE (scs.original_course_id=? OR scs.substitute_course_id=?) {substitution_scope}
       GROUP BY scs.original_course_id,scs.substitute_course_id
-      ORDER BY studentCount DESC""", tuple([course_id, course_id] + scope_params))
-    affected_scope = f" AND {scope}" if scope else ""
+      ORDER BY studentCount DESC""", tuple([course_id, course_id] + substitution_params))
+    affected_conditions = list(student_conditions)
+    affected_params = list(student_params)
+    if plan_id:
+        affected_conditions.append("x.plan_id=?"); affected_params.append(plan_id)
+    affected_scope = (" AND " + " AND ".join(affected_conditions)) if affected_conditions else ""
     affected = dbm.query_one(conn, f"""SELECT COUNT(DISTINCT CASE WHEN ms.evidence_status='explicit_gap'
         AND x.requirement_type='必修' AND x.completion_status='failed' THEN x.student_id END) actionRequiredStudents,
       COUNT(DISTINCT CASE WHEN ms.evidence_status='candidate' AND x.requirement_type='必修'
         AND x.completion_status IN ('not_completed','unknown') AND x.is_overdue=1 THEN x.student_id END) verificationStudents,
       COUNT(DISTINCT s.major_code) affectedMajors FROM student_plan_course_status x
       JOIN dim_student s ON s.student_id=x.student_id
+      JOIN student_plan_progress_summary ps ON ps.student_id=x.student_id AND ps.plan_id=x.plan_id
+        AND ps.rule_version=x.rule_version AND ps.binding_status='matched'
       JOIN student_plan_module_status ms ON ms.student_id=x.student_id AND ms.plan_id=x.plan_id
         AND ms.module_name=COALESCE(NULLIF(x.module,''),'未标注模块') AND ms.rule_version=x.rule_version
       WHERE x.course_id=? AND x.rule_version='growth-v1' {affected_scope}""",
-      tuple([course_id] + scope_params)) or {}
+      tuple([course_id] + affected_params)) or {}
     return ok({"course": course, "affected": affected, "offerings": offerings, "substitutions": substitutions,
       "availability": {"hasOfferingEvidence": bool(offerings), "hasSubstitutionEvidence": bool(substitutions),
         "hasRetakeResourceEvidence": False, "hasFuturePlanEvidence": False},
@@ -465,7 +650,7 @@ def graduation_readiness_student(student_id: str, conn: sqlite3.Connection = Dep
     failed, candidates = [], []
     for row in evidence:
         if row["completion_status"] == "failed":
-            row["reason"] = f"{row['module'] or '所属模块'}尚未达到“{row['module_rule']}”，且该必修课存在明确未通过成绩{('（'+str(row['effective_score'])+'分）') if row['effective_score'] is not None else ''}；核查补考、重修或替代安排。"
+            row["reason"] = f"{row['module'] or '所属模块'}尚未达到“{row['module_rule']}”，且该必修课存在未通过成绩{('（'+str(row['effective_score'])+'分）') if row['effective_score'] is not None else ''}；核查补考、重修或替代安排。"
             failed.append(row)
         else:
             row["reason"] = f"{row['module'] or '所属模块'}尚未达到“{row['module_rule']}”，且课程建议学期已过但未发现结果记录；先核对选课、缓修、免修和认定。"
@@ -474,7 +659,7 @@ def graduation_readiness_student(student_id: str, conn: sqlite3.Connection = Dep
       "summary": {"failed_courses": len(failed), "candidate_courses": len(candidates),
         "courses_without_offering": sum(not x["lesson_count"] for x in evidence),
         "courses_with_substitution": sum(bool(x["substitution_count"]) for x in evidence)},
-      "boundary": "本核查页只汇集与毕业准备相关的课程证据；候选课程必须核对选课、认定和方案适用范围后，才能形成管理结论。"})
+      "boundary": "本核查页只汇集与毕业准备相关的课程证据；过期漏修记录必须核对选课、认定和方案适用范围后，才能形成管理结论。"})
 
 
 @router.get("/curriculum/plans/{plan_id}")
@@ -593,6 +778,14 @@ def curriculum_progress(plan_id: str, limit: int = Query(200, ge=1, le=1000),
     for row in rows:
         row["status"] = {"explicit_gap": "明确需处理", "candidate": "数据候选",
           "no_due_issue": "当前未发现到期问题"}.get(row["evidenceStatus"], "待核验")
+        if row["evidenceStatus"] == "explicit_gap":
+            row["statusReason"] = f"存在{row['failedRequired']}门当前有效成绩仍为未通过的必修课程"
+        elif row["evidenceStatus"] == "candidate":
+            row["statusReason"] = f"存在{row['verificationRequired']}门建议修读学期已过但尚未形成明确修读结果的必修课程"
+        elif row["evidenceStatus"] == "no_due_issue":
+            row["statusReason"] = "当前未发现必修未通过或到期缺修读结果"
+        else:
+            row["statusReason"] = "当前方案执行证据需要进一步核验"
     summary = {
       "coveredStudents": total,
       "moduleRuleCoverageRate": round((all_summary.get("assessableModules") or 0) * 100 /
@@ -609,8 +802,8 @@ def curriculum_progress(plan_id: str, limit: int = Query(200, ge=1, le=1000),
       "definition": {
         "moduleRuleCoverageRate": "可按最低学分、最低门数或逐门必修规则评价的模块数÷全部课程模块数。",
         "allModulesMet": "当前可评价模块均达到要求，且未发现明确缺口或到期数据候选的学生数；不等同毕业审核通过。",
-        "actionRequired": "模块尚未达到要求，且存在明确未通过必修课程证据的学生人数。",
-        "verificationRequired": "模块尚未达到要求，且存在建议修读学期已过但缺少结果记录的候选学生；不能直接称为漏选。",
+        "actionRequired": "模块尚未达到要求，存在明确未通过必修课程证据的去重学生数。",
+        "verificationRequired": "模块尚未达到要求，存在已过建议学期但缺少结果记录的候选学生数。",
         "boundary": "进度按培养方案模块规则评价，不以全部课程池行数作为分母；课程组和跨模块抵扣规则不足时披露为不可自动评价。"
       }})
 
@@ -945,12 +1138,13 @@ def early_setback_topic(organization_id: Optional[str] = None,
 
 @router.get("/topics/graduation-readiness")
 def graduation_readiness_topic(organization_id: Optional[str] = None, major_code: Optional[str] = None,
-                               plan_id: Optional[str] = None, readiness: Optional[str] = None,
+                               plan_id: Optional[str] = None, grades: Optional[str] = None,
+                               readiness: Optional[str] = None,
                                limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0),
                                conn: sqlite3.Connection = Depends(get_v2_db), user: dict = Depends(require_v2_reader)):
     """统一模块评价后的毕业准备与课程保障核查；不是毕业审核结论。"""
     db_mtime = os.path.getmtime(settings.V2_DB_PATH)
-    cache_key = (_permission_cache_key(user), organization_id, major_code, plan_id, readiness)
+    cache_key = (_permission_cache_key(user), organization_id, major_code, plan_id, grades, readiness)
     cached = _GRADUATION_TOPIC_CACHE.get(cache_key)
     if cached and cached[0] == db_mtime and time.monotonic() - cached[1] < _GRADUATION_TOPIC_CACHE_TTL:
         cached_payload = dict(cached[2])
@@ -961,12 +1155,29 @@ def graduation_readiness_topic(organization_id: Optional[str] = None, major_code
     scope, scope_params = _student_scope(user, conn, "s")
     if scope:
         cond.append(scope); params.extend(scope_params)
+    filter_where = " AND ".join(cond)
+    filter_rows = dbm.query(conn, f"""SELECT DISTINCT s.organization_id,
+      COALESCE(o.name,s.organization_id,'未映射学院') organization_name,s.entry_grade,
+      s.major_code,COALESCE(s.major_name,s.major_code,'未映射专业') major_name,
+      ps.plan_id,COALESCE(p.plan_name,ps.plan_id,'未映射方案') plan_name
+      FROM student_plan_progress_summary ps JOIN dim_student s ON s.student_id=ps.student_id
+      LEFT JOIN dim_organization o ON o.organization_id=s.organization_id
+      LEFT JOIN curriculum_plan p ON p.plan_id=ps.plan_id WHERE {filter_where}
+      ORDER BY s.entry_grade DESC,organization_name,major_name,plan_name""", tuple(params))
     if organization_id:
         cond.append("s.organization_id=?"); params.append(organization_id)
     if major_code:
         cond.append("s.major_code=?"); params.append(major_code)
     if plan_id:
         cond.append("ps.plan_id=?"); params.append(plan_id)
+    if grades:
+        try:
+            grade_values = sorted({int(value.strip()) for value in grades.split(",") if value.strip()})
+        except ValueError as exc:
+            raise ApiError("年级参数格式不正确", code=400, status_code=400) from exc
+        if grade_values:
+            cond.append(f"s.entry_grade IN ({','.join('?' for _ in grade_values)})")
+            params.extend(grade_values)
     where = " AND ".join(cond)
     all_rows = dbm.query(conn, f"""SELECT s.student_id,s.display_name,s.entry_grade,s.organization_id,
       s.major_code,s.major_name,s.class_code,ps.plan_id,p.plan_name,p.version,
@@ -1047,24 +1258,40 @@ def graduation_readiness_topic(organization_id: Optional[str] = None, major_code
         course["substitution_count"] = substitution_supply.get(course["course_id"], 0)
         reasons = []
         if course["failed_students"] >= 10:
-            reasons.append(f"{course['failed_students']}名学生存在明确未通过证据")
+            reasons.append(f"{course['failed_students']}名学生存在必修未通过证据")
         if not course["lesson_count"]:
             reasons.append("当前接入学期未发现历史开课证据，不能据此判断下一周期不开课")
         course["supply_priority"] = "待确认" if course["failed_students"] else "候选"
         course["supply_reasons"] = reasons
     high_grade_students = [x for x in all_rows if (x["entry_grade"] or 9999) <= settings.GRADUATING_GRADE and x["readiness_status"] == "action_required"]
     summary["high_grade_attention_students"] = len(high_grade_students)
+    filter_options = {
+        "grades": sorted({x["entry_grade"] for x in filter_rows if x["entry_grade"] is not None}, reverse=True),
+        "colleges": sorted({(x["organization_id"], x["organization_name"]) for x in filter_rows
+                            if x["organization_id"]}, key=lambda x: x[1]),
+        "majors": sorted({(x["major_code"], x["major_name"], x["organization_id"]) for x in filter_rows
+                          if x["major_code"]}, key=lambda x: (x[2] or "", x[1])),
+        "plans": sorted({(x["plan_id"], x["plan_name"], x["entry_grade"], x["major_code"], x["organization_id"]) for x in filter_rows
+                         if x["plan_id"]}, key=lambda x: (-(x[2] or 0), x[1])),
+    }
+    filter_options["colleges"] = [{"value": x[0], "label": x[1]} for x in filter_options["colleges"]]
+    filter_options["majors"] = [{"value": x[0], "label": x[1], "organizationId": x[2]}
+                                for x in filter_options["majors"]]
+    filter_options["plans"] = [{"value": x[0], "label": x[1], "grade": x[2], "majorCode": x[3],
+                                "organizationId": x[4]}
+                               for x in filter_options["plans"]]
     payload = {"summary": summary, "majors": majors, "courses": courses,
                "students": students, "total": total, "limit": limit, "offset": offset,
+               "filterOptions": filter_options,
                "cache": {"ttl_seconds": _GRADUATION_TOPIC_CACHE_TTL, "generated_at": int(time.time())},
-               "definition": {"action_required": "统一模块评价后仍未达到要求，且存在明确未通过必修课证据的去重学生数。",
-                 "verification_required": "统一模块评价后仍未达到要求，且存在建议学期已过但缺少结果记录的候选学生数；需结合选课与认定数据核验，不称为漏选。",
-                 "evidence_complete": "当前可评价模块中未发现明确缺口或到期数据候选，不等同学校毕业审核通过。",
+               "definition": {"action_required": "统一模块评价后仍未达到要求，且存在必修课未通过成绩证据的去重学生数。",
+                 "verification_required": "统一模块评价后仍未达到要求，且存在建议学期已过但缺少结果记录的去重学生数；需结合选课与认定数据核验。",
+                 "evidence_complete": "当前可评价模块中未发现必修未通过或过期漏修记录，不等同学校毕业审核通过。",
                  "completion_rate": "学生已达到模块数÷可评价模块数，仅用于查看模块执行进度，不以全部课程池作为分母。",
                  "module_rule_coverage": "可按最低学分、最低门数或逐门必修评价的模块数÷全部课程模块数。",
                  "number_unit": "专业表为去重学生人数；课程表为涉及该课程的去重学生人数，不是成绩条数或课程门次。",
-                 "high_grade_attention": f"入学年级不晚于{settings.GRADUATING_GRADE}级，且至少有一门必修课存在明确未通过成绩的去重学生数；待核验候选不计入。",
-                 "supply_priority": "当前未接入下一周期教学任务、重修班和容量，不输出供给不足结论；按明确未通过影响人数形成待确认顺序。",
+                 "high_grade_attention": f"入学年级不晚于{settings.GRADUATING_GRADE}级，且至少有一门必修课存在未通过成绩的去重学生数；过期漏修不计入。",
+                 "supply_priority": "当前未接入下一周期教学任务、重修班和容量，不输出供给不足结论；按必修未通过影响人数形成待确认顺序。",
                  "boundary": "本专题不输出能否毕业或获得学位的结论；正式结果以学校毕业审核和学位审核为准。"}}
     cached_payload = dict(payload)
     cached_payload["_all_students"] = filtered
@@ -1129,8 +1356,8 @@ def course_quality_topic(course_id: Optional[str] = None, course_group: Optional
         first_fail_rates = [round((x["first_attempts"] - x["first_pass"]) * 100.0 / x["first_attempts"], 1)
                             for x in rows if x["first_attempts"]]
         reasons = []
-        if len(first_fail_rates) >= 2 and all(x >= 15 for x in first_fail_rates): reasons.append("persistent_high")
-        if len(first_fail_rates) >= 2 and max(first_fail_rates) - min(first_fail_rates) >= 15: reasons.append("volatile")
+        if len(first_fail_rates) >= 2 and all(x > 15 for x in first_fail_rates): reasons.append("persistent_high")
+        if len(first_fail_rates) >= 2 and max(first_fail_rates) - min(first_fail_rates) > 15: reasons.append("volatile")
         if failures >= 50: reasons.append("wide_impact")
         if ra >= 30: reasons.append("retake_pressure")
         all_courses.append({"course_id": cid, "course_name": rows[0]["course_name"],
@@ -1158,6 +1385,13 @@ def course_quality_topic(course_id: Optional[str] = None, course_group: Optional
     total = len(attention); courses = attention[offset:offset + limit]
     attempts = sum(x["attempts"] for x in filtered_courses); failures = sum(x["failures"] for x in filtered_courses)
     fa = sum(x["first_attempts"] for x in filtered_courses); fp = sum(x["first_pass"] for x in filtered_courses)
+    retake_cond, retake_params = list(cond), list(params)
+    if course_group:
+        retake_cond.append("a.course_group=?")
+        retake_params.append(course_group)
+    retake_attempts = dbm.scalar(conn, f"""SELECT COALESCE(SUM(a.retake_attempts),0)
+        FROM agg_course_pass_stat a LEFT JOIN dim_course c ON c.course_id=a.course_id
+        WHERE {' AND '.join(retake_cond)}""", tuple(retake_params)) or 0
     summary = {"observed_courses": len(filtered_courses), "attempts": attempts, "failures": failures,
       "overall_fail_rate": round(failures * 100.0 / attempts, 1) if attempts else 0,
       "overall_first_pass_rate": round(fp * 100.0 / fa, 1) if fa else None,
@@ -1165,9 +1399,9 @@ def course_quality_topic(course_id: Optional[str] = None, course_group: Optional
       "persistent_high_courses": sum("persistent_high" in x["attention_reasons"] for x in filtered_courses),
       "volatile_courses": sum("volatile" in x["attention_reasons"] for x in filtered_courses),
       "wide_impact_courses": sum("wide_impact" in x["attention_reasons"] for x in filtered_courses),
-      "retake_attempts": sum(x["retake_attempts"] for x in filtered_courses)}
+      "retake_attempts": retake_attempts}
     public_all = [
-        course for course in all_courses if course["course_group"] == "公共必修"
+        course for course in filtered_courses if course["course_group"] == "公共必修"
     ]
     public_required = [
         course for course in public_all if course["attention_reasons"]
@@ -1187,22 +1421,27 @@ def course_quality_topic(course_id: Optional[str] = None, course_group: Optional
             if public_first_attempts else None
         ),
     }
+    semester_cond, semester_params = ["1=1"], []
+    if organization_scope:
+        semester_cond.append(organization_scope)
+        semester_params.extend(organization_params)
     semesters = dbm.query(conn, f"""SELECT DISTINCT a.semester_id
         FROM agg_course_pass_stat a LEFT JOIN dim_course c ON c.course_id=a.course_id
-        WHERE {where} ORDER BY a.semester_id""", tuple(params))
+        WHERE {' AND '.join(semester_cond)} ORDER BY a.semester_id DESC""", tuple(semester_params))
     return ok({"summary": summary, "courses": courses,
                "publicRequiredTop": public_required[:10],
                "publicRequiredSummary": public_required_summary,
                "semesters": [x["semester_id"] for x in semesters], "total": total, "limit": limit, "offset": offset,
-               "definition": {"sample": f"至少有一个学期达到{min_sample}条有效成绩记录的去重课程数；有效记录=已发布且未作废且is_pass非空。",
-                 "first_pass_rate": "首次修读（attempt_type=regular，含缓考）通过人次数÷首次修读人次数，分母为0时不输出（null）。",
+               "definition": {"sample": f"至少有一个学期达到{min_sample}条有效成绩记录的去重课程数；有效记录是指已发布且未作废且 是否通过 非空的记录；",
+                  "first_pass_rate": "首次修读（含缓考）通过人次数÷首次修读人次数，分母为0时 输出 '-' ",
                  "makeup_pass_rate": "补考（attempt_type=makeup）通过人次数÷补考人次数，分母为0时不输出（null）。",
                  "retake_pass_rate": "重修（attempt_type=retake）通过人次数÷重修人次数，分母为0时不输出（null）。",
                  "course_group": "课程类别由培养方案模块与V1课程类别合并推导：公共必修/专业必修/选修/实践/其他，可用 course_group 参数过滤。",
                  "fail_rate": "deprecated：兼容字段，=首次未通过率（100-首次通过率），保留一个版本周期后移除。",
                  "overall": "进入统计范围的未通过成绩记录数 / 有效成绩记录总数，不是有挂科经历的学生比例。",
-                 "persistent_high": "至少2个可比学期且每学期首次未通过率均不低于15%。",
-                 "volatile": "至少2个可比学期，最高与最低首次未通过率相差不低于15个百分点。",
+                  "persistent_high": "同一门课程至少有2个学期及以上且每学期首次未通过率均高于15%",
+                  "volatile": "同一门课程至少有2个学期及以上，最高与最低首次未通过率相差高于15个百分点",
+                  "retake_attempts": "筛选条件范围内重修成绩记录数量",
                  "wide_impact": "观察期累计未通过达到50人次。", "retake_pressure": "观察期重修尝试达到30人次。",
                  "boundary": "课程结果用于发现需核查的课程与资源问题，不证明教学质量原因，不用于教师个人排名。"}})
 

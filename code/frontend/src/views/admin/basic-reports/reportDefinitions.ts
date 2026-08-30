@@ -22,8 +22,8 @@ const base: BasicReportFilter[] = ['semesterId', 'entryGrade']
 
 export const reportDefinitions: Record<string, BasicReportDefinition> = {
   '/admin/basic-reports/failure-overview': {
-    reportId: 'RPT-01', slug: 'rpt-01', title: '入学年级总体挂科情况', path: '/admin/basic-reports/failure-overview', requiredFilters: base,
-    columns: [c('category', '本科生', { minWidth: 220, fixed: 'left', region: 'identity' }), c('gender', '性别', { width: 90 }), c('countDisplay', '人数'), rate('rate', '比例')],
+    reportId: 'RPT-01', slug: 'rpt-01', title: '年级总体挂科情况', path: '/admin/basic-reports/failure-overview', requiredFilters: base,
+    columns: [c('category', '本科生', { minWidth: 300, fixed: 'left', region: 'identity' }), c('gender', '性别', { width: 90 }), c('countDisplay', '人数'), c('rateDisplay', '比例', { minWidth: 190, align: 'right' })],
     mergeBy: { category: 'categoryKey' },
   },
   '/admin/basic-reports/major-makeup-comparison': {
@@ -32,7 +32,7 @@ export const reportDefinitions: Record<string, BasicReportDefinition> = {
   },
   '/admin/basic-reports/major-gender-failure': {
     reportId: 'RPT-03', slug: 'rpt-03', title: '各专业整体与男女挂科率比较', path: '/admin/basic-reports/major-gender-failure', requiredFilters: base,
-    columns: [c('majorName', '专业', { minWidth: 180, fixed: 'left', region: 'identity' }), c('studentCount', '专业人数'), c('failedStudents', '整体挂科人数'), rate('failureRate', '整体挂科率'), c('maleFailureDisplay', '男生挂科率', { minWidth: 180 }), c('femaleFailureDisplay', '女生挂科率', { minWidth: 180 })],
+    columns: [c('majorName', '专业', { minWidth: 220, fixed: 'left', region: 'identity' }), c('studentCountDisplay', '专业人数'), c('failedStudentsDisplay', '整体挂科人数'), rate('failureRate', '整体挂科率'), c('maleFailureDisplay', '男生挂科率', { minWidth: 180 }), c('femaleFailureDisplay', '女生挂科率', { minWidth: 180 })],
   },
   '/admin/basic-reports/class-failure-count': {
     reportId: 'RPT-04A', slug: 'rpt-04a', title: '各班级挂科门数具体情况', path: '/admin/basic-reports/class-failure-count', requiredFilters: base,

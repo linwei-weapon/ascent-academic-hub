@@ -90,7 +90,7 @@
       <el-col :span="10">
         <div class="right-stack">
           <div class="sa-card" style="margin-bottom:16px">
-            <div class="sa-card-title">课程类别分布 <KpiLabel label="" formula="按课程性质统计（去重课程计数）" /></div>
+            <div class="sa-card-title">课程性质分布 <KpiLabel label="" formula="按课程性质统计（去重课程计数）" /></div>
             <EChart v-if="data.typeDist.length" :option="typeOption" :height="200" />
             <div v-else class="sa-faint" style="font-size:12px">暂无数据</div>
           </div>
@@ -136,7 +136,9 @@
         <el-button type="primary" plain @click="openOfferingAi(selectedOffering)">查看开课保障研判</el-button>
       </div>
     </el-drawer>
-    <AIInsightDrawer v-model="aiDrawerVisible" :insight="aiInsight" :loading="aiLoading" title="开课保障研判" />
+    <AIInsightDrawer v-model="aiDrawerVisible" :insight="aiInsight" :loading="aiLoading" title="开课保障研判"
+      hide-intervention-tag hide-decision-meta hide-baseline hide-consequence hide-expected-result
+      hide-no-comparison-tag hide-trace hide-evidence-help hide-evidence-source show-all-evidence />
   </div>
 </template>
 

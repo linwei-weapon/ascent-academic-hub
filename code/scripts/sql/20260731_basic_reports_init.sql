@@ -11,7 +11,7 @@ UPDATE sys_menu SET sort_order=sort_order+100
 WHERE parent_id='/admin/system' AND sort_order BETWEEN 301 AND 309;
 
 INSERT INTO sys_menu(menu_id,parent_id,title,path,icon,sort_order) VALUES
- ('/admin/basic-reports/failure-overview','/admin/basic-reports','入学年级总体挂科情况','/admin/basic-reports/failure-overview','DataBoard',301),
+ ('/admin/basic-reports/failure-overview','/admin/basic-reports','年级总体挂科情况','/admin/basic-reports/failure-overview','DataBoard',301),
  ('/admin/basic-reports/major-makeup-comparison','/admin/basic-reports','各专业补考前后挂科率比较','/admin/basic-reports/major-makeup-comparison','TrendCharts',302),
  ('/admin/basic-reports/major-gender-failure','/admin/basic-reports','各专业整体与男女挂科率比较','/admin/basic-reports/major-gender-failure','DataAnalysis',303),
  ('/admin/basic-reports/class-failure-count','/admin/basic-reports','各班级挂科门数具体情况','/admin/basic-reports/class-failure-count','Histogram',304),

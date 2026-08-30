@@ -3,12 +3,15 @@ import sqlite3
 import unittest
 
 from backend.api.routers.ai import (
+    _teacher_scope_filter,
     operation_course_offering_insight,
     operation_schedule_changes_insight,
+    operation_teacher_load_teacher_insight,
 )
 from backend.api.routers.operation import (
     _nearest_rank,
     _teacher_anomaly_ids,
+    _teacher_anomaly_rows,
     courses,
     schedule_changes,
     teacher_load,
@@ -113,7 +116,7 @@ class OperationIndicatorTrustTest(unittest.TestCase):
         conn.close()
         self.assertEqual(403, raised.exception.status_code)
 
-    def test_teacher_anomalies_merge_registered_and_heuristic_rules(self):
+    def test_teacher_anomalies_use_only_heuristic_thresholds(self):
         conn = sqlite3.connect(":memory:")
         conn.row_factory = sqlite3.Row
         conn.execute("""CREATE TABLE data_quality_issue(
@@ -122,6 +125,7 @@ class OperationIndicatorTrustTest(unittest.TestCase):
         conn.execute("""CREATE TABLE agg_teacher_load(
             teacher_id TEXT,semester_id TEXT,classes INTEGER,hours REAL,courses INTEGER
         )""")
+        conn.execute("CREATE TABLE dim_teacher(teacher_id TEXT,name TEXT)")
         conn.execute(
             "INSERT INTO data_quality_issue VALUES(?,?,?,?,?)",
             ("T-REGISTERED", "operation", "teacher_lesson_overflow", "open", "2025-2026-2"),
@@ -136,16 +140,57 @@ class OperationIndicatorTrustTest(unittest.TestCase):
             ],
         )
         ids = _teacher_anomaly_ids(conn, ["2025-2026-2"])
+        rows = _teacher_anomaly_rows(conn, ["2025-2026-2"])
         conn.close()
         self.assertEqual(
-            {"T-REGISTERED", "T-CLASSES", "T-HOURS", "T-COURSES"},
+            {"T-CLASSES", "T-HOURS", "T-COURSES"},
             ids,
         )
+        self.assertEqual(3, len(rows))
+        self.assertEqual(3, len({row["entity_id"] for row in rows}))
+        self.assertEqual(
+            {"semester_id", "entity_id", "entity_name", "detail", "recommendation"},
+            {"semester_id", "entity_id", "entity_name", "detail", "recommendation"}
+            & set(rows[0]),
+        )
+        source = inspect.getsource(teacher_load)
+        self.assertIn("scoped_anomaly_rows", source)
+        self.assertIn('len(scoped_anomaly_rows)', source)
+        self.assertIn('"qualityIssues": scoped_anomaly_rows', source)
+        self.assertIn('"formula": "命中教学班>200、学时>1000、课程>20"', source)
 
     def test_nearest_rank_percentiles_are_deterministic(self):
         self.assertEqual(3.0, _nearest_rank([1, 2, 3, 4, 5], .5))
         self.assertEqual(5.0, _nearest_rank([1, 2, 3, 4, 5], .9))
         self.assertEqual(0, _nearest_rank([], .9))
+
+    def test_teacher_ai_scope_preserves_denied_and_multi_college_ranges(self):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.execute("CREATE TABLE dim_college(college_id TEXT,name TEXT)")
+        conn.executemany("INSERT INTO dim_college VALUES(?,?)", [
+            ("C01", "甲学院"), ("C02", "乙学院"), ("C03", "丙学院"),
+        ])
+        multi_user = {"permission_context": {
+            "authorized": True,
+            "detailScope": {"type": "college", "sourceScopeIds": ["C01", "C02"]},
+        }}
+        college_id, college_name, allowed = _teacher_scope_filter(None, multi_user, conn)
+        self.assertIsNone(college_id)
+        self.assertIsNone(college_name)
+        self.assertEqual({"甲学院", "乙学院"}, allowed)
+        with self.assertRaises(ApiError):
+            _teacher_scope_filter("C03", multi_user, conn)
+
+        denied_user = {"permission_context": {
+            "authorized": True,
+            "detailScope": {"type": "denied"},
+        }}
+        _, _, denied_allowed = _teacher_scope_filter(None, denied_user, conn)
+        conn.close()
+        self.assertEqual(set(), denied_allowed)
+        source = inspect.getsource(operation_teacher_load_teacher_insight)
+        self.assertIn("teacher_dept not in allowed_college_names", source)
 
     def test_schedule_change_outputs_do_not_use_derived_workflow_fields(self):
         source = inspect.getsource(schedule_changes)
@@ -154,12 +199,31 @@ class OperationIndicatorTrustTest(unittest.TestCase):
             self.assertNotIn(forbidden, source)
             self.assertNotIn(forbidden, ai_source)
         self.assertIn('"evidenceLevel": "actual_source_event"', source)
+        self.assertIn("COUNT(DISTINCT s.change_id)", source)
+
+    def test_schedule_change_rejects_explicit_college_outside_scope(self):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.execute("CREATE TABLE dim_college(college_id TEXT,name TEXT)")
+        conn.executemany("INSERT INTO dim_college VALUES(?,?)", [
+            ("C01", "甲学院"), ("C02", "乙学院"),
+        ])
+        user = {"permission_context": {
+            "authorized": True,
+            "detailScope": {"type": "college", "sourceScopeIds": ["C01"]},
+        }}
+        with self.assertRaises(ApiError) as raised:
+            schedule_changes(
+                college="C02", semester="2025-2026-2", user=user, conn=conn,
+            )
+        conn.close()
+        self.assertEqual(403, raised.exception.status_code)
 
     def test_teacher_load_does_not_claim_compliance_or_overload(self):
         source = inspect.getsource(teacher_load)
         for forbidden in ("✓达标", "未达标(需", '"过载教师"'):
             self.assertNotIn(forbidden, source)
-        self.assertIn("_teacher_anomaly_ids", source)
+        self.assertIn("_teacher_anomaly_rows", source)
         self.assertIn('"configured": False', source)
 
     def test_course_offering_ai_falls_back_to_page_legacy_snapshot(self):

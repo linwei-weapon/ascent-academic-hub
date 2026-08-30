@@ -46,8 +46,8 @@ export const router = createRouter({
         // ====== 培养质量分析 ======
         { path: 'curriculum', component: () => import('@/views/admin/curriculum/index.vue') },
         { path: 'curriculum/progress', redirect: '/admin/curriculum?tab=progress' },
-        { path: 'curriculum/course-objectives/:id', redirect: to => ({ path:'/admin/curriculum', query:{ tab:'plan', plan_id:String(to.params.id) } }) },
-        { path: 'curriculum/graduate-requirements/:id', redirect: to => ({ path:'/admin/curriculum', query:{ tab:'plan', plan_id:String(to.params.id) } }) },
+        { path: 'curriculum/course-objectives/:id', redirect: '/admin/curriculum' },
+        { path: 'curriculum/graduate-requirements/:id', redirect: '/admin/curriculum' },
 
         // ====== 师资保障分析（旧团队/教师链接统一恢复为主页面抽屉） ======
         { path: 'faculty', component: () => import('@/views/admin/faculty/Index.vue') },

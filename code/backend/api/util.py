@@ -4,6 +4,25 @@ dept 可含重复段（"机械与储运工程学院;机械与储运工程学院"
 """
 
 _TITLE_RANK = {"教授": 4, "副教授": 3, "讲师": 2, "助教": 1, "其他": 0}
+TEACHER_LOAD_ANOMALY_LIMITS = {"classes": 200, "hours": 1000, "courses": 20}
+
+
+def teacher_load_anomaly_reasons(classes=0, hours=0, courses=0) -> list[str]:
+    """教师负荷启发式异常原因；页面统计与AI研判必须共用。"""
+    values = {
+        "教学班数": (classes or 0, TEACHER_LOAD_ANOMALY_LIMITS["classes"]),
+        "学时": (hours or 0, TEACHER_LOAD_ANOMALY_LIMITS["hours"]),
+        "课程数": (courses or 0, TEACHER_LOAD_ANOMALY_LIMITS["courses"]),
+    }
+    return [
+        f"{label} {value:g} 超过阈值 {limit}"
+        for label, (value, limit) in values.items()
+        if value > limit
+    ]
+
+
+def is_teacher_load_anomaly(classes=0, hours=0, courses=0) -> bool:
+    return bool(teacher_load_anomaly_reasons(classes, hours, courses))
 
 
 def normalize_title(raw) -> str:

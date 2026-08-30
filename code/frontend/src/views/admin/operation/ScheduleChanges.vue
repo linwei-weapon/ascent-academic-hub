@@ -3,22 +3,14 @@
     <div class="sa-head-row">
       <div>
         <h2 class="sa-page-title">调停课趋势分析</h2>
-        <p class="sa-page-sub">数据来源：调停课记录表(CL_ROOM_APPLIES) · {{ selectedSemesterLabel }}</p>
       </div>
-      <el-tag type="info" effect="plain">{{ selectedSemesterLabel }}</el-tag>
-    </div>
-
-    <div v-if="collegeFilter" class="filter-banner">
-      <span>当前学院视图：<b>{{ collegeFilter.name }}</b></span>
-      <el-button size="small" type="primary" text @click="clearCollegeFilter">← 返回全院视图</el-button>
+      <el-select v-model="fCollege" size="small" clearable placeholder="全部学院" style="width:160px" @change="load">
+        <el-option v-for="college in colleges" :key="college.value" :label="college.label" :value="college.value" />
+      </el-select>
     </div>
     <el-alert v-if="loadError" type="error" :closable="false" show-icon title="调停课分析加载失败"
       :description="loadError" style="margin-bottom:12px"><template #default><el-button link type="primary" @click="load">重新加载</el-button></template></el-alert>
     <div v-else-if="loading && !kpis.length" class="sa-card" style="margin-bottom:12px"><el-skeleton :rows="8" animated /></div>
-
-    <el-alert type="info" :closable="false" show-icon style="margin-bottom:12px"
-      title="当前使用历史调停课源事件和原始原因文本"
-      :description="data.dataLimitation || '审批层级、审核时长、补课安排与通知证据未接入，不输出相关结论。'" />
 
     <div class="sa-kpi-row">
       <KpiCard v-for="k in kpis" :key="k.label" :label="k.label" :value="k.value" :hint="k.formula" :tone="kpiTone(k.label)" />
@@ -30,10 +22,11 @@
     <el-row :gutter="16" style="margin-bottom:16px">
       <el-col :span="12">
         <div class="sa-card">
-          <div class="sa-card-title">按学院调课率排名 <KpiLabel label="" formula="调课率=调课次数÷该院教学班数×100%" /></div>
-          <DataTable :columns="deptRankCols" :data="data.deptRanks" storage-key="operation:schedule-changes-dept" size="small" @row-click="goCollege" row-class-name="row-clickable">
-            <template #col-name="{row}"><span class="link">{{ row.name }}</span></template>
-            <template #col-attention="{row,$index}"><el-tag size="small" :type="$index<3?'danger':row.pct>=3?'warning':'info'">{{$index<3?'优先核查':row.pct>=3?'需关注':'常规'}}</el-tag></template>
+          <div class="sa-card-title">按学院调停课率排名</div>
+          <DataTable :columns="deptRankCols" :data="data.deptRanks" storage-key="operation:schedule-changes-dept" size="small" config-version="2">
+            <template #header-changeCount><KpiLabel label="调停课次数" formula="该学院下所有开课教学任务调停课记录总数" /></template>
+            <template #header-pct><KpiLabel label="调停课率" formula="该学院下所有开课教学任务调停课去重记录数 ÷ 该学院下所有的教学任务数（教学任务就是教学班）" /></template>
+            <template #col-attention="{row,$index}"><el-tag size="small" :type="$index<3?'danger':row.pct>=3?'warning':'info'">{{$index<3?'优先关注':row.pct>=3?'需关注':'常规'}}</el-tag></template>
             <template #col-pct="{row}">
               <div style="display:flex;align-items:center;gap:8px">
                 <el-progress :percentage="Math.min(row.pct*20,100)" :show-text="false" :stroke-width="8" :color="row.pct>4?'#E11D48':'#D97706'" style="flex:1" />
@@ -44,30 +37,30 @@
         </div>
       </el-col>
       <el-col :span="12">
-        <div class="sa-card" style="margin-bottom:12px">
-          <div class="sa-card-title">调课原因语义分类 <KpiLabel label="" :formula="data.classification.explanation" /></div>
-          <EChart v-if="data.semanticReasonDist.length" :option="reasonOption" :height="180" />
-          <div v-else class="sa-faint" style="font-size:12px">暂无数据</div>
-          <div class="classification-note">规则已分类 {{ data.classification.classifiedRecords || 0 }} 条 · 待核验 {{ data.classification.unclassifiedRecords || 0 }} 条 · 未启用外部AI</div>
-        </div>
-        <div class="sa-card">
-          <div class="sa-card-title">教师调课 TOP10 <span class="extra">本学期 ≥ 3 次 · 点击核查原因</span></div>
-          <DataTable :columns="teacherTopCols" :data="data.frequentTeachers" storage-key="operation:schedule-changes-teachers" size="small" @row-click="inspectTeacher" row-class-name="row-clickable">
-            <template #col-name="{row}"><span class="link">{{ row.name }}</span></template>
-            <template #col-attention="{row}"><el-tag size="small" :type="teacherNeedsAi(row)?'danger':'warning'">{{teacherNeedsAi(row)?'AI重点':'需核查'}}</el-tag></template>
-          </DataTable>
+        <div class="schedule-side-stack">
+          <div class="sa-card">
+            <div class="sa-card-title">调课原因语义分类 <KpiLabel label="" :formula="data.classification.explanation" /></div>
+            <EChart v-if="data.semanticReasonDist.length" :option="reasonOption" :height="180" />
+            <div v-else class="sa-faint" style="font-size:12px">暂无数据</div>
+          </div>
+          <div class="sa-card">
+            <div class="sa-card-title">教师调停课 TOP10 <KpiLabel label="" formula="统计每位教师的调停课事件总次数，进入列表条件为总次数 `≥3`；最多 10 人" /></div>
+            <DataTable :columns="teacherTopCols" :data="data.frequentTeachers" storage-key="operation:schedule-changes-teachers" size="small" @row-click="inspectTeacher" row-class-name="row-clickable">
+              <template #col-name="{row}"><span class="link">{{ row.name }}</span></template>
+              <template #col-attention="{row}"><el-tag size="small" :type="teacherNeedsAi(row)?'danger':'warning'">{{teacherNeedsAi(row)?'重点关注':'需关注'}}</el-tag></template>
+            </DataTable>
+          </div>
         </div>
       </el-col>
     </el-row>
 
     <div class="sa-card">
-      <div class="sa-card-title">月度调课趋势 <KpiLabel label="" formula="按月统计调课次数变化" /></div>
+      <div class="sa-card-title">月度调停课趋势 <KpiLabel label="" formula="按月统计调停课次数变化" /></div>
       <EChart v-if="data.monthlyTrend.length" :option="monthlyOption" :height="220" />
       <div v-else class="sa-faint" style="font-size:12px">暂无数据</div>
     </div>
 
-    <el-drawer v-model="teacherDrawer" :title="`${selectedTeacher.name || ''}｜调课原因核查`" size="620px">
-      <el-alert type="info" :closable="false" show-icon title="语义分类仅用于汇总管理原因，核查时必须查看原始原因文本。" />
+    <el-drawer v-model="teacherDrawer" :title="`${selectedTeacher.name || ''}｜调课原因信息`" size="620px">
       <div class="teacher-summary"><b>{{ selectedTeacher.count || 0 }}</b><span>调停课记录</span><b>{{ selectedTeacher.reasonBreakdown?.length || 0 }}</b><span>原始原因类型</span></div>
       <el-table :data="selectedTeacher.reasonBreakdown || []" size="small" stripe>
         <el-table-column prop="reason" label="原始原因文本" min-width="180" />
@@ -75,35 +68,36 @@
         <el-table-column prop="count" label="次数" width="80" align="right" />
       </el-table>
       <div class="drawer-actions">
-        <span v-if="!teacherNeedsAi(selectedTeacher)" class="sa-faint">当前频次未达到 AI 重点阈值，核对原始原因即可。</span>
-        <el-button v-else type="primary" plain @click="openTeacherAi(selectedTeacher)">查看 AI 调课研判</el-button>
+        <span v-if="!teacherNeedsAi(selectedTeacher)" class="sa-faint">当前未列入重点关注范围，核对原始原因即可。</span>
+        <el-button v-else type="primary" plain @click="openTeacherAi(selectedTeacher)">查看调课研判</el-button>
       </div>
     </el-drawer>
-    <AIInsightDrawer v-model="aiDrawerVisible" :insight="aiInsight" :loading="aiLoading" title="调课治理AI研判" />
+    <AIInsightDrawer v-model="aiDrawerVisible" :insight="aiInsight" :loading="aiLoading" title="调课治理研判"
+      hide-intervention-tag hide-decision-meta hide-baseline hide-consequence hide-expected-result
+      hide-no-comparison-tag hide-trace hide-trace-shortcut hide-evidence-help hide-evidence-source show-all-evidence />
   </div>
 </template>
 
 <script setup lang="ts">
 import { http } from '@/utils/http'
 import { reactive, ref, computed, watch, onMounted, inject, type Ref } from 'vue'
-import { useRouter, useRoute } from 'vue-router'
+import { useRoute } from 'vue-router'
 import KpiLabel from '@/components/KpiLabel.vue'
 import KpiCard from '@/components/KpiCard.vue'
 import EChart from '@/components/EChart.vue'
-import { COLLEGE_MAP } from '@/constants/colleges'
 import { getFilterMeta } from '@/utils/meta'
 import AIInsightDrawer from '@/components/AIInsightDrawer.vue'
 import DataTable, { type DataTableColumn } from '@/components/DataTable.vue'
 import { getScheduleChangesAIInsight, getScheduleTeacherAIInsight } from '@/utils/ai'
-const router = useRouter(); const route = useRoute()
+const route = useRoute()
 
-// 按学院调课率排名 / 教师调课 TOP10 表列定义（M6 DataTable）
+// 按学院调停课率排名 / 教师调停课 TOP10 表列定义（M6 DataTable）
 const deptRankCols: DataTableColumn[] = [
   { key: 'name', label: '学院', width: 130, required:true, region:'identity', fixed:'left' },
   { key: 'totalLessons', label: '教学班数', width: 84, align: 'right', required:true },
-  { key: 'changeCount', label: '调课次数', width: 84, align: 'right', required:true },
+  { key: 'changeCount', label: '调停课次数', width: 110, align: 'right', required:true },
   { key: 'attention', label: '管理关注', width: 100, required:true },
-  { key: 'pct', label: '调课率', minWidth: 150, required:true },
+  { key: 'pct', label: '调停课率', minWidth: 170, required:true },
 ]
 const teacherTopCols: DataTableColumn[] = [
   { key: 'name', label: '教师', width: 80, required:true, region:'identity', fixed:'left' },
@@ -112,15 +106,9 @@ const teacherTopCols: DataTableColumn[] = [
   { key: 'attention', label: '管理关注', width: 100, required:true },
   { key: 'reason', label: '主要原因', minWidth: 110 },
 ]
-const collegeFilter = ref<{id:string;name:string}|null>(null)
-const collegeMap = COLLEGE_MAP
-function applyCollegeFilter() { const cid = route.query.college as string; collegeFilter.value = (cid && collegeMap[cid]) ? { id: cid, name: collegeMap[cid] } : null }
-applyCollegeFilter(); watch(() => route.query.college, () => { applyCollegeFilter(); load() })
-function clearCollegeFilter() { collegeFilter.value = null; router.replace({ query: {} }) }
-function goCollege(row: any) { router.push({ query: { college: row.id } }) }
-
 const fSemester = inject<Ref<string>>('operationSemester', ref(''))
-const selectedSemesterLabel = computed(() => fSemester.value || '未选择学期')
+const fCollege = ref('')
+const colleges = ref<{value:string;label:string}[]>([])
 
 const kpis = ref<any[]>([])
 const loading = ref(false)
@@ -144,7 +132,7 @@ async function openScheduleAi(row?: any) {
   try {
     aiInsight.value = await getScheduleChangesAIInsight({
       semester: fSemester.value,
-      college: row?.id || (route.query.college as string) || undefined,
+      college: row?.id || fCollege.value || undefined,
     })
   } finally { aiLoading.value = false }
 }
@@ -163,9 +151,8 @@ async function load() {
   loading.value = true
   loadError.value = ''
   try {
-  const cid = route.query.college as string
   const params = new URLSearchParams()
-  if (cid && collegeMap[cid]) params.set('college', cid)
+  if (fCollege.value) params.set('college', fCollege.value)
   if (fSemester.value) params.set('semester', fSemester.value)
   const qs = params.toString() ? `?${params.toString()}` : ''
   const d = await http.get('/admin/operation/schedule-changes' + qs)
@@ -179,6 +166,9 @@ async function load() {
 }
 onMounted(async () => {
   const meta = await getFilterMeta()
+  colleges.value = meta.colleges || []
+  const routeCollege = String(route.query.college || '')
+  if (colleges.value.some(item => item.value === routeCollege)) fCollege.value = routeCollege
   if (!fSemester.value) fSemester.value = meta.current
   await load()
 })
@@ -222,12 +212,11 @@ const monthlyOption = computed(() => {
 <style scoped>
 .sa-head-row { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 14px; }
 .ai-toolbar { display:flex; justify-content:flex-end; margin:-4px 0 12px; }
-.filter-banner { background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 10px; padding: 8px 14px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: var(--sa-primary); }
+.schedule-side-stack { display:flex; flex-direction:column; gap:12px; }
 .link { color: var(--sa-primary); cursor: pointer; font-weight: 500; }
 .link:hover { text-decoration: underline; }
 :deep(.row-clickable) { cursor: pointer; }
 :deep(.row-clickable:hover) { background: #eef2ff !important; }
-.classification-note { padding-top:8px; border-top:1px solid var(--sa-border); color:#64748b; font-size:11px; }
 .teacher-summary { display:grid; grid-template-columns:auto 1fr auto 1fr; align-items:end; gap:5px 8px; padding:14px 0; }
 .teacher-summary b { color:#1e3a5f; font-size:24px; }
 .teacher-summary span { color:#64748b; font-size:12px; padding-bottom:3px; }

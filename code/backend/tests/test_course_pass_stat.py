@@ -14,7 +14,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from backend.api.envelope import ApiError
-from backend.api.routers.v2 import course_quality_topic, require_v2_all_reader
+from backend.api.routers.v2 import (
+    course_quality_detail,
+    course_quality_topic,
+    require_v2_all_reader,
+)
 from backend.etl.init_v2 import init_v2
 from backend.etl.v2_course_pass_builder import (
     COURSE_GROUPS, classify_plan_row, derive_course_group, build_course_pass_stat,
@@ -181,24 +185,50 @@ def _api_conn():
         PRIMARY KEY(course_id, semester_id));
     CREATE TABLE dim_course(course_id TEXT PRIMARY KEY, name TEXT);
     CREATE TABLE grade_attempt(attempt_id TEXT, student_id TEXT, course_id TEXT,
-        semester_id TEXT, attempt_type TEXT, is_pass INTEGER,
+        semester_id TEXT, attempt_type TEXT, is_pass INTEGER, score REAL,
         is_published INTEGER, is_void INTEGER);
+    CREATE TABLE agg_course_offering(
+        course_id TEXT, semester_id TEXT, lesson_count INTEGER,
+        teacher_count INTEGER, enrolled INTEGER, total_hours REAL);
+    INSERT INTO dim_course VALUES('PUB', '公共课A');
+    INSERT INTO dim_course VALUES('ELE', '选修课B');
+    INSERT INTO dim_course VALUES('NEW', '新学期课程');
+    INSERT INTO dim_course VALUES('BOUND', '阈值边界课程');
+    INSERT INTO dim_course VALUES('BOUNDVOL', '波动边界课程');
+    INSERT INTO dim_course VALUES('LOWRETAKE', '低样本重修课程');
     """)
-    # PUB：公共必修，两学期首次未通过率均≥15 → persistent_high
+    # PUB：公共必修，两学期首次未通过率均>15 → persistent_high
     for sem, fa, fp in (("2024-2025-1", 40, 30), ("2024-2025-2", 40, 32)):
         conn.execute("INSERT INTO agg_course_pass_stat VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                      ("PUB", sem, "公共课A", "公共必修", "plan_module", fa, fp, 5, 2, 6, 3,
                       round(fp / fa, 4), 0.4, 0.5, "pass-stat-v1", "now", "derived"))
         for i in range(fa):
-            conn.execute("INSERT INTO grade_attempt VALUES(?,?,?,?,?,?,?,?)",
-                         (f"PUB-{sem}-{i}", f"S{i}", "PUB", sem, "regular", 1, 1, 0))
+            conn.execute("INSERT INTO grade_attempt VALUES(?,?,?,?,?,?,?,?,?)",
+                         (f"PUB-{sem}-{i}", f"S{i}", "PUB", sem, "regular", 1, 80, 1, 0))
+    conn.execute("INSERT INTO agg_course_pass_stat VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                 ("NEW", "2025-2026-1", "新学期课程", "其他", "plan_module", 40, 34, 0, 0, 0, 0,
+                  0.85, None, None, "pass-stat-v1", "now", "derived"))
+    for i in range(40):
+        conn.execute("INSERT INTO grade_attempt VALUES(?,?,?,?,?,?,?,?,?)",
+                     (f"NEW-2025-2026-1-{i}", f"N{i}", "NEW", "2025-2026-1", "regular", 1, 80, 1, 0))
+    for sem in ("2024-2025-1", "2024-2025-2"):
+        conn.execute("INSERT INTO agg_course_pass_stat VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                     ("BOUND", sem, "阈值边界课程", "其他", "plan_module", 40, 34, 0, 0, 0, 0,
+                      0.85, None, None, "pass-stat-v1", "now", "derived"))
+    for sem, fp in (("2024-2025-1", 36), ("2024-2025-2", 30)):
+        conn.execute("INSERT INTO agg_course_pass_stat VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                     ("BOUNDVOL", sem, "波动边界课程", "其他", "plan_module", 40, fp, 0, 0, 0, 0,
+                      round(fp / 40, 4), None, None, "pass-stat-v1", "now", "derived"))
+    conn.execute("INSERT INTO agg_course_pass_stat VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                 ("LOWRETAKE", "2024-2025-1", "低样本重修课程", "其他", "plan_module", 0, 0, 0, 0, 5, 2,
+                  None, None, 0.4, "pass-stat-v1", "now", "derived"))
     # ELE：选修，首次全部通过，无关注原因
     conn.execute("INSERT INTO agg_course_pass_stat VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                  ("ELE", "2024-2025-1", "选修课B", "选修", "plan_module", 40, 40, 0, 0, 0, 0,
                   1.0, None, None, "pass-stat-v1", "now", "derived"))
     for i in range(40):
-        conn.execute("INSERT INTO grade_attempt VALUES(?,?,?,?,?,?,?,?)",
-                     (f"ELE-{i}", f"E{i}", "ELE", "2024-2025-1", "regular", 1, 1, 0))
+        conn.execute("INSERT INTO grade_attempt VALUES(?,?,?,?,?,?,?,?,?)",
+                     (f"ELE-{i}", f"E{i}", "ELE", "2024-2025-1", "regular", 1, 80, 1, 0))
     conn.commit()
     return conn
 
@@ -231,6 +261,26 @@ class CourseQualityApiTest(unittest.TestCase):
         self.assertEqual(1, data["summary"]["public_required_courses"])
         self.assertIn("first_pass_rate", data["definition"])
         self.assertIn("deprecated", data["definition"]["fail_rate"])
+        self.assertEqual(
+            "至少有一个学期达到30条有效成绩记录的去重课程数；有效记录是指已发布且未作废且 是否通过 非空的记录；",
+            data["definition"]["sample"],
+        )
+        self.assertEqual(
+            "首次修读（含缓考）通过人次数÷首次修读人次数，分母为0时 输出 '-' ",
+            data["definition"]["first_pass_rate"],
+        )
+        self.assertEqual(
+            "同一门课程至少有2个学期及以上且每学期首次未通过率均高于15%",
+            data["definition"]["persistent_high"],
+        )
+        self.assertEqual(
+            "同一门课程至少有2个学期及以上，最高与最低首次未通过率相差高于15个百分点",
+            data["definition"]["volatile"],
+        )
+        self.assertEqual(
+            "筛选条件范围内重修成绩记录数量",
+            data["definition"]["retake_attempts"],
+        )
 
     def test_course_group_filter(self):
         data = self._call(course_group="公共必修")["data"]
@@ -240,6 +290,48 @@ class CourseQualityApiTest(unittest.TestCase):
         data2 = self._call(course_group="实践")["data"]
         self.assertEqual([], data2["courses"])
         self.assertEqual(0, data2["total"])
+
+    def test_semester_options_are_descending_and_not_narrowed_by_filters(self):
+        data = self._call(
+            semester_from="2024-2025-2",
+            semester_to="2024-2025-2",
+            course_group="选修",
+        )["data"]
+        self.assertEqual(
+            ["2025-2026-1", "2024-2025-2", "2024-2025-1"],
+            data["semesters"],
+        )
+
+    def test_public_required_section_respects_course_group_filter(self):
+        data = self._call(course_group="选修")["data"]
+        self.assertEqual([], data["publicRequiredTop"])
+        self.assertEqual(0, data["publicRequiredSummary"]["courses"])
+
+    def test_attention_thresholds_are_strictly_greater_than_15(self):
+        data = self._call()["data"]
+        ids = {course["course_id"] for course in data["courses"]}
+        self.assertNotIn("BOUND", ids)  # 每学期首次未通过率恰好15%
+        self.assertNotIn("BOUNDVOL", ids)  # 最高与最低首次未通过率恰好相差15个百分点
+
+    def test_retake_summary_includes_low_sample_terms_in_filter_range(self):
+        data = self._call(
+            semester_from="2024-2025-1",
+            semester_to="2024-2025-2",
+        )["data"]
+        self.assertEqual(17, data["summary"]["retake_attempts"])
+
+    def test_course_detail_semester_range_is_inclusive(self):
+        data = course_quality_detail(
+            "PUB",
+            semester_from="2024-2025-1",
+            semester_to="2024-2025-2",
+            conn=self.conn,
+            user={"role_id": "dean"},
+        )["data"]
+        self.assertEqual(
+            ["2024-2025-1", "2024-2025-2"],
+            [row["semester_id"] for row in data["trends"]],
+        )
 
     def test_invalid_course_group_rejected(self):
         with self.assertRaises(ApiError) as ctx:

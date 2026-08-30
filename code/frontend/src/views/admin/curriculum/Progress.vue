@@ -1,38 +1,37 @@
 <template>
   <div>
-    <p class="workspace-intro">按培养方案模块规则核查学生进度，区分明确问题、数据候选和暂不可自动评价的模块。</p>
     <div v-if="!planName" class="sa-faint empty-plan">请先选择培养方案</div>
     <template v-else>
       <div class="sa-kpi-row">
         <KpiCard label="方案覆盖学生" :value="summary.coveredStudents" hint="方案年级、专业与学生绑定一致并生成模块摘要的去重学生数" tone="primary" />
         <KpiCard label="模块规则可核查率" :value="`${summary.moduleRuleCoverageRate}%`" :hint="definition.moduleRuleCoverageRate" tone="teal" />
         <KpiCard label="可核查模块均达到" :value="summary.allModulesMetStudents" :hint="definition.allModulesMet" tone="teal" />
-        <KpiCard label="存在明确问题" :value="summary.actionRequiredStudents" :hint="definition.actionRequired" tone="danger" />
-        <KpiCard label="存在数据候选" :value="summary.verificationStudents" :hint="definition.verificationRequired" tone="amber" />
+        <KpiCard label="必修未通过学生" :value="summary.actionRequiredStudents" :hint="definition.actionRequired" tone="danger" />
+        <KpiCard label="过期漏修学生" :value="summary.verificationStudents" :hint="definition.verificationRequired" tone="amber" />
       </div>
-      <el-alert :title="definition.boundary" type="info" :closable="false" show-icon class="scope-alert" />
       <section class="sa-card">
         <div class="sa-card-title">学生模块进度核查 <span class="extra">当前列表 {{ filteredProgress.length }} 人</span></div>
         <DataTable :columns="studentColumns" :data="filteredProgress"
-          storage-key="curriculum:student-progress" :max-business-columns="7"
-          :config-version="2" :pagination="true" :default-page-size="20"
+          storage-key="curriculum:student-progress" :max-business-columns="8"
+          :config-version="3" :pagination="true" :default-page-size="20"
           stripe size="small" v-loading="loading" element-loading-text="正在计算学生模块进度…">
           <template #toolbar>
             <div class="filters">
               <el-input v-model="keyword" placeholder="搜索学号或姓名" clearable />
-              <el-select v-model="statusFilter" placeholder="全部证据状态" clearable>
-                <el-option label="明确需处理" value="明确需处理" />
-                <el-option label="数据候选" value="数据候选" />
+              <el-select v-model="statusFilter" placeholder="全部状态" clearable>
+                <el-option label="必修未通过" value="明确需处理" />
+                <el-option label="过期漏修" value="数据候选" />
                 <el-option label="当前未发现到期问题" value="当前未发现到期问题" />
               </el-select>
-              <el-button @click="exportCsv">导出当前结果</el-button>
+              <el-button @click="exportCsv">导出</el-button>
             </div>
           </template>
           <template #col-moduleProgress="{row}"><b class="tnum">{{row.completedModules}}</b><span class="sa-faint"> / {{row.assessableModules}} 个</span></template>
           <template #col-earnedCredits="{row}">{{ Number(row.earnedCredits || 0).toFixed(1) }}</template>
           <template #col-failedRequired="{row}"><b :class="row.failedRequired?'risk':'sa-faint'">{{row.failedRequired}}</b> 门</template>
           <template #col-verificationRequired="{row}">{{row.verificationRequired}} 门</template>
-          <template #col-status="{row}"><el-tag size="small" :type="statusTag(row.status)">{{row.status}}</el-tag></template>
+          <template #col-status="{row}"><el-tag size="small" :type="statusTag(row.status)">{{statusLabel(row.status)}}</el-tag></template>
+          <template #col-statusReason="{row}">{{statusReasonLabel(row)}}</template>
           <template #col-action="{row}"><el-button link type="primary" @click="openStudent(row)">详情</el-button></template>
         </DataTable>
       </section>
@@ -40,8 +39,6 @@
 
     <el-drawer v-model="detailVisible" :title="`${selectedStudent.name || ''}｜培养方案进度核查`" size="920px">
       <div v-loading="detailLoading" element-loading-text="正在加载模块与课程证据…" class="drawer-body">
-        <el-alert type="info" :closable="false" show-icon
-          title="本详情只核查培养方案执行证据，不跳转其他业务页面；数据候选不等同漏选或不能毕业。" />
         <el-alert v-if="detailError" type="error" :closable="false" show-icon title="详情加载失败" class="drawer-alert">
           <template #default><el-button size="small" @click="loadStudentDetail">重新加载</el-button></template>
         </el-alert>
@@ -50,14 +47,21 @@
             <el-descriptions-item label="学号">{{selectedStudent.studentId}}</el-descriptions-item>
             <el-descriptions-item label="年级">{{selectedStudent.grade || '—'}}</el-descriptions-item>
             <el-descriptions-item label="当前学习学期">第{{selectedStudent.currentStudyTerm || '—'}}学期</el-descriptions-item>
-            <el-descriptions-item label="证据状态"><el-tag size="small" :type="statusTag(selectedStudent.status)">{{selectedStudent.status}}</el-tag></el-descriptions-item>
+            <el-descriptions-item label="状态"><el-tag size="small" :type="statusTag(selectedStudent.status)">{{statusLabel(selectedStudent.status)}}</el-tag></el-descriptions-item>
             <el-descriptions-item label="可核查模块">{{selectedStudent.assessableModules || 0}}个</el-descriptions-item>
             <el-descriptions-item label="已达到模块">{{selectedStudent.completedModules || 0}}个</el-descriptions-item>
             <el-descriptions-item label="已认可学分">{{Number(selectedStudent.earnedCredits || 0).toFixed(1)}}</el-descriptions-item>
             <el-descriptions-item label="规则覆盖率">{{selectedStudent.ruleCoverageRate || 0}}%</el-descriptions-item>
           </el-descriptions>
           <el-tabs v-model="detailTab">
-            <el-tab-pane :label="`模块完成核查（${moduleProgress.length}）`" name="modules">
+            <el-tab-pane name="modules">
+              <template #label>
+                <span class="tab-label-with-help">模块完成核查（{{moduleProgress.length}}）
+                  <el-tooltip content="逐一核查该学生培养方案中的所有模块；优先比较已认可学分与最低学分，其次比较已完成门数与最低门数，最后核查模块内必修课程是否全部通过或认定" placement="top">
+                    <el-icon class="tab-help-icon" tabindex="0" aria-label="查看模块完成核查计算说明"><QuestionFilled /></el-icon>
+                  </el-tooltip>
+                </span>
+              </template>
               <DataTable :columns="moduleColumns" :data="moduleProgress"
                 storage-key="curriculum:student-module-detail" :max-business-columns="7"
                 :config-version="2" size="small">
@@ -65,15 +69,22 @@
                 <template #col-evidenceStatus="{row}"><el-tag size="small" :type="moduleTag(row.evidenceStatus)">{{moduleStatus(row.evidenceStatus)}}</el-tag></template>
               </DataTable>
             </el-tab-pane>
-            <el-tab-pane :label="`明确未解决课程（${failedCourses.length}）`" name="failed">
+            <el-tab-pane :label="`必修未通过课程（${failedCourses.length}）`" name="failed">
               <DataTable :columns="failedColumns" :data="failedCourses" storage-key="curriculum:student-failed-courses"
-                :max-business-columns="5" :config-version="2" size="small" empty-text="没有明确未解决课程" />
+                :max-business-columns="5" :config-version="2" size="small" empty-text="没有必修未通过课程" />
             </el-tab-pane>
-            <el-tab-pane :label="`数据候选课程（${verificationCourses.length}）`" name="verification">
+            <el-tab-pane :label="`过期漏修课程（${verificationCourses.length}）`" name="verification">
               <DataTable :columns="candidateColumns" :data="verificationCourses" storage-key="curriculum:student-candidate-courses"
-                :max-business-columns="5" :config-version="2" size="small" empty-text="没有到期数据候选" />
+                :max-business-columns="5" :config-version="2" size="small" empty-text="没有过期漏修课程" />
             </el-tab-pane>
-            <el-tab-pane label="全部课程证据" name="all">
+            <el-tab-pane name="all">
+              <template #label>
+                <span class="tab-label-with-help">全部课程证据
+                  <el-tooltip content="该学生当前绑定培养方案中，所有课程及其最新结果状态的记录数，包括通过、替代或认定、未通过、尚无完成证据和证据未知" placement="top">
+                    <el-icon class="tab-help-icon" tabindex="0" aria-label="查看全部课程证据计算说明"><QuestionFilled /></el-icon>
+                  </el-tooltip>
+                </span>
+              </template>
               <DataTable :columns="allCourseColumns" :data="detailCourses" storage-key="curriculum:student-all-plan-courses"
                 :max-business-columns="6" :config-version="2" :pagination="true" :default-page-size="20" size="small">
                 <template #col-completion_status="{row}"><el-tag size="small" :type="courseTag(row.completion_status)">{{courseStatus(row.completion_status)}}</el-tag></template>
@@ -89,6 +100,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { http } from '@/utils/http'
+import { QuestionFilled } from '@element-plus/icons-vue'
 import KpiCard from '@/components/KpiCard.vue'
 import DataTable, { type DataTableColumn } from '@/components/DataTable.vue'
 
@@ -106,9 +118,10 @@ const studentColumns:DataTableColumn[]=[
   {key:'currentStudyTerm',label:'学习学期',width:90},
   {key:'moduleProgress',label:'已达到/可核查模块',width:145,required:true},
   {key:'earnedCredits',label:'已认可学分',width:105,align:'right'},
-  {key:'failedRequired',label:'明确未通过',width:105,align:'right'},
-  {key:'verificationRequired',label:'数据候选',width:95,align:'right'},
-  {key:'status',label:'证据状态',width:125,required:true},
+  {key:'failedRequired',label:'必修未通过',width:105,align:'right'},
+  {key:'verificationRequired',label:'过期漏修',width:95,align:'right'},
+  {key:'status',label:'状态',width:125,required:true},
+  {key:'statusReason',label:'状态原因',minWidth:260,required:true,tooltip:true},
   {key:'action',label:'操作',width:70,fixed:'right',required:true,region:'action'},
 ]
 const moduleColumns:DataTableColumn[]=[
@@ -117,8 +130,8 @@ const moduleColumns:DataTableColumn[]=[
   {key:'progress',label:'完成进度',width:110},
   {key:'earnedCredits',label:'已认可学分',width:105,align:'right'},
   {key:'completedCourses',label:'完成课程',width:90,align:'right'},
-  {key:'failedRequired',label:'明确未通过',width:100,align:'right'},
-  {key:'verificationRequired',label:'数据候选',width:90,align:'right'},
+  {key:'failedRequired',label:'必修未通过',width:100,align:'right'},
+  {key:'verificationRequired',label:'过期漏修',width:90,align:'right'},
   {key:'sourceReference',label:'规则来源',minWidth:160,defaultVisible:false,tooltip:true},
   {key:'evidenceStatus',label:'判断',width:100,required:true},
 ]
@@ -152,9 +165,18 @@ async function loadStudentDetail(){
   try{const d=await http.get<any>(`/v2/students/${encodeURIComponent(selectedStudent.value.studentId)}/plan-courses?limit=1000`);detailCourses.value=d?.items||[];moduleProgress.value=d?.moduleProgress||[]}
   catch{detailError.value=true}finally{detailLoading.value=false}
 }
-function exportCsv(){const header=['学号','姓名','年级','方案','已达到模块','可核查模块','已认可学分','明确未通过','数据候选','证据状态'];const rows=filteredProgress.value.map(r=>[r.studentId,r.name,r.grade,planVersion.value,r.completedModules,r.assessableModules,r.earnedCredits,r.failedRequired,r.verificationRequired,r.status]);const csv='\uFEFF'+[header,...rows].map(row=>row.map(v=>`"${String(v??'').replace(/"/g,'""')}"`).join(',')).join('\r\n');const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download=`学生模块进度_${planVersion.value}.csv`;a.click();URL.revokeObjectURL(url)}
+function exportCsv(){const header=['学号','姓名','年级','方案','已达到模块','可核查模块','已认可学分','必修未通过','过期漏修','状态','状态原因'];const rows=filteredProgress.value.map(r=>[r.studentId,r.name,r.grade,planVersion.value,r.completedModules,r.assessableModules,r.earnedCredits,r.failedRequired,r.verificationRequired,statusLabel(r.status),statusReasonLabel(r)]);const csv='\uFEFF'+[header,...rows].map(row=>row.map(v=>`"${String(v??'').replace(/"/g,'""')}"`).join(',')).join('\r\n');const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download=`学生模块进度_${planVersion.value}.csv`;a.click();URL.revokeObjectURL(url)}
+function statusLabel(s:string){return s==='明确需处理'?'必修未通过':s==='数据候选'?'过期漏修':s}
+function statusReasonLabel(row:any){
+  const reason=String(row.statusReason||'').trim()
+  if(reason)return reason
+  if(row.status==='明确需处理')return `存在${Number(row.failedRequired||0)}门当前有效成绩仍为未通过的必修课程`
+  if(row.status==='数据候选')return `存在${Number(row.verificationRequired||0)}门建议修读学期已过但尚未形成明确修读结果的必修课程`
+  if(row.status==='当前未发现到期问题')return '当前未发现必修未通过或到期缺修读结果'
+  return '当前方案执行证据需要进一步核验'
+}
 function statusTag(s:string):'success'|'danger'|'warning'|'info'{return s==='明确需处理'?'danger':s==='数据候选'?'warning':'success'}
-function moduleStatus(s:string){return({explicit_gap:'明确问题',candidate:'数据候选',not_due:'尚未到期',complete:'已达到',not_assessable:'暂不可评价'} as any)[s]||s}
+function moduleStatus(s:string){return({explicit_gap:'必修未通过',candidate:'过期漏修',not_due:'尚未到期',complete:'已达到',not_assessable:'暂不可评价'} as any)[s]||s}
 function moduleTag(s:string):'success'|'danger'|'warning'|'info'{return s==='explicit_gap'?'danger':s==='candidate'?'warning':s==='complete'?'success':'info'}
 function courseStatus(s:string){return({passed:'成绩通过',recognized:'替代/认定',failed:'明确未通过',not_completed:'尚无完成证据',unknown:'证据未知'} as any)[s]||s||'未知'}
 function courseTag(s:string):'success'|'danger'|'warning'|'info'{return ['passed','recognized'].includes(s)?'success':s==='failed'?'danger':s==='not_completed'?'warning':'info'}
@@ -163,5 +185,5 @@ watch(()=>props.majorId,v=>load(v))
 </script>
 
 <style scoped>
-.workspace-intro{margin:0 0 14px;color:#64748b;font-size:13px}.empty-plan{text-align:center;padding:60px}.scope-alert{margin-bottom:12px}.filters{display:flex;gap:8px}.filters .el-input{width:210px}.filters .el-select{width:170px}.risk{color:#dc2626}.drawer-body{min-height:360px}.drawer-summary{margin:14px 0}.drawer-alert{margin-top:10px}
+.empty-plan{text-align:center;padding:60px}.filters{display:flex;gap:8px}.filters .el-input{width:210px}.filters .el-select{width:170px}.risk{color:#dc2626}.drawer-body{min-height:360px}.drawer-summary{margin:14px 0}.drawer-alert{margin-top:10px}.tab-label-with-help{display:inline-flex;align-items:center;gap:4px}.tab-help-icon{color:#64748b;cursor:help;font-size:14px}
 </style>

@@ -79,6 +79,12 @@ export function normalizeAIInsight(raw: any, roleName = ''): AIManagementInsight
     timing: backendAction.timing || '下一业务节点前',
     expectedResult: backendAction.expectedResult || '形成已核实的问题清单和后续处理依据',
   }
+  const alternativeSource = Array.isArray(raw.suggestions)
+    ? raw.suggestions
+    : Array.isArray(raw.alternativeActions) ? raw.alternativeActions : []
+  const alternativeActions = alternativeSource
+    .filter((item: any) => item?.action && item.action !== primaryAction.action)
+    .slice(0, 2)
   const profile = raw.profile || {}
   const meta = [profile.college, profile.major, profile.className].filter(Boolean).join(' · ')
   return {
@@ -106,7 +112,7 @@ export function normalizeAIInsight(raw: any, roleName = ''): AIManagementInsight
       changes: Array.isArray(raw.comparison?.changes) ? raw.comparison.changes : [],
     },
     primaryAction,
-    alternativeActions: Array.isArray(raw.alternativeActions) ? raw.alternativeActions.slice(0, 2) : [],
+    alternativeActions,
     evidence,
     focusItems: Array.isArray(raw.focusItems) ? raw.focusItems : [],
     traceability: raw.traceability || {},

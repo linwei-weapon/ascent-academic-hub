@@ -3,7 +3,6 @@
     <div class="sa-head-row">
       <div>
         <h2 class="sa-page-title">实际教室占用分析</h2>
-        <p class="sa-page-sub">从课程、考试、自习及其他活动的实际占用记录观察时序与楼宇负荷</p>
       </div>
       <div class="filters">
         <el-select v-model="fBuilding" size="small" clearable filterable placeholder="全部楼宇" style="width:160px" @change="load">
@@ -19,10 +18,6 @@
       <template #default><el-button link type="primary" @click="load">重新加载</el-button></template>
     </el-alert>
 
-    <el-alert class="boundary" type="info" :closable="false" show-icon
-      title="当前展示实际占用强度，不等于全校教室利用率"
-      :description="data.denominatorExplanation || '分母仅覆盖本批数据中实际出现过的教室，不能据此判断全校可用教室数量或正式空闲率。'" />
-
     <div class="sa-kpi-row">
       <KpiCard v-for="k in kpis" :key="k.label" :label="k.label" :value="k.value" :sub="k.sub" :hint="k.hint" :tone="k.tone" />
     </div>
@@ -33,8 +28,18 @@
     <el-row :gutter="16" class="section-row">
       <el-col :span="15">
         <div class="sa-card full-height">
-          <div class="sa-card-title">实际占用时序热力图 <KpiLabel label="" formula="单元格=该星期与节次发生占用的教室日数÷已观测教室数×该星期实际采集天数" /></div>
-          <div class="chart-note">按观测负荷固定分级：蓝色&lt;15%、绿色15%—30%、黄色30%—45%、红色≥45%；颜色仅用于定位尖峰时段。</div>
+          <div class="sa-card-title">
+            实际占用时序热力图
+            <el-tooltip placement="top" effect="dark">
+              <template #content>
+                <div class="metric-tooltip-content">
+                  <div v-for="rule in heatmapMetricRules" :key="rule">{{ rule }}</div>
+                  <div class="metric-tooltip-note">{{ heatmapMetricScopeNote }}</div>
+                </div>
+              </template>
+              <el-icon class="metric-help" tabindex="0" aria-label="查看实际占用时序热力图指标说明"><QuestionFilled /></el-icon>
+            </el-tooltip>
+          </div>
           <EChart v-if="data.heatmap.length" :option="heatOption" :height="360" />
           <el-empty v-else description="当前条件下暂无实际占用记录" :image-size="72" />
         </div>
@@ -42,7 +47,6 @@
       <el-col :span="9">
         <div class="sa-card full-height">
           <div class="sa-card-title">占用活动构成 <KpiLabel label="" formula="按每条实际教室占用事件分类计数；同一事件跨多个节次只计一次" /></div>
-          <div class="chart-note">判断资源压力主要来自常规教学，还是考试、自习及临时活动。</div>
           <EChart v-if="data.activityTypes.length" :option="activityOption" :height="360" />
           <el-empty v-else description="暂无活动分类数据" :image-size="72" />
         </div>
@@ -54,26 +58,79 @@
       <div class="chart-note">优先关注占用负荷高且记录量大的楼宇；“待映射”表示源教室名称尚不能可靠归属楼宇。</div>
       <DataTable :columns="buildingCols" :data="data.buildings" storage-key="operation:classroom-buildings"
         size="small" stripe max-height="430" :max-business-columns="5">
+        <template #header-occupiedRoomSlots>
+          <span class="metric-header">
+            占用教室日节次
+            <el-tooltip placement="top" effect="dark">
+              <template #content>
+                <div class="metric-tooltip-content">
+                  <div>{{ occupiedRoomSlotsHelp }}</div>
+                  <div class="metric-tooltip-note">{{ buildingPeriodScopeNote }}</div>
+                </div>
+              </template>
+              <el-icon class="metric-help" tabindex="0" aria-label="查看占用教室日节次指标说明"><QuestionFilled /></el-icon>
+            </el-tooltip>
+          </span>
+        </template>
+        <template #header-observedLoadPct>
+          <span class="metric-header">
+            观测负荷
+            <el-tooltip placement="top" effect="dark">
+              <template #content>
+                <div class="metric-tooltip-content">
+                  <div>{{ buildingObservedLoadHelp }}</div>
+                  <div class="metric-tooltip-note">{{ buildingObservedRoomScopeNote }}</div>
+                </div>
+              </template>
+              <el-icon class="metric-help" tabindex="0" aria-label="查看楼宇观测负荷指标说明"><QuestionFilled /></el-icon>
+            </el-tooltip>
+          </span>
+        </template>
         <template #col-observedLoadPct="{row}"><el-progress :percentage="row.observedLoadPct" :stroke-width="9" :color="loadColor(row.observedLoadPct)" /></template>
+        <template #header-attention>
+          <span class="metric-header">
+            管理关注
+            <el-tooltip placement="top" effect="dark">
+              <template #content>
+                <div v-for="rule in buildingAttentionRules" :key="rule">{{ rule }}</div>
+              </template>
+              <el-icon class="metric-help" tabindex="0" aria-label="查看管理关注规则"><QuestionFilled /></el-icon>
+            </el-tooltip>
+          </span>
+        </template>
         <template #col-attention="{row}"><el-tag size="small" :type="buildingAttention(row).type">{{ buildingAttention(row).label }}</el-tag></template>
-        <template #col-actions="{row}"><el-button link type="primary" @click="openBuildingReview(row)">核查</el-button></template>
+        <template #col-actions="{row}"><el-button link type="primary" @click="openBuildingReview(row)">详情</el-button></template>
       </DataTable>
     </div>
 
     <el-alert v-if="data.summary.overlapRecords || data.summary.pendingMappingRecords" class="quality" type="warning" :closable="false" show-icon
-      :title="`待核查：${fmt(data.summary.overlapRecords)} 条时段重叠，${fmt(data.summary.pendingMappingRecords)} 条楼宇待映射`"
-      description="这些记录已作为源数据核查线索保留，没有参与自动删除或主观修正。" />
-    <el-drawer v-model="buildingDrawerVisible" :title="`${selectedBuilding.name || '楼宇'}｜实际占用核查`" size="680px">
-      <el-alert type="info" :closable="false" show-icon title="观测负荷只用于定位占用集中，不等于正式利用率" />
+      :title="`待核查：${fmt(data.summary.overlapRecords)} 条时段重叠，${fmt(data.summary.pendingMappingRecords)} 条楼宇待映射`" />
+    <el-drawer v-model="buildingDrawerVisible" :title="`${selectedBuilding.name || '楼宇'}｜实际占用信息`" size="680px">
       <el-descriptions :column="3" border style="margin:14px 0"><el-descriptions-item label="已观测教室">{{ selectedBuilding.observedRooms || 0 }}</el-descriptions-item><el-descriptions-item label="采集日期">{{ selectedBuilding.observedDates || 0 }}</el-descriptions-item><el-descriptions-item label="占用记录">{{ selectedBuilding.occupancyRecords || 0 }}</el-descriptions-item><el-descriptions-item label="占用教室日节次">{{ selectedBuilding.occupiedRoomSlots || 0 }}</el-descriptions-item><el-descriptions-item label="观测负荷">{{ selectedBuilding.observedLoadPct || 0 }}%</el-descriptions-item><el-descriptions-item label="管理关注"><el-tag :type="buildingAttention(selectedBuilding).type">{{ buildingAttention(selectedBuilding).label }}</el-tag></el-descriptions-item></el-descriptions>
-      <div class="review-actions"><span v-if="!buildingNeedsAi(selectedBuilding)" class="sa-faint">当前仅需常规核查或数据映射，不生成楼宇 AI 评价。</span><el-button v-else type="primary" plain @click="openClassroomAi(selectedBuilding)">查看 AI 资源研判</el-button></div>
+      <div v-if="buildingNeedsAi(selectedBuilding)" class="review-actions"><el-button type="primary" plain @click="openClassroomAi(selectedBuilding)">查看资源研判</el-button></div>
     </el-drawer>
-    <AIInsightDrawer v-model="aiDrawerVisible" :insight="aiInsight" :loading="aiLoading" title="教室资源AI研判" />
+    <AIInsightDrawer
+      v-model="aiDrawerVisible"
+      :insight="aiInsight"
+      :loading="aiLoading"
+      title="教室资源研判"
+      hide-intervention-tag
+      hide-decision-meta
+      hide-baseline
+      hide-consequence
+      hide-expected-result
+      hide-no-comparison-tag
+      hide-trace
+      hide-evidence-help
+      hide-evidence-source
+      show-all-evidence
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, inject, onMounted, reactive, ref, watch, type Ref } from 'vue'
+import { QuestionFilled } from '@element-plus/icons-vue'
 import { http } from '@/utils/http'
 import { getFilterMeta } from '@/utils/meta'
 import EChart from '@/components/EChart.vue'
@@ -100,6 +157,21 @@ const activityLabels: Record<string,string> = {
   course:'课程教学', exam:'考试考务', self_study:'自习使用', admission_review:'招生复试',
   teaching_other:'其他教学', event:'会议活动', other:'其他占用',
 }
+const heatmapMetricRules = [
+  '1. 观测负荷 =【当前学期所有教室星期几第几节（星期一第一节）被占用的所有去重（有可能存在某个教室同一天同一节的重复占用记录）记录】 ÷ 【当前观测教室总数 × 该星期几（当期学期所有的星期一）出现的日期数】 × 100%',
+  '2. 占用教室日数 = 当前学期所有教室星期几第几节（星期一第一节）被占用的所有去重（有可能存在某个教室同一天同一节的重复占用记录）记录',
+]
+const heatmapMetricScopeNote = '口径说明：上述“所有教室”指当前筛选范围内已观测教室；该星期日期数按当前学期全量占用记录统计。'
+const occupiedRoomSlotsHelp = '占用教室日节次 = 当前学期该教学楼所有教室所有星期所有节次被占用的所有去重（有可能存在某个教室同一天同一节的重复占用记录）记录'
+const buildingPeriodScopeNote = '口径说明：上述“所有节次”指当前纳入节次；包含晚间时为第1—12节，关闭晚间时为第1—8节。'
+const buildingObservedLoadHelp = '观测负荷 =【占用教室日节次】 ÷ 【当前学期该教学楼所有教室总数 × 观测日期数 × 纳入节次数】 × 100%'
+const buildingObservedRoomScopeNote = '口径说明：上述“所有教室总数”指当前学期该教学楼实际出现过占用的已观测教室数。'
+const buildingAttentionRules = [
+  '1. 负载率 ≥45% 且记录数 ≥100：重点关注；',
+  '2. 负载率 ≥30%：需关注；',
+  '3. 教学楼为“待映射”：数据核验；',
+  '4. 其余：常规。',
+]
 const buildingCols:DataTableColumn[] = [
   {key:'name',label:'楼宇',minWidth:170,required:true,region:'identity',fixed:'left'},
   {key:'observedRooms',label:'已观测教室',width:120,align:'right',required:true},
@@ -114,17 +186,17 @@ const buildingCols:DataTableColumn[] = [
 function fmt(value: number) { return Number(value || 0).toLocaleString('zh-CN') }
 function loadColor(value: number) { return value >= 50 ? '#DC2626' : value >= 30 ? '#D97706' : '#0D9488' }
 function buildingNeedsAi(row:any) { return row?.name !== '待映射' && Number(row?.observedLoadPct || 0) >= 45 && Number(row?.occupancyRecords || 0) >= 100 }
-function buildingAttention(row:any):{label:string;type:'danger'|'warning'|'info'} { if(row?.name==='待映射')return{label:'数据核验',type:'warning'};if(buildingNeedsAi(row))return{label:'AI重点',type:'danger'};if(Number(row?.observedLoadPct||0)>=30)return{label:'需核查',type:'warning'};return{label:'常规',type:'info'} }
+function buildingAttention(row:any):{label:string;type:'danger'|'warning'|'info'} { if(row?.name==='待映射')return{label:'数据核验',type:'warning'};if(buildingNeedsAi(row))return{label:'重点关注',type:'danger'};if(Number(row?.observedLoadPct||0)>=30)return{label:'需关注',type:'warning'};return{label:'常规',type:'info'} }
 function openBuildingReview(row:any) { selectedBuilding.value=row; buildingDrawerVisible.value=true }
 
 const kpis = computed(() => {
   const s = data.summary || {}
   const peak = Math.max(0, ...(data.heatmap || []).map((x:any) => Number(x.observedUtilizationPct || 0)))
   return [
-    { label:'实际占用记录', value:fmt(s.occupancyRecords), sub:`覆盖 ${fmt(s.observedDates)} 个日期`, hint:'每条教室占用事件计一次，不按跨越节次重复计数', tone:'primary' },
-    { label:'已观测教室', value:fmt(s.observedRooms), sub:'不是学校可用教室总数', hint:'本批数据中至少出现过一次占用的不同教室数', tone:'teal' },
-    { label:'最高时段负荷', value:`${peak}%`, sub:'定位集中占用时段', hint:'所有星期×节次网格中的最高观测占用比例', tone:'danger' },
-    { label:'晚间占用记录', value:fmt(s.eveningRecords), sub:includeEvening.value?'已纳入当前分析':'当前图表已排除晚间', hint:'开始时间在18:00后或覆盖第9—12节的占用事件', tone:'amber' },
+    { label:'实际占用记录', value:fmt(s.occupancyRecords), sub:'', hint:'每条教室占用事件计一次，不按跨越节次重复计数', tone:'primary' },
+    { label:'已观测教室', value:fmt(s.observedRooms), sub:'', hint:'仅说明本批数据的观测覆盖；正式利用率分母须来自权威可用教室清单', tone:'teal' },
+    { label:'最高时段负荷', value:`${peak}%`, sub:'', hint:'所有星期×节次网格中的最高观测占用比例', tone:'danger' },
+    { label:'晚间占用记录', value:fmt(s.eveningRecords), sub:includeEvening.value?'已纳入当前分析':'', hint:'开始时间在18:00后或覆盖第9—12节的占用事件', tone:'amber' },
   ]
 })
 
@@ -141,7 +213,7 @@ const heatOption = computed(() => {
     grid:{left:58,right:18,top:10,bottom:48},
     tooltip:{formatter:(p:any)=>`${weekdays[days[p.data[0]]]} 第${periods[p.data[1]]}节<br/>观测负荷：<b>${p.data[2]}%</b><br/>占用教室日数：${p.data[3]}`},
     xAxis:{type:'category',data:days.map(d=>weekdays[d]),splitArea:{show:true}},
-    yAxis:{type:'category',data:periods.map(p=>`第${p}节`),splitArea:{show:true}},
+    yAxis:{type:'category',inverse:true,data:periods.map(p=>`第${p}节`),splitArea:{show:true}},
     visualMap:{type:'piecewise',dimension:2,selectedMode:false,orient:'horizontal',left:'center',bottom:0,itemWidth:18,itemHeight:10,textStyle:{color:'#64748b'},
       pieces:[{lt:15,label:'低 <15%',color:'#BFDBFE'},{gte:15,lt:30,label:'中低 15—30%',color:'#86D9C6'},{gte:30,lt:45,label:'中高 30—45%',color:'#FBBF24'},{gte:45,label:'高 ≥45%',color:'#DC2626'}]},
     series:[{type:'heatmap',data:cells,label:{show:true,color:'#334155',fontWeight:600,formatter:(p:any)=>p.data[2] ? `${p.data[2]}%` : ''},itemStyle:{borderColor:'#fff',borderWidth:2}}],
@@ -194,5 +266,5 @@ watch(fSemester, (value, oldValue) => {
 </script>
 
 <style scoped>
-.sa-head-row{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;margin-bottom:14px}.filters{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end}.evening-switch{height:32px;display:flex;align-items:center;gap:8px;padding:0 10px;border:1px solid #dcdfe6;border-radius:4px;color:#475569;font-size:13px}.boundary{margin-bottom:14px}.ai-toolbar{display:flex;justify-content:flex-end;margin:-4px 0 12px}.section-row{margin-bottom:16px}.full-height{height:100%;box-sizing:border-box}.chart-note{font-size:12px;color:#64748b;margin:4px 0 8px}.quality{margin-top:14px}.review-actions{display:flex;align-items:center;justify-content:flex-end;margin-top:16px}.review-actions .sa-faint{margin-right:auto}
+.sa-head-row{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;margin-bottom:14px}.filters{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end}.evening-switch{height:32px;display:flex;align-items:center;gap:8px;padding:0 10px;border:1px solid #dcdfe6;border-radius:4px;color:#475569;font-size:13px}.boundary{margin-bottom:14px}.ai-toolbar{display:flex;justify-content:flex-end;margin:-4px 0 12px}.section-row{margin-bottom:16px}.full-height{height:100%;box-sizing:border-box}.chart-note{font-size:12px;color:#64748b;margin:4px 0 8px}.quality{margin-top:14px}.review-actions{display:flex;align-items:center;justify-content:flex-end;margin-top:16px}.metric-header{display:inline-flex;align-items:center;gap:4px}.metric-help{color:#64748b;cursor:help}.metric-tooltip-content{max-width:520px;line-height:1.65}.metric-tooltip-content>div+div{margin-top:8px}.metric-tooltip-note{color:#cbd5e1}
 </style>

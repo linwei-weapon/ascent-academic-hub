@@ -20,10 +20,10 @@ class ReportDefinition:
 REPORTS = {
     item.report_id: item for item in (
         ReportDefinition(
-            "RPT-01", "rpt-01", "入学年级总体挂科情况",
+            "RPT-01", "rpt-01", "年级总体挂科情况",
             "/admin/basic-reports/failure-overview", "aggregate",
             result_columns=(("category", "本科生"), ("gender", "性别"),
-                            ("countDisplay", "人数"), ("rate", "比例")),
+                            ("countDisplay", "人数"), ("rateDisplay", "比例")),
             merge_by=(("category", "categoryKey"),),
         ),
         ReportDefinition("RPT-02", "rpt-02", "各专业补考前后挂科率比较",
@@ -34,8 +34,8 @@ REPORTS = {
                                          ("passRate", "通过率"))),
         ReportDefinition("RPT-03", "rpt-03", "各专业整体与男女挂科率比较",
                          "/admin/basic-reports/major-gender-failure", "aggregate",
-                         result_columns=(("majorName", "专业"), ("studentCount", "专业人数"),
-                                         ("failedStudents", "整体挂科人数"), ("failureRate", "整体挂科率"),
+                         result_columns=(("majorName", "专业"), ("studentCountDisplay", "专业人数"),
+                                         ("failedStudentsDisplay", "整体挂科人数"), ("failureRate", "整体挂科率"),
                                          ("maleFailureDisplay", "男生挂科率"), ("femaleFailureDisplay", "女生挂科率"))),
         ReportDefinition("RPT-04A", "rpt-04a", "各班级挂科门数具体情况",
                          "/admin/basic-reports/class-failure-count", "distribution",

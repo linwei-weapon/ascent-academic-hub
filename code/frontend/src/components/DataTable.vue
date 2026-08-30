@@ -84,7 +84,10 @@ const props = withDefaults(defineProps<{
   configVersion: 1,
 })
 
-const emit = defineEmits<{ (e: 'update:pageSize', value: number): void }>()
+const emit = defineEmits<{
+  (e: 'update:pageSize', value: number): void
+  (e: 'row-click', row: any, column: any, event: Event): void
+}>()
 
 defineOptions({ inheritAttrs: false })
 const attrs = useAttrs()
@@ -234,6 +237,10 @@ function onPageSizeChange(value: number): void {
   if (isExternalPageSize.value) emit('update:pageSize', value)
 }
 
+function forwardRowClick(row: any, column: any, event: Event): void {
+  emit('row-click', row, column, event)
+}
+
 onMounted(() => {
   // 外部分页：偏好中的每页行数与页面当前值不一致时回写，由页面自行重载
   if (isExternalPageSize.value && pageSizeInner.value !== props.pageSize) {
@@ -374,7 +381,7 @@ function resetPref(): void {
       </div>
     </div>
 
-    <el-table v-bind="$attrs" :data="pagedData" :size="tableSize">
+    <el-table v-bind="$attrs" :data="pagedData" :size="tableSize" @row-click="forwardRowClick">
       <el-table-column
         v-for="col in visibleColumns"
         :key="col.key"

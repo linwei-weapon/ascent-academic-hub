@@ -17,7 +17,8 @@
   >
     <div class="sa-kpi__label">
       <span>{{ label }}</span>
-      <el-tooltip v-if="hint" :content="hint" placement="top" effect="dark">
+      <el-tooltip v-if="hint" placement="top" effect="dark">
+        <template #content><div class="sa-kpi__tooltip-content">{{ hint }}</div></template>
         <span class="sa-kpi__info" @click.stop>&#9432;</span>
       </el-tooltip>
     </div>
@@ -149,6 +150,11 @@ onBeforeUnmount(() => cancelAnimationFrame(raf))
   color: #94a3b8;
   cursor: help;
   font-size: 12px;
+}
+.sa-kpi__tooltip-content {
+  max-width: 560px;
+  line-height: 1.65;
+  white-space: pre-line;
 }
 .sa-kpi__value {
   font-family: 'Plus Jakarta Sans', 'Noto Sans SC', sans-serif;

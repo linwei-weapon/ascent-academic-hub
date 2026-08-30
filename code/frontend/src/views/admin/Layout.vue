@@ -81,6 +81,7 @@ import { menuKeyOfPath } from '@/utils/menu'
 
 const footerHiddenPaths = new Set([
   '/admin/basic-reports/major-makeup-comparison',
+  '/admin/basic-reports/major-gender-failure',
   '/admin/basic-reports/class-failure-count',
   '/admin/basic-reports/class-score-distribution',
   '/admin/basic-reports/course-makeup-comparison',

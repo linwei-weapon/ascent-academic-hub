@@ -59,8 +59,8 @@ class CurriculumProgressBuilderTest(unittest.TestCase):
             ],
         )
         conn.executemany(
-            "INSERT INTO dim_student(student_id,display_name,entry_grade,major_code,major_name,plan_id) "
-            "VALUES(?,?,?,?,?,'P1')",
+            "INSERT INTO dim_student(student_id,display_name,entry_grade,major_code,major_name,plan_id,student_status) "
+            "VALUES(?,?,?,?,?,'P1','在校')",
             [
                 ("S1", "匹配学生", self.grade, "M1", "测试专业"),
                 ("S2", "错配学生", self.grade - 1, "M1", "测试专业"),
@@ -156,15 +156,35 @@ class CurriculumProgressBuilderTest(unittest.TestCase):
             overview = v2.curriculum_management_overview(conn=conn, user=user)["data"]
             progress = v2.curriculum_progress("P1", 100, 0, conn, user)["data"]
             readiness = v2.graduation_readiness_topic(
-                None, None, "P1", None, 50, 0, conn, user
+                plan_id="P1", limit=50, offset=0, conn=conn, user=user
             )["data"]
         conn.close()
         self.assertEqual(1, overview["summary"]["applicableStudents"])
         self.assertEqual(1, overview["summary"]["matchedStudents"])
         self.assertEqual(1, overview["summary"]["bindingReviewStudents"])
         self.assertEqual(1, overview["summary"]["actionRequiredStudents"])
+        self.assertEqual(
+            "模块尚未达到要求，存在明确未通过必修课程证据的去重学生数。",
+            overview["definition"]["actionRequiredStudents"],
+        )
+        self.assertEqual(
+            "模块尚未达到要求，存在已过建议学期但缺少结果记录的候选学生数。",
+            overview["definition"]["verificationStudents"],
+        )
         self.assertEqual(1, progress["summary"]["coveredStudents"])
         self.assertEqual(1, progress["summary"]["actionRequiredStudents"])
+        self.assertEqual(
+            "模块尚未达到要求，存在明确未通过必修课程证据的去重学生数。",
+            progress["definition"]["actionRequired"],
+        )
+        self.assertEqual(
+            "模块尚未达到要求，存在已过建议学期但缺少结果记录的候选学生数。",
+            progress["definition"]["verificationRequired"],
+        )
+        self.assertEqual(
+            "存在1门当前有效成绩仍为未通过的必修课程",
+            progress["students"][0]["statusReason"],
+        )
         self.assertEqual(1, readiness["summary"]["covered_students"])
         self.assertEqual(1, readiness["summary"]["action_required_students"])
 
@@ -178,6 +198,163 @@ class CurriculumProgressBuilderTest(unittest.TestCase):
         conn.close()
         self.assertEqual(2, result["total"])
         self.assertEqual(1, len(result["items"]))
+
+    def test_management_student_list_includes_student_status_and_status_reason(self):
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        result = v2.curriculum_management_students(
+            status=None, limit=20, offset=0, conn=conn,
+            user={"role_id": "dean", "username": "curriculum-list-fields-test"},
+        )["data"]
+        conn.close()
+        items = {row["studentId"]: row for row in result["items"]}
+        self.assertEqual("在校", items["S1"]["studentStatus"])
+        self.assertEqual("在校", items["S2"]["studentStatus"])
+        self.assertEqual(
+            "存在1门当前有效成绩仍为未通过的必修课程",
+            items["S1"]["statusReason"],
+        )
+        self.assertEqual(
+            "学生绑定的方案与学生入学年级不一致",
+            items["S2"]["statusReason"],
+        )
+
+    def test_management_overview_filters_and_binding_rate_use_query_scope(self):
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        user = {"role_id": "dean", "username": "curriculum-filter-test"}
+        v2._QUERY_CACHE.clear()
+        with patch.object(v2.settings, "V2_DB_PATH", str(self.db_path)):
+            options = v2.curriculum_options(conn=conn, user=user)["data"]
+            all_rows = v2.curriculum_management_overview(conn=conn, user=user)["data"]
+            filtered = v2.curriculum_management_overview(
+                grades=str(self.grade), conn=conn, user=user
+            )["data"]
+        conn.close()
+        self.assertEqual({self.grade, self.grade - 1}, {
+            row["grade"] for row in options["overviewFilters"]
+        })
+        self.assertEqual(["P1"], [row["planId"] for row in options["progressPlans"]])
+        self.assertEqual(2, options["progressPlans"][0]["studentCount"])
+        self.assertEqual(2, all_rows["colleges"][0]["totalStudents"])
+        self.assertEqual(1, all_rows["colleges"][0]["matchedStudents"])
+        self.assertEqual(50.0, all_rows["colleges"][0]["bindingRate"])
+        self.assertEqual(1, filtered["summary"]["totalPlans"])
+        self.assertEqual(1, filtered["summary"]["reviewablePlans"])
+        self.assertEqual(1, filtered["summary"]["coveredStudents"])
+        self.assertEqual(100.0, filtered["colleges"][0]["bindingRate"])
+
+    def test_progress_plan_options_exclude_plans_only_bound_to_non_enrolled_students(self):
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        conn.execute(
+            "INSERT INTO curriculum_plan(plan_id,plan_name,grade,major_code,major_name) "
+            "VALUES('P0','较早在校方案',?,'M0','较早专业')",
+            (self.grade - 2,),
+        )
+        conn.execute(
+            "INSERT INTO curriculum_plan(plan_id,plan_name,grade,major_code,major_name) "
+            "VALUES('P2','已毕业方案',?,'M2','历史专业')",
+            (self.grade - 3,),
+        )
+        conn.executemany(
+            "INSERT INTO dim_student(student_id,display_name,entry_grade,major_code,major_name,plan_id,student_status) "
+            "VALUES(?,?,?,?,?,?,?)",
+            [
+                ("S0", "较早在校学生", self.grade - 2, "M0", "较早专业", "P0", "在校"),
+                ("S5", "已毕业学生", self.grade - 3, "M2", "历史专业", "P2", "已毕业"),
+            ],
+        )
+        conn.commit()
+        user = {"role_id": "dean", "username": "curriculum-progress-options-test"}
+        v2._QUERY_CACHE.clear()
+        with patch.object(v2.settings, "V2_DB_PATH", str(self.db_path)):
+            options = v2.curriculum_options(conn=conn, user=user)["data"]
+        conn.close()
+        self.assertEqual(["P0", "P1"], [row["planId"] for row in options["progressPlans"]])
+        self.assertEqual(0, next(row for row in options["plans"] if row["planId"] == "P2")["studentCount"])
+        self.assertNotIn(self.grade - 3, {row["grade"] for row in options["overviewFilters"]})
+
+    def test_missing_binding_keys_enter_binding_review(self):
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        conn.execute(
+            "INSERT INTO dim_student(student_id,display_name,major_code,major_name,plan_id,student_status) "
+            "VALUES('S3','缺少年级学生','M1','测试专业','P1','在校')"
+        )
+        conn.commit()
+        user = {"role_id": "dean", "username": "curriculum-missing-key-test"}
+        v2._QUERY_CACHE.clear()
+        with patch.object(v2.settings, "V2_DB_PATH", str(self.db_path)):
+            overview = v2.curriculum_management_overview(conn=conn, user=user)["data"]
+            students = v2.curriculum_management_students(
+                status="方案绑定待核验", limit=200, offset=0, conn=conn, user=user
+            )["data"]
+        conn.close()
+        self.assertEqual(2, overview["summary"]["bindingReviewStudents"])
+        self.assertEqual({"S2", "S3"}, {row["studentId"] for row in students["items"]})
+
+    def test_same_major_name_uses_major_code_for_expected_plan(self):
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        conn.execute(
+            "INSERT INTO curriculum_plan(plan_id,plan_name,grade,major_code,major_name) "
+            "VALUES('P2','同名专业方案',?,'M2','测试专业')",
+            (self.grade,),
+        )
+        conn.execute(
+            "INSERT INTO dim_student(student_id,display_name,entry_grade,major_code,major_name,plan_id,student_status) "
+            "VALUES('S4','同名专业学生',?,'M2','测试专业','P2','在校')",
+            (self.grade,),
+        )
+        conn.commit()
+        user = {"role_id": "dean", "username": "curriculum-major-code-test"}
+        v2._QUERY_CACHE.clear()
+        with patch.object(v2.settings, "V2_DB_PATH", str(self.db_path)):
+            overview = v2.curriculum_management_overview(
+                grades=str(self.grade), conn=conn, user=user
+            )["data"]
+            students = v2.curriculum_management_students(
+                grades=str(self.grade), major_name="测试专业", limit=200, offset=0,
+                conn=conn, user=user,
+            )["data"]
+        conn.close()
+        self.assertEqual(2, overview["summary"]["totalPlans"])
+        expected = {row["studentId"]: row["expectedPlanId"] for row in students["items"]}
+        self.assertEqual("P1", expected["S1"])
+        self.assertEqual("P2", expected["S4"])
+
+    def test_overview_counts_failed_and_candidate_evidence_independently(self):
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        conn.execute(
+            "UPDATE student_plan_progress_summary SET evidence_status='explicit_gap',"
+            "failed_required_courses=1,due_candidate_courses=2 WHERE student_id='S1'"
+        )
+        conn.commit()
+        user = {"role_id": "dean", "username": "curriculum-overlap-test"}
+        v2._QUERY_CACHE.clear()
+        with patch.object(v2.settings, "V2_DB_PATH", str(self.db_path)):
+            overview = v2.curriculum_management_overview(
+                grades=str(self.grade), conn=conn, user=user
+            )["data"]
+            candidate_students = v2.curriculum_management_students(
+                grades=str(self.grade), college_name="未映射学院", status="数据候选",
+                limit=200, offset=0, conn=conn, user=user,
+            )["data"]
+            courses = v2.curriculum_management_courses(
+                limit=20, grades=str(self.grade), college_name="未映射学院",
+                conn=conn, user=user,
+            )["data"]
+        conn.close()
+        self.assertEqual(1, overview["summary"]["actionRequiredStudents"])
+        self.assertEqual(1, overview["summary"]["verificationStudents"])
+        self.assertEqual({"S1"}, {row["studentId"] for row in candidate_students["items"]})
+        self.assertEqual(
+            "存在2门建议修读学期已过但尚未形成明确修读结果的必修课程",
+            candidate_students["items"][0]["statusReason"],
+        )
+        self.assertTrue(courses["items"])
 
 
 if __name__ == "__main__":

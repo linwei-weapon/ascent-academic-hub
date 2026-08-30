@@ -24,9 +24,22 @@
           <div class="object-meta">
             {{ view.targetMeta }}
             <span v-if="view.generatedAt"> · 数据时点 {{ shortTime(view.generatedAt) }}</span>
+            <template v-if="hideTrace">
+              <el-tooltip v-if="!hideTraceShortcut" placement="bottom" effect="dark">
+                <template #content>
+                  <div class="compact-trace-content">
+                    <div>分析范围：{{ trace.scope || view.targetName }}</div>
+                    <div>事实来源：{{ trace.businessDataSources || listText(trace.dataSources) }}</div>
+                    <div>规则版本：{{ trace.ruleVersion || '—' }}</div>
+                    <div>适用边界：{{ trace.boundary || listText(view.limitations) }}</div>
+                  </div>
+                </template>
+                <button type="button" class="compact-trace-trigger">· 研判依据</button>
+              </el-tooltip>
+            </template>
           </div>
         </div>
-        <el-tag :type="statusTagType(view.intervention.status)" effect="light" size="large">
+        <el-tag v-if="!hideInterventionTag" :type="statusTagType(view.intervention.status)" effect="light" size="large">
           {{ view.intervention.label }}
         </el-tag>
       </header>
@@ -35,7 +48,7 @@
         <section class="decision-card" :class="view.intervention.priority">
           <div class="section-kicker">管理结论</div>
           <h3>{{ view.decision.headline }}</h3>
-          <div class="decision-meta">
+          <div v-if="!hideDecisionMeta" class="decision-meta">
             <span>{{ view.sourceLabel }}</span>
             <span>证据充分度：{{ view.confidence }}</span>
           </div>
@@ -44,7 +57,7 @@
         <section class="ai-section why-section">
           <div class="section-title-row">
             <h4>为什么现在看</h4>
-            <el-tag v-if="!view.comparison.available" type="info" effect="plain" size="small">无可比变化基准</el-tag>
+            <el-tag v-if="!hideNoComparisonTag && !view.comparison.available" type="info" effect="plain" size="small">无可比变化基准</el-tag>
           </div>
           <ul v-if="view.comparison.available && view.comparison.changes.length" class="signal-list">
             <li v-for="item in view.comparison.changes.slice(0, 3)" :key="item">{{ item }}</li>
@@ -52,12 +65,12 @@
           <ul v-else class="signal-list">
             <li v-for="item in view.decision.whyNow.slice(0, 3)" :key="item">{{ item }}</li>
           </ul>
-          <div class="baseline-note">
+          <div v-if="!hideBaseline" class="baseline-note">
             <b>{{ view.comparison.available ? '比较基准' : '判断边界' }}</b>
             <span>{{ view.comparison.baseline }}</span>
           </div>
           <div class="impact-line"><b>影响范围</b><span>{{ view.decision.impactScope || '当前对象' }}</span></div>
-          <div class="impact-line consequence"><b>暂不核查的影响</b><span>{{ view.decision.consequence }}</span></div>
+          <div v-if="!hideConsequence" class="impact-line consequence"><b>暂不核查的影响</b><span>{{ view.decision.consequence }}</span></div>
         </section>
 
         <section class="primary-action">
@@ -69,9 +82,9 @@
             <el-tag type="primary" effect="plain">{{ view.primaryAction.role }}</el-tag>
           </div>
           <p v-if="view.primaryAction.detail">{{ view.primaryAction.detail }}</p>
-          <div class="action-result-grid">
+          <div class="action-result-grid" :class="{ 'single-column': hideExpectedResult }">
             <div><span>建议时点</span><b>{{ view.primaryAction.timing || '下一业务节点前' }}</b></div>
-            <div><span>预期形成</span><b>{{ view.primaryAction.expectedResult || '已核实的问题清单和处理依据' }}</b></div>
+            <div v-if="!hideExpectedResult"><span>预期形成</span><b>{{ view.primaryAction.expectedResult || '已核实的问题清单和处理依据' }}</b></div>
           </div>
         </section>
 
@@ -92,14 +105,14 @@
         <section v-if="view.evidence.length" class="ai-section">
           <div class="section-title-row">
             <h4>支撑本次判断的关键证据</h4>
-            <span class="section-help">首屏最多展示3项</span>
+            <span v-if="!hideEvidenceHelp" class="section-help">首屏最多展示3项</span>
           </div>
           <div class="evidence-grid">
-            <article v-for="item in view.evidence.slice(0, 3)" :key="item.label" :class="item.tone">
+            <article v-for="item in (showAllEvidence ? view.evidence : view.evidence.slice(0, 3))" :key="item.label" :class="item.tone">
               <span>{{ item.label }}</span>
               <b>{{ item.value }}</b>
               <p>{{ item.detail }}</p>
-              <small>来源：{{ item.businessSource || item.source || '当前页面业务数据' }}</small>
+              <small v-if="!hideEvidenceSource">来源：{{ item.businessSource || item.source || '当前页面业务数据' }}</small>
             </article>
           </div>
         </section>
@@ -125,7 +138,7 @@
         </div>
       </section>
 
-      <section class="trace-section">
+      <section v-if="!hideTrace" class="trace-section">
         <el-collapse>
           <el-collapse-item name="trace" title="查看完整数据来源、计算口径与使用边界">
             <el-descriptions :column="1" border size="small">
@@ -159,6 +172,17 @@ const props = defineProps<{
   insight?: any
   loading?: boolean
   title?: string
+  hideInterventionTag?: boolean
+  hideDecisionMeta?: boolean
+  hideBaseline?: boolean
+  hideConsequence?: boolean
+  hideExpectedResult?: boolean
+  hideNoComparisonTag?: boolean
+  hideTrace?: boolean
+  hideTraceShortcut?: boolean
+  hideEvidenceHelp?: boolean
+  hideEvidenceSource?: boolean
+  showAllEvidence?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -212,6 +236,9 @@ function focusReason(item: any) {
 .object-head { display:flex; justify-content:space-between; align-items:flex-start; gap:14px; margin-bottom:12px; }
 .object-name { color:#0f172a; font-size:18px; font-weight:700; }
 .object-meta { margin-top:5px; color:#64748b; font-size:12px; line-height:1.55; }
+.compact-trace-trigger { padding:0; border:0; background:transparent; color:#4f46e5; font:inherit; cursor:help; }
+.compact-trace-trigger:focus-visible { outline:2px solid #a5b4fc; outline-offset:2px; border-radius:3px; }
+.compact-trace-content { max-width:420px; line-height:1.65; }
 .decision-card { padding:16px; border:1px solid #e2e8f0; border-left:4px solid #64748b; border-radius:12px; background:#f8fafc; }
 .decision-card.high { border-left-color:#e11d48; background:#fff7f8; }
 .decision-card.medium { border-left-color:#d97706; background:#fffbeb; }
@@ -237,6 +264,7 @@ function focusReason(item: any) {
 .action-head h4 { margin:5px 0 0; color:#1e293b; font-size:16px; }
 .primary-action > p { margin:10px 0 0; color:#475569; font-size:12px; line-height:1.7; }
 .action-result-grid { display:grid; grid-template-columns:1fr 1.5fr; gap:9px; margin-top:12px; }
+.action-result-grid.single-column { grid-template-columns:1fr; }
 .action-result-grid > div { padding:9px 10px; border:1px solid #e0e7ff; border-radius:8px; background:#fff; }
 .action-result-grid span { display:block; color:#64748b; font-size:11px; }
 .action-result-grid b { display:block; margin-top:4px; color:#334155; font-size:12px; line-height:1.55; }

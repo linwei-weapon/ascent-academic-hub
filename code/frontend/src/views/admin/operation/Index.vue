@@ -10,7 +10,6 @@
           <el-option v-for="item in semesters" :key="item.value" :label="item.label" :value="item.value" />
         </el-select>
       </div>
-      <el-tag v-else type="info" effect="plain">课程结果使用独立多学期窗口</el-tag>
     </div>
     <el-tabs v-model="activeTab" @tab-click="onTabClick">
       <el-tab-pane label="开课供给" name="courses">

@@ -24,7 +24,12 @@ from ..permission_context import (
 )
 from ...ai_experts import get_expert
 from ...ai_experts.versions import resolve_effective_expert
-from ..util import clean_dept, normalize_title
+from ..util import (
+    TEACHER_LOAD_ANOMALY_LIMITS,
+    clean_dept,
+    is_teacher_load_anomaly,
+    normalize_title,
+)
 from . import alert_monitor as alert_monitor_api
 
 router = APIRouter(prefix="/api/admin/ai", tags=["ai"])
@@ -1943,19 +1948,27 @@ def operation_schedule_teacher_insight(teacher_id: str, semester: Optional[str] 
     })
 
 
-def _teacher_scope_filter(college: Optional[str], user: dict, conn: sqlite3.Connection) -> tuple[Optional[str], Optional[str]]:
+def _teacher_scope_filter(
+        college: Optional[str], user: dict, conn: sqlite3.Connection,
+) -> tuple[Optional[str], Optional[str], Optional[set[str]]]:
     col_scope, col_params = college_data_scope(user, conn)
-    scoped_college = college
-    if col_scope and not scoped_college:
-        row = dbm.query_one(conn, f"SELECT college_id,name FROM dim_college WHERE {col_scope}", tuple(col_params))
-        if row:
-            scoped_college = row["college_id"]
-    if scoped_college:
-        name = dbm.scalar(conn, "SELECT name FROM dim_college WHERE college_id=?", (scoped_college,))
-        if not name:
+    visible = dbm.query(
+        conn,
+        "SELECT college_id,name FROM dim_college" +
+        (f" WHERE {col_scope}" if col_scope else "") +
+        " ORDER BY college_id",
+        tuple(col_params),
+    )
+    if college:
+        selected = next((row for row in visible if row["college_id"] == college), None)
+        if not selected:
             raise ApiError("学院不存在或无权访问", code=404, status_code=404)
-        return scoped_college, name
-    return None, None
+        return selected["college_id"], selected["name"], {selected["name"]}
+    if col_scope and len(visible) == 1:
+        return visible[0]["college_id"], visible[0]["name"], {visible[0]["name"]}
+    if col_scope:
+        return None, None, {row["name"] for row in visible}
+    return None, None, None
 
 
 def _teacher_title_map(conn: sqlite3.Connection) -> dict:
@@ -1972,28 +1985,18 @@ def _teacher_load_percentile(rows: list[dict], percentile: float) -> float:
     return values[index]
 
 
-def _teacher_load_quality_issues(conn: sqlite3.Connection, semester: str) -> dict[str, dict]:
-    rows = dbm.query(conn, """
-        SELECT entity_id,affected_rows,severity,status,detail,recommendation
-        FROM data_quality_issue
-        WHERE domain='operation' AND issue_type='teacher_lesson_overflow'
-          AND semester_id=? AND status IN ('open','reviewing')
-    """, (semester,))
-    return {r["entity_id"]: r for r in rows}
-
-
 def _teacher_load_anomaly_ids(conn: sqlite3.Connection, semester: str) -> set[str]:
-    ids = set(_teacher_load_quality_issues(conn, semester).keys())
+    limits = TEACHER_LOAD_ANOMALY_LIMITS
     rows = dbm.query(conn, """
         SELECT teacher_id FROM agg_teacher_load
-        WHERE semester_id=? AND (COALESCE(classes,0)>200 OR COALESCE(hours,0)>1000 OR COALESCE(courses,0)>20)
-    """, (semester,))
-    ids.update(r["teacher_id"] for r in rows)
-    return ids
+        WHERE semester_id=? AND (COALESCE(classes,0)>? OR COALESCE(hours,0)>? OR COALESCE(courses,0)>?)
+    """, (semester, limits["classes"], limits["hours"], limits["courses"]))
+    return {r["teacher_id"] for r in rows}
 
 
 def _teacher_load_rows(conn: sqlite3.Connection, semester: str, college_name: Optional[str] = None,
-                       title: Optional[str] = None, include_quality_issues: bool = False) -> list[dict]:
+                       title: Optional[str] = None, include_anomalies: bool = False,
+                       allowed_college_names: Optional[set[str]] = None) -> list[dict]:
     title_of = _teacher_title_map(conn)
     anomaly_ids = _teacher_load_anomaly_ids(conn, semester)
     rows = dbm.query(conn, """
@@ -2009,9 +2012,11 @@ def _teacher_load_rows(conn: sqlite3.Connection, semester: str, college_name: Op
         norm_title = title_of.get(row["teacher_id"]) or normalize_title(row.get("title"))
         if college_name and dept != college_name:
             continue
+        if allowed_college_names is not None and dept not in allowed_college_names:
+            continue
         if title and norm_title != title:
             continue
-        if not include_quality_issues and row["teacher_id"] in anomaly_ids:
+        if not include_anomalies and row["teacher_id"] in anomaly_ids:
             continue
         item = dict(row)
         item["dept"] = dept
@@ -2031,12 +2036,16 @@ def operation_teacher_load_insight(semester: Optional[str] = None,
                                    user: dict = Depends(get_current_user),
                                    conn: sqlite3.Connection = Depends(get_db)):
     sem = semester or dbm.scalar(conn, "SELECT MAX(semester_id) FROM agg_teacher_load")
-    college_id, college_name = _teacher_scope_filter(college, user, conn)
+    college_id, college_name, allowed_college_names = _teacher_scope_filter(college, user, conn)
     anomaly_ids = _teacher_load_anomaly_ids(conn, sem)
-    rows = _teacher_load_rows(conn, sem, college_name, title)
+    rows = _teacher_load_rows(
+        conn, sem, college_name, title,
+        allowed_college_names=allowed_college_names,
+    )
     scoped_teacher_ids = {
         row["teacher_id"] for row in _teacher_load_rows(
-            conn, sem, college_name, title, include_quality_issues=True,
+            conn, sem, college_name, title, include_anomalies=True,
+            allowed_college_names=allowed_college_names,
         )
     }
     scoped_anomaly_ids = anomaly_ids & scoped_teacher_ids
@@ -2129,7 +2138,7 @@ def operation_teacher_load_insight(semester: Optional[str] = None,
             {"label": "中位学时", "value": f"{median_hours}", "detail": "当前范围教师学时第50百分位；同时保留人均学时作为规模参考", "tone": "info"},
             {"label": "P90核查对象", "value": f"{len(review_candidates)} 人", "detail": f"当前范围总学时不低于P90（{p90_hours}学时），最多10人", "tone": "warning" if review_candidates else "success"},
             {"label": "学时最高教师", "value": top["name"], "detail": f"{top['hours']} 学时；{top['courses']} 门课；{top['classes']} 个班", "tone": "warning"},
-            {"label": "已排除异常", "value": f"{len(scoped_anomaly_ids)} 人", "detail": "当前筛选范围内命中教师负荷异常或数据质量问题，未计入AI负荷排序", "tone": "warning" if scoped_anomaly_ids else "success"},
+            {"label": "已排除异常", "value": f"{len(scoped_anomaly_ids)} 人", "detail": "当前筛选范围内命中教学班、学时或课程数异常阈值，未计入负荷排序", "tone": "warning" if scoped_anomaly_ids else "success"},
             {"label": "最高P90职称层", "value": title_rows[0]["title"] if title_rows else "暂无", "detail": f"中位 {title_rows[0]['medianHours']} 学时；P90 {title_rows[0]['p90Hours']} 学时" if title_rows else "无职称统计", "tone": "info"},
         ],
         "reasons": reasons,
@@ -2153,19 +2162,20 @@ def operation_teacher_load_teacher_insight(teacher_id: str, semester: Optional[s
                                            user: dict = Depends(get_current_user),
                                            conn: sqlite3.Connection = Depends(get_db)):
     sem = semester or dbm.scalar(conn, "SELECT MAX(semester_id) FROM agg_teacher_load")
-    _, scoped_college_name = _teacher_scope_filter(None, user, conn)
+    _, scoped_college_name, allowed_college_names = _teacher_scope_filter(None, user, conn)
     teacher = dbm.query_one(conn, "SELECT teacher_id,name,dept,title FROM dim_teacher WHERE teacher_id=?", (teacher_id,))
     if not teacher:
         raise ApiError("教师不存在", code=404, status_code=404)
     teacher_dept = clean_dept(teacher.get("dept")) or "未归属"
-    if scoped_college_name and teacher_dept != scoped_college_name:
+    if allowed_college_names is not None and teacher_dept not in allowed_college_names:
         raise ApiError("无权访问该教师负荷数据", code=403, status_code=403)
     load = dbm.query_one(conn, "SELECT teacher_id,hours,courses,classes FROM agg_teacher_load WHERE semester_id=? AND teacher_id=?", (sem, teacher_id))
     if not load:
         raise ApiError("暂无该教师负荷数据", code=404, status_code=404)
-    quality_issue = _teacher_load_quality_issues(conn, sem).get(teacher_id)
-    heuristic_anomaly = (load.get("classes") or 0) > 200 or (load.get("hours") or 0) > 1000 or (load.get("courses") or 0) > 20
-    if quality_issue or heuristic_anomaly:
+    heuristic_anomaly = is_teacher_load_anomaly(
+        load.get("classes"), load.get("hours"), load.get("courses"),
+    )
+    if heuristic_anomaly:
         return ai_ok({
             "targetType": "operationTeacherLoadDataQuality",
             "targetId": teacher_id,
@@ -2178,13 +2188,13 @@ def operation_teacher_load_teacher_insight(teacher_id: str, semester: Optional[s
             "sourceLabel": "数据质量规则拦截",
             "generatedBy": "deterministic_rule_engine",
             "generatedAt": _now(),
-            "summary": f"{teacher.get('name') or teacher_id}在 {sem} 学期命中教师教学班溢出数据质量问题：当前记录显示 {load.get('hours') or 0} 学时、{load.get('courses') or 0} 门课、{load.get('classes') or 0} 个教学班。该结果不应作为真实教师负荷结论，应优先核查源系统教师映射、通识课合并和教学班生成逻辑。",
+            "summary": f"{teacher.get('name') or teacher_id}在 {sem} 学期命中教师负荷启发式异常阈值：当前记录显示 {load.get('hours') or 0} 学时、{load.get('courses') or 0} 门课、{load.get('classes') or 0} 个教学班。该结果不应作为真实教师负荷结论，应优先核查源系统教师映射、课程合班和教学班生成逻辑。",
             "confidence": "高",
             "profile": {"college": teacher_dept, "major": normalize_title(teacher.get("title")), "semester": sem},
             "evidence": [
                 {"label": "异常教学班", "value": f"{load.get('classes') or 0} 个", "detail": "超过原型数据质量阈值 200", "tone": "danger"},
                 {"label": "异常学时", "value": f"{load.get('hours') or 0}", "detail": "不进入AI真实负荷排序", "tone": "danger"},
-                {"label": "质量状态", "value": quality_issue.get("status") if quality_issue else "heuristic", "detail": quality_issue.get("detail") if quality_issue else "启发式识别为疑似异常", "tone": "warning"},
+                {"label": "异常规则", "value": "启发式阈值", "detail": "教学班>200、学时>1000或课程>20", "tone": "warning"},
             ],
             "reasons": [
                 "该教师负荷记录远超正常教学任务范围，更可能是教师映射、公共课/通识课合并或教学班明细重复导致。",

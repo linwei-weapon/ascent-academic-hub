@@ -80,7 +80,7 @@ def _write_table(ws, payload: dict) -> None:
     rows = payload.get("rows") or []
     columns = list(report.result_columns)
     keys = [key for key, _ in columns]
-    title_rows = 1 if report.report_id in {"RPT-02", "RPT-04A", "RPT-04B", "RPT-05", "RPT-06", "RPT-07", "RPT-08"} else 0
+    title_rows = 1 if report.report_id in {"RPT-01", "RPT-02", "RPT-03", "RPT-04A", "RPT-04B", "RPT-05", "RPT-06", "RPT-07", "RPT-08"} else 0
     header_rows = 2 if report.report_id == "RPT-05" else 1
     header_start = title_rows + 1
     if title_rows:
@@ -154,7 +154,7 @@ def build_workbook(payload: dict, user: dict) -> bytes:
         ("报表编号", payload.get("reportId")), ("报表标题", payload.get("title")),
         ("可用状态", payload.get("status")), ("导出账号", user.get("username")),
         ("当前工作身份", context.get("identity")), ("学年学期", context.get("semesterId")),
-        ("年级" if payload.get("reportId") in {"RPT-02", "RPT-04A", "RPT-04B", "RPT-05", "RPT-06", "RPT-07", "RPT-08"} else "入学年级", grade_value),
+        ("年级" if payload.get("reportId") in {"RPT-02", "RPT-03", "RPT-04A", "RPT-04B", "RPT-05", "RPT-06", "RPT-07", "RPT-08"} else "入学年级", grade_value),
         ("学院筛选", context.get("organizationId") or "全部授权范围"),
         ("专业筛选", context.get("majorCode") or "全部授权范围"), ("班级筛选", context.get("classCode") or "全部授权范围"),
         ("口径版本", context.get("ruleVersion")), ("数据截止时间", str(context.get("dataCutoff"))),

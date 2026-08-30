@@ -19,6 +19,7 @@ from backend.api.basic_reports.service import (
     _rank_cet4_rows,
     _report_01,
     _report_02,
+    _report_03,
     _report_04a,
     _report_07,
     _rpt07_data_fingerprint,
@@ -87,16 +88,20 @@ class BasicReportContractTest(unittest.TestCase):
         self.assertEqual(0.333333, _pct(1, 3))
 
     def test_export_contains_result_explanation_and_rule_sheets(self):
-        payload = {"reportId": "RPT-01", "title": "测试报表", "status": "available",
-                   "rows": [{"categoryKey": "total", "category": "总人数（留降级：2）：10",
-                             "gender": "男", "countDisplay": "6（1）", "rate": .6}],
+        payload = {"reportId": "RPT-01", "title": "本科2022 级总体挂科情况", "status": "available",
+                   "rows": [{"categoryKey": "total", "category": "总人数（留降级）：10（2）",
+                             "gender": "男", "countDisplay": "6（1）", "rate": .6,
+                             "rateDisplay": "6/10=60.00%"}],
                    "context": {"ruleVersion": "basic-report-v1.1"},
                    "rules": [{"ruleId": "BR-X", "formula": "x"}], "boundary": ["只读"]}
         workbook = load_workbook(BytesIO(build_workbook(payload, {"username": "tester"})))
         self.assertEqual(["报表结果", "报表说明", "口径规则"], workbook.sheetnames)
-        self.assertEqual(["本科生", "性别", "人数", "比例"], [cell.value for cell in workbook["报表结果"][1]])
-        self.assertEqual("0.00%", workbook["报表结果"]["D2"].number_format)
-        self.assertEqual("6（1）", workbook["报表结果"]["C2"].value)
+        result = workbook["报表结果"]
+        self.assertEqual("本科2022 级总体挂科情况", result["A1"].value)
+        self.assertIn("A1:D1", {str(item) for item in result.merged_cells.ranges})
+        self.assertEqual(["本科生", "性别", "人数", "比例"], [cell.value for cell in result[2]])
+        self.assertEqual("6（1）", result["C3"].value)
+        self.assertEqual("6/10=60.00%", result["D3"].value)
 
     def test_rpt01_displays_total_and_retained_demoted_counts(self):
         students = [
@@ -118,13 +123,28 @@ class BasicReportContractTest(unittest.TestCase):
             {"studentId": "R2", "courseId": "C5", "firstPass": 0, "currentPass": 1},
         ])
         rows, summary = _report_01(students, pairs, retained)
-        self.assertEqual("总人数（留降级：2）：3", rows[0]["category"])
+        self.assertEqual("总人数（留降级）：3（2）", rows[0]["category"])
         self.assertEqual("2（1）", rows[0]["countDisplay"])
         self.assertEqual("1（1）", rows[1]["countDisplay"])
-        self.assertEqual("已挂人数（留降级：2）：2", rows[2]["category"])
-        self.assertEqual("在挂人数（留降级：1）：1", rows[4]["category"])
+        self.assertEqual("2/3=66.67%", rows[0]["rateDisplay"])
+        self.assertEqual("1/3=33.33%", rows[1]["rateDisplay"])
+        self.assertEqual("1/3=33.33%", rows[2]["rateDisplay"])
+        self.assertEqual("1/3=33.33%", rows[3]["rateDisplay"])
+        self.assertEqual("1/3=33.33%", rows[4]["rateDisplay"])
+        self.assertEqual("0/3=0.00%", rows[5]["rateDisplay"])
+        self.assertEqual("已挂人数（留降级）：2（2）\n已挂比例: 66.67%", rows[2]["category"])
+        self.assertEqual("在挂人数（留降级）：1（1）\n在挂比例: 33.33%", rows[4]["category"])
+        self.assertEqual(0.666667, rows[2]["categoryRate"])
+        self.assertEqual(0.333333, rows[4]["categoryRate"])
         self.assertEqual(2, summary["retainedDemotedStudents"])
         self.assertEqual(1, summary["failedAfterRetainedDemotedStudents"])
+
+    def test_rpt01_title_uses_only_education_level_and_grade(self):
+        title = _report_title(
+            REPORTS["RPT-01"], "2025-2026-2", 2022, [],
+            {"organization_id": None, "major_code": None, "class_code": None},
+        )
+        self.assertEqual("本科2022 级总体挂科情况", title)
 
     def test_rpt02_uses_major_population_denominators_and_retained_displays(self):
         students = [
@@ -191,6 +211,69 @@ class BasicReportContractTest(unittest.TestCase):
         self.assertLessEqual(row["failedAfterStudents"], row["failedBeforeStudents"])
         self.assertEqual(2, summary["failedBeforeStudents"])
         self.assertEqual(1, summary["failedAfterStudents"])
+
+    def test_rpt03_displays_retained_counts_and_slash_gender_rates(self):
+        students = [
+            {"student_id": "S1", "gender": "男", "organization_id": "O1", "organization_name": "学院A",
+             "major_code": "M1", "major_name": "专业A"},
+            {"student_id": "S2", "gender": "女", "organization_id": "O1", "organization_name": "学院A",
+             "major_code": "M1", "major_name": "专业A"},
+            {"student_id": "S3", "gender": "女", "organization_id": "O1", "organization_name": "学院A",
+             "major_code": "M2", "major_name": "专业B"},
+        ]
+        retained = [
+            {"student_id": "R1", "gender": "男", "organization_id": "O1", "organization_name": "学院A",
+             "major_code": "M1", "major_name": "专业A"},
+            {"student_id": "R2", "gender": "女", "organization_id": "O1", "organization_name": "学院A",
+             "major_code": "M2", "major_name": "专业B"},
+        ]
+        pairs = [
+            {"studentId": "S1", "courseId": "C1", "firstPass": 0, "currentPass": 0},
+            {"studentId": "S2", "courseId": "C2", "firstPass": 1, "currentPass": 1},
+            {"studentId": "S3", "courseId": "C3", "firstPass": 0, "currentPass": 0},
+            {"studentId": "R1", "courseId": "C4", "firstPass": 0, "currentPass": 0},
+            {"studentId": "R2", "courseId": "C5", "firstPass": 1, "currentPass": 1},
+        ]
+
+        rows, summary = _report_03(students, pairs, retained)
+        by_major = {row.get("majorCode"): row for row in rows if not row.get("isSummary")}
+        self.assertEqual("专业A(留降级)", by_major["M1"]["majorName"])
+        self.assertEqual("2（1）", by_major["M1"]["studentCountDisplay"])
+        self.assertEqual("1（1）", by_major["M1"]["failedStudentsDisplay"])
+        self.assertEqual("1/1=100.00%", by_major["M1"]["maleFailureDisplay"])
+        self.assertEqual("0/1=0.00%", by_major["M1"]["femaleFailureDisplay"])
+        self.assertEqual("-", by_major["M2"]["maleFailureDisplay"])
+        self.assertEqual("1/1=100.00%", by_major["M2"]["femaleFailureDisplay"])
+        self.assertEqual("总体情况(留降级)", rows[-1]["majorName"])
+        self.assertEqual("3（2）", rows[-1]["studentCountDisplay"])
+        self.assertEqual("2（1）", rows[-1]["failedStudentsDisplay"])
+        self.assertEqual("3（2）", summary["studentCountDisplay"])
+        self.assertEqual("2（1）", summary["failedStudentsDisplay"])
+
+    def test_rpt03_export_uses_display_counts_and_grade_label(self):
+        payload = {
+            "reportId": "RPT-03",
+            "title": "2025-2026-2 学期本科 2022 级各专业整体与男女挂科率比较",
+            "status": "available",
+            "rows": [{"majorName": "专业A(留降级)", "studentCountDisplay": "2（1）",
+                      "failedStudentsDisplay": "1（1）", "failureRate": .5,
+                      "maleFailureDisplay": "1/1=100.00%", "femaleFailureDisplay": "0/1=0.00%"}],
+            "context": {"semesterId": "2025-2026-2", "entryGrade": 2022},
+            "rules": [], "boundary": [],
+        }
+        workbook = load_workbook(BytesIO(build_workbook(payload, {"username": "tester"})))
+        sheet = workbook["报表结果"]
+        self.assertEqual(payload["title"], sheet["A1"].value)
+        self.assertIn("A1:F1", {str(item) for item in sheet.merged_cells.ranges})
+        self.assertEqual(["专业", "专业人数", "整体挂科人数", "整体挂科率", "男生挂科率", "女生挂科率"],
+                         [cell.value for cell in sheet[2]])
+        self.assertEqual("专业A(留降级)", sheet["A3"].value)
+        self.assertEqual("2（1）", sheet["B3"].value)
+        self.assertEqual("1（1）", sheet["C3"].value)
+        self.assertEqual("1/1=100.00%", sheet["E3"].value)
+        self.assertEqual("A3", sheet.freeze_panes)
+        self.assertEqual("年级", workbook["报表说明"]["A7"].value)
+
     def test_retained_demoted_responsibility_grade_prefers_current_class(self):
         self.assertEqual(2022, _responsibility_grade("石工22-1留学生全英文班", "2021.0"))
         self.assertEqual(2021, _responsibility_grade(None, "2021.0"))

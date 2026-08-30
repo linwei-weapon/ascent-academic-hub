@@ -32,8 +32,9 @@ def _pct(numerator: int | float, denominator: int | float) -> float | None:
 
 
 def _rate_text(numerator: int, denominator: int) -> str:
-    rate = _pct(numerator, denominator)
-    return f"{numerator}÷{denominator}={'—' if rate is None else f'{rate * 100:.2f}%'}"
+    if not denominator:
+        return "-"
+    return f"{numerator}/{denominator}={numerator / denominator * 100:.2f}%"
 
 
 def _count_rate_text(count: int, denominator: int) -> str:
@@ -351,27 +352,32 @@ def _report_01(students: list[dict], pairs: list[dict],
                     "gradeCoverageRate": None, "retainedDemotedStudents": 0,
                     "failedBeforeRetainedDemotedStudents": 0,
                     "failedAfterRetainedDemotedStudents": 0, "unknownGenderStudents": 0}
+    denominator = len(all_ids & eligible)
     categories = (
-        ("total", "总人数", all_ids, retained_demoted_ids),
-        ("failed-before", "已挂人数", all_ids & first, retained_demoted_ids & first),
-        ("failed-after", "在挂人数", all_ids & current, retained_demoted_ids & current),
+        ("total", "总人数", all_ids, retained_demoted_ids, None),
+        ("failed-before", "已挂人数", all_ids & first, retained_demoted_ids & first, "已挂比例"),
+        ("failed-after", "在挂人数", all_ids & current, retained_demoted_ids & current, "在挂比例"),
     )
     rows = []
     student_gender = {student["student_id"]: student.get("gender")
                       for student in [*students, *retained_demoted_students]}
-    for category_key, label, ids, category_retained in categories:
-        category = f"{label}（留降级：{len(category_retained)}）：{len(ids)}"
+    for category_key, label, ids, category_retained, rate_label in categories:
+        category_rate = _pct(len(ids), denominator) if rate_label else None
+        category = f"{label}（留降级）：{len(ids)}（{len(category_retained)}）"
+        if rate_label:
+            category += f"\n{rate_label}: {'—' if category_rate is None else f'{category_rate * 100:.2f}%'}"
         for gender in ("男", "女"):
             gender_ids = {student_id for student_id in ids
                           if student_gender.get(student_id) == gender}
             count = len(gender_ids)
             retained_count = sum(student_gender.get(student_id) == gender
                                  for student_id in category_retained)
-            rows.append({"categoryKey": category_key, "category": category, "gender": gender,
+            rows.append({"categoryKey": category_key, "category": category, "categoryRate": category_rate, "gender": gender,
                          "count": count, "retainedDemotedCount": retained_count,
                          "countDisplay": f"{count}（{retained_count}）",
-                         "rate": _pct(count, len(ids))})
-    denominator = len(all_ids & eligible)
+                         "rate": _pct(count, denominator),
+                         "rateDisplay": f"{count}/{denominator}="
+                                        f"{'—' if not denominator else f'{count / denominator * 100:.2f}%'}"})
     summary = {"studentCount": len(all_ids), "validGradeStudents": denominator,
                "failedBeforeStudents": len(all_ids & first),
                "failedBeforeRate": _pct(len(all_ids & first), denominator),
@@ -462,31 +468,82 @@ def _report_02(students: list[dict], pairs: list[dict],
     return rows, summary
 
 
-def _report_03(students: list[dict], pairs: list[dict]) -> tuple[list[dict], dict]:
-    _, current, _ = _failure_sets(pairs); eligible = {p["studentId"] for p in pairs}
+def _report_03(students: list[dict], pairs: list[dict],
+               retained_demoted_students: list[dict] | None = None) -> tuple[list[dict], dict]:
+    _, current, _ = _failure_sets(pairs)
+    eligible = {pair["studentId"] for pair in pairs}
+    retained_demoted_students = retained_demoted_students or []
+    student_groups = _major_groups(students)
+    retained_groups = _major_groups(retained_demoted_students)
+    group_keys = list(student_groups)
+    group_keys.extend(key for key in retained_groups if key not in student_groups)
     rows = []
-    for key, members in _major_groups(students).items():
-        ids = {s["student_id"] for s in members}; male = {s["student_id"] for s in members if s.get("gender") == "男"}; female = {s["student_id"] for s in members if s.get("gender") == "女"}; unknown = ids - male - female
-        male_valid = len(male & eligible); male_failed = len(male & current)
-        female_valid = len(female & eligible); female_failed = len(female & current)
-        rows.append({"organizationName": key[1], "majorCode": key[2], "majorName": key[3],
-                     "studentCount": len(ids), "validGradeStudents": len(ids & eligible),
-                     "failedStudents": len(ids & current), "failureRate": _pct(len(ids & current), len(ids & eligible)),
-                     "maleValidStudents": male_valid, "maleFailedStudents": male_failed,
-                     "maleFailureRate": _pct(male_failed, male_valid), "maleFailureDisplay": _rate_text(male_failed, male_valid),
-                     "femaleValidStudents": female_valid, "femaleFailedStudents": female_failed,
-                     "femaleFailureRate": _pct(female_failed, female_valid), "femaleFailureDisplay": _rate_text(female_failed, female_valid),
-                     "unknownGenderStudents": len(unknown)})
-    all_ids = {student["student_id"] for student in students}; all_eligible = all_ids & eligible
+    for key in group_keys:
+        members = student_groups.get(key, [])
+        ids = {student["student_id"] for student in members}
+        retained_ids = {student["student_id"] for student in retained_groups.get(key, [])}
+        male = {student["student_id"] for student in members if student.get("gender") == "男"}
+        female = {student["student_id"] for student in members if student.get("gender") == "女"}
+        unknown = ids - male - female
+        student_count = len(ids)
+        retained_count = len(retained_ids)
+        failed_students = len(ids & current)
+        retained_failed = len(retained_ids & current)
+        male_valid = len(male & eligible)
+        male_failed = len(male & current)
+        female_valid = len(female & eligible)
+        female_failed = len(female & current)
+        rows.append({
+            "organizationName": key[1], "majorCode": key[2],
+            "majorName": f"{key[3]}(留降级)",
+            "studentCount": student_count,
+            "retainedDemotedStudents": retained_count,
+            "studentCountDisplay": f"{student_count}（{retained_count}）",
+            "validGradeStudents": len(ids & eligible),
+            "failedStudents": failed_students,
+            "failedRetainedDemotedStudents": retained_failed,
+            "failedStudentsDisplay": f"{failed_students}（{retained_failed}）",
+            "failureRate": _pct(failed_students, len(ids & eligible)),
+            "maleValidStudents": male_valid,
+            "maleFailedStudents": male_failed,
+            "maleFailureRate": _pct(male_failed, male_valid),
+            "maleFailureDisplay": _rate_text(male_failed, male_valid),
+            "femaleValidStudents": female_valid,
+            "femaleFailedStudents": female_failed,
+            "femaleFailureRate": _pct(female_failed, female_valid),
+            "femaleFailureDisplay": _rate_text(female_failed, female_valid),
+            "unknownGenderStudents": len(unknown),
+        })
+    all_ids = {student["student_id"] for student in students}
+    retained_ids = {student["student_id"] for student in retained_demoted_students}
+    all_eligible = all_ids & eligible
     male = {student["student_id"] for student in students if student.get("gender") == "男"}
     female = {student["student_id"] for student in students if student.get("gender") == "女"}
-    summary = {"majorCount": len(rows), "studentCount": len(all_ids), "validGradeStudents": len(all_eligible),
-               "failedStudents": len(all_ids & current), "failureRate": _pct(len(all_ids & current), len(all_eligible)),
-               "maleFailureDisplay": _rate_text(len(male & current), len(male & eligible)),
-               "femaleFailureDisplay": _rate_text(len(female & current), len(female & eligible))}
+    failed_students = len(all_ids & current)
+    retained_failed = len(retained_ids & current)
+    summary = {
+        "majorCount": len(rows),
+        "studentCount": len(all_ids),
+        "retainedDemotedStudents": len(retained_ids),
+        "studentCountDisplay": f"{len(all_ids)}（{len(retained_ids)}）",
+        "validGradeStudents": len(all_eligible),
+        "failedStudents": failed_students,
+        "failedRetainedDemotedStudents": retained_failed,
+        "failedStudentsDisplay": f"{failed_students}（{retained_failed}）",
+        "failureRate": _pct(failed_students, len(all_eligible)),
+        "maleValidStudents": len(male & eligible),
+        "maleFailedStudents": len(male & current),
+        "maleFailureRate": _pct(len(male & current), len(male & eligible)),
+        "maleFailureDisplay": _rate_text(len(male & current), len(male & eligible)),
+        "femaleValidStudents": len(female & eligible),
+        "femaleFailedStudents": len(female & current),
+        "femaleFailureRate": _pct(len(female & current), len(female & eligible)),
+        "femaleFailureDisplay": _rate_text(len(female & current), len(female & eligible)),
+        "unknownGenderStudents": sum(student.get("gender") not in {"男", "女"} for student in students),
+    }
     rows.sort(key=lambda row: (-(row["failureRate"] or 0), -row["failedStudents"], row["majorName"]))
     if rows:
-        rows.append({"majorName": "总体情况", **summary, "isSummary": True})
+        rows.append({"majorName": "总体情况(留降级)", **summary, "isSummary": True})
     return rows, summary
 
 
@@ -780,6 +837,8 @@ def validate_token(token: str, report: ReportDefinition, user: dict, filters: di
 
 def _report_title(report: ReportDefinition, semester_id: str, entry_grade: int | None,
                   students: list[dict], filters: dict) -> str:
+    if report.report_id == "RPT-01":
+        return f"本科{entry_grade} 级总体挂科情况"
     if report.report_id not in {"RPT-02", "RPT-04A", "RPT-04B", "RPT-05", "RPT-06", *FOCUS_ROSTER_REPORT_IDS}:
         return f"{semester_id} 学期本科 {entry_grade} 级{report.title}"
     parts: list[str] = []
@@ -821,7 +880,7 @@ def build_report(v1: sqlite3.Connection, v2: sqlite3.Connection, user: dict,
         raise ApiError("当前工作身份没有该报表菜单权限", code=403, status_code=403)
     supplied = {"semesterId": semester_id, "entryGrade": entry_grade, "organizationId": organization_id,
                 "majorCode": major_code, "classCode": class_code}
-    labels = {"semesterId": "学年学期", "entryGrade": "年级" if report.report_id in {"RPT-02", "RPT-04A", "RPT-04B", "RPT-05", "RPT-06", *FOCUS_ROSTER_REPORT_IDS} else "入学年级", "organizationId": "学院",
+    labels = {"semesterId": "学年学期", "entryGrade": "年级" if report.report_id in {"RPT-02", "RPT-03", "RPT-04A", "RPT-04B", "RPT-05", "RPT-06", *FOCUS_ROSTER_REPORT_IDS} else "入学年级", "organizationId": "学院",
               "majorCode": "专业", "classCode": "班级"}
     missing = [labels[key] for key in report.required_filters if supplied.get(key) in {None, "", 0}]
     if missing:
@@ -833,18 +892,18 @@ def build_report(v1: sqlite3.Connection, v2: sqlite3.Connection, user: dict,
         title_filters = {**filters, **_title_scope_labels(v2, context, filters)}
     retained_demoted_students = (
         _retained_demoted_students(v2, context, filters, semester_id)
-        if report.report_id in {"RPT-01", "RPT-02"} else []
+        if report.report_id in {"RPT-01", "RPT-02", "RPT-03"} else []
     )
     additional_student_ids = {student["student_id"] for student in retained_demoted_students}
     pairs = [] if report.report_id in {"RPT-06", "RPT-07", "RPT-08"} else _pair_states(
         v2, context, filters, semester_id,
-        additional_student_ids=additional_student_ids if report.report_id in {"RPT-01", "RPT-02"} else None,
+        additional_student_ids=additional_student_ids if report.report_id in {"RPT-01", "RPT-02", "RPT-03"} else None,
     )
     status = "available"
     if report.report_id == "RPT-01":
         rows, summary = _report_01(students, pairs, retained_demoted_students)
     elif report.report_id == "RPT-02": rows, summary = _report_02(students, pairs, retained_demoted_students)
-    elif report.report_id == "RPT-03": rows, summary = _report_03(students, pairs)
+    elif report.report_id == "RPT-03": rows, summary = _report_03(students, pairs, retained_demoted_students)
     elif report.report_id == "RPT-04A": rows, summary = _report_04a(students, pairs)
     elif report.report_id == "RPT-04B": rows, summary = _report_04b(students, pairs)
     elif report.report_id == "RPT-05": rows, summary = _report_05(students, pairs)
@@ -867,6 +926,11 @@ def build_report(v1: sqlite3.Connection, v2: sqlite3.Connection, user: dict,
         "不并入主人数及比率分母；补考前后限定同一所选学期、同一普通考试首次不及格学生课程集合，"
         "在挂人数不得大于已挂人数；补考前后挂科率分别为已挂人数、在挂人数除以专业人数，"
         "通过率为（专业人数－在挂人数）除以专业人数"
+    )
+    if report.report_id == "RPT-03": boundary.append(
+        "专业名称标注留降级口径；专业人数、整体挂科人数括号内分别显示同专业留降级人数，"
+        "留降级沿用正式异动和责任年级口径，不并入主人数及比率分母；男、女生挂科率按各自有效成绩人数计算，"
+        "分母为0时显示“-”"
     )
     if report.report_id == "RPT-04A": boundary.append("原表列名保留为“5科以上”；计算按大于5科，即6科及以上，避免与3-5科重复")
     if report.report_id in FOCUS_ROSTER_REPORT_IDS: boundary.append(

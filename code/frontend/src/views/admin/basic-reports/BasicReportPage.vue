@@ -1,6 +1,6 @@
 <template>
   <div class="basic-report-page">
-    <div v-if="!isRpt02 && !isRpt04A && !isRpt04B && !isRpt05 && !isRpt06 && !isFocusRoster" class="sa-head-row">
+    <div v-if="!isRpt01 && !isRpt02 && !isRpt03 && !isRpt04A && !isRpt04B && !isRpt05 && !isRpt06 && !isFocusRoster" class="sa-head-row">
       <div>
         <h2 class="sa-page-title">{{ definition.reportId }} {{ definition.title }}</h2>
         <p class="sa-page-sub">固定口径只读报表 · 查询结果按原始报表结构展示 · 支持 Excel 导出</p>
@@ -12,7 +12,7 @@
 
     <el-card shadow="never" class="filter-card">
       <el-form :inline="true" label-position="top" class="report-filter">
-        <el-form-item label="学年学期" :required="isRequired('semesterId')">
+        <el-form-item v-if="!isRpt01" label="学年学期" :required="isRequired('semesterId')">
           <el-select v-model="draft.semesterId" clearable filterable placeholder="请选择学年学期" style="width:180px">
             <el-option v-for="item in options.semesters" :key="item" :label="item" :value="item" />
           </el-select>
@@ -22,17 +22,17 @@
             <el-option v-for="item in options.entryGrades" :key="item" :label="`${item}级`" :value="item" />
           </el-select>
         </el-form-item>
-        <el-form-item label="学院" :required="isRequired('organizationId')">
+        <el-form-item v-if="!isRpt01 && !isRpt03" label="学院" :required="isRequired('organizationId')">
           <el-select v-model="draft.organizationId" clearable filterable placeholder="请选择学院" style="width:220px">
             <el-option v-for="item in organizationOptions" :key="item.value" :label="item.label" :value="item.value" />
           </el-select>
         </el-form-item>
-        <el-form-item v-if="!isRpt02" label="专业" :required="isRequired('majorCode')">
+        <el-form-item v-if="!isRpt01 && !isRpt02 && !isRpt03" label="专业" :required="isRequired('majorCode')">
           <el-select v-model="draft.majorCode" clearable filterable placeholder="请选择专业" style="width:220px">
             <el-option v-for="item in majorOptions" :key="item.value" :label="item.label" :value="item.value" />
           </el-select>
         </el-form-item>
-        <el-form-item v-if="!isRpt02 && !isRpt04A && !isRpt05" label="班级" :required="isRequired('classCode')">
+        <el-form-item v-if="!isRpt01 && !isRpt02 && !isRpt03 && !isRpt04A && !isRpt05" label="班级" :required="isRequired('classCode')">
           <el-select v-model="draft.classCode" clearable filterable placeholder="请选择班级" style="width:190px">
             <el-option v-for="item in classOptions" :key="item" :label="item" :value="item" />
           </el-select>
@@ -42,7 +42,7 @@
       <p class="filter-tip">带 <span>*</span> 的条件必须填写；必选条件未完整填写时不发起查询，结果区仅展示原始报表表头。</p>
     </el-card>
 
-    <div v-if="result && !isRpt02 && !isRpt04A && !isRpt04B && !isRpt05 && !isRpt06 && !isFocusRoster" class="context-strip">
+    <div v-if="result && !isRpt01 && !isRpt02 && !isRpt03 && !isRpt04A && !isRpt04B && !isRpt05 && !isRpt06 && !isFocusRoster" class="context-strip">
       <span><b>当前身份：</b>{{ result.context.identity }}</span><span><b>学期：</b>{{ result.context.semesterId }}</span>
       <span><b>{{ usesGradeLabel ? '年级' : '入学年级' }}：</b>{{ result.context.entryGrade }}级</span><span><b>口径版本：</b>{{ result.context.ruleVersion }}</span>
       <span><b>结果行数：</b>{{ result.total }}</span>
@@ -69,7 +69,7 @@
             <el-icon class="rule-help-icon" tabindex="0" aria-label="查看重点关注学生规则"><QuestionFilled /></el-icon>
           </el-tooltip>
         </div>
-        <el-button v-if="result && (isRpt02 || isRpt04A || isRpt04B || isRpt05 || isRpt06 || isFocusRoster)" type="primary" plain :disabled="!result.capabilities?.export || !result.snapshotToken || loading" :loading="exporting" @click="exportExcel">
+        <el-button v-if="result && (isRpt01 || isRpt02 || isRpt03 || isRpt04A || isRpt04B || isRpt05 || isRpt06 || isFocusRoster)" type="primary" plain :disabled="!result.capabilities?.export || !result.snapshotToken || loading" :loading="exporting" @click="exportExcel">
           <el-icon><Download /></el-icon> 导出 Excel
         </el-button>
         <el-tag v-else-if="result" effect="plain">{{ result.status }}</el-tag>
@@ -95,7 +95,8 @@
         <template #empty><div class="blank-table-body">{{ result ? '当前授权范围和筛选条件下无数据' : '' }}</div></template>
       </el-table>
 
-      <DataTable v-else :key="definition.reportId" :columns="definition.columns" :data="result?.rows || []" :storage-key="`basic-report:${definition.reportId}`" :span-method="spanMethod" :row-class-name="rowClassName" max-business-columns="12" :config-version="isRpt02 || isRpt06 ? 3 : 2" empty-text="">
+      <DataTable v-else :key="definition.reportId" :columns="definition.columns" :data="result?.rows || []" :storage-key="`basic-report:${definition.reportId}`" :span-method="spanMethod" :row-class-name="rowClassName" max-business-columns="12" :config-version="isRpt01 || isRpt02 || isRpt03 || isRpt06 ? 3 : 2" empty-text="">
+        <template v-if="isRpt01" #col-category="{ row }"><span class="multiline-cell">{{ row.category }}</span></template>
         <template v-if="isRpt02" #header-failedBeforeRate>
           <span class="formula-header">挂科率（补考前）<el-tooltip content="挂科率（补考前）= 已挂人数 ÷ 专业人数" placement="top"><el-icon class="formula-help-icon" tabindex="0" aria-label="查看补考前挂科率计算公式"><QuestionFilled /></el-icon></el-tooltip></span>
         </template>
@@ -113,7 +114,7 @@
       </DataTable>
     </el-card>
 
-    <el-collapse v-if="result && !isRpt02 && !isRpt04A && !isRpt04B && !isRpt05 && !isRpt06 && !isFocusRoster" class="boundary-panel">
+    <el-collapse v-if="result && !isRpt01 && !isRpt02 && !isRpt03 && !isRpt04A && !isRpt04B && !isRpt05 && !isRpt06 && !isFocusRoster" class="boundary-panel">
       <el-collapse-item title="数据来源、计算规则与适用边界" name="rules">
         <ul><li v-for="item in result.boundary" :key="item">{{ item }}</li></ul>
         <el-table :data="result.rules" size="small" border><el-table-column prop="ruleId" label="规则编号" width="190" /><el-table-column prop="provenance" label="来源类型" width="120" /><el-table-column prop="source" label="复用来源" min-width="240" /><el-table-column prop="formula" label="计算方法" min-width="300" /><el-table-column prop="boundary" label="适用边界" min-width="300" /></el-table>
@@ -135,13 +136,15 @@ import { reportDefinitions, type BasicReportFilter } from './reportDefinitions'
 const route = useRoute()
 const router = useRouter()
 const definition = computed(() => reportDefinitions[route.path] || reportDefinitions['/admin/basic-reports/failure-overview'])
+const isRpt01 = computed(() => definition.value.reportId === 'RPT-01')
 const isRpt02 = computed(() => definition.value.reportId === 'RPT-02')
+const isRpt03 = computed(() => definition.value.reportId === 'RPT-03')
 const isRpt04A = computed(() => definition.value.reportId === 'RPT-04A')
 const isRpt04B = computed(() => definition.value.reportId === 'RPT-04B')
 const isRpt06 = computed(() => definition.value.reportId === 'RPT-06')
 const isRpt05 = computed(() => definition.value.reportId === 'RPT-05')
 const isFocusRoster = computed(() => ['RPT-07', 'RPT-08'].includes(definition.value.reportId))
-const usesGradeLabel = computed(() => isRpt02.value || isRpt04A.value || isRpt04B.value || isRpt05.value || isRpt06.value || isFocusRoster.value)
+const usesGradeLabel = computed(() => isRpt01.value || isRpt02.value || isRpt03.value || isRpt04A.value || isRpt04B.value || isRpt05.value || isRpt06.value || isFocusRoster.value)
 const options = reactive<any>({ semesters: [], entryGrades: [], organizations: [], majors: [], classes: [] })
 const draft = reactive<any>({ semesterId: '', entryGrade: null, organizationId: '', majorCode: '', classCode: '' })
 const applied = reactive<any>({ semesterId: '', entryGrade: null, organizationId: '', majorCode: '', classCode: '' })
@@ -176,7 +179,7 @@ function rankClass(rank: number) {
   return rank <= 3 ? ['cet4-rank', 'rank-' + rank] : 'cet4-rank-text'
 }
 function clearPage() {
-  Object.assign(draft, { semesterId: '', entryGrade: null, organizationId: '', majorCode: '', classCode: '' })
+  Object.assign(draft, { semesterId: isRpt01.value ? (options.semesters[0] || '') : '', entryGrade: null, organizationId: '', majorCode: '', classCode: '' })
   Object.assign(applied, draft)
   result.value = null
 }
@@ -184,15 +187,19 @@ function clearPage() {
 function queryParams() {
   const params = new URLSearchParams({ semesterId: applied.semesterId })
   if (applied.entryGrade != null && applied.entryGrade !== '') params.set('entryGrade', String(applied.entryGrade))
-  if (applied.organizationId) params.set('organizationId', applied.organizationId)
-  if (!isRpt02.value && applied.majorCode) params.set('majorCode', applied.majorCode)
-  if (!isRpt02.value && !isRpt04A.value && !isRpt05.value && applied.classCode) params.set('classCode', applied.classCode)
+  if (!isRpt01.value && !isRpt03.value && applied.organizationId) params.set('organizationId', applied.organizationId)
+  if (!isRpt01.value && !isRpt02.value && !isRpt03.value && applied.majorCode) params.set('majorCode', applied.majorCode)
+  if (!isRpt01.value && !isRpt02.value && !isRpt03.value && !isRpt04A.value && !isRpt05.value && applied.classCode) params.set('classCode', applied.classCode)
   return params
 }
 
 async function loadOptions() {
   const data = await http.get<any>('/admin/basic-reports/options')
   Object.assign(options, data)
+  if (isRpt01.value) {
+    draft.semesterId = options.semesters[0] || ''
+    applied.semesterId = draft.semesterId
+  }
 }
 
 async function applyFilters() {
