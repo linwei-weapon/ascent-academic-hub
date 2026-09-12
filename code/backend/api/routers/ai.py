@@ -634,8 +634,10 @@ def _v2_student_access(conn: sqlite3.Connection, student_id: str, user: dict) ->
     scope, params = _v2_student_scope(user, conn, "s")
     row = dbm.query_one(conn, f"""
         SELECT s.student_id,s.display_name,s.entry_grade,s.organization_id,s.major_code,
+               COALESCE(NULLIF(o.name,''),'未映射学院') organization_name,
                s.major_name,s.class_code,p.plan_name,p.version
         FROM dim_student s
+        LEFT JOIN dim_organization o ON o.organization_id=s.organization_id
         LEFT JOIN curriculum_plan p ON p.plan_id=s.plan_id
         WHERE s.student_id=?{(' AND ' + scope) if scope else ''}
     """, tuple([student_id] + params))
@@ -1194,7 +1196,7 @@ def graduation_readiness_student_insight(student_id: str,
         },
         "primaryAction": primary_action,
         "confidence": "高" if rows else "中",
-        "profile": {"college": student.get("organization_id"), "major": student.get("major_name"),
+        "profile": {"college": student.get("organization_name"), "major": student.get("major_name"),
                     "className": student.get("class_code"), "grade": student.get("entry_grade")},
         "evidence": [
             {"label": "明确未通过", "value": f"{len(failed)} 门", "detail": "已发布成绩中存在必修课未通过记录", "tone": "danger" if failed else "success"},

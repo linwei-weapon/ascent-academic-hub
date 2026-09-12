@@ -104,9 +104,25 @@ class GraduationReadinessUiContractTest(unittest.TestCase):
         self.assertIn("AND ps.rule_version=x.rule_version AND ps.binding_status='matched'", backend)
         self.assertIn('cond.append("ps.binding_status=\'matched\'")', backend)
 
+    def test_course_supply_drawer_hides_boundary_and_paginates_affected_students(self):
+        page = self.read("frontend/src/views/admin/reports/GraduationReadiness.vue")
+
+        self.assertNotIn('title="证据边界" :description="supply.boundary"', page)
+        self.assertIn("supplyPage=ref(1),supplyPageSize=ref(50),supplyStudentTotal=ref(0)", page)
+        self.assertIn(':page-sizes="[10,20,50,100]"', page)
+        self.assertIn('layout="total, sizes, prev, pager, next"', page)
+        self.assertIn("studentQuery.set('limit',String(supplyPageSize.value))", page)
+        self.assertIn("studentQuery.set('offset',String((supplyPage.value-1)*supplyPageSize.value))", page)
+        self.assertIn("supplyStudentTotal.value=s.total||0", page)
+        self.assertIn("async function loadSupplyStudents()", page)
+        self.assertIn("function changeSupplyPageSize(value:number)", page)
+        self.assertIn("function changeSupplyPage(value:number)", page)
+        self.assertNotIn("studentQuery.set('limit','100')", page)
+
     def test_student_evidence_and_insight_use_the_simplified_graduation_view(self):
         page = self.read("frontend/src/views/admin/reports/GraduationReadiness.vue")
         drawer = self.read("frontend/src/components/AIInsightDrawer.vue")
+        backend = self.read("backend/api/routers/ai.py")
 
         self.assertNotIn('title="核查边界"', page)
         self.assertNotIn("studentEvidence.boundary", page)
@@ -123,6 +139,7 @@ class GraduationReadinessUiContractTest(unittest.TestCase):
             "hide-expected-result",
             "hide-no-comparison-tag",
             "hide-trace",
+            "hide-trace-shortcut",
             "hide-evidence-help",
             "hide-evidence-source",
             "show-all-evidence",
@@ -131,7 +148,9 @@ class GraduationReadinessUiContractTest(unittest.TestCase):
 
         self.assertIn("'single-column': hideExpectedResult", drawer)
         self.assertIn("showAllEvidence ? view.evidence : view.evidence.slice(0, 3)", drawer)
-        self.assertNotIn("hide-trace-shortcut", page)
+        self.assertIn("COALESCE(NULLIF(o.name,''),'未映射学院') organization_name", backend)
+        self.assertIn('"college": student.get("organization_name")', backend)
+        self.assertNotIn('"college": student.get("organization_id")', backend)
         for trace_field in ("分析范围：", "事实来源：", "规则版本：", "适用边界："):
             self.assertIn(trace_field, drawer)
 

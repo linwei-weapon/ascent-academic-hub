@@ -112,7 +112,6 @@
 
     <el-drawer v-model="supplyVisible" :title="supply.course?.courseName ? `${supply.course.courseName}｜课程保障证据` : '课程保障证据'" size="860px">
       <div v-loading="supplyDrawerLoading" element-loading-text="正在加载历史开课、替代和影响学生证据…" class="drawer-body">
-        <el-alert type="info" :closable="false" title="证据边界" :description="supply.boundary"/>
         <el-descriptions class="drawer-summary" :column="3" border>
           <el-descriptions-item label="必修未通过">{{supply.affected?.actionRequiredStudents||0}}人</el-descriptions-item>
           <el-descriptions-item label="过期漏修">{{supply.affected?.verificationStudents||0}}人</el-descriptions-item>
@@ -124,9 +123,12 @@
         <h4>已接入历史开课记录</h4>
         <DataTable :columns="offeringColumns" :data="supply.offerings||[]" storage-key="curriculum:graduation-supply" :max-business-columns="6" :config-version="2" size="small"/>
         <h4>受影响学生</h4>
-        <DataTable :columns="supplyStudentColumns" :data="supplyStudents" storage-key="curriculum:graduation-supply-students" :max-business-columns="5" :config-version="2" size="small">
+        <DataTable :columns="supplyStudentColumns" :data="supplyStudents" storage-key="curriculum:graduation-supply-students" :max-business-columns="5" :config-version="2" size="small" v-loading="supplyStudentsLoading">
           <template #col-action="{row}"><el-button link type="primary" @click="student({student_id:row.studentId})">核查学生</el-button></template>
         </DataTable>
+        <el-pagination :current-page="supplyPage" :page-size="supplyPageSize" :page-sizes="[10,20,50,100]"
+          :total="supplyStudentTotal" layout="total, sizes, prev, pager, next" class="pager"
+          @size-change="changeSupplyPageSize" @current-change="changeSupplyPage"/>
       </div>
     </el-drawer>
     <AIInsightDrawer
@@ -141,6 +143,7 @@
       hide-expected-result
       hide-no-comparison-tag
       hide-trace
+      hide-trace-shortcut
       hide-evidence-help
       hide-evidence-source
       show-all-evidence
@@ -158,8 +161,9 @@ import DataTable,{type DataTableColumn}from'@/components/DataTable.vue'
 
 const initialLoading=ref(true),listLoading=ref(false),draftStatus=ref(''),status=ref(''),page=ref(1),pageSize=ref(50)
 const supplyVisible=ref(false),studentVisible=ref(false),activeMajor=ref(''),activeMajorName=ref('')
+const supplyPage=ref(1),supplyPageSize=ref(50),supplyStudentTotal=ref(0),supplyCourseId=ref('')
 const studentSection=ref<HTMLElement|null>(null)
-const studentDrawerLoading=ref(false),supplyDrawerLoading=ref(false)
+const studentDrawerLoading=ref(false),supplyDrawerLoading=ref(false),supplyStudentsLoading=ref(false)
 const aiDrawerVisible=ref(false),aiLoading=ref(false),aiInsight=ref<any>(null)
 const data=reactive<any>({summary:{},majors:[],courses:[],students:[],total:0}),definition=reactive<any>({})
 const filterOptions=reactive<any>({grades:[],colleges:[],majors:[],plans:[]})
@@ -167,7 +171,7 @@ const filterOptionsError=ref('')
 const draftGlobal=reactive<any>({grades:[],organizationId:'',majorCode:'',planId:''})
 const appliedGlobal=reactive<any>({grades:[],organizationId:'',majorCode:'',planId:''})
 const supply=reactive<any>({}),studentEvidence=reactive<any>({}),supplyStudents=ref<any[]>([])
-let overviewRequestSeq=0,listRequestSeq=0,studentRequestSeq=0,supplyRequestSeq=0
+let overviewRequestSeq=0,listRequestSeq=0,studentRequestSeq=0,supplyRequestSeq=0,supplyStudentRequestSeq=0
 const selectedStudentNeedsAi=computed(()=>Number(studentEvidence.summary?.failed_courses||0)>0)
 const statusName:any={action_required:'必修未通过',verification_required:'过期漏修',evidence_complete:'当前未发现到期问题'}
 const filterOptionKeys=['grades','colleges','majors','plans'] as const
@@ -292,7 +296,10 @@ async function inspectMajor(row:any){draftStatus.value='';status.value='';active
 async function clearMajor(){activeMajor.value='';activeMajorName.value='';page.value=1;await loadStudents()}
 function changePageSize(value:number){pageSize.value=value;page.value=1;loadStudents()}
 async function student(row:any){const requestId=++studentRequestSeq;studentVisible.value=true;studentDrawerLoading.value=true;try{const r=await http.get<any>('/v2/topics/graduation-readiness/student/'+encodeURIComponent(row.student_id));if(requestId===studentRequestSeq)Object.assign(studentEvidence,r)}finally{if(requestId===studentRequestSeq)studentDrawerLoading.value=false}}
-async function openSupply(row:any){const requestId=++supplyRequestSeq;supplyVisible.value=true;supplyDrawerLoading.value=true;try{const id=encodeURIComponent(row.course_id);const context=appendGlobalParams(new URLSearchParams(),false);const supplyQuery=context.toString();const studentQuery=new URLSearchParams(context);studentQuery.set('course_id',row.course_id);studentQuery.set('limit','100');const[r,s]=await Promise.all([http.get<any>('/v2/curriculum/course-supply/'+id+(supplyQuery?'?'+supplyQuery:'')),http.get<any>('/v2/curriculum/management-students?'+studentQuery)]);if(requestId===supplyRequestSeq){Object.assign(supply,r);supplyStudents.value=s.items||[]}}finally{if(requestId===supplyRequestSeq)supplyDrawerLoading.value=false}}
+async function loadSupplyStudents(){const courseId=supplyCourseId.value;if(!courseId)return;const requestId=++supplyStudentRequestSeq;supplyStudentsLoading.value=true;const studentQuery=appendGlobalParams(new URLSearchParams(),false);studentQuery.set('course_id',courseId);studentQuery.set('limit',String(supplyPageSize.value));studentQuery.set('offset',String((supplyPage.value-1)*supplyPageSize.value));try{const s=await http.get<any>('/v2/curriculum/management-students?'+studentQuery);if(requestId===supplyStudentRequestSeq){supplyStudents.value=s.items||[];supplyStudentTotal.value=s.total||0}}finally{if(requestId===supplyStudentRequestSeq)supplyStudentsLoading.value=false}}
+function changeSupplyPageSize(value:number){supplyPageSize.value=value;supplyPage.value=1;loadSupplyStudents()}
+function changeSupplyPage(value:number){supplyPage.value=value;loadSupplyStudents()}
+async function openSupply(row:any){const requestId=++supplyRequestSeq;supplyCourseId.value=row.course_id;supplyPage.value=1;supplyStudents.value=[];supplyStudentTotal.value=0;supplyVisible.value=true;supplyDrawerLoading.value=true;try{const id=encodeURIComponent(row.course_id);const context=appendGlobalParams(new URLSearchParams(),false);const supplyQuery=context.toString();const[r]=await Promise.all([http.get<any>('/v2/curriculum/course-supply/'+id+(supplyQuery?'?'+supplyQuery:'')),loadSupplyStudents()]);if(requestId===supplyRequestSeq)Object.assign(supply,r)}finally{if(requestId===supplyRequestSeq)supplyDrawerLoading.value=false}}
 async function openStudentAi(row:any){const sid=row.student_id;if(!sid)return;aiDrawerVisible.value=true;aiLoading.value=true;aiInsight.value=null;try{aiInsight.value=await getGraduationStudentAIInsight(sid)}finally{aiLoading.value=false}}
 onMounted(loadInitial)
 </script>
