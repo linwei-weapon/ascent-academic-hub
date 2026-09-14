@@ -4,52 +4,14 @@
  */
 import { reactive, computed } from 'vue'
 import {
-  http, setToken, clearToken, getToken, setActiveIdentity, clearActiveIdentity,
+  setToken, clearToken, getToken, setActiveIdentity, clearActiveIdentity,
 } from '@/utils/http'
 import { roleStore, type RoleType, setCollege, setMajorId, setManagedClasses } from '@/store/role'
+import { loginWithPassword, getCurrentUser, switchWorkIdentity, logoutSession } from '@/api/auth'
+import type { AuthMenu, AuthUser } from '@/types/auth'
 
-export interface AuthMenu {
-  menu_id: string
-  title: string
-  path: string
-  icon?: string | null
-  sort_order?: number
-  parent_id?: string | null
-}
-
-export interface AuthUser {
-  username: string
-  name: string
-  role: string
-  roleName: string
-  activeIdentityId?: string
-  identities?: Array<{
-    identityId: string
-    roleId: string
-    roleName: string
-    isDefault: boolean
-    validFrom?: string | null
-    validTo?: string | null
-    source?: string | null
-  }>
-  permissionContext?: {
-    userId: string
-    username: string
-    staffId?: string | null
-    activeIdentityId: string
-    activeRole: string
-    activeRoleName: string
-    authorized: boolean
-    authorizationIssue?: string | null
-    menuPermissions: string[]
-    actionPermissions: string[]
-    detailScope: Record<string, unknown>
-    comparisonScope: Record<string, unknown>
-    fieldPolicy: Record<string, unknown>
-    scopeFingerprint: string
-  }
-  scope?: { collegeId?: string; collegeName?: string; majorId?: string; classIds?: string[] }
-}
+// 保留既有类型导入路径，页面与菜单工具可继续从 Store 导入。
+export type { AuthMenu, AuthUser } from '@/types/auth'
 
 interface AuthState {
   user: AuthUser | null
@@ -79,8 +41,7 @@ function applyUser(user: AuthUser, menus: AuthMenu[]): void {
 
 /** 账号密码登录 */
 export async function login(username: string, password: string): Promise<void> {
-  const data = await http.post<{ token: string; user: AuthUser & { menus: AuthMenu[] } }>(
-    '/auth/login', { username, password })
+  const data = await loginWithPassword(username, password)
   setToken(data.token)
   applyUser(data.user, data.user.menus || [])
 }
@@ -88,23 +49,25 @@ export async function login(username: string, password: string): Promise<void> {
 /** 刷新页面后用已存 token 恢复会话；失败抛错由守卫处理 */
 export async function fetchMe(): Promise<void> {
   if (!getToken()) throw new Error('no token')
-  const data = await http.get<AuthUser & { menus: AuthMenu[] }>('/auth/me')
+  const data = await getCurrentUser()
   applyUser(data, data.menus || [])
 }
 
 /** 切换当前工作身份；后端重新计算菜单、动作权限和数据范围。 */
 export async function switchIdentity(identityId: string): Promise<void> {
-  const data = await http.post<AuthUser & { menus: AuthMenu[] }>(
-    '/auth/switch-identity', { identityId },
-  )
+  const data = await switchWorkIdentity(identityId)
   applyUser(data, data.menus || [])
 }
 
-/** 登出：清 token + 状态，跳登录页 */
-export function logout(): void {
-  clearToken()
-  clearActiveIdentity()
-  authStore.user = null
-  authStore.menus = []
-  location.hash = '#/login'
+/** 先请求撤销当前令牌；无论请求结果如何，均清除本地状态并返回登录页。 */
+export async function logout(): Promise<void> {
+  try {
+    if (getToken()) await logoutSession()
+  } finally {
+    clearToken()
+    clearActiveIdentity()
+    authStore.user = null
+    authStore.menus = []
+    location.hash = '#/login'
+  }
 }

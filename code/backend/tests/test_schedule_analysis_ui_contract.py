@@ -10,7 +10,7 @@ class ScheduleAnalysisUiContractTest(unittest.TestCase):
         return (ROOT / relative_path).read_text(encoding="utf-8")
 
     def test_schedule_analysis_uses_confirmed_copy_and_visual_order(self):
-        page = self.read("frontend/src/views/admin/operation/ScheduleAnalysis.vue")
+        page = self.read("frontend/src/views/operation/ScheduleAnalysis.vue")
 
         self.assertNotIn("基于真实课表复盘时段分布，为下一轮排课提供核查线索", page)
         self.assertNotIn("课程明细用于识别排课规模、晚间安排和星期集中度；不能单独判定排课不合理。", page)
@@ -21,7 +21,7 @@ class ScheduleAnalysisUiContractTest(unittest.TestCase):
         self.assertIn("yAxis:{type:'category',data:parts,inverse:true}", page)
 
     def test_schedule_fragment_tooltip_contains_confirmed_examples(self):
-        page = self.read("frontend/src/views/admin/operation/ScheduleAnalysis.vue")
+        page = self.read("frontend/src/views/operation/ScheduleAnalysis.vue")
         card = self.read("frontend/src/components/KpiCard.vue")
 
         for copy in (

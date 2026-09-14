@@ -216,7 +216,7 @@ class SystemManagementTest(unittest.TestCase):
     def test_frontend_redirects_invalid_permission_context_to_forbidden(self):
         root = __import__("pathlib").Path(__file__).resolve().parents[2]
         router = (root / "frontend/src/router/index.ts").read_text(encoding="utf-8")
-        layout = (root / "frontend/src/views/admin/Layout.vue").read_text(
+        layout = (root / "frontend/src/layouts/AppLayout.vue").read_text(
             encoding="utf-8"
         )
         self.assertIn("permissionContext?.authorized === false", router)

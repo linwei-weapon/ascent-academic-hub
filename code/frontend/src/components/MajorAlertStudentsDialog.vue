@@ -63,7 +63,7 @@
 import { reactive, ref, watch } from 'vue'
 import { http } from '@/utils/http'
 import DataTable, { type DataTableColumn } from '@/components/DataTable.vue'
-import AlertStudentDrawer from '@/views/admin/alert/AlertStudentDrawer.vue'
+import AlertStudentDrawer from '@/views/alert/AlertStudentDrawer.vue'
 
 const props = withDefaults(defineProps<{
   modelValue: boolean

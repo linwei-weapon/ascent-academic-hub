@@ -10,7 +10,7 @@ class GraduationReadinessUiContractTest(unittest.TestCase):
         return (ROOT / relative).read_text(encoding="utf-8")
 
     def test_requested_copy_is_removed_or_renamed(self):
-        page = self.read("frontend/src/views/admin/reports/GraduationReadiness.vue")
+        page = self.read("frontend/src/views/reports/GraduationReadiness.vue")
 
         for removed in (
             "本页是毕业准备核查工具，不是毕业或学位审核结论",
@@ -39,7 +39,7 @@ class GraduationReadinessUiContractTest(unittest.TestCase):
             self.assertIn(expected, page)
 
     def test_global_filters_are_visible_and_reach_the_api(self):
-        page = self.read("frontend/src/views/admin/reports/GraduationReadiness.vue")
+        page = self.read("frontend/src/views/reports/GraduationReadiness.vue")
         backend = self.read("backend/api/routers/v2.py")
 
         for placeholder in ("年级", "学院", "专业", "培养方案"):
@@ -52,7 +52,7 @@ class GraduationReadinessUiContractTest(unittest.TestCase):
         self.assertIn("if plan_id: cond.append(\"ps.plan_id=?\")", backend)
 
     def test_global_filter_options_load_independently_of_the_topic_response(self):
-        page = self.read("frontend/src/views/admin/reports/GraduationReadiness.vue")
+        page = self.read("frontend/src/views/reports/GraduationReadiness.vue")
 
         self.assertIn("async function loadFilterOptions()", page)
         self.assertIn("http.get<any>('/v2/curriculum/options')", page)
@@ -66,7 +66,7 @@ class GraduationReadinessUiContractTest(unittest.TestCase):
         self.assertNotIn("if(r.filterOptions)Object.assign(filterOptions,r.filterOptions)", page)
 
     def test_student_drill_actions_load_and_scroll_to_the_list(self):
-        page = self.read("frontend/src/views/admin/reports/GraduationReadiness.vue")
+        page = self.read("frontend/src/views/reports/GraduationReadiness.vue")
 
         self.assertIn('ref="studentSection"', page)
         self.assertIn('@click.stop="useKpi(x)"', page)
@@ -77,7 +77,7 @@ class GraduationReadinessUiContractTest(unittest.TestCase):
         self.assertIn("draftStatus.value='';status.value='';activeMajor.value=row.major_code", page)
 
     def test_overview_tables_have_explicit_horizontal_scroll_regions(self):
-        page = self.read("frontend/src/views/admin/reports/GraduationReadiness.vue")
+        page = self.read("frontend/src/views/reports/GraduationReadiness.vue")
 
         self.assertEqual(2, page.count('class="table-horizontal-scroll"'))
         self.assertIn('class="major-table-width"', page)
@@ -88,7 +88,7 @@ class GraduationReadinessUiContractTest(unittest.TestCase):
         self.assertIn(".course-table-width{min-width:1280px}", page)
 
     def test_course_evidence_keeps_global_context_and_async_results_are_ordered(self):
-        page = self.read("frontend/src/views/admin/reports/GraduationReadiness.vue")
+        page = self.read("frontend/src/views/reports/GraduationReadiness.vue")
         backend = self.read("backend/api/routers/v2.py")
 
         self.assertIn("const context=appendGlobalParams(new URLSearchParams(),false)", page)
@@ -105,7 +105,7 @@ class GraduationReadinessUiContractTest(unittest.TestCase):
         self.assertIn('cond.append("ps.binding_status=\'matched\'")', backend)
 
     def test_course_supply_drawer_hides_boundary_and_paginates_affected_students(self):
-        page = self.read("frontend/src/views/admin/reports/GraduationReadiness.vue")
+        page = self.read("frontend/src/views/reports/GraduationReadiness.vue")
 
         self.assertNotIn('title="证据边界" :description="supply.boundary"', page)
         self.assertIn("supplyPage=ref(1),supplyPageSize=ref(50),supplyStudentTotal=ref(0)", page)
@@ -120,7 +120,7 @@ class GraduationReadinessUiContractTest(unittest.TestCase):
         self.assertNotIn("studentQuery.set('limit','100')", page)
 
     def test_student_evidence_and_insight_use_the_simplified_graduation_view(self):
-        page = self.read("frontend/src/views/admin/reports/GraduationReadiness.vue")
+        page = self.read("frontend/src/views/reports/GraduationReadiness.vue")
         drawer = self.read("frontend/src/components/AIInsightDrawer.vue")
         backend = self.read("backend/api/routers/ai.py")
 

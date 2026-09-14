@@ -11,10 +11,10 @@ class StudentWorkspaceContractTest(unittest.TestCase):
 
     def test_canonical_route_uses_role_aware_workspace(self):
         router = self.read("frontend/src/router/index.ts")
-        workspace = self.read("frontend/src/views/admin/students/Workspace.vue")
+        workspace = self.read("frontend/src/views/students/Workspace.vue")
 
         self.assertIn(
-            "students/analysis', component: () => import('@/views/admin/students/Workspace.vue')",
+            "students/analysis', component: () => import('@/views/students/Workspace.vue')",
             router,
         )
         self.assertIn("path: 'students/my', redirect:", router)
@@ -42,8 +42,8 @@ class StudentWorkspaceContractTest(unittest.TestCase):
         self.assertNotIn('("/admin/students/my",', target_section)
 
     def test_relationship_workspace_returns_to_canonical_entry(self):
-        my_scope = self.read("frontend/src/views/admin/students/MyScope.vue")
-        analysis = self.read("frontend/src/views/admin/students/Analysis.vue")
+        my_scope = self.read("frontend/src/views/students/MyScope.vue")
+        analysis = self.read("frontend/src/views/students/Analysis.vue")
         drawer = self.read("frontend/src/components/StudentEvidenceDrawer.vue")
 
         self.assertIn("'我的学生学业关注'", my_scope)
@@ -55,7 +55,7 @@ class StudentWorkspaceContractTest(unittest.TestCase):
 
     def test_management_workspace_uses_explainable_growth_contract(self):
         analysis = self.read(
-            "frontend/src/views/admin/students/Analysis.vue"
+            "frontend/src/views/students/Analysis.vue"
         )
         router = self.read("backend/api/routers/students.py")
         growth = self.read("backend/api/student_growth.py")
@@ -76,9 +76,9 @@ class StudentWorkspaceContractTest(unittest.TestCase):
     def test_student_evidence_drawer_is_shared_by_all_student_workspaces(self):
         drawer = self.read("frontend/src/components/StudentEvidenceDrawer.vue")
         for relative in (
-            "frontend/src/views/admin/students/Analysis.vue",
-            "frontend/src/views/admin/students/List.vue",
-            "frontend/src/views/admin/students/MyScope.vue",
+            "frontend/src/views/students/Analysis.vue",
+            "frontend/src/views/students/List.vue",
+            "frontend/src/views/students/MyScope.vue",
         ):
             page = self.read(relative)
             self.assertIn("<StudentEvidenceDrawer", page)
@@ -103,7 +103,7 @@ class StudentWorkspaceContractTest(unittest.TestCase):
         self.assertIn("数据来源与适用边界", drawer)
 
     def test_student_profile_failure_history_shows_pass_semester(self):
-        detail = self.read("frontend/src/views/admin/student/Detail.vue")
+        detail = self.read("frontend/src/views/student/Detail.vue")
         failure_history = detail.split("历史未通过课程", 1)[1].split(
             "成绩明细", 1
         )[0]
@@ -117,14 +117,14 @@ class StudentWorkspaceContractTest(unittest.TestCase):
         )
 
     def test_student_profile_uses_business_growth_heading(self):
-        detail = self.read("frontend/src/views/admin/student/Detail.vue")
+        detail = self.read("frontend/src/views/student/Detail.vue")
 
         self.assertIn("学业成长指标", detail)
         self.assertNotIn(">V2 成长指标 ", detail)
 
     def test_growth_and_legacy_lists_restore_url_context(self):
-        analysis = self.read("frontend/src/views/admin/students/Analysis.vue")
-        legacy_list = self.read("frontend/src/views/admin/students/List.vue")
+        analysis = self.read("frontend/src/views/students/Analysis.vue")
+        legacy_list = self.read("frontend/src/views/students/List.vue")
         drawer = self.read("frontend/src/components/StudentEvidenceDrawer.vue")
 
         for token in (
@@ -147,9 +147,9 @@ class StudentWorkspaceContractTest(unittest.TestCase):
         self.assertIn("withScrollPosition(", drawer)
 
     def test_student_workspaces_have_local_retry_and_paginated_class_rows(self):
-        analysis = self.read("frontend/src/views/admin/students/Analysis.vue")
-        legacy_list = self.read("frontend/src/views/admin/students/List.vue")
-        my_scope = self.read("frontend/src/views/admin/students/MyScope.vue")
+        analysis = self.read("frontend/src/views/students/Analysis.vue")
+        legacy_list = self.read("frontend/src/views/students/List.vue")
+        my_scope = self.read("frontend/src/views/students/MyScope.vue")
 
         self.assertIn("重新加载名单", analysis)
         self.assertIn("重新加载组织比较", analysis)
