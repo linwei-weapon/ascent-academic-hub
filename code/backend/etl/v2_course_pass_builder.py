@@ -1,6 +1,6 @@
 """M1 课程通过率三分层聚合：grade_attempt → agg_course_pass_stat（幂等可重跑）。
 
-口径（与 docs/91-管理分析增强实施计划.md M1 一致）：
+口径（与 文档/7-历史归档/实施与验收记录/91-管理分析增强实施计划.md M1 一致）：
 - 有效记录：grade_attempt 中 is_published=1 AND is_void=0 AND is_pass IS NOT NULL。
 - 三分层（attempt_type）：
     first  = 首次修读链路，attempt_type='regular'；缓考 deferred、空值等其他取值
