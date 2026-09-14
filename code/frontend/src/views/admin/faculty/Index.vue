@@ -3,7 +3,7 @@
     <div class="head">
       <div>
         <h2 class="sa-page-title">{{ pageTitle }}</h2>
-        <p class="sa-page-sub">{{ pageSubtitle }}</p>
+        <p v-if="pageSubtitle" class="sa-page-sub">{{ pageSubtitle }}</p>
       </div>
       <el-select v-model="semester" class="semester" placeholder="选择学期" @change="changeSemester">
         <el-option v-for="s in semesters" :key="s.value" :label="s.label" :value="s.value" />
@@ -75,7 +75,6 @@
         <div class="section-head">
           <div>
             <h3>本期证据就绪情况</h3>
-            <p>未接入的证据不参与正式判断，避免把数据缺失误认为保障风险。</p>
           </div>
           <el-button link type="primary" @click="evidenceDrawer = true">查看口径边界</el-button>
         </div>
@@ -553,7 +552,7 @@ let prefetchTimer: ReturnType<typeof setTimeout> | null = null
 const hasData = computed(() => Object.keys(data.summary || {}).length > 0)
 const isSchoolScope = computed(() => data.scope_mode !== 'college')
 const pageSubtitle = computed(() => isSchoolScope.value
-  ? '从全校识别真正需要学院核实的课程团队保障事项，再下钻查看证据。'
+  ? ''
   : `聚焦${data.college || '本学院'}责任课程，明确先核实哪门课、为什么以及缺少什么证据。`)
 const drawerWidth = computed(() => window.innerWidth >= 1600 ? '76%' : window.innerWidth >= 1200 ? '86%' : '96%')
 const drawerTitle = computed(() => drawerMode.value === 'course'

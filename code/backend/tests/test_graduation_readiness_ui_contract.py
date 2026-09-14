@@ -67,6 +67,7 @@ class GraduationReadinessUiContractTest(unittest.TestCase):
 
     def test_student_drill_actions_load_and_scroll_to_the_list(self):
         page = self.read("frontend/src/views/admin/reports/GraduationReadiness.vue")
+        backend = self.read("backend/api/routers/v2.py")
 
         self.assertIn('ref="studentSection"', page)
         self.assertIn('@click.stop="useKpi(x)"', page)
@@ -75,6 +76,26 @@ class GraduationReadinessUiContractTest(unittest.TestCase):
         self.assertIn("studentSection.value?.scrollIntoView", page)
         self.assertIn("activeMajor.value='';activeMajorName.value='';draftStatus.value=x.filter", page)
         self.assertIn("draftStatus.value='';status.value='';activeMajor.value=row.major_code", page)
+        student_columns = page[
+            page.index("const studentColumns"):
+            page.index("const evidenceCourseColumns")
+        ]
+        expected_columns = (
+            "{key:'student_id',label:'学号'",
+            "{key:'display_name',label:'姓名'",
+            "{key:'entry_grade',label:'年级'",
+            "{key:'organization_name',label:'院系'",
+            "{key:'major_name',label:'专业'",
+            "{key:'class_code',label:'行政班'",
+        )
+        column_positions = tuple(student_columns.index(column) for column in expected_columns)
+        self.assertEqual(tuple(sorted(column_positions)), column_positions)
+        self.assertIn("{key:'moduleProgress',label:'已完成/可核查模块'", student_columns)
+        self.assertIn("{key:'completed_credits',label:'已完成学分'", student_columns)
+        self.assertIn("{key:'evidence',label:'核查重点'", student_columns)
+        self.assertNotIn("本行核查重点", student_columns)
+        self.assertIn("COALESCE(o.name,s.organization_id,'未映射院系') organization_name", backend)
+        self.assertIn("LEFT JOIN dim_organization o ON o.organization_id=s.organization_id", backend)
 
     def test_overview_tables_have_explicit_horizontal_scroll_regions(self):
         page = self.read("frontend/src/views/admin/reports/GraduationReadiness.vue")
@@ -84,8 +105,33 @@ class GraduationReadinessUiContractTest(unittest.TestCase):
         self.assertIn('class="course-table-width"', page)
         self.assertIn(".table-horizontal-scroll{width:100%;max-width:100%;overflow-x:auto", page)
         self.assertIn(".grid>.sa-card{min-width:0}", page)
+        self.assertIn(".grid{display:grid;grid-template-columns:minmax(0,1fr);gap:14px}", page)
+        self.assertNotIn(".grid{display:grid;grid-template-columns:1fr 1fr", page)
         self.assertIn(".major-table-width{min-width:1040px}", page)
-        self.assertIn(".course-table-width{min-width:1280px}", page)
+        self.assertIn(".course-table-width{min-width:760px}", page)
+
+    def test_required_course_failure_list_has_the_requested_copy_and_columns(self):
+        page = self.read("frontend/src/views/admin/reports/GraduationReadiness.vue")
+
+        overview = page[page.index('<div class="grid">'):page.index('<section ref="studentSection"')]
+        self.assertIn('<div class="sa-card-title">必修课程未通过清单</div>', overview)
+        self.assertNotIn("课程保障待确认清单", overview)
+        self.assertNotIn("按必修未通过影响人数排序；不直接判定供给不足", overview)
+        self.assertIn(">详情</el-button>", overview)
+        self.assertNotIn(">保障证据</el-button>", overview)
+        self.assertIn(':max-business-columns="4" :config-version="3"', overview)
+
+        course_columns = page[
+            page.index("const courseColumns"):
+            page.index("const studentColumns")
+        ]
+        for removed_key in ("verification_students", "supply_reasons", "supply_priority"):
+            self.assertNotIn(f"key:'{removed_key}'", course_columns)
+        for visible_key in (
+            "course_name", "failed_students", "major_count", "lesson_count",
+            "teacher_count", "action",
+        ):
+            self.assertIn(f"key:'{visible_key}'", course_columns)
 
     def test_course_evidence_keeps_global_context_and_async_results_are_ordered(self):
         page = self.read("frontend/src/views/admin/reports/GraduationReadiness.vue")
@@ -104,9 +150,70 @@ class GraduationReadinessUiContractTest(unittest.TestCase):
         self.assertIn("AND ps.rule_version=x.rule_version AND ps.binding_status='matched'", backend)
         self.assertIn('cond.append("ps.binding_status=\'matched\'")', backend)
 
+    def test_course_supply_drawer_hides_boundary_and_paginates_affected_students(self):
+        page = self.read("frontend/src/views/admin/reports/GraduationReadiness.vue")
+        backend = self.read("backend/api/routers/v2.py")
+
+        self.assertNotIn('title="证据边界" :description="supply.boundary"', page)
+        supply_drawer = page[
+            page.index('<el-drawer v-model="supplyVisible"'):
+            page.index('<AIInsightDrawer')
+        ]
+        self.assertIn(':title="supply.course?.courseName || \'课程保障证据\'"', supply_drawer)
+        self.assertNotIn('label="过期漏修"', supply_drawer)
+
+        supply_student_columns = page[
+            page.index("const supplyStudentColumns"):
+            page.index("const kpis")
+        ]
+        expected_columns = (
+            "{key:'studentId',label:'学号'",
+            "{key:'name',label:'姓名'",
+            "{key:'grade',label:'年级'",
+            "{key:'collegeName',label:'院系'",
+            "{key:'majorName',label:'专业'",
+            "{key:'action',label:'操作'",
+        )
+        column_positions = tuple(
+            supply_student_columns.index(column) for column in expected_columns
+        )
+        self.assertEqual(tuple(sorted(column_positions)), column_positions)
+        self.assertNotIn("key:'failedRequired'", supply_student_columns)
+        self.assertNotIn("key:'verificationRequired'", supply_student_columns)
+        self.assertIn(':max-business-columns="3" :config-version="3"', supply_drawer)
+        self.assertIn(
+            "COALESCE(NULLIF(o.name,''),s.organization_id,'未映射院系') collegeName",
+            backend,
+        )
+
+        management_students = backend[
+            backend.index("def curriculum_management_students"):
+            backend.index("def curriculum_management_major")
+        ]
+        course_filter = management_students[
+            management_students.index("if course_id:"):
+            management_students.index('where = "WHERE "')
+        ]
+        self.assertIn("x.requirement_type='必修'", course_filter)
+        self.assertIn("ms.evidence_status='explicit_gap'", course_filter)
+        self.assertIn("x.completion_status='failed'", course_filter)
+        self.assertNotIn("ms.evidence_status='candidate'", course_filter)
+        self.assertIn("supplyPage=ref(1),supplyPageSize=ref(50),supplyStudentTotal=ref(0)", page)
+        self.assertIn(':page-sizes="[10,20,50,100]"', page)
+        self.assertIn('layout="total, sizes, prev, pager, next"', page)
+        self.assertIn("studentQuery.set('limit',String(supplyPageSize.value))", page)
+        self.assertIn("studentQuery.set('offset',String((supplyPage.value-1)*supplyPageSize.value))", page)
+        self.assertIn("supplyStudentTotal.value=s.total||0", page)
+        self.assertIn("async function loadSupplyStudents()", page)
+        self.assertIn("function changeSupplyPageSize(value:number)", page)
+        self.assertIn("function changeSupplyPage(value:number)", page)
+        self.assertNotIn("studentQuery.set('limit','100')", page)
+
     def test_student_evidence_and_insight_use_the_simplified_graduation_view(self):
         page = self.read("frontend/src/views/admin/reports/GraduationReadiness.vue")
         drawer = self.read("frontend/src/components/AIInsightDrawer.vue")
+        backend = self.read("backend/api/routers/ai.py")
+        v2_backend = self.read("backend/api/routers/v2.py")
 
         self.assertNotIn('title="核查边界"', page)
         self.assertNotIn("studentEvidence.boundary", page)
@@ -114,6 +221,23 @@ class GraduationReadinessUiContractTest(unittest.TestCase):
         self.assertNotIn("AI归纳核查重点", page)
         self.assertIn('title="毕业准备研判"', page)
         self.assertNotIn('title="毕业准备AI研判"', page)
+        student_evidence = page[
+            page.index('<el-drawer v-model="studentVisible"'):
+            page.index('<el-drawer v-model="supplyVisible"')
+        ]
+        evidence_fields = (
+            'label="学号"', 'label="年级"', 'label="院系"', 'label="专业"',
+            'label="行政班"', 'label="培养方案"', 'label="必修未通过"',
+            'label="过期漏修"', 'label="课程替代证据"',
+        )
+        evidence_positions = tuple(student_evidence.index(field) for field in evidence_fields)
+        self.assertEqual(tuple(sorted(evidence_positions)), evidence_positions)
+        self.assertIn('class="drawer-summary" :column="3"', student_evidence)
+        self.assertNotIn('label="历史开课无证据"', student_evidence)
+        self.assertEqual(2, page.count("{key:'reason',label:'原因&建议'"))
+        self.assertNotIn("label:'核查原因与动作'", page)
+        self.assertIn("COALESCE(NULLIF(o.name,''),s.organization_id,'未映射院系') organization_name", v2_backend)
+        self.assertIn("LEFT JOIN dim_organization o ON o.organization_id=s.organization_id", v2_backend)
 
         for prop in (
             "hide-intervention-tag",
@@ -123,6 +247,7 @@ class GraduationReadinessUiContractTest(unittest.TestCase):
             "hide-expected-result",
             "hide-no-comparison-tag",
             "hide-trace",
+            "hide-trace-shortcut",
             "hide-evidence-help",
             "hide-evidence-source",
             "show-all-evidence",
@@ -131,7 +256,17 @@ class GraduationReadinessUiContractTest(unittest.TestCase):
 
         self.assertIn("'single-column': hideExpectedResult", drawer)
         self.assertIn("showAllEvidence ? view.evidence : view.evidence.slice(0, 3)", drawer)
-        self.assertNotIn("hide-trace-shortcut", page)
+        self.assertIn("COALESCE(NULLIF(o.name,''),'未映射学院') organization_name", backend)
+        self.assertIn('"college": student.get("organization_name")', backend)
+        self.assertNotIn('"college": student.get("organization_id")', backend)
+        student_insight = backend[
+            backend.index("def graduation_readiness_student_insight"):
+            backend.index("def graduation_readiness_course_insight")
+        ]
+        self.assertIn('"label": "过期漏修"', student_insight)
+        self.assertIn('过期漏修 {len(candidates)} 门', student_insight)
+        self.assertNotIn("到期缺结果候选", student_insight)
+        self.assertNotIn("缺结果候选", student_insight)
         for trace_field in ("分析范围：", "事实来源：", "规则版本：", "适用边界："):
             self.assertIn(trace_field, drawer)
 

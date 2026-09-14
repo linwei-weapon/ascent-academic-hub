@@ -3,7 +3,10 @@ import unittest
 from unittest.mock import patch
 
 from backend.api import db as dbm
-from backend.api.routers.alert import _curriculum_progress_evidence
+from backend.api.routers.alert import (
+    _curriculum_progress_evidence,
+    _student_enrollment_label,
+)
 from pathlib import Path
 
 
@@ -41,6 +44,11 @@ def make_v2_conn() -> sqlite3.Connection:
 
 
 class StudentEvidenceTest(unittest.TestCase):
+    def test_student_enrollment_prefers_date_and_falls_back_to_entry_year(self):
+        self.assertEqual("2022-09-01", _student_enrollment_label("2022-09-01", 2022))
+        self.assertEqual("2022年", _student_enrollment_label(None, 2022))
+        self.assertIsNone(_student_enrollment_label(None, None))
+
     def test_curriculum_progress_reuses_v2_summary(self):
         conn = make_v2_conn()
         with patch.object(dbm, "get_v2_conn", return_value=conn):

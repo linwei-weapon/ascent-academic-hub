@@ -634,8 +634,10 @@ def _v2_student_access(conn: sqlite3.Connection, student_id: str, user: dict) ->
     scope, params = _v2_student_scope(user, conn, "s")
     row = dbm.query_one(conn, f"""
         SELECT s.student_id,s.display_name,s.entry_grade,s.organization_id,s.major_code,
+               COALESCE(NULLIF(o.name,''),'未映射学院') organization_name,
                s.major_name,s.class_code,p.plan_name,p.version
         FROM dim_student s
+        LEFT JOIN dim_organization o ON o.organization_id=s.organization_id
         LEFT JOIN curriculum_plan p ON p.plan_id=s.plan_id
         WHERE s.student_id=?{(' AND ' + scope) if scope else ''}
     """, tuple([student_id] + params))
@@ -1131,7 +1133,7 @@ def graduation_readiness_student_insight(student_id: str,
     top_names = "、".join(r["course_name"] for r in rows[:3]) or "暂无明确课程缺口"
     summary = (
         f"{student['display_name']}当前毕业准备核查重点为：{top_names}。"
-        f"其中明确未通过 {len(failed)} 门，到期缺结果候选 {len(candidates)} 门。"
+        f"其中明确未通过 {len(failed)} 门，过期漏修 {len(candidates)} 门。"
         "建议先核查必修未通过课程的重修、补考、替代认定和近期教学班供给。"
     )
     if failed:
@@ -1155,11 +1157,11 @@ def graduation_readiness_student_insight(student_id: str,
             "detail": "核对选课、成绩、免修认定、课程替代和个人方案适用范围，证据确认前不把候选课程认定为学生缺修。",
             "timing": "本轮毕业准备名单形成前", "expectedResult": "把数据候选拆分为真实课程缺口与待补数据记录",
         }
-        consequence = "若直接把缺结果候选当作学生缺修，可能造成误提醒和无效管理；若不核验，也可能遗漏真实课程缺口。"
+        consequence = "若直接把过期漏修当作已经确认的学生缺修，可能造成误提醒和无效管理；若不核验，也可能遗漏真实课程缺口。"
     else:
         intervention = {
             "status": "no_intervention", "label": "当前无需AI介入", "priority": "low",
-            "priorityReasons": ["当前未发现必修课明确未通过或到期缺结果候选。"],
+            "priorityReasons": ["当前未发现必修课明确未通过或过期漏修。"],
         }
         primary_action = {
             "role": "二级学院", "action": "维持常规毕业准备观察",
@@ -1184,7 +1186,7 @@ def graduation_readiness_student_insight(student_id: str,
         "decision": {
             "headline": summary,
             "whyNow": intervention["priorityReasons"],
-            "impactScope": f"明确未通过 {len(failed)} 门；到期缺结果候选 {len(candidates)} 门；无开课证据 {len(no_offering)} 门",
+            "impactScope": f"明确未通过 {len(failed)} 门；过期漏修 {len(candidates)} 门；无开课证据 {len(no_offering)} 门",
             "consequence": consequence,
         },
         "comparison": {
@@ -1194,18 +1196,18 @@ def graduation_readiness_student_insight(student_id: str,
         },
         "primaryAction": primary_action,
         "confidence": "高" if rows else "中",
-        "profile": {"college": student.get("organization_id"), "major": student.get("major_name"),
+        "profile": {"college": student.get("organization_name"), "major": student.get("major_name"),
                     "className": student.get("class_code"), "grade": student.get("entry_grade")},
         "evidence": [
             {"label": "明确未通过", "value": f"{len(failed)} 门", "detail": "已发布成绩中存在必修课未通过记录", "tone": "danger" if failed else "success"},
-            {"label": "缺结果候选", "value": f"{len(candidates)} 门", "detail": "到建议学期仍缺完成证据，需先核验选课与认定", "tone": "warning" if candidates else "success"},
+            {"label": "过期漏修", "value": f"{len(candidates)} 门", "detail": "到建议学期仍缺完成证据，需先核验选课与认定", "tone": "warning" if candidates else "success"},
             {"label": "无开课证据", "value": f"{len(no_offering)} 门", "detail": "历史教学任务中暂未发现该课程教学班", "tone": "danger" if no_offering else "info"},
             {"label": "培养方案", "value": student.get("plan_name") or "未绑定", "detail": student.get("version") or "当前学生绑定方案", "tone": "info"},
         ],
         "reasons": [
             "毕业准备核查关注的是学生是否存在必修课程完成证据缺口，不直接等同毕业审核结论。",
             "明确未通过课程可优先进入重修、补考、替代认定和课程保障核查。",
-            "缺结果候选必须先核验选课、免修认定、课程替代和个人方案适用范围，不能直接认定学生缺修。",
+            "过期漏修必须先核验选课、免修认定、课程替代和个人方案适用范围，不能直接认定学生缺修。",
         ],
         "suggestions": [
             {"role": "学院", "priority": "high" if failed else "medium", "action": "确认学生课程缺口清单", "detail": "逐门核查必修未通过课程是否有近期补修、重修或替代认定路径。"},
@@ -1213,7 +1215,7 @@ def graduation_readiness_student_insight(student_id: str,
             {"role": "辅导员/班主任", "priority": "medium", "action": "提醒学生制定毕业准备计划", "detail": "让学生明确优先处理哪些必修课程，避免毕业审核前集中暴露问题。"},
         ],
         "nextActions": [
-            "查看核查证据弹窗中的明确未通过课程和缺结果候选课程。",
+            "查看核查证据弹窗中的明确未通过课程和过期漏修课程。",
             "对无开课证据课程进入课程保障证据核查。",
             "必要时把学生加入学院毕业准备重点跟踪名单。",
         ],

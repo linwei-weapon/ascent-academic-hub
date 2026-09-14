@@ -26,9 +26,6 @@
             <b>{{ reasonText }}</b>
             <p>{{ contextSummary }}</p>
           </div>
-          <el-tag v-if="context?.ruleVersion" size="small" effect="plain">
-            规则 {{ context.ruleVersion }}
-          </el-tag>
         </section>
 
         <el-descriptions :column="4" border size="small" class="identity-block">
@@ -174,11 +171,6 @@
             </div>
           </el-tab-pane>
         </el-tabs>
-
-        <el-alert
-          type="info" :closable="false" show-icon title="数据来源与适用边界"
-          :description="evidenceDescription"
-        />
 
         <div class="drawer-actions">
           <el-button v-if="aiEligible" type="primary" plain @click="emit('ai', student)">按需查看AI管理研判</el-button>
@@ -326,32 +318,12 @@ const reasonText = computed(() => {
   return reasons.length ? reasons.join('、') : '当前管理范围内主动核查'
 })
 const contextSummary = computed(() => {
-  const period = props.context?.period ? `证据周期 ${props.context.period}` : '使用当前可用学业证据'
-  return `${period}；先核查事实，再形成管理判断。`
+  return props.context?.period ? `周期 ${props.context.period}` : '使用当前可用学业证据'
 })
 const hasContextChange = computed(() => (
   props.context?.fromGpa != null || props.context?.toGpa != null
   || props.context?.fromFailCount != null || props.context?.toFailCount != null
 ))
-const sourceText = computed(() => {
-  const sources = student.value.evidence?.sources || []
-  return sources.length ? `数据来源：${sources.join('、')}` : '数据来源待披露'
-})
-const evidenceDescription = computed(() => {
-  const version = props.context?.ruleVersion || student.value.evidence?.ruleVersion || '未标注'
-  const calculatedAt = student.value.evidence?.calculatedAt || curriculum.value?.calculatedAt
-  const freshness = calculatedAt
-    ? `方案进度计算时间：${String(calculatedAt).replace('T', ' ').slice(0, 16)}`
-    : '更新时间：随当前页面请求读取最新可用数据'
-  return [
-    sourceText.value,
-    `规则版本：${version}`,
-    freshness,
-    student.value.evidence?.boundary || '',
-    props.context?.boundary || '',
-  ].filter(Boolean).join('；')
-})
-
 function valueText(value: any, fallback: any = '—') { return value == null ? fallback : value }
 function signed(value: number | null) { return value == null ? '—' : `${value > 0 ? '+' : ''}${value}` }
 function pctText(value: number | null) { return value == null ? '—' : `${value}%` }

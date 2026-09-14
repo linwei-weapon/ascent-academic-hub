@@ -39,6 +39,21 @@ class BasicReportDemoBootstrapTest(unittest.TestCase):
                 with closing(sqlite3.connect(db_path)) as conn:
                     self.assertEqual(12, conn.execute("SELECT COUNT(*) FROM sys_user").fetchone()[0])
                     self.assertGreater(conn.execute("SELECT COUNT(*) FROM fact_alert").fetchone()[0], 0)
+                with closing(sqlite3.connect(source_root / "2025-2026-1.db")) as conn:
+                    columns = {
+                        row[1] for row in conn.execute("PRAGMA table_info(students)")
+                    }
+                    self.assertEqual(
+                        {
+                            "student_id", "college", "major", "grade_year",
+                            "class_name", "status",
+                        },
+                        columns,
+                    )
+                    self.assertEqual(
+                        63,
+                        conn.execute("SELECT COUNT(*) FROM students").fetchone()[0],
+                    )
 
                 with self.assertRaises(SystemExit):
                     bootstrap_demo_data.main()

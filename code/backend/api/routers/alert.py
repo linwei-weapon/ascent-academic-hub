@@ -379,6 +379,14 @@ def _curriculum_progress_evidence(student_id: str) -> dict:
             v2_conn.close()
 
 
+def _student_enrollment_label(enroll_on, entry_grade):
+    if enroll_on:
+        return str(enroll_on)
+    if entry_grade is None or not str(entry_grade).strip():
+        return None
+    return f"{entry_grade}年"
+
+
 @router.get("/student/{sid}")
 def student_detail(sid: str, user: dict = Depends(get_current_user),
                    conn: sqlite3.Connection = Depends(get_db)):
@@ -611,7 +619,9 @@ def student_detail(sid: str, user: dict = Depends(get_current_user),
     return ok({
         "code": st["student_id"], "name": st["name"], "collegeId": st["college_id"],
         "collegeName": st["college"], "majorName": st["major"], "className": st["cls"],
-        "enrollOn": st["enroll_on"], "kpis": kpis, "gpaHistory": gpa_hist,
+        "entryGrade": st["grade"],
+        "enrollOn": _student_enrollment_label(st["enroll_on"], st["grade"]),
+        "kpis": kpis, "gpaHistory": gpa_hist,
         "totalGpa": total_gpa,
         "alertHistory": [{"alertId": a["alert_id"], "eventId": a["event_id"],
                           "ruleId": a["rule_id"],

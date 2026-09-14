@@ -34,7 +34,10 @@
                     <div>适用边界：{{ trace.boundary || listText(view.limitations) }}</div>
                   </div>
                 </template>
-                <button type="button" class="compact-trace-trigger">· 研判依据</button>
+                <button type="button" class="compact-trace-trigger" aria-label="查看研判依据">
+                  <span v-if="iconOnlyTraceShortcut" aria-hidden="true">ⓘ</span>
+                  <template v-else>· 研判依据</template>
+                </button>
               </el-tooltip>
             </template>
           </div>
@@ -65,7 +68,7 @@
           <ul v-else class="signal-list">
             <li v-for="item in view.decision.whyNow.slice(0, 3)" :key="item">{{ item }}</li>
           </ul>
-          <div v-if="!hideBaseline" class="baseline-note">
+          <div v-if="!hideBaseline && (view.comparison.available || !hideJudgmentBoundary)" class="baseline-note">
             <b>{{ view.comparison.available ? '比较基准' : '判断边界' }}</b>
             <span>{{ view.comparison.baseline }}</span>
           </div>
@@ -175,11 +178,13 @@ const props = defineProps<{
   hideInterventionTag?: boolean
   hideDecisionMeta?: boolean
   hideBaseline?: boolean
+  hideJudgmentBoundary?: boolean
   hideConsequence?: boolean
   hideExpectedResult?: boolean
   hideNoComparisonTag?: boolean
   hideTrace?: boolean
   hideTraceShortcut?: boolean
+  iconOnlyTraceShortcut?: boolean
   hideEvidenceHelp?: boolean
   hideEvidenceSource?: boolean
   showAllEvidence?: boolean

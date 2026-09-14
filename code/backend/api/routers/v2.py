@@ -416,9 +416,9 @@ def curriculum_management_students(college_name: Optional[str] = None,
             AND ms.module_name=COALESCE(NULLIF(x.module,''),'未标注模块') AND ms.rule_version=x.rule_version
           WHERE x.student_id=s.student_id AND x.plan_id=ps.plan_id
             AND x.course_id=? AND x.rule_version='growth-v1'
-            AND ((ms.evidence_status='explicit_gap' AND x.completion_status='failed')
-              OR (ms.evidence_status='candidate' AND x.is_overdue=1
-                AND x.completion_status IN ('not_completed','unknown'))))""")
+            AND x.requirement_type='必修'
+            AND ms.evidence_status='explicit_gap'
+            AND x.completion_status='failed')""")
         params.append(course_id)
     where = "WHERE " + " AND ".join(cond) if cond else ""
     rows = dbm.query(conn, f"""WITH expected_plan AS (
@@ -426,7 +426,8 @@ def curriculum_management_students(college_name: Optional[str] = None,
         WHERE grade IS NOT NULL AND (major_code IS NOT NULL OR major_name IS NOT NULL)
         GROUP BY grade,major_code,major_name
       ) SELECT s.student_id studentId,s.display_name name,s.entry_grade grade,
-      COALESCE(o.name,s.organization_id,'未映射学院') collegeName,s.major_code majorCode,s.major_name majorName,
+      COALESCE(NULLIF(o.name,''),s.organization_id,'未映射院系') collegeName,
+      s.major_code majorCode,s.major_name majorName,
       COALESCE(NULLIF(s.student_status,''),'未知') studentStatus,
       s.plan_id boundPlanReference,bp.plan_id boundPlanId,bp.grade boundPlanGrade,
       bp.major_code boundPlanMajorCode,bp.major_name boundPlanMajorName,
@@ -627,8 +628,11 @@ def graduation_readiness_student(student_id: str, conn: sqlite3.Connection = Dep
                                  user: dict = Depends(require_v2_reader)):
     scope, scope_params = _student_scope(user, conn, "s")
     where = "s.student_id=?" + (f" AND {scope}" if scope else "")
-    student = dbm.query_one(conn, f"""SELECT s.student_id,s.display_name,s.entry_grade,s.major_name,s.class_code,
-      p.plan_name,p.version FROM dim_student s LEFT JOIN curriculum_plan p ON p.plan_id=s.plan_id WHERE {where}""",
+    student = dbm.query_one(conn, f"""SELECT s.student_id,s.display_name,s.entry_grade,
+      COALESCE(NULLIF(o.name,''),s.organization_id,'未映射院系') organization_name,
+      s.major_name,s.class_code,p.plan_name,p.version FROM dim_student s
+      LEFT JOIN dim_organization o ON o.organization_id=s.organization_id
+      LEFT JOIN curriculum_plan p ON p.plan_id=s.plan_id WHERE {where}""",
       tuple([student_id] + scope_params))
     if not student:
         raise ApiError("学生不存在或无权访问", code=404, status_code=404)
@@ -1180,6 +1184,7 @@ def graduation_readiness_topic(organization_id: Optional[str] = None, major_code
             params.extend(grade_values)
     where = " AND ".join(cond)
     all_rows = dbm.query(conn, f"""SELECT s.student_id,s.display_name,s.entry_grade,s.organization_id,
+      COALESCE(o.name,s.organization_id,'未映射院系') organization_name,
       s.major_code,s.major_name,s.class_code,ps.plan_id,p.plan_name,p.version,
       ps.current_study_term,ps.earned_credits completed_credits,
       ps.module_count,ps.assessable_modules,ps.completed_modules,
@@ -1190,6 +1195,7 @@ def graduation_readiness_topic(organization_id: Optional[str] = None, major_code
       CASE ps.evidence_status WHEN 'explicit_gap' THEN 'action_required'
         WHEN 'candidate' THEN 'verification_required' ELSE 'evidence_complete' END readiness_status
       FROM student_plan_progress_summary ps JOIN dim_student s ON s.student_id=ps.student_id
+      LEFT JOIN dim_organization o ON o.organization_id=s.organization_id
       LEFT JOIN curriculum_plan p ON p.plan_id=ps.plan_id WHERE {where}""", tuple(params))
     if readiness:
         if readiness not in {"action_required", "verification_required", "evidence_complete", "high_grade_action"}:

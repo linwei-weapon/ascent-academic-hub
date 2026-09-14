@@ -2,8 +2,9 @@
 
 This path is used only when the teaching-source databases are not available.
 It creates both local analytics databases and the nine semester source files
-needed by the cumulative CET-4 report.  All people and identifiers are
-synthetic; production deployments must continue to use ``backend.etl.run_etl``.
+needed by the cumulative CET-4 report and historical-roster comparisons.  All
+people and identifiers are synthetic; production deployments must continue to
+use ``backend.etl.run_etl``.
 
 Run from ``code/``::
 
@@ -249,6 +250,7 @@ def _create_v1(students: list[dict], attempts: list[dict]) -> None:
 
 def _create_cet4_sources(students: list[dict]) -> None:
     config.TS_DIR.mkdir(parents=True, exist_ok=True)
+    organization_names = dict(ORGANIZATIONS)
     regular = [row for row in students if row["entry_grade"] == 2022]
     pass_groups = {
         "2024-2025-1": regular[0::10],
@@ -262,9 +264,31 @@ def _create_cet4_sources(students: list[dict]) -> None:
             path.unlink()
         conn = sqlite3.connect(str(path))
         conn.execute("CREATE TABLE external_exams(student_id TEXT,exam_type TEXT,is_passed INTEGER)")
+        conn.execute("""
+            CREATE TABLE students(
+                student_id TEXT,college TEXT,major TEXT,grade_year TEXT,
+                class_name TEXT,status TEXT
+            )
+        """)
         conn.executemany(
             "INSERT INTO external_exams VALUES(?,?,1)",
             [(row["student_id"], "全国大学英语四级") for row in pass_groups.get(semester, [])],
+        )
+        semester_start_year = int(semester[:4])
+        conn.executemany(
+            "INSERT INTO students VALUES(?,?,?,?,?,?)",
+            [
+                (
+                    row["student_id"],
+                    organization_names[row["organization_id"]],
+                    row["major_name"],
+                    str(row["entry_grade"]),
+                    row["class_code"],
+                    row["student_status"],
+                )
+                for row in students
+                if int(row["entry_grade"]) <= semester_start_year
+            ],
         )
         conn.commit()
         conn.close()

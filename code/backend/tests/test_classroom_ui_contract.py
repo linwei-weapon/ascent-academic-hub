@@ -58,7 +58,7 @@ class ClassroomUiContractTest(unittest.TestCase):
         drawer_contracts = (
             'v-if="!hideInterventionTag"',
             'v-if="!hideDecisionMeta"',
-            'v-if="!hideBaseline"',
+            'v-if="!hideBaseline && (view.comparison.available || !hideJudgmentBoundary)"',
             'v-if="!hideConsequence"',
             'v-if="!hideExpectedResult"',
             'v-if="!hideNoComparisonTag && !view.comparison.available"',

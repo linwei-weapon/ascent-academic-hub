@@ -56,16 +56,17 @@ class P3ModuleReorganizationTest(unittest.TestCase):
         self.assertIn('"/admin/faculty"', ai)
         self.assertIn('{"tab": "graduation-readiness"}', ai)
 
-    def test_business_pages_show_permission_context(self):
+    def test_business_page_context_visibility_contract(self):
         component = self.read("frontend/src/components/BusinessPageContext.vue")
         self.assertIn("permissionContext?.detailScope", component)
         self.assertIn("activeRoleName", component)
         for page in (
             "frontend/src/views/admin/dashboard/index.vue",
             "frontend/src/views/admin/faculty/Index.vue",
-            "frontend/src/views/admin/students/Analysis.vue",
         ):
             self.assertIn("BusinessPageContext", self.read(page), page)
+        student_growth = self.read("frontend/src/views/admin/students/Analysis.vue")
+        self.assertNotIn("BusinessPageContext", student_growth)
         curriculum = self.read("frontend/src/views/admin/curriculum/index.vue")
         self.assertNotIn("BusinessPageContext", curriculum)
         alert = self.read("frontend/src/views/admin/alert/Workspace.vue")
@@ -181,10 +182,20 @@ class P3ModuleReorganizationTest(unittest.TestCase):
         self.assertIn("{key:'verificationRequired',label:'过期漏修'", progress)
         self.assertIn("{key:'status',label:'状态'", progress)
         self.assertIn("{key:'statusReason',label:'状态原因'", progress)
+        self.assertIn("{key:'moduleProgress',label:'已完成/可核查模块'", progress)
+        self.assertNotIn("{key:'moduleProgress',label:'已达到/可核查模块'", progress)
+        self.assertIn("{key:'earnedCredits',label:'已完成学分'", progress)
+        self.assertIn("'已完成模块','可核查模块','已完成学分','必修未通过'", progress)
+        self.assertNotIn("'已达到模块','可核查模块'", progress)
         self.assertIn('placeholder="全部状态"', progress)
         self.assertIn('@click="exportCsv">导出</el-button>', progress)
         self.assertNotIn("导出当前结果", progress)
         self.assertIn('<el-descriptions-item label="状态">', progress)
+        self.assertIn('<el-descriptions-item label="已完成模块">', progress)
+        self.assertIn('<el-descriptions-item label="已完成学分">', progress)
+        self.assertIn('<el-descriptions-item label="已绑定培养方案" :span="4">', progress)
+        self.assertNotIn('<el-descriptions-item label="已达到模块">', progress)
+        self.assertNotIn('<el-descriptions-item label="已认可学分">', progress)
         self.assertNotIn('<el-descriptions-item label="证据状态">', progress)
         self.assertNotIn("本详情只核查培养方案执行证据", progress)
         self.assertIn('<el-option label="必修未通过" value="明确需处理"', progress)
@@ -201,9 +212,12 @@ class P3ModuleReorganizationTest(unittest.TestCase):
         self.assertIn("`过期漏修课程（${verificationCourses.length}）`", progress)
         self.assertNotIn("明确未解决课程", progress)
         self.assertNotIn("数据候选课程", progress)
+        self.assertNotIn("{key:'sourceReference',label:'规则来源'", progress)
+        self.assertIn("failed:'成绩未通过'", progress)
+        self.assertIn("not_completed:'无修读记录'", progress)
         expected_tooltips = (
-            "逐一核查该学生培养方案中的所有模块；优先比较已认可学分与最低学分，其次比较已完成门数与最低门数，最后核查模块内必修课程是否全部通过或认定",
-            "该学生当前绑定培养方案中，所有课程及其最新结果状态的记录数，包括通过、替代或认定、未通过、尚无完成证据和证据未知",
+            "逐一核查该学生培养方案中的所有模块；优先比较已完成学分与最低学分，其次比较已完成门数与最低门数，最后核查模块内必修课程是否全部通过或认定",
+            "该学生当前绑定培养方案中，所有课程及其最新结果状态的记录数，包括成绩通过、替代或认定、成绩未通过、无修读记录和证据未知",
         )
         for tooltip in expected_tooltips:
             self.assertIn(f'content="{tooltip}"', progress)

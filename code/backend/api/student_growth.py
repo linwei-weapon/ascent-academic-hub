@@ -7,14 +7,17 @@ from __future__ import annotations
 
 import sqlite3
 from collections import defaultdict
+from pathlib import Path
 from typing import Optional
 
 from . import db as dbm
 from .deps import student_data_scope
 from .envelope import ApiError
+from .historical_roster import read_historical_roster
 
 GPA_CHANGE_THRESHOLD = 0.3
-RULE_VERSION = "student-growth-v1"
+RULE_VERSION = "student-growth-v2"
+ENROLLED_STATUSES = {"在校", "在籍"}
 
 
 def resolve_semester_pair(
@@ -62,6 +65,40 @@ def _scope_students(
     return [dict(row) for row in dbm.query(conn, f"""
         SELECT student_id,name,college_id,major_id,class_id,grade,status
         FROM dim_student{where} ORDER BY student_id""", tuple(params))]
+
+
+def _comparison_cohort(
+    conn: sqlite3.Connection,
+    students: list[dict],
+    start: str,
+    target: str,
+    roster_dir: Optional[Path],
+) -> tuple[set[str], set[str]]:
+    """Return the in-school roster union and intersection for two terms."""
+    authorized_ids = [str(row["student_id"]) for row in students]
+    term_ids: list[set[str]] = []
+    for semester in (start, target):
+        roster = read_historical_roster(
+            conn,
+            semester,
+            scope_type="school",
+            authorized_student_ids=authorized_ids,
+            scope_fingerprint="student-growth-comparison",
+            ts_dir=roster_dir,
+        )
+        if not roster.get("available"):
+            reason = roster.get("unavailableReason") or "对应学期在籍名单不可用"
+            raise ApiError(
+                f"{semester}在籍学生名单不可用，无法计算可比较学生：{reason}",
+                code=422,
+                status_code=422,
+            )
+        term_ids.append({
+            str(row["studentId"])
+            for row in roster.get("students", [])
+            if str(row.get("status") or "").strip() in ENROLLED_STATUSES
+        })
+    return term_ids[0] | term_ids[1], term_ids[0] & term_ids[1]
 
 
 def _term_facts(
@@ -178,17 +215,17 @@ def _metric(
 
 def _organization_rows(
     rows: list[dict],
-    detail_scope_type: str,
+    group_level: str,
     names: dict[str, dict[str, str]],
 ) -> tuple[str, list[dict]]:
-    if detail_scope_type == "all":
-        level, field, label = "college", "collegeId", "学院"
+    if group_level == "college":
+        field, label = "collegeId", "学院"
         name_map = names["college"]
-    elif detail_scope_type == "college":
-        level, field, label = "major", "majorId", "专业"
+    elif group_level == "major":
+        field, label = "majorId", "专业"
         name_map = names["major"]
     else:
-        level, field, label = "class", "classId", "行政班"
+        field, label = "classId", "行政班"
         name_map = names["class"]
     grouped: dict[str, list[dict]] = defaultdict(list)
     for row in rows:
@@ -197,6 +234,9 @@ def _organization_rows(
     for org_id, members in grouped.items():
         total = len(members)
         comparable = sum(bool(item["comparable"]) for item in members)
+        grade_evidence_comparable = sum(
+            bool(item["hasGradeEvidenceInBothTerms"]) for item in members
+        )
         declined = sum(item["category"] == "declined" for item in members)
         result.append({
             "organizationId": org_id,
@@ -204,10 +244,12 @@ def _organization_rows(
                 org_id, "未分配" if org_id == "UNASSIGNED" else org_id),
             "studentCount": total,
             "comparableCount": comparable,
+            "gradeEvidenceComparableCount": grade_evidence_comparable,
             "coverageRate": round(comparable / total * 100, 1) if total else None,
             "declinedCount": declined,
-            "declinedRate": round(declined / comparable * 100, 1)
-                            if comparable else None,
+            "declinedRate": round(
+                declined / grade_evidence_comparable * 100, 1
+            ) if grade_evidence_comparable else None,
             "continuousCount": sum(item["continuous"] for item in members),
             "firstSetbackCount": sum(item["firstSetback"] for item in members),
             "repeatedUnresolvedCount": sum(
@@ -230,12 +272,19 @@ def build_growth_snapshot(
     major: Optional[str] = None,
     grade: Optional[str] = None,
     class_id: Optional[str] = None,
+    roster_dir: Optional[Path] = None,
 ) -> dict:
     start, target = resolve_semester_pair(conn, from_semester, to_semester)
     students = _scope_students(
         conn, user, college=college, major=major, grade=grade,
         class_id=class_id,
     )
+    cohort_ids, comparable_ids = _comparison_cohort(
+        conn, students, start, target, roster_dir,
+    )
+    students = [
+        row for row in students if str(row["student_id"]) in cohort_ids
+    ]
     ids = [row["student_id"] for row in students]
     conn.execute("DROP TABLE IF EXISTS temp_student_growth_scope")
     conn.execute(
@@ -279,7 +328,8 @@ def build_growth_snapshot(
         sid = student["student_id"]
         old = facts.get(sid, {}).get(start)
         new = facts.get(sid, {}).get(target)
-        comparable = bool(old and new)
+        comparable = sid in comparable_ids
+        has_grade_evidence_in_both_terms = bool(old and new)
         old_gpa = old.get("gpa") if old else None
         new_gpa = new.get("gpa") if new else None
         gpa_delta = (
@@ -288,17 +338,24 @@ def build_growth_snapshot(
         )
         old_fail = old.get("failCount", 0) if old else 0
         new_fail = new.get("failCount", 0) if new else 0
-        fail_delta = new_fail - old_fail if comparable else None
+        fail_delta = (
+            new_fail - old_fail if has_grade_evidence_in_both_terms else None
+        )
         category = (
             _classification(gpa_delta, fail_delta)
-            if comparable and fail_delta is not None else "insufficient"
+            if has_grade_evidence_in_both_terms and fail_delta is not None
+            else "insufficient"
         )
         outcomes = course_outcomes.get(sid, {})
         unresolved = list(outcomes.values())
         repeated = [
             item for item in unresolved if item["repeatedUnresolved"]
         ]
-        continuous = bool(comparable and old_fail > 0 and new_fail > 0)
+        continuous = bool(
+            has_grade_evidence_in_both_terms
+            and old_fail > 0
+            and new_fail > 0
+        )
         first_setback = bool(
             student.get("grade") in low_grades
             and new_fail > 0 and sid not in historical_failed
@@ -333,7 +390,9 @@ def build_growth_snapshot(
             "className": class_names.get(student["class_id"],
                                          student["class_id"] or "未分班"),
             "grade": student["grade"],
-            "comparable": comparable, "category": category,
+            "comparable": comparable,
+            "hasGradeEvidenceInBothTerms": has_grade_evidence_in_both_terms,
+            "category": category,
             "fromGpa": round(old_gpa, 2) if old_gpa is not None else None,
             "toGpa": round(new_gpa, 2) if new_gpa is not None else None,
             "gpaDelta": round(gpa_delta, 2) if gpa_delta is not None else None,
@@ -357,6 +416,9 @@ def build_growth_snapshot(
 
     total = len(rows)
     comparable = sum(item["comparable"] for item in rows)
+    grade_evidence_comparable = sum(
+        item["hasGradeEvidenceInBothTerms"] for item in rows
+    )
     improved = sum(item["category"] == "improved" for item in rows)
     declined = sum(item["category"] == "declined" for item in rows)
     continuous = sum(item["continuous"] for item in rows)
@@ -365,27 +427,35 @@ def build_growth_snapshot(
     metrics = [
         _metric(
             "comparable", "可比较学生", comparable, total,
-            "两个目标学期均有真实有效成绩记录；用于判断变化结论覆盖是否充分。",
+            "两个参与学期均在籍；用于判断参与学期学生的可比较覆盖。",
             "primary",
         ),
         _metric(
-            "improved", "明确改善学生", improved, comparable,
+            "improved", "明确改善学生", improved,
+            grade_evidence_comparable,
             "GPA明显上升且挂科未增加，或挂科减少且GPA未明显下降。",
             "teal",
         ),
         _metric(
-            "declined", "明确恶化学生", declined, comparable,
+            "declined", "明确恶化学生", declined,
+            grade_evidence_comparable,
             "GPA明显下降且挂科未减少，或挂科增加且GPA未明显上升。",
             "danger",
         ),
         _metric(
-            "continuous", "连续受挫学生", continuous, comparable,
+            "continuous", "连续受挫学生", continuous,
+            grade_evidence_comparable,
             "起始学期和目标学期均至少有1门未通过课程。",
             "amber",
         ),
         _metric(
             "first_setback", "低年级首次受挫", first_setback, total,
             "当前两个低年级群体在目标学期首次出现可观测未通过记录。",
+            "danger",
+        ),
+        _metric(
+            "repeated_unresolved", "重复未解决", repeated, total,
+            "同一课程至少两次未通过且最新有效结果仍未通过",
             "danger",
         ),
     ]
@@ -412,8 +482,18 @@ def build_growth_snapshot(
     detail_type = (
         (user.get("permission_context") or {}).get("detailScope") or {}
     ).get("type") or "all"
+    if class_id or major:
+        organization_level = "class"
+    elif college:
+        organization_level = "major"
+    elif detail_type == "all":
+        organization_level = "college"
+    elif detail_type == "college":
+        organization_level = "major"
+    else:
+        organization_level = "class"
     org_label, organizations = _organization_rows(
-        rows, detail_type,
+        rows, organization_level,
         {"college": college_names, "major": major_names, "class": class_names},
     )
     aggregate_meta_row = conn.execute("""
@@ -424,6 +504,14 @@ def build_growth_snapshot(
     aggregate_meta = dict(aggregate_meta_row) if aggregate_meta_row else {}
     return {
         "period": {"fromSemester": start, "toSemester": target},
+        "comparisonBoard": {
+            "title": "可比较学生情况看板",
+            "fromSemester": start,
+            "toSemester": target,
+            "comparableCount": comparable,
+            "studentCount": total,
+            "rate": round(comparable / total * 100, 1) if total else None,
+        },
         "rule": {
             "version": RULE_VERSION,
             "gpaThreshold": GPA_CHANGE_THRESHOLD,
@@ -437,6 +525,7 @@ def build_growth_snapshot(
         "evidence": {
             "sources": [
                 "dim_student",
+                "所选两学期源库students（在校学生名单）",
                 "agg_student_term_growth（源自fact_grade）",
                 "agg_student_course_outcome（源自fact_grade）",
                 "alert_event",

@@ -26,7 +26,7 @@
     <template v-else>
     <h2 class="sa-page-title">{{ data.name || '加载中…' }} · 学生学业档案</h2>
     <div class="ai-profile-action">
-      <el-button type="primary" plain @click="openStudentInsight">AI学业研判</el-button>
+      <el-button type="primary" plain @click="openStudentInsight">学业研判</el-button>
     </div>
     <div class="info-bar">
       <span>学号：{{ data.code || '—' }}</span><el-divider direction="vertical" />
@@ -35,10 +35,6 @@
       <span>入学：{{ data.enrollOn || '—' }}</span>
       <template v-if="data.graduateOn"><el-divider direction="vertical" /><span>预计毕业：{{ data.graduateOn }}</span></template>
     </div>
-
-    <el-alert v-if="v2Status==='ok'" type="success" :closable="false" show-icon class="v2-banner">
-      <template #title>V2真实数据档案 · 成绩有效结果、培养方案、学籍异动和毕业结果已统一关联</template>
-    </el-alert>
 
     <el-row :gutter="12" style="margin-bottom:12px">
       <el-col :span="8">
@@ -128,7 +124,6 @@
           <div v-if="card.verification" class="advice-limit"><b>需核验：</b>{{ card.verification }}</div>
         </div>
       </div>
-      <div class="sa-faint advice-footer">生成方式：{{ advice.generated_by }} · 当前未启用外部AI模型 · 正式课程、成绩和毕业审核以学校业务系统为准</div>
     </div>
 
     <!-- 学业成长指标与困难证据 -->
@@ -219,12 +214,25 @@
         <el-table-column prop="takeType" label="修读类别" width="90" />
         <el-table-column prop="examStatus" label="考试情况" width="90" />
       </el-table>
-      <div class="sa-faint" style="font-size:11px;margin-top:12px;text-align:center">
-        数据来源：教务系统 · 本页仅做数据展示，预警处理请在教务系统中操作
-      </div>
     </div>
     </template>
-    <AIInsightDrawer v-model="aiDrawerVisible" :insight="aiInsight" :loading="aiLoading" title="AI学业研判" />
+    <AIInsightDrawer
+      v-model="aiDrawerVisible"
+      :insight="aiInsight"
+      :loading="aiLoading"
+      title="学业研判"
+      hide-intervention-tag
+      hide-decision-meta
+      hide-judgment-boundary
+      hide-consequence
+      hide-expected-result
+      hide-no-comparison-tag
+      hide-trace
+      icon-only-trace-shortcut
+      hide-evidence-help
+      hide-evidence-source
+      show-all-evidence
+    />
   </div>
 </template>
 
@@ -272,7 +280,7 @@ const v2Status = ref<'loading'|'ok'|'unavailable'>('loading')
 const v2Growth = reactive<any>({ student: null, indicator: null, flags: [], timeline: [], graduation: [] })
 const actionableCourses = reactive<any>({ items: [], total: 0 })
 const candidateCourses = reactive<any>({ items: [], total: 0 })
-const advice = reactive<any>({ cards: [], audiences: [], generated_by: '', wording: '' })
+const advice = reactive<any>({ cards: [], audiences: [], wording: '' })
 const adviceAudience = ref('student')
 const timelineFilter = ref('all')
 const aiDrawerVisible = ref(false)
@@ -325,6 +333,9 @@ onMounted(async () => {
       http.getSilent<any>('/v2/students/' + id + '/advice'),
     ])
     Object.assign(v2Growth, growth)
+    if (!data.enrollOn && growth?.student?.entry_grade) {
+      data.enrollOn = `${growth.student.entry_grade}年`
+    }
     Object.assign(actionableCourses, actionable)
     Object.assign(candidateCourses, candidates)
     Object.assign(advice, adviceData)
@@ -447,7 +458,6 @@ const gpaOption = computed(() => {
 .unified-timeline small { color:#94a3b8; font-size:11px; }
 .link { color: var(--sa-primary); cursor: pointer; font-weight: 500; }
 .link:hover { text-decoration: underline; }
-.v2-banner { margin-bottom: 12px; }
 .v2-metrics { margin-top: 4px; }
 .metric { background:#F8FAFC; border:1px solid #E2E8F0; border-radius:8px; padding:12px; text-align:center; }
 .metric b { display:block; color:#1E3A5F; font-size:22px; font-variant-numeric:tabular-nums; }
@@ -468,6 +478,5 @@ const gpaOption = computed(() => {
 .advice-message { margin:10px 0; color:#334155; font-size:13px; line-height:1.7; }
 .advice-evidence,.advice-limit { font-size:11px; color:#64748B; line-height:1.6; }
 .advice-limit { color:#92400E; margin-top:3px; }
-.advice-footer { font-size:11px; margin-top:12px; text-align:right; }
 @media (max-width:1000px) { .advice-list { grid-template-columns:1fr; } .growth-head { flex-direction:column; } }
 </style>
