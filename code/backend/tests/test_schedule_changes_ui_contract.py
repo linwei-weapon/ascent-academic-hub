@@ -11,7 +11,7 @@ class ScheduleChangesUiContractTest(unittest.TestCase):
         return (FRONTEND / relative_path).read_text(encoding="utf-8")
 
     def test_teacher_top_uses_non_stretched_side_stack(self):
-        page = self.read("views/operation/ScheduleChanges.vue")
+        page = self.read("views/teaching-analysis/operation/ScheduleChanges.vue")
         self.assertIn('class="schedule-side-stack"', page)
         self.assertIn(".schedule-side-stack {", page)
 
@@ -21,13 +21,13 @@ class ScheduleChangesUiContractTest(unittest.TestCase):
         self.assertIn('@row-click="forwardRowClick"', table)
 
     def test_teacher_row_opens_reason_drawer(self):
-        page = self.read("views/operation/ScheduleChanges.vue")
+        page = self.read("views/teaching-analysis/operation/ScheduleChanges.vue")
         self.assertIn('@row-click="inspectTeacher"', page)
         self.assertIn('v-model="teacherDrawer"', page)
         self.assertIn("selectedTeacher.value = row", page)
 
     def test_teacher_top_copy_and_reason_drawer_copy(self):
-        page = self.read("views/operation/ScheduleChanges.vue")
+        page = self.read("views/teaching-analysis/operation/ScheduleChanges.vue")
         self.assertIn("教师调停课 TOP10", page)
         self.assertNotIn("本学期 ≥ 3 次 · 点击核查原因", page)
         self.assertIn(

@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[2]
 class ClassroomUiContractTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.page = (ROOT / "frontend/src/views/operation/Classroom.vue").read_text(encoding="utf-8")
+        cls.page = (ROOT / "frontend/src/views/teaching-analysis/operation/Classroom.vue").read_text(encoding="utf-8")
         cls.insight_drawer = (ROOT / "frontend/src/components/AIInsightDrawer.vue").read_text(encoding="utf-8")
 
     def test_classroom_page_uses_requested_labels_and_attention_rules(self):
