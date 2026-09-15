@@ -57,13 +57,13 @@
         <span class="extra">共 {{ data.classSummary?.totalAdministrativeClasses || 0 }} 个行政班；{{ data.classSummary?.sort }}</span>
         <KpiLabel label="" formula="当前数据按修读学生所属行政班聚合，并非教学班。未通过人次率=该行政班未通过有效成绩人次÷有效成绩人次×100%" />
       </div>
-      <DataTable :columns="classCols" :data="data.classDetail"
+      <AppTable :columns="classCols"
         storage-key="dashboard:course-class-distribution" :max-business-columns="4"
-        :config-version="3" :pagination="true" :default-page-size="20" size="small">
+        :config-version="3" :show-density="true" :show-column-settings="true" :data="classPagination.rows" :pagination="true" :page="classPagination.page" :page-size="classPagination.pageSize" :total="classPagination.total" @page-change="classPagination.changePage" @page-size-change="classPagination.changePageSize">
         <template #col-riskRank="{row}"><span class="rank" :class="{hot:row.riskRank<=3}">{{ row.riskRank }}</span></template>
         <template #col-avgScore="{row}"><b class="tnum" :style="{color:row.avgScore<60?'#E11D48':'#1E293B'}">{{ row.avgScore }}</b></template>
         <template #col-failRate="{row}"><span class="tnum" :style="{color:parseFloat(row.failRate)>25?'#E11D48':'#D97706',fontWeight:600}">{{ row.failRate }}</span></template>
-      </DataTable>
+      </AppTable>
     </div>
     <div style="margin-top:16px"><el-button type="primary" @click="goStudents">查看全部修读学生 →</el-button></div>
     </template>
@@ -72,6 +72,7 @@
 </template>
 
 <script setup lang="ts">
+import { useTablePagination } from '@/composables/useTablePagination'
 import * as dashboardApi from '@/api/teachingAnalysis/dashboard'
 
 
@@ -80,7 +81,8 @@ import { useRoute, useRouter } from 'vue-router';
 import KpiLabel from '@/components/KpiLabel.vue';
 import KpiCard from '@/components/KpiCard.vue';
 import EChart from '@/components/EChart.vue';
-import DataTable, { type DataTableColumn } from '@/components/DataTable.vue';
+import AppTable from '@/components/AppTable.vue'
+import type { AppTableColumn } from '@/types/table'
 import { withReturnContext } from '@/utils/dashboardDrill';
 const route = useRoute(); const router = useRouter();
 const semLabel = (route.query.semester as string) || '';
@@ -88,12 +90,12 @@ const pageLoading = ref(false);
 const loadError = ref('');
 let requestSeq = 0;
 const data = reactive<any>({ name:'', credits:0, type:'', college:'', kpi:[], scoreDistribution:[], classDetail:[], classSummary:{}, history:[], scope:{restricted:false}, analysisScope:{}, evidence:{} });
-const classCols: DataTableColumn[] = [
-  { key: 'riskRank', label: '序', width: 48, fixed: 'left', region: 'identity', required: true },
-  { key: 'className', label: '行政班', width: 150, fixed: 'left', region: 'identity', required: true },
-  { key: 'students', label: '有效成绩人次', width: 112, align: 'right' },
-  { key: 'avgScore', label: '平均分', width: 80, align: 'right' },
-  { key: 'failRate', label: '未通过人次率', width: 112, align: 'right', required: true },
+const classCols: AppTableColumn[] = [
+  { key: 'riskRank', label: '序', minWidth: 48, fixed: 'left', region: 'identity', required: true },
+  { key: 'className', label: '行政班', minWidth: 150, fixed: 'left', region: 'identity', required: true },
+  { key: 'students', label: '有效成绩人次', minWidth: 112, align: 'center' },
+  { key: 'avgScore', label: '平均分', minWidth: 80, align: 'center' },
+  { key: 'failRate', label: '未通过人次率', minWidth: 112, align: 'center', required: true },
   { key: 'teacher', label: '任课教师', minWidth: 120 },
 ];
 
@@ -186,6 +188,9 @@ function goStudents() {
     query:withReturnContext(query, route.fullPath, '返回课程详情'),
   });
 }
+
+// 全量结果在页面分页；不改变查询、汇总和证据数据。
+const classPagination = useTablePagination(() => data.classDetail, 20)
 </script>
 
 <style scoped lang="scss">

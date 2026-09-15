@@ -120,22 +120,21 @@
               <el-button link type="primary" @click="loadOrganizations">重新加载组织比较</el-button>
             </template>
           </el-alert>
-          <DataTable
+          <AppTable
             :columns="organizationCols"
             :data="overview.organizations"
             storage-key="students:growth-organizations"
             :max-business-columns="7"
             :config-version="1"
-            size="small"
-            v-loading="organizationLoading"
-          >
+
+            v-loading="organizationLoading" :show-density="true" :show-column-settings="true" :pagination="false">
             <template #col-organizationName="{ row }"><b>{{ row.organizationName }}</b></template>
             <template #col-coverageRate="{ row }">{{ ratioCell(row.comparableCount, row.studentCount, row.coverageRate) }}</template>
             <template #col-declinedRate="{ row }">{{ ratioCell(row.declinedCount, row.comparableCount, row.declinedRate) }}</template>
             <template #col-actions="{ row }">
               <el-button size="small" type="primary" plain @click="selectOrganization(row)">查看名单</el-button>
             </template>
-          </DataTable>
+          </AppTable>
           <el-empty v-if="!initialLoading && !overview.organizations.length" description="当前授权范围没有可比较的下级组织" :image-size="62" />
         </div>
       </el-col>
@@ -167,16 +166,15 @@
           <el-button link type="primary" @click="loadList(page)">重新加载名单</el-button>
         </template>
       </el-alert>
-      <DataTable
+      <AppTable
         :columns="studentCols"
         :data="list.students"
         storage-key="students:growth-priority-list"
         :max-business-columns="8"
         :config-version="1"
-        v-model:page-size="pageSize"
+
         v-loading="listLoading"
-        stripe
-      >
+        stripe :show-density="true" :show-column-settings="true" :pagination="true" :page="page" :page-size="pageSize" :total="list.total" @page-change="page = $event; loadList()" @page-size-change="pageSize = $event" :loading="listLoading">
         <template #col-sid="{ row }"><span class="tnum">{{ row.sid }}</span></template>
         <template #col-name="{ row }"><el-button link type="primary" @click="openEvidence(row)">{{ row.name }}</el-button></template>
         <template #col-organization="{ row }">{{ row.major }} · {{ row.className }}</template>
@@ -199,18 +197,9 @@
         </template>
         <template #col-openAlerts="{ row }"><span :class="{ 'danger-text': row.openAlerts }">{{ row.openAlerts }}件</span></template>
         <template #col-actions="{ row }"><el-button size="small" type="primary" plain @click="openEvidence(row)">详情</el-button></template>
-      </DataTable>
+      </AppTable>
       <el-empty v-if="!listLoading && !list.students.length" :description="emptyDescription" :image-size="66" />
-      <div class="pager" v-if="list.total">
-        <el-pagination
-          v-model:current-page="page"
-          :page-size="pageSize"
-          :total="list.total"
-          layout="total, prev, pager, next, jumper"
-          size="small"
-          @current-change="loadList"
-        />
-      </div>
+
     </div>
 
     <StudentEvidenceDrawer
@@ -232,7 +221,8 @@ import { authStore } from '@/store/auth'
 import { getFilterMeta, type ClassOpt, type MajorOpt, type SemesterOpt } from '@/api/shared/filterMeta'
 import BusinessPageContext from '@/components/BusinessPageContext.vue'
 import KpiCard from '@/components/KpiCard.vue'
-import DataTable, { type DataTableColumn } from '@/components/DataTable.vue'
+import AppTable from '@/components/AppTable.vue'
+import type { AppTableColumn } from '@/types/table'
 import StudentEvidenceDrawer from '@/components/StudentEvidenceDrawer.vue'
 
 const route = useRoute()
@@ -297,27 +287,27 @@ const evidenceContext = computed(() => ({
   returnQuery: currentViewQuery(),
 }))
 
-const organizationCols: DataTableColumn[] = [
+const organizationCols: AppTableColumn[] = [
   { key: 'organizationName', label: '组织名称', minWidth: 150, fixed: 'left', region: 'identity', required: true },
-  { key: 'studentCount', label: '范围学生', width: 92, align: 'right' },
-  { key: 'coverageRate', label: '可比较覆盖', minWidth: 130, align: 'right', required: true },
-  { key: 'declinedRate', label: '明确恶化', minWidth: 122, align: 'right' },
-  { key: 'continuousCount', label: '连续受挫', width: 96, align: 'right' },
-  { key: 'firstSetbackCount', label: '首次受挫', width: 96, align: 'right' },
-  { key: 'repeatedUnresolvedCount', label: '重复未解决', width: 110, align: 'right' },
-  { key: 'openAlertCount', label: '有效预警', width: 96, align: 'right', defaultVisible: false },
+  { key: 'studentCount', label: '范围学生', minWidth: 92, align: 'center' },
+  { key: 'coverageRate', label: '可比较覆盖', minWidth: 130, align: 'center', required: true },
+  { key: 'declinedRate', label: '明确恶化', minWidth: 122, align: 'center' },
+  { key: 'continuousCount', label: '连续受挫', minWidth: 96, align: 'center' },
+  { key: 'firstSetbackCount', label: '首次受挫', minWidth: 96, align: 'center' },
+  { key: 'repeatedUnresolvedCount', label: '重复未解决', minWidth: 110, align: 'center' },
+  { key: 'openAlertCount', label: '有效预警', minWidth: 96, align: 'center', defaultVisible: false },
   { key: 'actions', label: '操作', width: 96, fixed: 'right', region: 'action', required: true },
 ]
-const studentCols: DataTableColumn[] = [
-  { key: 'sid', label: '学号', width: 132, fixed: 'left', region: 'identity', required: true },
-  { key: 'name', label: '姓名', width: 100, fixed: 'left', region: 'identity', required: true },
+const studentCols: AppTableColumn[] = [
+  { key: 'sid', label: '学号', minWidth: 132, fixed: 'left', region: 'identity', required: true },
+  { key: 'name', label: '姓名', minWidth: 100, fixed: 'left', region: 'identity', required: true },
   { key: 'organization', label: '专业 / 班级', minWidth: 190, tooltip: true },
   { key: 'gpaChange', label: 'GPA 起点→终点', minWidth: 150 },
   { key: 'failChange', label: '未通过 起点→终点', minWidth: 160 },
   { key: 'triggers', label: '触发原因', minWidth: 210, required: true },
   { key: 'unresolved', label: '当前未解决', minWidth: 130 },
-  { key: 'openAlerts', label: '当前预警', width: 90, align: 'right' },
-  { key: 'grade', label: '年级', width: 82, align: 'center', defaultVisible: false },
+  { key: 'openAlerts', label: '当前预警', minWidth: 90, align: 'center' },
+  { key: 'grade', label: '年级', minWidth: 82, align: 'center', defaultVisible: false },
   { key: 'college', label: '学院', minWidth: 150, tooltip: true, defaultVisible: false },
   { key: 'actions', label: '详情', width: 82, fixed: 'right', region: 'action', required: true },
 ]

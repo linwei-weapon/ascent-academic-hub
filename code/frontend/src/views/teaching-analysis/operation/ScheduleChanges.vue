@@ -24,7 +24,7 @@
       <el-col :span="12">
         <div class="sa-card">
           <div class="sa-card-title">按学院调停课率排名</div>
-          <DataTable :columns="deptRankCols" :data="data.deptRanks" storage-key="operation:schedule-changes-dept" size="small" config-version="2">
+          <AppTable :columns="deptRankCols" :data="data.deptRanks" storage-key="operation:schedule-changes-dept"  config-version="2" :show-density="true" :show-column-settings="true" :pagination="false">
             <template #header-changeCount><KpiLabel label="调停课次数" formula="该学院下所有开课教学任务调停课记录总数" /></template>
             <template #header-pct><KpiLabel label="调停课率" formula="该学院下所有开课教学任务调停课去重记录数 ÷ 该学院下所有的教学任务数（教学任务就是教学班）" /></template>
             <template #col-attention="{row,$index}"><el-tag size="small" :type="$index<3?'danger':row.pct>=3?'warning':'info'">{{$index<3?'优先关注':row.pct>=3?'需关注':'常规'}}</el-tag></template>
@@ -34,7 +34,7 @@
                 <span class="tnum" :style="{color:row.pct>4?'#E11D48':'#D97706',fontWeight:600,minWidth:'42px',textAlign:'right'}">{{ row.pct }}%</span>
               </div>
             </template>
-          </DataTable>
+          </AppTable>
         </div>
       </el-col>
       <el-col :span="12">
@@ -46,10 +46,10 @@
           </div>
           <div class="sa-card">
             <div class="sa-card-title">教师调停课 TOP10 <KpiLabel label="" formula="统计每位教师的调停课事件总次数，进入列表条件为总次数 `≥3`；最多 10 人" /></div>
-            <DataTable :columns="teacherTopCols" :data="data.frequentTeachers" storage-key="operation:schedule-changes-teachers" size="small" @row-click="inspectTeacher" row-class-name="row-clickable">
+            <AppTable :columns="teacherTopCols" :data="data.frequentTeachers" storage-key="operation:schedule-changes-teachers"  @row-click="inspectTeacher" row-class-name="row-clickable" :show-density="true" :show-column-settings="true" :pagination="false">
               <template #col-name="{row}"><span class="link">{{ row.name }}</span></template>
               <template #col-attention="{row}"><el-tag size="small" :type="teacherNeedsAi(row)?'danger':'warning'">{{teacherNeedsAi(row)?'重点关注':'需关注'}}</el-tag></template>
-            </DataTable>
+            </AppTable>
           </div>
         </div>
       </el-col>
@@ -63,11 +63,13 @@
 
     <el-drawer v-model="teacherDrawer" :title="`${selectedTeacher.name || ''}｜调课原因信息`" size="620px">
       <div class="teacher-summary"><b>{{ selectedTeacher.count || 0 }}</b><span>调停课记录</span><b>{{ selectedTeacher.reasonBreakdown?.length || 0 }}</b><span>原始原因类型</span></div>
-      <el-table :data="selectedTeacher.reasonBreakdown || []" size="small" stripe>
-        <el-table-column prop="reason" label="原始原因文本" min-width="180" />
-        <el-table-column prop="semanticCategory" label="语义分类" width="150" />
-        <el-table-column prop="count" label="次数" width="80" align="right" />
-      </el-table>
+      <AppTable :data="selectedTeacher.reasonBreakdown || []"  stripe :columns="[]" storage-key="teaching-analysis:operation:schedulechanges:3" :pagination="false">
+        <template #columns>
+        <el-table-column prop="reason" label="原始原因文本" min-width="180" align="center" header-align="center"/>
+        <el-table-column prop="semanticCategory" label="语义分类" min-width="150" align="center" header-align="center"/>
+        <el-table-column prop="count" label="次数" min-width="80" align="center" header-align="center"/>
+              </template>
+      </AppTable>
       <div class="drawer-actions">
         <span v-if="!teacherNeedsAi(selectedTeacher)" class="sa-faint">当前未列入重点关注范围，核对原始原因即可。</span>
         <el-button v-else type="primary" plain @click="openTeacherAi(selectedTeacher)">查看调课研判</el-button>
@@ -90,23 +92,24 @@ import KpiCard from '@/components/KpiCard.vue'
 import EChart from '@/components/EChart.vue'
 import { getFilterMeta } from '@/api/shared/filterMeta'
 import AIInsightDrawer from '@/components/AIInsightDrawer.vue'
-import DataTable, { type DataTableColumn } from '@/components/DataTable.vue'
+import AppTable from '@/components/AppTable.vue'
+import type { AppTableColumn } from '@/types/table'
 import { getScheduleChangesAIInsight, getScheduleTeacherAIInsight } from '@/api/teachingAnalysis/insights'
 const route = useRoute()
 
 // 按学院调停课率排名 / 教师调停课 TOP10 表列定义（M6 DataTable）
-const deptRankCols: DataTableColumn[] = [
-  { key: 'name', label: '学院', width: 130, required:true, region:'identity', fixed:'left' },
-  { key: 'totalLessons', label: '教学班数', width: 84, align: 'right', required:true },
-  { key: 'changeCount', label: '调停课次数', width: 110, align: 'right', required:true },
-  { key: 'attention', label: '管理关注', width: 100, required:true },
+const deptRankCols: AppTableColumn[] = [
+  { key: 'name', label: '学院', minWidth: 130, required:true, region:'identity', fixed:'left' },
+  { key: 'totalLessons', label: '教学班数', minWidth: 84, align: 'center', required:true },
+  { key: 'changeCount', label: '调停课次数', minWidth: 110, align: 'center', required:true },
+  { key: 'attention', label: '管理关注', minWidth: 100, required:true },
   { key: 'pct', label: '调停课率', minWidth: 170, required:true },
 ]
-const teacherTopCols: DataTableColumn[] = [
-  { key: 'name', label: '教师', width: 80, required:true, region:'identity', fixed:'left' },
-  { key: 'dept', label: '学院', width: 120 },
-  { key: 'count', label: '次数', width: 60, align: 'right', required:true },
-  { key: 'attention', label: '管理关注', width: 100, required:true },
+const teacherTopCols: AppTableColumn[] = [
+  { key: 'name', label: '教师', minWidth: 80, required:true, region:'identity', fixed:'left' },
+  { key: 'dept', label: '学院', minWidth: 120 },
+  { key: 'count', label: '次数', minWidth: 60, align: 'center', required:true },
+  { key: 'attention', label: '管理关注', minWidth: 100, required:true },
   { key: 'reason', label: '主要原因', minWidth: 110 },
 ]
 const fSemester = inject<Ref<string>>('operationSemester', ref(''))

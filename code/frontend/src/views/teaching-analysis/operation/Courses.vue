@@ -36,13 +36,15 @@
       :description="`${data.dataQuality.reason}（阈值>${data.dataQuality.threshold}）`" />
     <el-collapse v-if="data.dataQuality.excludedTeachers" style="margin-bottom:12px">
       <el-collapse-item :title="`查看 ${data.dataQuality.excludedTeachers} 条数据质量问题明细`" name="quality">
-        <el-table v-if="qualityIssues.length" :data="qualityIssues" size="small" stripe max-height="300">
-          <el-table-column prop="semester_id" label="学期" width="120" />
-          <el-table-column label="教师" width="150"><template #default="{row}">{{ row.entity_name || row.entity_id }}（{{ row.entity_id }}）</template></el-table-column>
-          <el-table-column prop="affected_rows" label="影响记录" width="90" align="right" />
-          <el-table-column prop="detail" label="问题说明" min-width="210" />
-          <el-table-column prop="recommendation" label="处置建议" min-width="250" />
-        </el-table>
+        <AppTable v-if="qualityIssues.length" :data="qualityIssues"  stripe max-height="300" :columns="[]" storage-key="teaching-analysis:operation:courses:1" :pagination="false">
+        <template #columns>
+          <el-table-column prop="semester_id" label="学期" min-width="120" align="center" header-align="center"/>
+          <el-table-column label="教师" min-width="150" align="center" header-align="center"><template #default="{row}">{{ row.entity_name || row.entity_id }}（{{ row.entity_id }}）</template></el-table-column>
+          <el-table-column prop="affected_rows" label="影响记录" min-width="90" align="center" header-align="center"/>
+          <el-table-column prop="detail" label="问题说明" min-width="210" align="center" header-align="center"/>
+          <el-table-column prop="recommendation" label="处置建议" min-width="250" align="center" header-align="center"/>
+                </template>
+      </AppTable>
         <el-empty v-else description="数据质量问题明细暂未返回，请刷新页面重试" :image-size="64" />
       </el-collapse-item>
     </el-collapse>
@@ -52,11 +54,11 @@
         <span>开课保障关注 TOP10 <KpiLabel label="" formula="按大班额、单一教师多班覆盖和单班集中供给排序，不是课程质量排名" /></span>
         <el-button size="small" type="primary" plain @click="openOfferingDrawer">查看全部 {{ data.totalCourses }} 门</el-button>
       </div>
-      <DataTable :columns="offeringTopCols" :data="decisionOfferings.slice(0,10)" storage-key="operation:courses-top10" size="small" stripe>
+      <AppTable :columns="offeringTopCols" :data="decisionOfferings.slice(0,10)" storage-key="operation:courses-top10"  stripe :show-density="true" :show-column-settings="true" :pagination="false">
         <template #col-attention="{row}"><el-tag size="small" :type="offeringAttentionLevel(row).type">{{ offeringAttentionLevel(row).label }}</el-tag></template>
         <template #col-reasons="{row}"><span v-if="row.attention.length">{{ row.attention.join('；') }}</span><span v-else class="sa-faint">规模较大，建议常规关注</span></template>
         <template #col-actions="{row}"><el-button link type="primary" @click.stop="openOfferingReview(row)">详情</el-button></template>
-      </DataTable>
+      </AppTable>
     </div>
 
     <div class="sa-kpi-row">
@@ -65,10 +67,11 @@
 
     <el-row :gutter="16" style="margin-bottom:16px">
       <el-col :span="14">
-        <div class="sa-card">
+        <div class="sa-card supply-card">
           <div class="sa-card-title">学院教学供给规模</div>
-          <DataTable :columns="deptCourseCols" :data="data.deptCourses" storage-key="operation:courses-college"
-            size="small" :max-business-columns="2">
+          <AppTable :columns="deptCourseCols" :data="data.deptCourses" storage-key="operation:courses-college"
+             :max-business-columns="2" :show-density="true" :show-column-settings="true" :pagination="false"
+             show-summary :summary-method="supplySummary">
             <template #col-name="{row}"><span>{{ row.name }}</span></template>
             <template #col-courseCount="{row}">
               <div class="tnum" style="font-weight:700;font-size:14px;color:#1E293B">{{ row.courseCount }} <span style="font-size:12px;font-weight:400">门</span></div>
@@ -76,16 +79,11 @@
             </template>
             <template #col-pct="{row}">
               <div style="display:flex;align-items:center;gap:10px">
-                <el-progress :percentage="row.pct" :stroke-width="10" :color="pctColor(row.pct)" style="flex:1" />
+                <el-progress :percentage="row.pct" :show-text="false" :stroke-width="10" :color="pctColor(row.pct)" style="flex:1" />
                 <span class="tnum" style="font-weight:700;font-size:13px;min-width:34px;text-align:right">{{ row.pct }}%</span>
               </div>
             </template>
-          </DataTable>
-          <div class="table-foot">
-            <span style="width:150px">合计</span>
-            <span style="width:130px;font-weight:700;color:#1E293B" class="tnum">{{ totalCourses }} 门</span>
-            <span style="flex:1;font-weight:700;color:#1E293B">100%</span>
-          </div>
+          </AppTable>
         </div>
       </el-col>
       <el-col :span="10">
@@ -110,14 +108,14 @@
         <el-button type="primary" @click="searchOfferings">查询</el-button>
         <span>共 {{ offeringDrawer.total }} 门课程 · {{ offeringDrawer.semester }}</span>
       </div>
-      <DataTable :columns="offeringAllCols" :data="offeringDrawer.items" storage-key="operation:courses-all"
-        size="small" stripe v-loading="offeringDrawer.loading" max-height="620" :page-size="offeringDrawer.pageSize"
-        :default-page-size="20" :max-business-columns="6" @update:page-size="onOfferingPageSize">
+      <AppTable :columns="offeringAllCols" :data="offeringDrawer.items" storage-key="operation:courses-all"
+         stripe v-loading="offeringDrawer.loading" max-height="620"
+         :max-business-columns="6" :show-density="true" :show-column-settings="true" :pagination="true" :page="offeringDrawer.page" :page-size="offeringDrawer.pageSize" :total="offeringDrawer.total" @page-change="offeringDrawer.page = $event; loadOfferingPage()" @page-size-change="onOfferingPageSize" :loading="offeringDrawer.loading">
         <template #col-avgClassSize="{row}">{{ row.lesson_count ? Math.round(row.enrolled/row.lesson_count) : 0 }}</template>
         <template #col-attention="{row}"><el-tag size="small" :type="offeringAttentionLevel(row).type">{{ offeringAttentionLevel(row).label }}</el-tag></template>
         <template #col-actions="{row}"><el-button link type="primary" @click="openOfferingReview(row)">详情</el-button></template>
-      </DataTable>
-      <el-pagination v-model:current-page="offeringDrawer.page" :page-size="offeringDrawer.pageSize" :total="offeringDrawer.total" layout="total,prev,pager,next" style="justify-content:flex-end;margin-top:14px" @current-change="loadOfferingPage" />
+      </AppTable>
+
     </el-drawer>
     <el-drawer v-model="offeringReviewVisible" :title="`${selectedOffering.course_name || '课程'}｜开课保障信息`" size="720px">
       <el-descriptions :column="3" border style="margin-bottom:14px">
@@ -147,13 +145,15 @@
 import * as operationApi from '@/api/teachingAnalysis/operation'
 
 
-import { reactive, ref, computed, watch, onMounted, inject, type Ref } from 'vue'
+import { reactive, ref, computed, watch, onMounted, inject, h, type Ref } from 'vue'
+import type { TableColumnCtx } from 'element-plus'
 import KpiLabel from '@/components/KpiLabel.vue'
 import KpiCard from '@/components/KpiCard.vue'
 import EChart from '@/components/EChart.vue'
 import { getFilterMeta } from '@/api/shared/filterMeta'
 import AIInsightDrawer from '@/components/AIInsightDrawer.vue'
-import DataTable, { type DataTableColumn } from '@/components/DataTable.vue'
+import AppTable from '@/components/AppTable.vue'
+import type { AppTableColumn, TableRow } from '@/types/table'
 import { getOperationCourseAIInsight } from '@/api/teachingAnalysis/insights'
 
 const fSemester = inject<Ref<string>>('operationSemester', ref(''))
@@ -206,32 +206,32 @@ const decisionOfferings = computed(() => (data.focusCourses || [])
 const hasResults = computed(() => !!kpis.value.length || !!data.totalCourses)
 
 // 开课保障关注 TOP10 表列定义（M6 DataTable）
-const offeringTopCols: DataTableColumn[] = [
-  { key: 'course_id', label: '课程代码', width: 140, region:'identity', fixed:'left' },
+const offeringTopCols: AppTableColumn[] = [
+  { key: 'course_id', label: '课程代码', minWidth: 140, region:'identity', fixed:'left' },
   { key: 'course_name', label: '课程名称', minWidth: 190, required:true, region:'identity', fixed:'left' },
-  { key: 'lesson_count', label: '教学班', width: 85, align: 'right', required:true },
-  { key: 'teacher_count', label: '教师数', width: 80, align: 'right' },
-  { key: 'enrolled', label: '选课人次', width: 90, align: 'right', required:true },
-  { key: 'avgClassSize', label: '平均班额', width: 90, align: 'right', required:true },
-  { key: 'attention', label: '管理关注', width: 95, required:true },
+  { key: 'lesson_count', label: '教学班', minWidth: 85, align: 'center', required:true },
+  { key: 'teacher_count', label: '教师数', minWidth: 80, align: 'center' },
+  { key: 'enrolled', label: '选课人次', minWidth: 90, align: 'center', required:true },
+  { key: 'avgClassSize', label: '平均班额', minWidth: 90, align: 'center', required:true },
+  { key: 'attention', label: '管理关注', minWidth: 95, required:true },
   { key: 'reasons', label: '优先关注原因', minWidth: 250 },
   { key: 'actions', label: '操作', width: 88, required:true, region:'action', fixed:'right' },
 ]
-const deptCourseCols:DataTableColumn[] = [
-  {key:'name',label:'学院',width:150,required:true,region:'identity',fixed:'left'},
-  {key:'courseCount',label:'开课门数',width:130,required:true},
+const deptCourseCols:AppTableColumn[] = [
+  {key:'name',label:'学院',minWidth:150,required:true,region:'identity',fixed:'left'},
+  {key:'courseCount',label:'开课门数',minWidth:130,required:true},
   {key:'pct',label:'教学班占全校比例',minWidth:240,required:true},
 ]
-const offeringAllCols:DataTableColumn[] = [
-  {key:'course_id',label:'课程代码',width:140,region:'identity',fixed:'left'},
+const offeringAllCols:AppTableColumn[] = [
+  {key:'course_id',label:'课程代码',minWidth:140,region:'identity',fixed:'left'},
   {key:'course_name',label:'课程名称',minWidth:200,required:true,region:'identity',fixed:'left'},
-  {key:'category',label:'类别',width:110},
-  {key:'nature',label:'性质',width:110},
-  {key:'lesson_count',label:'教学班',width:80,align:'right',required:true},
-  {key:'teacher_count',label:'教师',width:70,align:'right'},
-  {key:'enrolled',label:'选课人次',width:90,align:'right',required:true},
-  {key:'avgClassSize',label:'平均班额',width:90,align:'right',required:true},
-  {key:'attention',label:'管理关注',width:95,required:true},
+  {key:'category',label:'类别',minWidth:110},
+  {key:'nature',label:'性质',minWidth:110},
+  {key:'lesson_count',label:'教学班',minWidth:80,align:'center',required:true},
+  {key:'teacher_count',label:'教师',minWidth:70,align:'center'},
+  {key:'enrolled',label:'选课人次',minWidth:90,align:'center',required:true},
+  {key:'avgClassSize',label:'平均班额',minWidth:90,align:'center',required:true},
+  {key:'attention',label:'管理关注',minWidth:95,required:true},
   {key:'actions',label:'操作',width:88,required:true,region:'action',fixed:'right'},
 ]
 function buildCourseParams() {
@@ -281,6 +281,17 @@ async function openOfferingAi(row:any) {
   finally { aiLoading.value = false }
 }
 const totalCourses = computed(() => data.totalCourses)
+
+/** 按实际列字段生成合计，随列宽和列顺序变化；沿用原门数与比例口径。 */
+function supplySummary({ columns }: { columns: TableColumnCtx<TableRow>[] }) {
+  return columns.map(column => {
+    if (column.property === 'name') return '合计'
+    if (column.property === 'courseCount') return `${totalCourses.value} 门`
+    if (column.property === 'pct') return h('span', { class: 'supply-summary-percentage' }, '100%')
+    return ''
+  })
+}
+
 function applyFilters() { load() }
 function resetFilters() {
   fCollege.value = ''
@@ -369,15 +380,22 @@ const sizeOption = computed(() => {
   text-align: center;
 }
 
-.table-foot {
-  display: flex;
-  align-items: center;
-  padding: 10px 12px;
-  background: #f8fafc;
-  border-top: 2px solid var(--sa-border-2);
-  font-size: 12px;
-  color: #475569;
-  font-weight: 600;
+.supply-card {
+  :deep(.el-table__footer-wrapper) {
+    border-top: 2px solid var(--sa-border-2);
+
+    .el-table__cell {
+      background: #f8fafc;
+      color: #1e293b;
+      font-weight: 700;
+    }
+  }
+
+  // 百分比合计与上方进度条末尾的数值对齐，其余合计跟随列居中。
+  :deep(.supply-summary-percentage) {
+    display: block;
+    text-align: right;
+  }
 }
 
 .management-note {

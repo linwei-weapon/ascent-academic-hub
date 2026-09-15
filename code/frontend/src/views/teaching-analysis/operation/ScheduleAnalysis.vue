@@ -28,11 +28,11 @@
 
     <div class="sa-card" style="margin-bottom:16px">
       <div class="sa-card-title">重点课程组排课均衡分布情况 <KpiLabel label="" :formula="data.definition.focus" /></div>
-      <DataTable :columns="focusCols" :data="data.focusSummary" storage-key="operation:schedule-focus" size="small" :max-business-columns="6">
+      <AppTable :columns="focusCols" :data="data.focusSummary" storage-key="operation:schedule-focus"  :max-business-columns="6" :show-density="true" :show-column-settings="true" :pagination="false">
         <template #col-peakShare="{row}"><span :class="row.peakShare>=20?'warn':''">{{ row.peakShare }}%</span></template>
         <template #col-eveningShare="{row}">{{ row.eveningShare }}%</template>
         <template #col-actions="{row}"><el-button text type="primary" @click="openGroup(row.group)">查看课程</el-button></template>
-      </DataTable>
+      </AppTable>
     </div>
 
     <div class="sa-card">
@@ -41,9 +41,11 @@
     </div>
 
     <el-drawer v-model="drawer" :title="`${drawerGroup}｜课程排课情况`" size="860px">
-      <el-table :data="drawerCourses" size="small">
-        <el-table-column prop="course_name" label="课程" min-width="190" show-overflow-tooltip /><el-table-column prop="lesson_count" label="教学班" width="75" align="right" /><el-table-column prop="meeting_count" label="排课片段" width="85" align="right" /><el-table-column prop="teacher_count" label="教师" width="65" align="right" /><el-table-column prop="student_visits" label="学生人次" width="86" align="right" /><el-table-column prop="avg_class_size" label="平均班额" width="82" align="right" /><el-table-column label="晚间片段" width="82" align="right"><template #default="{row}">{{ row.evening_meetings }}</template></el-table-column><el-table-column prop="weekday_coverage" label="覆盖星期" width="82" align="right" />
-      </el-table>
+      <AppTable :data="drawerCourses" :columns="[]" storage-key="teaching-analysis:operation:scheduleanalysis:2" :pagination="false">
+        <template #columns>
+        <el-table-column prop="course_name" label="课程" min-width="190" show-overflow-tooltip align="center" header-align="center"/><el-table-column prop="lesson_count" label="教学班" min-width="75" align="center" header-align="center"/><el-table-column prop="meeting_count" label="排课片段" min-width="85" align="center" header-align="center"/><el-table-column prop="teacher_count" label="教师" min-width="65" align="center" header-align="center"/><el-table-column prop="student_visits" label="学生人次" min-width="86" align="center" header-align="center"/><el-table-column prop="avg_class_size" label="平均班额" min-width="82" align="center" header-align="center"/><el-table-column label="晚间片段" min-width="82" align="center" header-align="center"><template #default="{row}">{{ row.evening_meetings }}</template></el-table-column><el-table-column prop="weekday_coverage" label="覆盖星期" min-width="82" align="center" header-align="center"/>
+              </template>
+      </AppTable>
     </el-drawer>
     </template>
   </div>
@@ -57,18 +59,19 @@ import { computed, inject, reactive, ref, watch, type Ref } from 'vue'
 import KpiCard from '@/components/KpiCard.vue'
 import KpiLabel from '@/components/KpiLabel.vue'
 import EChart from '@/components/EChart.vue'
-import DataTable, { type DataTableColumn } from '@/components/DataTable.vue'
+import AppTable from '@/components/AppTable.vue'
+import type { AppTableColumn } from '@/types/table'
 
 const groups=['体育课','思政课','数学类','英语类']; const activeGroup=ref('体育课'),drawer=ref(false),drawerGroup=ref('')
-const focusCols:DataTableColumn[]=[
-  {key:'group',label:'课程组',width:100,required:true,region:'identity',fixed:'left'},
-  {key:'courseCount',label:'课程门数',width:90,align:'right'},
-  {key:'lessonCount',label:'教学班',width:82,align:'right',required:true},
-  {key:'meetingCount',label:'排课片段',width:90,align:'right'},
-  {key:'studentVisits',label:'学生人次',width:95,align:'right'},
-  {key:'peakSlot',label:'最集中时段',width:120,required:true},
-  {key:'peakShare',label:'峰值占比',width:96,align:'right'},
-  {key:'eveningShare',label:'晚间占比',width:96,align:'right'},
+const focusCols:AppTableColumn[]=[
+  {key:'group',label:'课程组',minWidth:100,required:true,region:'identity',fixed:'left'},
+  {key:'courseCount',label:'课程门数',minWidth:90,align:'center'},
+  {key:'lessonCount',label:'教学班',minWidth:82,align:'center',required:true},
+  {key:'meetingCount',label:'排课片段',minWidth:90,align:'center'},
+  {key:'studentVisits',label:'学生人次',minWidth:95,align:'center'},
+  {key:'peakSlot',label:'最集中时段',minWidth:120,required:true},
+  {key:'peakShare',label:'峰值占比',minWidth:96,align:'center'},
+  {key:'eveningShare',label:'晚间占比',minWidth:96,align:'center'},
   {key:'actions',label:'操作',width:90,required:true,region:'action',fixed:'right'},
 ]
 const sharedSemester=inject<Ref<string>>('operationSemester',ref(''))

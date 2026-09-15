@@ -57,56 +57,52 @@
           <el-button type="primary" @click="loadUsers">查询</el-button>
         </div>
         <div class="sa-card table-card">
-          <el-table :data="users" v-loading="loading" size="small">
-            <el-table-column prop="name" label="用户" min-width="150">
-              <template #default="{ row }">
-                <div class="main-cell">{{ row.name || row.username }}</div>
-                <div class="sub-cell">{{ row.username }}</div>
-              </template>
-            </el-table-column>
-            <el-table-column label="默认工作身份" min-width="180">
-              <template #default="{ row }">
-                {{ row.defaultIdentity?.role_name || '未配置' }}
-              </template>
-            </el-table-column>
-            <el-table-column prop="identity_count" label="身份" width="80" align="right" />
-            <el-table-column prop="scope_count" label="组织范围" width="100" align="right" />
-            <el-table-column label="人员关联" width="100" align="center">
-              <template #default="{ row }">{{ row.staff_count ? '已关联' : '—' }}</template>
-            </el-table-column>
-            <el-table-column label="权限状态" width="130">
-              <template #default="{ row }">
-                <el-tag
-                  size="small"
-                  effect="plain"
-                  :type="row.permissionStatus === 'ready' ? 'success' : 'warning'"
-                >
-                  {{ row.permissionStatus === 'ready' ? '权限就绪' : '待补映射' }}
-                </el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column label="待处理问题" min-width="220">
-              <template #default="{ row }">
-                <span v-if="!row.issues?.length" class="ok-text">无</span>
-                <el-tooltip v-else :content="row.issues.join('；')" placement="top">
-                  <span class="issue-text">{{ row.issues[0] }}{{ row.issues.length > 1 ? ` 等${row.issues.length}项` : '' }}</span>
-                </el-tooltip>
-              </template>
-            </el-table-column>
-            <el-table-column label="操作" width="210" fixed="right">
-              <template #default="{ row }">
-                <el-button text type="primary" size="small" @click="openConfig(row)">配置</el-button>
-                <el-button
-                  text
-                  size="small"
-                  :disabled="!row.defaultIdentity"
-                  @click="preview(row.username, row.defaultIdentity?.user_role_id)"
-                >
-                  核验权限
-                </el-button>
-              </template>
-            </el-table-column>
-          </el-table>
+          <AppTable
+            :columns="userColumns"
+            storage-key="system:permission-users"
+            :page="userTable.page"
+            :page-size="userTable.pageSize"
+            :total="userTable.total"
+            @page-change="userTable.changePage"
+            @page-size-change="userTable.changePageSize"
+            :data="userTable.rows"
+            :loading="loading"
+          >
+            <template #col-name="{ row }">
+              <div class="main-cell">{{ row.name || row.username }}</div>
+              <div class="sub-cell">{{ row.username }}</div>
+            </template>
+            <template #col-identity="{ row }">
+              {{ row.defaultIdentity?.role_name || '未配置' }}
+            </template>
+            <template #col-staff="{ row }">{{ row.staff_count ? '已关联' : '—' }}</template>
+            <template #col-status="{ row }">
+              <el-tag
+                size="small"
+                effect="plain"
+                :type="row.permissionStatus === 'ready' ? 'success' : 'warning'"
+              >
+                {{ row.permissionStatus === 'ready' ? '权限就绪' : '待补映射' }}
+              </el-tag>
+            </template>
+            <template #col-issues="{ row }">
+              <span v-if="!row.issues?.length" class="ok-text">无</span>
+              <el-tooltip v-else :content="row.issues.join('；')" placement="top">
+                <span class="issue-text">{{ row.issues[0] }}{{ row.issues.length > 1 ? ` 等${row.issues.length}项` : '' }}</span>
+              </el-tooltip>
+            </template>
+            <template #col-actions="{ row }">
+              <el-button text type="primary" size="small" @click="openConfig(row)">配置</el-button>
+              <el-button
+                text
+                size="small"
+                :disabled="!row.defaultIdentity"
+                @click="preview(row.username, row.defaultIdentity?.user_role_id)"
+              >
+                核验权限
+              </el-button>
+            </template>
+          </AppTable>
         </div>
       </el-tab-pane>
 
@@ -136,45 +132,33 @@
           <el-button type="primary" @click="loadRelationships(1)">查询</el-button>
         </div>
         <div class="sa-card table-card">
-          <el-table :data="relationships" v-loading="relationLoading" size="small">
-            <el-table-column prop="staff_id" label="人员工号" width="150" />
-            <el-table-column label="关系" width="110">
-              <template #default="{ row }">{{ relationLabel(row.relation_type) }}</template>
-            </el-table-column>
-            <el-table-column label="学生" min-width="170">
-              <template #default="{ row }">
-                <div class="main-cell">{{ row.student_name }}</div>
-                <div class="sub-cell">{{ row.student_id }}</div>
-              </template>
-            </el-table-column>
-            <el-table-column prop="scope_ref" label="行政班/关系范围" min-width="170" />
-            <el-table-column label="有效期" min-width="180">
-              <template #default="{ row }">{{ row.valid_from }} 至 {{ row.valid_to || '长期' }}</template>
-            </el-table-column>
-            <el-table-column label="来源" min-width="150">
-              <template #default="{ row }">
-                <div>{{ row.source_system || '未知来源' }}</div>
-                <div class="sub-cell">{{ row.source_updated_at || '未提供同步时间' }}</div>
-              </template>
-            </el-table-column>
-            <el-table-column label="状态" width="90">
-              <template #default="{ row }">
-                <el-tag size="small" effect="plain" :type="row.status === 'active' ? 'success' : 'info'">
-                  {{ row.status === 'active' ? '有效' : '失效' }}
-                </el-tag>
-              </template>
-            </el-table-column>
-          </el-table>
-          <el-pagination
-            v-if="relationTotal > relationPageSize"
-            class="pagination"
-            background
-            layout="total, prev, pager, next"
-            :total="relationTotal"
+          <AppTable
+            :columns="relationColumns"
+            storage-key="system:staff-relationships"
+            :page="relationPage"
             :page-size="relationPageSize"
-            :current-page="relationPage"
-            @current-change="loadRelationships"
-          />
+            :total="relationTotal"
+            @page-change="loadRelationships"
+            @page-size-change="changeRelationPageSize"
+            :data="relationships"
+            :loading="relationLoading"
+          >
+            <template #col-relation="{ row }">{{ relationLabel(row.relation_type) }}</template>
+            <template #col-student="{ row }">
+              <div class="main-cell">{{ row.student_name }}</div>
+              <div class="sub-cell">{{ row.student_id }}</div>
+            </template>
+            <template #col-period="{ row }">{{ row.valid_from }} 至 {{ row.valid_to || '长期' }}</template>
+            <template #col-source="{ row }">
+              <div>{{ row.source_system || '未知来源' }}</div>
+              <div class="sub-cell">{{ row.source_updated_at || '未提供同步时间' }}</div>
+            </template>
+            <template #col-status="{ row }">
+              <el-tag size="small" effect="plain" :type="row.status === 'active' ? 'success' : 'info'">
+                {{ row.status === 'active' ? '有效' : '失效' }}
+              </el-tag>
+            </template>
+          </AppTable>
         </div>
       </el-tab-pane>
     </el-tabs>
@@ -353,6 +337,9 @@
 </template>
 
 <script setup lang="ts">
+import AppTable from '@/components/AppTable.vue'
+import type { AppTableColumn } from '@/types/table'
+import { useTablePagination } from '@/composables/useTablePagination'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
@@ -370,6 +357,7 @@ const returnPath = computed(() => {
 const activeTab = ref('accounts')
 const keyword = ref('')
 const users = ref<AnyRow[]>([])
+const userTable = useTablePagination(() => users.value)
 const loading = ref(false)
 const options = reactive<AnyRow>({ roles: [], colleges: [], majors: [], classes: [], teachers: [] })
 // 根据当前返回的账号集合生成已有权限准备度摘要。
@@ -396,7 +384,7 @@ const relationLoading = ref(false)
 const relationType = ref('')
 const relationKeyword = ref('')
 const relationPage = ref(1)
-const relationPageSize = 50
+const relationPageSize = ref(20)
 const relationTotal = ref(0)
 const relationshipQuality = reactive({ temporaryStaff: 0, expired: 0, duplicateGroups: 0, missingSource: 0 })
 
@@ -546,7 +534,7 @@ async function loadRelationships(page = 1) {
   try {
     const params = new URLSearchParams({
       page: String(page),
-      page_size: String(relationPageSize),
+      page_size: String(relationPageSize.value),
     })
     if (relationType.value) params.set('relation_type', relationType.value)
     if (relationKeyword.value.trim()) params.set('keyword', relationKeyword.value.trim())
@@ -558,6 +546,13 @@ async function loadRelationships(page = 1) {
   } finally {
     relationLoading.value = false
   }
+}
+
+// 页长只影响关系名单的服务端分页，仍使用已填写的关系筛选条件。
+function changeRelationPageSize(value: number) {
+  if (value === relationPageSize.value) return
+  relationPageSize.value = value
+  loadRelationships(1)
 }
 
 // 根据身份范围类型返回后端提供的可选组织。
@@ -594,6 +589,29 @@ onMounted(async () => {
     if (matched) await openConfig(matched)
   }
 })
+// 列定义只负责展示；单元格内容和业务操作沿用原页面。
+const userColumns: AppTableColumn[] = [
+  { key: "name", label: "用户", minWidth: 150 },
+  { key: "identity", label: "默认工作身份", minWidth: 180 },
+  { key: "identity_count", label: "身份", minWidth: 80 },
+  { key: "scope_count", label: "组织范围", minWidth: 100 },
+  { key: "staff", label: "人员关联", minWidth: 100 },
+  { key: "status", label: "权限状态", minWidth: 130 },
+  { key: "issues", label: "待处理问题", minWidth: 220 },
+  { key: "actions", label: "操作", fixed: "right", required: true, width: 210 },
+]
+
+// 列定义只负责展示；单元格内容和业务操作沿用原页面。
+const relationColumns: AppTableColumn[] = [
+  { key: "staff_id", label: "人员工号", minWidth: 150 },
+  { key: "relation", label: "关系", minWidth: 110 },
+  { key: "student", label: "学生", minWidth: 170 },
+  { key: "scope_ref", label: "行政班/关系范围", minWidth: 170 },
+  { key: "period", label: "有效期", minWidth: 180 },
+  { key: "source", label: "来源", minWidth: 150 },
+  { key: "status", label: "状态", minWidth: 90 },
+]
+
 </script>
 
 <style scoped lang="scss">
@@ -699,11 +717,6 @@ onMounted(async () => {
   color: var(--sa-amber);
   font-size: 12px;
   cursor: help;
-}
-
-.pagination {
-  justify-content: flex-end;
-  padding: 14px;
 }
 
 .relation-summary {

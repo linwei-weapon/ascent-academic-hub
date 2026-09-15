@@ -31,10 +31,9 @@
     <div v-if="initialLoading" class="dialog-loading"><el-skeleton :rows="9" animated /></div>
     <template v-else>
       <div v-if="loading" class="refresh-note">正在按新条件更新，当前结果暂时保留…</div>
-      <DataTable :columns="columns" :data="rows" storage-key="dashboard:major-alert-students"
-        :max-business-columns="7" :config-version="1" :page-size="pagination.pageSize"
-        :page-sizes="[10,20,50]" size="small" empty-text="当前条件下没有有效预警学生"
-        @update:page-size="changePageSize">
+      <AppTable :columns="columns" :data="rows" storage-key="dashboard:major-alert-students"
+        :max-business-columns="7" :config-version="1"
+          empty-text="当前条件下没有有效预警学生" :show-density="true" :show-column-settings="true" :pagination="true" :page="pagination.page" :page-size="pagination.pageSize" :total="pagination.total" @page-change="pagination.page = $event; loadRows()" @page-size-change="changePageSize" :page-sizes="[10,20,50]">
         <template #col-student="{row}">
           <button class="student-link" type="button" @click="openReview(row)">
             <b>{{ row.studentName }}</b><span>{{ row.studentId }}</span>
@@ -48,12 +47,8 @@
         </template>
         <template #col-managementLabel="{row}"><el-tag size="small" effect="plain">{{ row.managementLabel }}</el-tag></template>
         <template #col-action="{row}"><el-button link type="primary" @click="openReview(row)">核查</el-button></template>
-      </DataTable>
-      <div class="external-pager">
-        <el-pagination v-model:current-page="pagination.page" :page-size="pagination.pageSize"
-          :total="pagination.total" layout="total, prev, pager, next" small
-          @current-change="loadRows" />
-      </div>
+      </AppTable>
+
     </template>
     <AlertStudentDrawer v-model="reviewVisible" :row="selectedRow" @changed="loadRows" />
   </el-dialog>
@@ -62,7 +57,8 @@
 <script setup lang="ts">
 import { reactive, ref, watch } from 'vue'
 import { http } from '@/utils/http'
-import DataTable, { type DataTableColumn } from '@/components/DataTable.vue'
+import AppTable from '@/components/AppTable.vue'
+import type { AppTableColumn } from '@/types/table'
 import AlertStudentDrawer from '@/views/teaching-analysis/alert/AlertStudentDrawer.vue'
 
 const props = withDefaults(defineProps<{
@@ -88,15 +84,15 @@ const reviewVisible = ref(false)
 const selectedRow = ref<any>(null)
 let requestSequence = 0
 
-const columns: DataTableColumn[] = [
-  { key: 'student', label: '学生', width: 135, fixed: 'left', region: 'identity', required: true },
-  { key: 'grade', label: '年级', width: 80, required: true },
+const columns: AppTableColumn[] = [
+  { key: 'student', label: '学生', minWidth: 135, fixed: 'left', region: 'identity', required: true },
+  { key: 'grade', label: '年级', minWidth: 80, required: true },
   { key: 'className', label: '行政班', minWidth: 130, required: true },
-  { key: 'highestLevel', label: '最高风险', width: 90, required: true },
+  { key: 'highestLevel', label: '最高风险', minWidth: 90, required: true },
   { key: 'primaryReason', label: '主要触发证据', minWidth: 250, tooltip: true, required: true },
-  { key: 'alertCount', label: '规则命中', width: 88, align: 'right' },
-  { key: 'managementLabel', label: '核查状态', width: 108, required: true },
-  { key: 'latestAt', label: '最近变化时间', width: 145, defaultVisible: false },
+  { key: 'alertCount', label: '规则命中', minWidth: 88, align: 'center' },
+  { key: 'managementLabel', label: '核查状态', minWidth: 108, required: true },
+  { key: 'latestAt', label: '最近变化时间', minWidth: 145, defaultVisible: false },
   { key: 'action', label: '核查', width: 62, fixed: 'right', region: 'action', required: true },
 ]
 

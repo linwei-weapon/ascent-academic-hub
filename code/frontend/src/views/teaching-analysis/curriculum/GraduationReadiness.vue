@@ -40,12 +40,12 @@
         <div class="sa-card-title">各专业毕业准备概览</div>
         <div class="table-horizontal-scroll">
           <div class="major-table-width">
-            <DataTable :columns="majorColumns" :data="data.majors" storage-key="curriculum:graduation-majors"
-              :max-business-columns="6" :config-version="2" :pagination="true" :default-page-size="10"
-              size="small" v-loading="initialLoading">
+            <AppTable :columns="majorColumns"  storage-key="curriculum:graduation-majors"
+              :max-business-columns="6" :config-version="2"
+               v-loading="initialLoading" :show-density="true" :show-column-settings="true" :data="majorPagination.rows" :pagination="true" :page="majorPagination.page" :page-size="majorPagination.pageSize" :total="majorPagination.total" @page-change="majorPagination.changePage" @page-size-change="majorPagination.changePageSize">
               <template #col-moduleRuleCoverageRate="{row}">{{row.module_rule_coverage_rate}}%</template>
               <template #col-action="{row}"><el-button link type="primary" @click="inspectMajor(row)">核查学生</el-button></template>
-            </DataTable>
+            </AppTable>
           </div>
         </div>
       </section>
@@ -53,13 +53,13 @@
         <div class="sa-card-title">课程保障待确认清单 <span class="extra">按必修未通过影响人数排序；不直接判定供给不足</span></div>
         <div class="table-horizontal-scroll">
           <div class="course-table-width">
-            <DataTable :columns="courseColumns" :data="data.courses" storage-key="curriculum:graduation-courses"
-              :max-business-columns="7" :config-version="2" :pagination="true" :default-page-size="10"
-              size="small" v-loading="initialLoading">
+            <AppTable :columns="courseColumns"  storage-key="curriculum:graduation-courses"
+              :max-business-columns="7" :config-version="2"
+               v-loading="initialLoading" :show-density="true" :show-column-settings="true" :data="coursePagination.rows" :pagination="true" :page="coursePagination.page" :page-size="coursePagination.pageSize" :total="coursePagination.total" @page-change="coursePagination.changePage" @page-size-change="coursePagination.changePageSize">
               <template #col-supply_priority="{row}"><el-tag size="small" type="warning">{{row.supply_priority}}</el-tag></template>
               <template #col-supply_reasons="{row}">{{(row.supply_reasons||[]).join('；')||'按学生候选情况观察'}}</template>
               <template #col-action="{row}"><el-button link type="primary" @click="openSupply(row)">保障证据</el-button></template>
-            </DataTable>
+            </AppTable>
           </div>
         </div>
       </section>
@@ -78,17 +78,16 @@
         <el-button :disabled="listLoading||(!status&&!activeMajor)" @click="reset">重置</el-button>
         <span v-if="activeMajor" class="active-scope">当前专业：<el-tag closable @close="clearMajor">{{activeMajorName}}</el-tag></span>
       </div>
-      <DataTable :columns="studentColumns" :data="data.students" storage-key="curriculum:graduation-students"
-        :max-business-columns="8" :config-version="2" :page-size="pageSize"
-        @update:page-size="changePageSize" size="small" stripe
-        v-loading="listLoading" element-loading-text="正在按名单条件提取学生证据…">
+      <AppTable :columns="studentColumns" :data="data.students" storage-key="curriculum:graduation-students"
+        :max-business-columns="8" :config-version="2"
+          stripe
+        v-loading="listLoading" element-loading-text="正在按名单条件提取学生证据…" :show-density="true" :show-column-settings="true" :pagination="true" :page="page" :page-size="pageSize" :total="data.total" @page-change="page = $event; loadStudents()" @page-size-change="changePageSize" :loading="listLoading">
         <template #col-moduleProgress="{row}">{{row.completed_modules}} / {{row.assessable_modules}}</template>
         <template #col-evidence="{row}"><span v-if="row.explicit_required_failures">{{row.explicit_required_failures}}门必修未通过，涉及{{row.explicit_gap_modules}}个未达到模块</span><span v-else-if="row.due_required_gaps">{{row.due_required_gaps}}门过期漏修，涉及{{row.candidate_modules}}个模块</span><span v-else>当前未发现必修未通过或过期漏修</span></template>
         <template #col-status="{row}"><el-tag size="small" :type="row.readiness_status==='action_required'?'danger':row.readiness_status==='verification_required'?'warning':'success'">{{statusName[row.readiness_status]}}</el-tag></template>
         <template #col-action="{row}"><el-button link type="primary" @click="student(row)">核查证据</el-button></template>
-      </DataTable>
-      <el-pagination v-if="data.total" v-model:current-page="page" :page-size="pageSize" :total="data.total"
-        layout="total, prev, pager, next" class="pager" @current-change="loadStudents"/>
+      </AppTable>
+
     </section>
 
     <el-drawer v-model="studentVisible" :title="studentEvidence.student?.display_name ? `${studentEvidence.student.display_name}｜毕业准备核查证据` : '毕业准备核查证据'" size="900px">
@@ -105,9 +104,9 @@
         </el-descriptions>
         <div class="drawer-actions"><el-button v-if="selectedStudentNeedsAi" type="primary" plain @click="openStudentAi({student_id:studentEvidence.student?.student_id})">归纳核查重点</el-button></div>
         <h4>必修未通过课程</h4>
-        <DataTable :columns="evidenceCourseColumns" :data="studentEvidence.failed_courses||[]" storage-key="curriculum:graduation-failed-evidence" :max-business-columns="6" :config-version="2" size="small"/>
+        <AppTable :columns="evidenceCourseColumns" :data="studentEvidence.failed_courses||[]" storage-key="curriculum:graduation-failed-evidence" :max-business-columns="6" :config-version="2" :show-density="true" :show-column-settings="true" :pagination="false"/>
         <h4>过期漏修课程</h4>
-        <DataTable :columns="candidateCourseColumns" :data="studentEvidence.candidate_courses||[]" storage-key="curriculum:graduation-candidate-evidence" :max-business-columns="6" :config-version="2" size="small"/>
+        <AppTable :columns="candidateCourseColumns" :data="studentEvidence.candidate_courses||[]" storage-key="curriculum:graduation-candidate-evidence" :max-business-columns="6" :config-version="2" :show-density="true" :show-column-settings="true" :pagination="false"/>
       </div>
     </el-drawer>
 
@@ -122,14 +121,12 @@
           <el-descriptions-item label="下一周期计划">尚未接入</el-descriptions-item>
         </el-descriptions>
         <h4>已接入历史开课记录</h4>
-        <DataTable :columns="offeringColumns" :data="supply.offerings||[]" storage-key="curriculum:graduation-supply" :max-business-columns="6" :config-version="2" size="small"/>
+        <AppTable :columns="offeringColumns" :data="supply.offerings||[]" storage-key="curriculum:graduation-supply" :max-business-columns="6" :config-version="2" :show-density="true" :show-column-settings="true" :pagination="false"/>
         <h4>受影响学生</h4>
-        <DataTable :columns="supplyStudentColumns" :data="supplyStudents" storage-key="curriculum:graduation-supply-students" :max-business-columns="5" :config-version="2" size="small" v-loading="supplyStudentsLoading">
+        <AppTable :columns="supplyStudentColumns" :data="supplyStudents" storage-key="curriculum:graduation-supply-students" :max-business-columns="5" :config-version="2"  v-loading="supplyStudentsLoading" :show-density="true" :show-column-settings="true" :pagination="true" :page="supplyPage" :page-size="supplyPageSize" :total="supplyStudentTotal" @page-change="changeSupplyPage" @page-size-change="changeSupplyPageSize" :page-sizes="[10,20,50,100]" :loading="supplyStudentsLoading">
           <template #col-action="{row}"><el-button link type="primary" @click="student({student_id:row.studentId})">核查学生</el-button></template>
-        </DataTable>
-        <el-pagination :current-page="supplyPage" :page-size="supplyPageSize" :page-sizes="[10,20,50,100]"
-          :total="supplyStudentTotal" layout="total, sizes, prev, pager, next" class="pager"
-          @size-change="changeSupplyPageSize" @current-change="changeSupplyPage"/>
+        </AppTable>
+
       </div>
     </el-drawer>
     <AIInsightDrawer
@@ -153,6 +150,7 @@
 </template>
 
 <script setup lang="ts">
+import { useTablePagination } from '@/composables/useTablePagination'
 import * as curriculumApi from '@/api/teachingAnalysis/curriculum'
 
 import{computed,nextTick,onMounted,reactive,ref}from'vue'
@@ -160,7 +158,8 @@ import{InfoFilled}from'@element-plus/icons-vue'
 
 import{getGraduationStudentAIInsight}from'@/utils/ai'
 import AIInsightDrawer from'@/components/AIInsightDrawer.vue'
-import DataTable,{type DataTableColumn}from'@/components/DataTable.vue'
+import AppTable from '@/components/AppTable.vue'
+import type { AppTableColumn } from '@/types/table'
 
 const initialLoading=ref(true),listLoading=ref(false),draftStatus=ref(''),status=ref(''),page=ref(1),pageSize=ref(50)
 const supplyVisible=ref(false),studentVisible=ref(false),activeMajor=ref(''),activeMajorName=ref('')
@@ -182,62 +181,63 @@ const allFilterOptionsReady=computed(()=>filterOptionKeys.every(key=>filterOptio
 const availableMajors=computed(()=>filterOptions.majors.filter((x:any)=>!draftGlobal.organizationId||x.organizationId===draftGlobal.organizationId))
 const availablePlans=computed(()=>filterOptions.plans.filter((x:any)=>(!draftGlobal.organizationId||x.organizationId===draftGlobal.organizationId)&&(!draftGlobal.majorCode||x.majorCode===draftGlobal.majorCode)&&(!draftGlobal.grades.length||draftGlobal.grades.includes(x.grade))))
 
-const majorColumns:DataTableColumn[]=[
+const majorColumns:AppTableColumn[]=[
   {key:'major_name',label:'专业',minWidth:160,fixed:'left',required:true,region:'identity'},
-  {key:'students',label:'覆盖学生',width:90,align:'right'},
-  {key:'module_rule_coverage_rate',label:'模块规则可核查率',width:135,align:'right'},
-  {key:'all_modules_met_students',label:'可核查模块均达到',width:130,align:'right'},
-  {key:'failed_students',label:'必修未通过学生',width:120,align:'right',required:true},
-  {key:'verification_students',label:'过期漏修学生',width:110,align:'right'},
-  {key:'action',label:'操作',width:85,fixed:'right',required:true,region:'action'},
+  {key:'students',label:'覆盖学生',minWidth:90,align:'center'},
+  {key:'module_rule_coverage_rate',label:'模块规则可核查率',minWidth:135,align:'center'},
+  {key:'all_modules_met_students',label:'可核查模块均达到',minWidth:130,align:'center'},
+  {key:'failed_students',label:'必修未通过学生',minWidth:120,align:'center',required:true},
+  {key:'verification_students',label:'过期漏修学生',minWidth:110,align:'center'},
+  {key:'action',label:'操作',width:110,fixed:'right',required:true,region:'action'},
 ]
-const courseColumns:DataTableColumn[]=[
+const courseColumns:AppTableColumn[]=[
   {key:'course_name',label:'课程',minWidth:180,fixed:'left',required:true,region:'identity',tooltip:true},
-  {key:'failed_students',label:'必修未通过学生',width:120,align:'right',required:true},
-  {key:'verification_students',label:'过期漏修学生',width:110,align:'right'},
-  {key:'major_count',label:'涉及专业',width:85,align:'right'},
-  {key:'lesson_count',label:'历史教学班',width:100,align:'right'},
-  {key:'teacher_count',label:'历史授课教师',width:105,align:'right'},
-  {key:'supply_priority',label:'保障状态',width:90},
+  {key:'failed_students',label:'必修未通过学生',minWidth:120,align:'center',required:true},
+  {key:'verification_students',label:'过期漏修学生',minWidth:110,align:'center'},
+  {key:'major_count',label:'涉及专业',minWidth:85,align:'center'},
+  {key:'lesson_count',label:'历史教学班',minWidth:100,align:'center'},
+  {key:'teacher_count',label:'历史授课教师',minWidth:105,align:'center'},
+  {key:'supply_priority',label:'保障状态',minWidth:90},
   {key:'supply_reasons',label:'进入清单原因',minWidth:230,tooltip:true},
-  {key:'action',label:'操作',width:85,fixed:'right',required:true,region:'action'},
+  {key:'action',label:'操作',width:110,fixed:'right',required:true,region:'action'},
 ]
-const studentColumns:DataTableColumn[]=[
-  {key:'student_id',label:'学号',width:130,fixed:'left',required:true,region:'identity'},
-  {key:'display_name',label:'姓名',width:90,fixed:'left',required:true,region:'identity'},
+const studentColumns:AppTableColumn[]=[
+  {key:'student_id',label:'学号',minWidth:130,fixed:'left',required:true,region:'identity'},
+  {key:'display_name',label:'姓名',minWidth:90,fixed:'left',required:true,region:'identity'},
   {key:'major_name',label:'专业',minWidth:145},
-  {key:'entry_grade',label:'年级',width:75},
-  {key:'moduleProgress',label:'已达到/可核查模块',width:145},
-  {key:'completed_credits',label:'已认可学分',width:100,align:'right'},
-  {key:'explicit_required_failures',label:'必修未通过',width:100,align:'right'},
-  {key:'due_required_gaps',label:'过期漏修',width:90,align:'right'},
+  {key:'entry_grade',label:'年级',minWidth:75},
+  {key:'moduleProgress',label:'已达到/可核查模块',minWidth:145},
+  {key:'completed_credits',label:'已认可学分',minWidth:100,align:'center'},
+  {key:'explicit_required_failures',label:'必修未通过',minWidth:100,align:'center'},
+  {key:'due_required_gaps',label:'过期漏修',minWidth:90,align:'center'},
   {key:'evidence',label:'本行核查重点',minWidth:260,required:true,tooltip:true},
-  {key:'status',label:'状态',width:120},
-  {key:'action',label:'操作',width:85,fixed:'right',required:true,region:'action'},
+  {key:'status',label:'状态',minWidth:120},
+  {key:'action',label:'操作',width:110,fixed:'right',required:true,region:'action'},
 ]
-const evidenceCourseColumns:DataTableColumn[]=[
-  {key:'course_name',label:'课程',minWidth:170,fixed:'left',required:true,region:'identity'},
-  {key:'module',label:'模块',minWidth:130},{key:'module_rule',label:'模块规则',minWidth:160},
-  {key:'effective_score',label:'成绩',width:70,align:'right'},{key:'last_semester',label:'最近学期',width:110},
-  {key:'reason',label:'核查原因与动作',minWidth:280,required:true,tooltip:true},
+// 两张证据表用合计为 100 的 minWidth 权重分配容器宽度，长文本换行，避免像素下限撑出横向滚动。
+const evidenceCourseColumns:AppTableColumn[]=[
+  {key:'course_name',label:'课程',minWidth:17,fixed:'left',required:true,region:'identity'},
+  {key:'module',label:'模块',minWidth:10},{key:'module_rule',label:'模块规则',minWidth:14},
+  {key:'effective_score',label:'成绩',minWidth:8,align:'center'},{key:'last_semester',label:'最近学期',minWidth:14},
+  {key:'reason',label:'核查原因与动作',minWidth:37,required:true,tooltip:false},
 ]
-const candidateCourseColumns:DataTableColumn[]=[
-  {key:'course_name',label:'课程',minWidth:170,fixed:'left',required:true,region:'identity'},
-  {key:'module',label:'模块',minWidth:130},{key:'module_rule',label:'模块规则',minWidth:160},
-  {key:'suggested_term',label:'建议学期',width:90},{key:'reason',label:'核查原因与动作',minWidth:300,required:true,tooltip:true},
+const candidateCourseColumns:AppTableColumn[]=[
+  {key:'course_name',label:'课程',minWidth:20,fixed:'left',required:true,region:'identity'},
+  {key:'module',label:'模块',minWidth:14},{key:'module_rule',label:'模块规则',minWidth:17},
+  {key:'suggested_term',label:'建议学期',minWidth:10},{key:'reason',label:'核查原因与动作',minWidth:39,required:true,tooltip:false},
 ]
-const offeringColumns:DataTableColumn[]=[
-  {key:'semesterId',label:'学期',width:120,fixed:'left',required:true,region:'identity'},
-  {key:'lessonCount',label:'教学班',width:85,align:'right'},{key:'teacherCount',label:'教师',width:75,align:'right'},
-  {key:'capacity',label:'容量',width:80,align:'right'},{key:'enrolled',label:'已选人数',width:90,align:'right'},
+const offeringColumns:AppTableColumn[]=[
+  {key:'semesterId',label:'学期',minWidth:120,fixed:'left',required:true,region:'identity'},
+  {key:'lessonCount',label:'教学班',minWidth:85,align:'center'},{key:'teacherCount',label:'教师',minWidth:75,align:'center'},
+  {key:'capacity',label:'容量',minWidth:80,align:'center'},{key:'enrolled',label:'已选人数',minWidth:90,align:'center'},
   {key:'schedules',label:'排课时段',minWidth:180,tooltip:true},
 ]
-const supplyStudentColumns:DataTableColumn[]=[
-  {key:'studentId',label:'学号',width:130,fixed:'left',required:true,region:'identity'},
-  {key:'name',label:'姓名',width:90,fixed:'left',required:true,region:'identity'},
-  {key:'majorName',label:'专业',minWidth:150},{key:'failedRequired',label:'必修未通过',width:100,align:'right'},
-  {key:'verificationRequired',label:'过期漏修',width:90,align:'right'},
-  {key:'action',label:'操作',width:85,fixed:'right',required:true,region:'action'},
+const supplyStudentColumns:AppTableColumn[]=[
+  {key:'studentId',label:'学号',minWidth:130,fixed:'left',required:true,region:'identity'},
+  {key:'name',label:'姓名',minWidth:90,fixed:'left',required:true,region:'identity'},
+  {key:'majorName',label:'专业',minWidth:150},{key:'failedRequired',label:'必修未通过',minWidth:100,align:'center'},
+  {key:'verificationRequired',label:'过期漏修',minWidth:90,align:'center'},
+  {key:'action',label:'操作',width:110,fixed:'right',required:true,region:'action'},
 ]
 const kpis=computed(()=>[
   {label:'方案覆盖可核查学生',value:(data.summary.covered_students||0)+'人',note:(data.summary.plan_count||0)+'个方案',help:'年级、专业与方案绑定一致并生成模块摘要的去重学生数。'},
@@ -307,6 +307,12 @@ async function openSupply(row:any){const requestId=++supplyRequestSeq;supplyCour
 async function openStudentAi(row:any){const sid=row.student_id;if(!sid)return;aiDrawerVisible.value=true;aiLoading.value=true;aiInsight.value=null;try{aiInsight.value=await getGraduationStudentAIInsight(sid)}finally{aiLoading.value=false}}
 // 进入页面时执行原初始化流程，恢复路由条件与可用选项。
 onMounted(loadInitial)
+
+// 全量结果在页面分页；不改变查询、汇总和证据数据。
+const majorPagination = useTablePagination(() => data.majors, 10)
+
+// 全量结果在页面分页；不改变查询、汇总和证据数据。
+const coursePagination = useTablePagination(() => data.courses, 10)
 </script>
 
 <style scoped lang="scss">

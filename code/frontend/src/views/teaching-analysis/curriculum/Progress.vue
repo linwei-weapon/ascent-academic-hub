@@ -12,10 +12,10 @@
       </div>
       <section class="sa-card">
         <div class="sa-card-title">学生模块进度核查 <span class="extra">当前列表 {{ filteredProgress.length }} 人</span></div>
-        <DataTable :columns="studentColumns" :data="filteredProgress"
+        <AppTable :columns="studentColumns"
           storage-key="curriculum:student-progress" :max-business-columns="8"
-          :config-version="3" :pagination="true" :default-page-size="20"
-          stripe size="small" v-loading="loading" element-loading-text="正在计算学生模块进度…">
+          :config-version="3"
+          stripe  v-loading="loading" element-loading-text="正在计算学生模块进度…" :show-density="true" :show-column-settings="true" :data="studentPagination.rows" :pagination="true" :page="studentPagination.page" :page-size="studentPagination.pageSize" :total="studentPagination.total" @page-change="studentPagination.changePage" @page-size-change="studentPagination.changePageSize">
           <template #toolbar>
             <div class="filters">
               <el-input v-model="keyword" placeholder="搜索学号或姓名" clearable />
@@ -34,7 +34,7 @@
           <template #col-status="{row}"><el-tag size="small" :type="statusTag(row.status)">{{statusLabel(row.status)}}</el-tag></template>
           <template #col-statusReason="{row}">{{statusReasonLabel(row)}}</template>
           <template #col-action="{row}"><el-button link type="primary" @click="openStudent(row)">详情</el-button></template>
-        </DataTable>
+        </AppTable>
       </section>
     </template>
 
@@ -63,20 +63,20 @@
                   </el-tooltip>
                 </span>
               </template>
-              <DataTable :columns="moduleColumns" :data="moduleProgress"
+              <AppTable :columns="moduleColumns" :data="moduleProgress"
                 storage-key="curriculum:student-module-detail" :max-business-columns="7"
-                :config-version="2" size="small">
+                :config-version="2" :show-density="true" :show-column-settings="true" :pagination="false">
                 <template #col-progress="{row}"><span v-if="row.target != null"><b>{{row.achieved}}</b> / {{row.target}}</span><span v-else>—</span></template>
                 <template #col-evidenceStatus="{row}"><el-tag size="small" :type="moduleTag(row.evidenceStatus)">{{moduleStatus(row.evidenceStatus)}}</el-tag></template>
-              </DataTable>
+              </AppTable>
             </el-tab-pane>
             <el-tab-pane :label="`必修未通过课程（${failedCourses.length}）`" name="failed">
-              <DataTable :columns="failedColumns" :data="failedCourses" storage-key="curriculum:student-failed-courses"
-                :max-business-columns="5" :config-version="2" size="small" empty-text="没有必修未通过课程" />
+              <AppTable :columns="failedColumns" :data="failedCourses" storage-key="curriculum:student-failed-courses"
+                :max-business-columns="5" :config-version="2"  empty-text="没有必修未通过课程" :show-density="true" :show-column-settings="true" :pagination="false"/>
             </el-tab-pane>
             <el-tab-pane :label="`过期漏修课程（${verificationCourses.length}）`" name="verification">
-              <DataTable :columns="candidateColumns" :data="verificationCourses" storage-key="curriculum:student-candidate-courses"
-                :max-business-columns="5" :config-version="2" size="small" empty-text="没有过期漏修课程" />
+              <AppTable :columns="candidateColumns" :data="verificationCourses" storage-key="curriculum:student-candidate-courses"
+                :max-business-columns="5" :config-version="2"  empty-text="没有过期漏修课程" :show-density="true" :show-column-settings="true" :pagination="false"/>
             </el-tab-pane>
             <el-tab-pane name="all">
               <template #label>
@@ -86,10 +86,10 @@
                   </el-tooltip>
                 </span>
               </template>
-              <DataTable :columns="allCourseColumns" :data="detailCourses" storage-key="curriculum:student-all-plan-courses"
-                :max-business-columns="6" :config-version="2" :pagination="true" :default-page-size="20" size="small">
+              <AppTable :columns="allCourseColumns"  storage-key="curriculum:student-all-plan-courses"
+                :max-business-columns="6" :config-version="2" :show-density="true" :show-column-settings="true" :data="courseEvidencePagination.rows" :pagination="true" :page="courseEvidencePagination.page" :page-size="courseEvidencePagination.pageSize" :total="courseEvidencePagination.total" @page-change="courseEvidencePagination.changePage" @page-size-change="courseEvidencePagination.changePageSize">
                 <template #col-completion_status="{row}"><el-tag size="small" :type="courseTag(row.completion_status)">{{courseStatus(row.completion_status)}}</el-tag></template>
-              </DataTable>
+              </AppTable>
             </el-tab-pane>
           </el-tabs>
         </template>
@@ -99,13 +99,15 @@
 </template>
 
 <script setup lang="ts">
+import { useTablePagination } from '@/composables/useTablePagination'
 import * as curriculumApi from '@/api/teachingAnalysis/curriculum'
 
 import { computed, onMounted, ref, watch } from 'vue'
 
 import { QuestionFilled } from '@element-plus/icons-vue'
 import KpiCard from '@/components/KpiCard.vue'
-import DataTable, { type DataTableColumn } from '@/components/DataTable.vue'
+import AppTable from '@/components/AppTable.vue'
+import type { AppTableColumn } from '@/types/table'
 
 const props = defineProps<{ majorId: string }>()
 const loading=ref(false), planName=ref(''), planVersion=ref(''), progress=ref<any[]>([])
@@ -114,39 +116,39 @@ const definition=ref<any>({boundary:''}), keyword=ref(''), statusFilter=ref('')
 const detailVisible=ref(false), detailLoading=ref(false), detailError=ref(false), detailTab=ref('modules')
 const selectedStudent=ref<any>({}), detailCourses=ref<any[]>([]), moduleProgress=ref<any[]>([])
 
-const studentColumns:DataTableColumn[]=[
-  {key:'studentId',label:'学号',width:130,fixed:'left',required:true,region:'identity'},
-  {key:'name',label:'姓名',width:90,fixed:'left',required:true,region:'identity'},
-  {key:'grade',label:'年级',width:75},
-  {key:'currentStudyTerm',label:'学习学期',width:90},
-  {key:'moduleProgress',label:'已达到/可核查模块',width:145,required:true},
-  {key:'earnedCredits',label:'已认可学分',width:105,align:'right'},
-  {key:'failedRequired',label:'必修未通过',width:105,align:'right'},
-  {key:'verificationRequired',label:'过期漏修',width:95,align:'right'},
-  {key:'status',label:'状态',width:125,required:true},
+const studentColumns:AppTableColumn[]=[
+  {key:'studentId',label:'学号',minWidth:130,fixed:'left',required:true,region:'identity'},
+  {key:'name',label:'姓名',minWidth:90,fixed:'left',required:true,region:'identity'},
+  {key:'grade',label:'年级',minWidth:75},
+  {key:'currentStudyTerm',label:'学习学期',minWidth:90},
+  {key:'moduleProgress',label:'已达到/可核查模块',minWidth:145,required:true},
+  {key:'earnedCredits',label:'已认可学分',minWidth:105,align:'center'},
+  {key:'failedRequired',label:'必修未通过',minWidth:105,align:'center'},
+  {key:'verificationRequired',label:'过期漏修',minWidth:95,align:'center'},
+  {key:'status',label:'状态',minWidth:125,required:true},
   {key:'statusReason',label:'状态原因',minWidth:260,required:true,tooltip:true},
   {key:'action',label:'操作',width:70,fixed:'right',required:true,region:'action'},
 ]
-const moduleColumns:DataTableColumn[]=[
+const moduleColumns:AppTableColumn[]=[
   {key:'module',label:'模块',minWidth:170,fixed:'left',required:true,region:'identity',tooltip:true},
   {key:'ruleLabel',label:'采用规则',minWidth:190,required:true,tooltip:true},
-  {key:'progress',label:'完成进度',width:110},
-  {key:'earnedCredits',label:'已认可学分',width:105,align:'right'},
-  {key:'completedCourses',label:'完成课程',width:90,align:'right'},
-  {key:'failedRequired',label:'必修未通过',width:100,align:'right'},
-  {key:'verificationRequired',label:'过期漏修',width:90,align:'right'},
+  {key:'progress',label:'完成进度',minWidth:110},
+  {key:'earnedCredits',label:'已认可学分',minWidth:105,align:'center'},
+  {key:'completedCourses',label:'完成课程',minWidth:90,align:'center'},
+  {key:'failedRequired',label:'必修未通过',minWidth:100,align:'center'},
+  {key:'verificationRequired',label:'过期漏修',minWidth:90,align:'center'},
   {key:'sourceReference',label:'规则来源',minWidth:160,defaultVisible:false,tooltip:true},
-  {key:'evidenceStatus',label:'判断',width:100,required:true},
+  {key:'evidenceStatus',label:'判断',minWidth:100,required:true},
 ]
-const baseCourseColumns:DataTableColumn[]=[
-  {key:'course_id',label:'课程代码',width:125,fixed:'left',required:true,region:'identity'},
+const baseCourseColumns:AppTableColumn[]=[
+  {key:'course_id',label:'课程代码',minWidth:125,fixed:'left',required:true,region:'identity'},
   {key:'course_name',label:'课程',minWidth:180,fixed:'left',required:true,region:'identity',tooltip:true},
   {key:'module',label:'模块',minWidth:140,tooltip:true},
-  {key:'suggested_term',label:'建议学期',width:90},
+  {key:'suggested_term',label:'建议学期',minWidth:90},
 ]
-const failedColumns=[...baseCourseColumns,{key:'effective_score',label:'有效成绩',width:90,align:'right'}]
-const candidateColumns=[...baseCourseColumns,{key:'requirement_type',label:'性质',width:80}]
-const allCourseColumns=[...baseCourseColumns,{key:'requirement_type',label:'性质',width:80},{key:'completion_status',label:'完成证据',width:125,required:true}]
+const failedColumns: AppTableColumn[]=[...baseCourseColumns,{key:'effective_score',label:'有效成绩',minWidth:90,align:'center'}]
+const candidateColumns=[...baseCourseColumns,{key:'requirement_type',label:'性质',minWidth:80}]
+const allCourseColumns=[...baseCourseColumns,{key:'requirement_type',label:'性质',minWidth:80},{key:'completion_status',label:'完成证据',minWidth:125,required:true}]
 
 const failedModules=computed(()=>new Set(moduleProgress.value.filter(x=>x.evidenceStatus==='explicit_gap').map(x=>x.module)))
 const candidateModules=computed(()=>new Set(moduleProgress.value.filter(x=>x.evidenceStatus==='candidate').map(x=>x.module)))
@@ -189,6 +191,12 @@ function courseTag(s:string):'success'|'danger'|'warning'|'info'{return ['passed
 onMounted(()=>load(props.majorId))
 // 按既有监听条件响应路由、筛选或身份变化，保留原重载与清理时机。
 watch(()=>props.majorId,v=>load(v))
+
+// 全量结果在页面分页；不改变查询、汇总和证据数据。
+const studentPagination = useTablePagination(() => filteredProgress.value, 20)
+
+// 全量结果在页面分页；不改变查询、汇总和证据数据。
+const courseEvidencePagination = useTablePagination(() => detailCourses.value, 20)
 </script>
 
 <style scoped lang="scss">

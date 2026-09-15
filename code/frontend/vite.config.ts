@@ -5,8 +5,6 @@ import { fileURLToPath } from 'url'
 import viteCompression from 'vite-plugin-compression'
 import Components from 'unplugin-vue-components/vite'
 import AutoImport from 'unplugin-auto-import/vite'
-import ElementPlus from 'unplugin-element-plus/vite'
-import { ElementPlusResolver } from 'unplugin-vue-components/resolvers'
 import tailwindcss from '@tailwindcss/vite'
 
 /** 内置Mock数据 — 参见详细需求设计文档的字段定义 */
@@ -1126,16 +1124,16 @@ export default ({ mode }: { mode: string }) => {
       AutoImport({
         imports: ['vue', 'vue-router', 'pinia', '@vueuse/core'],
         dts: 'src/types/import/auto-imports.d.ts',
-        resolvers: [ElementPlusResolver()],
-        eslintrc: { enabled: true, filepath: './.auto-import.json', globalsPropValue: true }
+        // 当前未接入 ESLint，不生成未使用的全局变量配置文件。
+        eslintrc: { enabled: false }
       }),
-      Components({ dts: 'src/types/import/components.d.ts', resolvers: [ElementPlusResolver()] }),
-      ElementPlus({ useSource: true }),
+      // 仅自动引入本项目组件；Element Plus 已在 main.ts 全局注册。
+      Components({ dts: 'src/types/import/components.d.ts' }),
       viteCompression({ verbose: false, disable: false, algorithm: 'gzip', ext: '.gz', threshold: 10240, deleteOriginFile: false }),
       // mockPlugin() 已停用：连接真实后端 (:8000)
     ],
     optimizeDeps: {
-      include: ['echarts/core','echarts/charts','echarts/components','echarts/renderers','element-plus/es','element-plus/es/components/*/style/css']
+      include: ['echarts/core','echarts/charts','echarts/components','echarts/renderers','element-plus']
     },
     css: {
       preprocessorOptions: { scss: { additionalData: `` } },

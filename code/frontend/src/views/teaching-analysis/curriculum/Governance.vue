@@ -7,14 +7,15 @@
     </div>
     <el-alert title="权限分离" type="info" :closable="false" style="margin-bottom:12px"
       description="教务处/教研科创建并提交，质量办审核，校领导激活；全过程保留审计轨迹。" />
-    <el-table :data="rows" stripe size="small" v-loading="loading">
-      <el-table-column prop="change_id" label="#" width="60" />
-      <el-table-column label="类型" width="120"><template #default="{row}">{{ typeName[row.rule_type] || row.rule_type }}</template></el-table-column>
-      <el-table-column prop="reason" label="变更原因" min-width="180" />
-      <el-table-column prop="created_by" label="创建人" width="110" />
-      <el-table-column prop="created_at" label="创建时间" width="160" />
-      <el-table-column label="状态" width="90"><template #default="{row}"><el-tag :type="statusType(row.status)" size="small">{{ statusName[row.status] || row.status }}</el-tag></template></el-table-column>
-      <el-table-column label="操作" width="230"><template #default="{row}">
+    <AppTable :data="rows" stripe  v-loading="loading" :columns="[]" storage-key="teaching-analysis:curriculum:governance:1" :pagination="false">
+        <template #columns>
+      <el-table-column prop="change_id" label="#" min-width="60" align="center" header-align="center"/>
+      <el-table-column label="类型" min-width="120" align="center" header-align="center"><template #default="{row}">{{ typeName[row.rule_type] || row.rule_type }}</template></el-table-column>
+      <el-table-column prop="reason" label="变更原因" min-width="180" align="center" header-align="center"/>
+      <el-table-column prop="created_by" label="创建人" min-width="110" align="center" header-align="center"/>
+      <el-table-column prop="created_at" label="创建时间" min-width="160" align="center" header-align="center"/>
+      <el-table-column label="状态" min-width="90" align="center" header-align="center"><template #default="{row}"><el-tag :type="statusType(row.status)" size="small">{{ statusName[row.status] || row.status }}</el-tag></template></el-table-column>
+      <el-table-column label="操作" width="230" align="center" header-align="center"><template #default="{row}">
         <el-button link type="primary" @click="preview(row)">影响试算</el-button>
         <el-button v-if="permissions.edit && row.status==='draft'" link type="primary" @click="act(row,'submit')">提交</el-button>
         <template v-if="permissions.review && row.status==='submitted'">
@@ -23,7 +24,8 @@
         <el-button v-if="permissions.activate && row.status==='approved'" link type="danger" @click="act(row,'activate')">激活</el-button>
         <el-button link @click="detail(row)">详情</el-button>
       </template></el-table-column>
-    </el-table>
+            </template>
+      </AppTable>
 
     <el-dialog v-model="dialog" title="新建例外规则变更单" width="650px">
       <el-form label-width="100px">
@@ -66,6 +68,7 @@
   </div>
 </template>
 <script setup lang="ts">
+import AppTable from '@/components/AppTable.vue'
 import * as curriculumApi from '@/api/teachingAnalysis/curriculum'
 
 import { reactive, ref, computed, onMounted } from 'vue'

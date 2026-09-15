@@ -57,14 +57,14 @@
             </div>
 
             <div class="course-caption">该年级当前未通过率较高课程 TOP3，点击课程查看趋势和行政班证据</div>
-            <DataTable v-if="g.courses && g.courses.length" :columns="gradeCourseCols"
+            <AppTable v-if="g.courses && g.courses.length" :columns="gradeCourseCols"
               :data="g.courses" :storage-key="`dashboard:major-grade-courses:${g.grade}`"
-              :max-business-columns="3" :config-version="2" size="small"
-              @row-click="row => goCourse(row, g)" row-class-name="course-row-clickable">
+              :max-business-columns="3" :config-version="2"
+              @row-click="row => goCourse(row, g)" row-class-name="course-row-clickable" :show-density="true" :show-column-settings="true" :pagination="false">
               <template #col-name="{row}"><span class="course-link">{{ row.name }}</span></template>
               <template #col-failRate="{row}"><b class="tnum risk-text">{{ row.failRate }}%</b></template>
               <template #col-drill><span class="sa-faint">›</span></template>
-            </DataTable>
+            </AppTable>
             <div v-else class="sa-faint">该年级没有达到展示阈值的集中未通过课程</div>
             <div class="more-courses">
               <el-button size="small" type="primary" plain @click="openGradeCourses(g)">
@@ -103,7 +103,8 @@ import * as dashboardApi from '@/api/teachingAnalysis/dashboard'
 import { reactive, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import KpiCard from '@/components/KpiCard.vue'
-import DataTable, { type DataTableColumn } from '@/components/DataTable.vue'
+import AppTable from '@/components/AppTable.vue'
+import type { AppTableColumn } from '@/types/table'
 import MetricHistoryDialog from '@/components/MetricHistoryDialog.vue'
 import MajorAlertStudentsDialog from '@/components/MajorAlertStudentsDialog.vue'
 import GradeCoursesDrawer from '@/components/GradeCoursesDrawer.vue'
@@ -126,11 +127,11 @@ const data = reactive<any>({
   scope:{restricted:false}, evidence:{},
 })
 
-const gradeCourseCols: DataTableColumn[] = [
-  { key: 'name', label: '重点课程', width: 200, fixed: 'left', region: 'identity', required: true },
-  { key: 'failCount', label: '未通过人次', width: 100, align: 'right' },
-  { key: 'totalCount', label: '有效成绩人次', width: 112, align: 'right' },
-  { key: 'failRate', label: '未通过人次率', width: 118, align: 'right', required: true },
+const gradeCourseCols: AppTableColumn[] = [
+  { key: 'name', label: '重点课程', minWidth: 200, fixed: 'left', region: 'identity', required: true },
+  { key: 'failCount', label: '未通过人次', minWidth: 100, align: 'center' },
+  { key: 'totalCount', label: '有效成绩人次', minWidth: 112, align: 'center' },
+  { key: 'failRate', label: '未通过人次率', minWidth: 118, align: 'center', required: true },
   { key: 'drill', label: '详情', width: 52, fixed: 'right', region: 'action', required: true },
 ]
 

@@ -45,7 +45,7 @@
       <!-- 明细表 -->
       <div class="sa-card">
         <div class="sa-card-title">课程目标达成明细</div>
-        <DataTable :columns="objectiveCols" :data="data.objectives" storage-key="curriculum:course-objectives" size="small">
+        <AppTable :columns="objectiveCols" :data="data.objectives" storage-key="curriculum:course-objectives" :show-density="true" :show-column-settings="true" :pagination="false">
           <template #col-avgScore="{row}"><span class="tnum">{{ row.avgScore }}</span></template>
           <template #col-passRate="{row}"><span class="tnum">{{ row.passRate }}%</span></template>
           <template #col-achievement="{row}">
@@ -60,7 +60,7 @@
               <el-tag :type="row.status === '达标' ? 'success' : 'danger'" size="small">{{ row.status }}</el-tag>
             </div>
           </template>
-        </DataTable>
+        </AppTable>
       </div>
     </template>
 
@@ -77,15 +77,16 @@ import * as curriculumApi from '@/api/teachingAnalysis/curriculum'
 import { ref, reactive, computed, onMounted } from 'vue'
 import KpiCard from '@/components/KpiCard.vue'
 import EChart from '@/components/EChart.vue'
-import DataTable, { type DataTableColumn } from '@/components/DataTable.vue'
+import AppTable from '@/components/AppTable.vue'
+import type { AppTableColumn } from '@/types/table'
 
 // 课程目标达成明细表列定义（M6 DataTable）
-const objectiveCols: DataTableColumn[] = [
+const objectiveCols: AppTableColumn[] = [
   { key: 'objective', label: '课程目标（培养方案模块）', minWidth: 180 },
-  { key: 'courseCount', label: '覆盖课程数', width: 100, align: 'center' },
-  { key: 'credits', label: '学分', width: 80, align: 'center' },
-  { key: 'avgScore', label: '平均分', width: 80, align: 'center' },
-  { key: 'passRate', label: '通过率', width: 90, align: 'center' },
+  { key: 'courseCount', label: '覆盖课程数', minWidth: 100, align: 'center' },
+  { key: 'credits', label: '学分', minWidth: 80, align: 'center' },
+  { key: 'avgScore', label: '平均分', minWidth: 80, align: 'center' },
+  { key: 'passRate', label: '通过率', minWidth: 90, align: 'center' },
   { key: 'achievement', label: '达成度', minWidth: 240 },
 ]
 

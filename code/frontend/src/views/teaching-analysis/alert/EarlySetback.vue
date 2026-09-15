@@ -85,19 +85,17 @@
               <h3>各年级大一未通过情况</h3>
             </div>
           </div>
-          <DataTable
+          <AppTable
             :columns="gradeColumns"
             :data="data.by_grade"
             storage-key="alert:early-setback:grade"
             config-version="2"
-            :max-business-columns="5"
-            size="small"
-          >
+            :max-business-columns="5" :show-density="true" :show-column-settings="true" :pagination="false">
             <template #col-entry_grade="{ row }">{{ row.entry_grade }}级</template>
             <template #col-setback_rate="{ row }">
               {{ rate(row.setback_students, row.eligible_students) }}%
             </template>
-          </DataTable>
+          </AppTable>
         </section>
 
         <section class="sa-card">
@@ -106,14 +104,12 @@
               <h3>大一未通过学生集中的课程 TOP10</h3>
             </div>
           </div>
-          <DataTable
+          <AppTable
             :columns="courseColumns"
             :data="data.courses"
             storage-key="alert:early-setback:courses"
             config-version="2"
-            :max-business-columns="2"
-            size="small"
-          />
+            :max-business-columns="2" :show-density="true" :show-column-settings="true" :pagination="false"/>
           <p class="foot">学生数为去重人数；记录数可能包含同一学生的多次未通过。</p>
         </section>
       </div>
@@ -125,18 +121,16 @@
             <p>{{ focusDescription }}</p>
           </div>
         </div>
-        <DataTable
+        <AppTable
           :columns="focusColumns"
           :data="data.focus_groups"
           storage-key="alert:early-setback:majors"
           config-version="3"
-          :max-business-columns="5"
-          size="small"
-        >
+          :max-business-columns="5" :show-density="true" :show-column-settings="true" :pagination="false">
           <template #col-setback_rate="{ row }">
             {{ rate(row.setback_students, row.eligible_students) }}%
           </template>
-        </DataTable>
+        </AppTable>
       </section>
 
       <section ref="studentListSection" class="sa-card student-list-section">
@@ -158,20 +152,18 @@
             <el-button :disabled="refreshing" @click="resetStudentKeyword">重置</el-button>
           </div>
         </div>
-        <DataTable
+        <AppTable
           :columns="studentColumns"
           :data="data.students"
           storage-key="alert:early-setback:students"
           config-version="3"
           :max-business-columns="8"
-          :page-size="pageSize"
-          :page-sizes="[20, 50, 100]"
-          size="small"
+
+
+
           row-class-name="row-clickable"
           :empty-text="studentEmptyText"
-          @row-click="showStudent"
-          @update:page-size="changePageSize"
-        >
+          @row-click="showStudent" :show-density="true" :show-column-settings="true" :pagination="true" :page="page" :page-size="pageSize" :total="data.total" @page-change="page = $event; load()" @page-size-change="changePageSize" :page-sizes="[20, 50, 100]">
           <template #col-student="{ row }">
             <div class="student-cell">
               <button type="button" @click.stop="showStudent(row)">{{ row.display_name }}</button>
@@ -187,16 +179,8 @@
           <template #col-action="{ row }">
             <el-button link type="primary" @click.stop="showStudent(row)">核查</el-button>
           </template>
-        </DataTable>
-        <el-pagination
-          v-if="data.total"
-          v-model:current-page="page"
-          :page-size="pageSize"
-          :total="data.total"
-          layout="total, prev, pager, next"
-          small
-          @current-change="load"
-        />
+        </AppTable>
+
       </section>
 
       <section class="sa-card definition">
@@ -221,7 +205,8 @@ import * as alertApi from '@/api/teachingAnalysis/alert'
 
 import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 
-import DataTable, { type DataTableColumn } from '@/components/DataTable.vue'
+import AppTable from '@/components/AppTable.vue'
+import type { AppTableColumn } from '@/types/table'
 import KpiLabel from '@/components/KpiLabel.vue'
 import EarlySetbackDrawer from '@/views/teaching-analysis/alert/EarlySetbackDrawer.vue'
 
@@ -314,7 +299,7 @@ const focusDescription = computed(() => {
 const focusIdentityLabel = computed(() => ({
   college: '学院', major: '专业', class: '班级',
 }[data.focus_dimension as string] || '组织') as string)
-const focusColumns = computed<DataTableColumn[]>(() => [
+const focusColumns = computed<AppTableColumn[]>(() => [
   { key: 'group_name', label: focusIdentityLabel.value, required: true, region: 'identity', minWidth: 180, tooltip: true },
   { key: 'eligible_students', label: '观察学生', region: 'business' },
   { key: 'setback_students', label: '大一有未通过', required: true, region: 'business' },
@@ -322,29 +307,29 @@ const focusColumns = computed<DataTableColumn[]>(() => [
   { key: 'persistent_students', label: '后续持续', required: true, region: 'business' },
   { key: 'improved_students', label: '后续未再出现', region: 'business' },
 ])
-const gradeColumns: DataTableColumn[] = [
-  { key: 'entry_grade', label: '年级', required: true, region: 'identity', width: 90 },
+const gradeColumns: AppTableColumn[] = [
+  { key: 'entry_grade', label: '年级', required: true, region: 'identity', minWidth: 90 },
   { key: 'eligible_students', label: '观察学生', required: true, region: 'business' },
   { key: 'setback_students', label: '大一有未通过', required: true, region: 'business' },
   { key: 'setback_rate', label: '未通过学生比例', required: true, region: 'business' },
   { key: 'persistent_students', label: '后续持续', region: 'business' },
   { key: 'improved_students', label: '后续未再出现', region: 'business' },
 ]
-const courseColumns: DataTableColumn[] = [
+const courseColumns: AppTableColumn[] = [
   { key: 'course_name', label: '课程', required: true, region: 'identity', minWidth: 190, tooltip: true },
   { key: 'affected_students', label: '未通过学生', required: true, region: 'business' },
   { key: 'failed_attempts', label: '未通过记录', region: 'business' },
 ]
-const studentColumns: DataTableColumn[] = [
-  { key: 'student', label: '学生', required: true, region: 'identity', fixed: 'left', width: 125 },
+const studentColumns: AppTableColumn[] = [
+  { key: 'student', label: '学生', required: true, region: 'identity', fixed: 'left', minWidth: 125 },
   { key: 'organization_name', label: '学院', region: 'business', minWidth: 170, tooltip: true },
   { key: 'major_name', label: '专业', region: 'business', minWidth: 150, tooltip: true },
   { key: 'class_code', label: '班级', region: 'business', minWidth: 130, tooltip: true },
-  { key: 'entry_grade', label: '年级', region: 'business', width: 75 },
-  { key: 'first_setback_semester', label: '首次未通过学期', required: true, region: 'business', width: 125 },
-  { key: 'first_year_failures', label: '大一未通过记录', region: 'business', width: 115 },
-  { key: 'later_failures', label: '后续未通过记录', region: 'business', width: 115 },
-  { key: 'recovery_status', label: '当前观察状态', required: true, region: 'business', width: 150 },
+  { key: 'entry_grade', label: '年级', region: 'business', minWidth: 75 },
+  { key: 'first_setback_semester', label: '首次未通过学期', required: true, region: 'business', minWidth: 125 },
+  { key: 'first_year_failures', label: '大一未通过记录', region: 'business', minWidth: 115 },
+  { key: 'later_failures', label: '后续未通过记录', region: 'business', minWidth: 115 },
+  { key: 'recovery_status', label: '当前观察状态', required: true, region: 'business', minWidth: 150 },
   { key: 'action', label: '操作', required: true, region: 'action', fixed: 'right', width: 65 },
 ]
 

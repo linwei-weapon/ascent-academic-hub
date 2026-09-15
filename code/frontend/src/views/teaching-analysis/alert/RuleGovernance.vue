@@ -19,14 +19,15 @@
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
             <div class="sa-card-title" style="margin:0">预警规则配置 <span class="extra">引擎内置规则 · 阈值可调</span></div>
           </div>
-          <el-table :data="rules" size="small">
-            <el-table-column prop="name" label="规则名称" width="150" />
-            <el-table-column prop="level" label="预警等级" width="90">
+          <AppTable :data="rules" :columns="[]" storage-key="teaching-analysis:alert:rulegovernance:1" :pagination="false">
+        <template #columns>
+            <el-table-column prop="name" label="规则名称" min-width="150" align="center" header-align="center"/>
+            <el-table-column prop="level" label="预警等级" min-width="90" align="center" header-align="center">
               <template #default="{row}">
                 <el-tag :type="row.level==='严重'?'danger':row.level==='警告'?'warning':'info'" size="small">{{ row.level }}</el-tag>
               </template>
             </el-table-column>
-            <el-table-column label="判定阈值" min-width="300">
+            <el-table-column label="判定阈值" min-width="300" align="center" header-align="center">
               <template #default="{row}">
                 <span v-if="row.conditions.length" class="cond-line">
                   <span v-for="(c,i) in row.conditions" :key="c.key">
@@ -39,32 +40,34 @@
                 <span v-else style="font-size:12px;color:#94A3B8">{{ row.params || '—' }}</span>
               </template>
             </el-table-column>
-            <el-table-column prop="enabled" label="启用" width="64">
+            <el-table-column prop="enabled" label="启用" min-width="64" align="center" header-align="center">
               <template #default="{row}">
                 <el-switch v-model="row.enabled" size="small" :disabled="!row.editable||!hasPerm('edit')" @change="onRuleToggle(row)" />
               </template>
             </el-table-column>
-            <el-table-column label="操作" width="80">
+            <el-table-column label="操作" width="80" align="center" header-align="center">
               <template #default="{row}">
                 <el-button size="small" text type="primary" :disabled="!row.editable||!hasPerm('edit')" @click="openRuleDialog(row)">编辑阈值</el-button>
               </template>
             </el-table-column>
-            <el-table-column prop="enabled" label="来源" width="70">
+            <el-table-column prop="enabled" label="来源" min-width="70" align="center" header-align="center">
               <template #default="{row}">
                 <el-tag v-if="row.triggerType==='discovered'" size="small" type="warning">自发现</el-tag>
                 <span v-else class="sa-faint" style="font-size:12px">内置</span>
               </template>
             </el-table-column>
-          </el-table>
+                  </template>
+      </AppTable>
           <div class="sa-card-title" style="font-size:13px;margin-top:20px">规则变更单</div>
-          <el-table :data="changes" size="small" empty-text="暂无规则变更单">
-            <el-table-column prop="changeId" label="编号" width="70" />
-            <el-table-column prop="ruleId" label="规则" width="70" />
-            <el-table-column prop="reason" label="变更原因" min-width="180" />
-            <el-table-column label="状态" width="90">
+          <AppTable :data="changes"  empty-text="暂无规则变更单" :columns="[]" storage-key="teaching-analysis:alert:rulegovernance:2" :pagination="false">
+        <template #columns>
+            <el-table-column prop="changeId" label="编号" min-width="70" align="center" header-align="center"/>
+            <el-table-column prop="ruleId" label="规则" min-width="70" align="center" header-align="center"/>
+            <el-table-column prop="reason" label="变更原因" min-width="180" align="center" header-align="center"/>
+            <el-table-column label="状态" min-width="90" align="center" header-align="center">
               <template #default="{row}"><el-tag size="small" :type="statusType(row.status)">{{ statusLabel(row.status) }}</el-tag></template>
             </el-table-column>
-            <el-table-column label="影响试算" min-width="190">
+            <el-table-column label="影响试算" min-width="190" align="center" header-align="center">
               <template #default="{row}">
                 <span v-if="row.impact?.candidateStatus==='evaluated'">
                   候选 {{ row.impact.candidateStudents }} · 新增 {{ row.impact.newStudents }} · 退出 {{ row.impact.exitedStudents }}
@@ -76,8 +79,8 @@
                 <el-tag v-else size="small" type="info">待试算</el-tag>
               </template>
             </el-table-column>
-            <el-table-column prop="createdBy" label="创建人" width="100" />
-            <el-table-column label="操作" width="320">
+            <el-table-column prop="createdBy" label="创建人" min-width="100" align="center" header-align="center"/>
+            <el-table-column label="操作" width="320" align="center" header-align="center">
               <template #default="{row}">
                 <el-button v-if="row.status==='draft'&&hasPerm('edit')" size="small" text type="primary" @click="openTrialScript(row)">试算脚本维护</el-button>
                 <el-button v-if="row.status==='draft'&&hasPerm('edit')" size="small" text type="success" @click="changeAction(row,'evaluate')">影响试算</el-button>
@@ -91,7 +94,8 @@
                 <el-button v-if="(row.status==='published'||row.status==='activated')&&hasPerm('edit')" size="small" text type="warning" @click="changeAction(row,'rollback')">创建回滚单</el-button>
               </template>
             </el-table-column>
-          </el-table>
+                  </template>
+      </AppTable>
           <div class="sa-faint" style="font-size:11px;margin-top:12px;line-height:1.7">
             规则为引擎内置（基于教务系统真实成绩自动计算），变量与运算符固定、仅数值阈值可调。
             阈值或启用状态修改后<b>下次数据重算时生效</b>，预警结果在「预警查看」页面展示。
@@ -278,26 +282,28 @@
       </template>
     </el-dialog>
     <el-dialog v-model="candidateVisible" title="规则候选学生明细" width="900px">
-      <el-table :data="candidateRows" size="small" v-loading="candidateLoading">
-        <el-table-column prop="student_id" label="学号" width="130" />
-        <el-table-column prop="student_name" label="姓名" width="90" />
-        <el-table-column prop="college_name" label="学院" min-width="130" />
-        <el-table-column prop="major_name" label="专业" min-width="120" />
-        <el-table-column prop="trigger_detail" label="候选命中说明" min-width="220" show-overflow-tooltip />
-      </el-table>
-      <el-pagination style="margin-top:12px;justify-content:flex-end" background small
-        layout="total, prev, pager, next" :total="candidateTotal" :page-size="20"
-        :current-page="candidatePage" @current-change="loadCandidates" />
+      <AppTable :data="candidateRows"  v-loading="candidateLoading" :columns="[]" storage-key="teaching-analysis:alert:rulegovernance:3" :pagination="true" :page="candidatePage" :page-size="20" :total="candidateTotal" @page-change="loadCandidates" :page-sizes="[20]" :loading="candidateLoading">
+        <template #columns>
+        <el-table-column prop="student_id" label="学号" min-width="130" align="center" header-align="center"/>
+        <el-table-column prop="student_name" label="姓名" min-width="90" align="center" header-align="center"/>
+        <el-table-column prop="college_name" label="学院" min-width="130" align="center" header-align="center"/>
+        <el-table-column prop="major_name" label="专业" min-width="120" align="center" header-align="center"/>
+        <el-table-column prop="trigger_detail" label="候选命中说明" min-width="220" show-overflow-tooltip align="center" header-align="center"/>
+              </template>
+      </AppTable>
+
       <template #footer><el-button type="primary" plain @click="downloadCandidates">导出候选 CSV</el-button></template>
     </el-dialog>
     <el-dialog v-model="analysisVisible" title="规则变更影响分析" width="min(1120px, 94vw)">
       <div class="sa-card-title" style="font-size:13px">参数变更</div>
-      <el-table :data="analysis.paramDiff || []" size="small" style="margin-bottom:16px">
-        <el-table-column prop="key" label="参数" />
-        <el-table-column prop="before" label="变更前" />
-        <el-table-column prop="after" label="变更后" />
-        <el-table-column label="是否变化"><template #default="{row}"><el-tag size="small" :type="row.changed?'warning':'info'">{{ row.changed?'已调整':'未调整' }}</el-tag></template></el-table-column>
-      </el-table>
+      <AppTable :data="analysis.paramDiff || []"  style="margin-bottom:16px" :columns="[]" storage-key="teaching-analysis:alert:rulegovernance:4" :pagination="false">
+        <template #columns>
+        <el-table-column prop="key" label="参数" align="center" header-align="center"/>
+        <el-table-column prop="before" label="变更前" align="center" header-align="center"/>
+        <el-table-column prop="after" label="变更后" align="center" header-align="center"/>
+        <el-table-column label="是否变化" align="center" header-align="center"><template #default="{row}"><el-tag size="small" :type="row.changed?'warning':'info'">{{ row.changed?'已调整':'未调整' }}</el-tag></template></el-table-column>
+              </template>
+      </AppTable>
       <section class="distribution-section">
         <div class="distribution-head">
           <div>
@@ -305,23 +311,26 @@
           </div>
           <div class="distribution-total">总影响 <strong>{{ analysisDistribution.total }}</strong> 人</div>
         </div>
-        <el-table class="analysis-cross-table" :data="analysisDistribution.rows" border size="small"
+        <AppTable class="analysis-cross-table" :data="analysisDistribution.rows" border
           max-height="430" empty-text="暂无变更影响数据" :span-method="analysisSpanMethod"
-          :row-class-name="analysisRowClassName">
-          <el-table-column prop="collegeName" label="学院" width="170" fixed show-overflow-tooltip />
-          <el-table-column prop="majorName" label="专业" width="170" fixed show-overflow-tooltip />
+          :row-class-name="analysisRowClassName" :columns="[]" storage-key="teaching-analysis:alert:rulegovernance:5" :pagination="false">
+        <template #columns>
+          <el-table-column prop="collegeName" label="学院" min-width="170" fixed show-overflow-tooltip align="center" header-align="center"/>
+          <el-table-column prop="majorName" label="专业" min-width="170" fixed show-overflow-tooltip align="center" header-align="center"/>
           <el-table-column v-for="(grade, gradeIndex) in analysisDistribution.grades" :key="grade"
-            :label="grade" width="105" align="right" header-align="center">
+            :label="grade" min-width="105" align="center" header-align="center">
             <template #default="{row}">{{ row.counts?.[gradeIndex] || 0 }}</template>
           </el-table-column>
-          <el-table-column prop="total" label="小计" width="110" align="right" header-align="center" fixed="right" />
-        </el-table>
+          <el-table-column prop="total" label="小计" min-width="110" align="center" header-align="center" fixed="right" />
+                </template>
+      </AppTable>
       </section>
     </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
+import AppTable from '@/components/AppTable.vue'
 import * as rulesApi from '@/api/teachingAnalysis/rules'
 
 import { computed, ref, reactive, onMounted } from 'vue'

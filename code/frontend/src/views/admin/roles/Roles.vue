@@ -9,26 +9,36 @@
       <el-button type="primary" size="small" @click="openRoleDialog()">+ 新建角色</el-button>
     </div>
 
-    <div class="sa-card">
-      <el-table :data="roles" size="small" v-loading="loading">
-        <el-table-column prop="name" label="角色名称" width="180" />
-        <el-table-column prop="role_id" label="角色 ID" width="170" />
-        <el-table-column prop="user_count" label="账号数" width="90" align="right" />
-        <el-table-column prop="menu_count" label="可见菜单数" width="110" align="right" />
-        <el-table-column label="数据范围类型" width="130">
-          <template #default="{row}">{{ scopeTypeLabel(row.data_scope_type) }}</template>
-        </el-table-column>
-        <el-table-column label="操作" min-width="220">
-          <template #default="{ row }">
+    <div class="sa-card role-table-card">
+      <!-- 全量角色由页面分页；公共组件统一展示设置，不改变角色接口和授权操作。 -->
+      <AppTable
+        :columns="columns"
+        :data="pagedRoles"
+        storage-key="system:roles"
+        :show-density="false"
+        :show-column-settings="false"
+        default-density="default"
+        :page="page"
+        :page-size="pageSize"
+        :total="roles.length"
+        :loading="loading"
+        row-key="role_id"
+        stripe
+        @page-change="changePage"
+        @page-size-change="changePageSize"
+      >
+        <template #col-data_scope_type="{ row }">{{ scopeTypeLabel(row.data_scope_type) }}</template>
+        <template #col-actions="{ row }">
+          <div class="role-table-card__actions">
             <el-button size="small" text type="primary" @click="openPermissionDrawer(row)">配置权限</el-button>
             <el-button size="small" text @click="previewRole(row)">权限预览</el-button>
             <el-button size="small" text @click="openRoleDialog(row)">编辑</el-button>
             <el-popconfirm title="确定删除该角色？" @confirm="removeRole(row)">
               <template #reference><el-button size="small" text type="danger">删除</el-button></template>
             </el-popconfirm>
-          </template>
-        </el-table-column>
-      </el-table>
+          </div>
+        </template>
+      </AppTable>
     </div>
 
     <!-- 角色编辑 -->
@@ -111,6 +121,8 @@
 import { computed, ref, reactive, onMounted, nextTick } from 'vue'
 import type { TreeInstance } from 'element-plus'
 import { ElMessage } from 'element-plus'
+import AppTable from '@/components/AppTable.vue'
+import { DEFAULT_TABLE_PAGE_SIZE, TABLE_PAGE_SIZES, type AppTableColumn } from '@/types/table'
 import * as rolesApi from '@/api/admin/roles'
 
 interface RoleRow {
@@ -126,6 +138,38 @@ const roles = ref<RoleRow[]>([])
 const menuTree = ref<MenuRow[]>([])
 const loading = ref(false)
 const saving = ref(false)
+
+// 列标识用于保存显示偏好；数据列自适应，名称和操作在横向滚动时保持可见。
+const columns: AppTableColumn[] = [
+  { key: 'name', label: '角色名称', minWidth: 180, fixed: 'left', required: true, tooltip: true },
+  { key: 'role_id', label: '角色 ID', minWidth: 170, tooltip: true },
+  { key: 'user_count', label: '账号数', minWidth: 90 },
+  { key: 'menu_count', label: '可见菜单数', minWidth: 110 },
+  { key: 'data_scope_type', label: '数据范围类型', minWidth: 130 },
+  { key: 'actions', label: '操作', width: 320, fixed: 'right', required: true },
+]
+const page = ref(1)
+const pageSize = ref<number>(DEFAULT_TABLE_PAGE_SIZE)
+const lastPage = computed(() => Math.max(1, Math.ceil(roles.value.length / pageSize.value)))
+
+/** 接口返回完整角色集合；仅在页面切片一次，保留服务端顺序和原始统计字段。 */
+const pagedRoles = computed(() => {
+  const start = (page.value - 1) * pageSize.value
+  return roles.value.slice(start, start + pageSize.value)
+})
+
+/** 翻页只改变本页展示，不重复请求角色、菜单或动作目录，也不写入 URL。 */
+function changePage(value: number): void {
+  if (loading.value || !Number.isSafeInteger(value)) return
+  page.value = Math.min(lastPage.value, Math.max(1, value))
+}
+
+/** 每页条数沿用公共选项，切换后回第一页；不从显示偏好中恢复页长。 */
+function changePageSize(value: number): void {
+  if (loading.value || !TABLE_PAGE_SIZES.some(size => size === value)) return
+  pageSize.value = value
+  page.value = 1
+}
 
 const roleDialogVisible = ref(false)
 const editingRole = ref(false)
@@ -153,7 +197,9 @@ const actionGroups = computed(() => {
 async function load() {
   loading.value = true
   try {
-    roles.value = await rolesApi.listRoles()
+    roles.value = await rolesApi.listRoles<RoleRow[]>()
+    // 保存后保留当前页；删除导致末页消失时回到最近的有效页，空集合回第一页。
+    page.value = Math.min(page.value, lastPage.value)
     const menus = await rolesApi.listRoleMenuOptions<MenuRow[]>()
     actionCatalog.value = await rolesApi.listRoleActionOptions()
     menuTree.value = menus
@@ -258,7 +304,7 @@ function scopeTypeLabel(type:string) {
   return ({all:'全校',college:'学院',major:'专业',class:'行政班',teacher:'任课关系',staff_relation:'带班/带生关系'} as any)[type] || type
 }
 
-// 进入页面时沿用原初始化与路由参数恢复流程。
+// 每次进入或刷新从第 1 页、每页 20 条开始，沿用原角色和权限目录加载流程。
 onMounted(load)
 </script>
 
@@ -269,6 +315,17 @@ onMounted(load)
   justify-content: space-between;
   align-items: flex-start;
   margin-bottom: 14px;
+}
+
+.role-table-card {
+  min-width: 0;
+
+  &__actions {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    white-space: nowrap;
+  }
 }
 
 .drawer-tip {

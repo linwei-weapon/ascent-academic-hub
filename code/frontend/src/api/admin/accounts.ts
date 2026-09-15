@@ -1,9 +1,33 @@
 // 账号管理接口：只封装原有请求，不解释或修正后台业务数据。
 import { http } from '@/utils/http'
 
-// 按页面已应用的筛选和分页读取账号列表及服务端汇总。
-export function listAccounts<T = any>(query: string | URLSearchParams): Promise<T> {
-  return http.get<T>(`/admin/rbac/users?${query}`)
+/** 页面使用结构化状态，API 层映射到既有后台字段名。 */
+export interface AccountListQuery {
+  page: number
+  pageSize: number
+  keyword?: string
+  accountSource?: string
+  roleId?: string
+  authStatus?: string
+  permissionStatus?: string
+  status?: string
+}
+
+// 与 QuizTest 相同，GET 查询参数只用于接口调用，不更新浏览器页面地址。
+export function listAccounts<T = any>(query: AccountListQuery): Promise<T> {
+  const params = new URLSearchParams({ page: String(query.page), page_size: String(query.pageSize) })
+  const fields = {
+    keyword: query.keyword,
+    account_source: query.accountSource,
+    role_id: query.roleId,
+    auth_status: query.authStatus,
+    permission_status: query.permissionStatus,
+    status: query.status,
+  }
+  for (const [key, value] of Object.entries(fields)) {
+    if (value) params.set(key, value)
+  }
+  return http.get<T>(`/admin/rbac/users?${params}`)
 }
 
 // 读取账号创建与筛选使用的角色选项。

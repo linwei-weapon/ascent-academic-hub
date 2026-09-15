@@ -102,19 +102,18 @@
             </div>
             <el-input v-model="collegeKeyword" clearable placeholder="搜索学院" class="college-search" />
           </div>
-          <DataTable
+          <AppTable
             :columns="collegeColumns"
             :data="filteredColleges"
             storage-key="faculty:college-assurance"
             :max-business-columns="6"
             config-version="2"
             stripe
-            size="small"
+
             row-class-name="college-row"
             @row-click="openCollegeQueue"
             @cell-mouse-enter="schedulePrefetch"
-            @cell-mouse-leave="cancelPrefetch"
-          >
+            @cell-mouse-leave="cancelPrefetch" :show-density="true" :show-column-settings="true" :pagination="false">
             <template #col-college_name="{ row }"><span class="college-link">{{ row.college_name }}</span></template>
             <template #col-priority_review_courses="{ row }">
               <el-tag :type="row.priority_review_courses ? 'danger' : 'success'" effect="plain">
@@ -125,7 +124,7 @@
             <template #col-actions="{ row }">
               <el-button link type="primary" @click.stop="openCollegeQueue(row)">核查学院</el-button>
             </template>
-          </DataTable>
+          </AppTable>
         </section>
 
         <aside class="sa-card focus-card" v-loading="refreshing">
@@ -249,7 +248,7 @@
           >
             <template #extra><el-button type="primary" @click="loadQueue">重试</el-button></template>
           </el-result>
-          <DataTable
+          <AppTable
             v-else
             v-loading="drawerLoading"
             :columns="courseQueueColumns"
@@ -257,13 +256,12 @@
             storage-key="faculty:course-review-queue"
             :max-business-columns="7"
             config-version="2"
-            :page-size="queuePageSize"
+
             stripe
-            size="small"
+
             empty-text="当前条件下没有课程"
-            @update:page-size="changeQueuePageSize"
-            @row-click="row => openCourse(row)"
-          >
+
+            @row-click="row => openCourse(row)" :show-density="true" :show-column-settings="true" :pagination="true" :page="queuePage" :page-size="queuePageSize" :total="queueTotal" @page-change="queuePage = $event; loadQueue(true)" @page-size-change="changeQueuePageSize" :page-sizes="[10, 20, 50, 100]" :loading="drawerLoading">
             <template #col-course_name="{ row }">
               <span class="course-link">{{ row.course_name }}</span>
               <small class="course-code">{{ row.course_id }}</small>
@@ -277,17 +275,10 @@
             <template #col-actions="{ row }">
               <el-button link type="primary" @click.stop="openCourse(row)">查看证据</el-button>
             </template>
-          </DataTable>
+          </AppTable>
           <div v-if="queueTotal" class="queue-pagination">
             <span>共 {{ queueTotal }} 门课程</span>
-            <el-pagination
-              v-model:current-page="queuePage"
-              v-model:page-size="queuePageSize"
-              :total="queueTotal"
-              :page-sizes="[10, 20, 50, 100]"
-              layout="prev, pager, next"
-              @current-change="loadQueue"
-            />
+
           </div>
         </template>
 
@@ -355,22 +346,20 @@
               <div class="section-head">
                 <div><h3>当前实际授课团队</h3><p>教师经历仅为课程保障核查提供证据，不展示成绩评价。</p></div>
               </div>
-              <DataTable
+              <AppTable
                 :columns="teamColumns"
                 :data="courseDetail.members"
                 storage-key="faculty:course-team"
                 :max-business-columns="6"
                 config-version="2"
-                stripe
-                size="small"
-              >
+                stripe :show-density="true" :show-column-settings="true" :pagination="false">
                 <template #col-display_name="{ row }"><b>{{ row.display_name }}</b></template>
                 <template #col-title="{ row }">{{ row.title || '待补充' }}</template>
                 <template #col-organization_id="{ row }">{{ row.organization_id || '待映射' }}</template>
                 <template #col-actions="{ row }">
                   <el-button link type="primary" @click="openTeacher(row)">教学经历</el-button>
                 </template>
-              </DataTable>
+              </AppTable>
             </section>
 
             <el-collapse class="history-collapse">
@@ -378,17 +367,15 @@
                 <template #title>
                   <span class="collapse-title">查看全部历史开课记录（{{ courseDetail.offerings.length }}个学期）</span>
                 </template>
-                <DataTable
+                <AppTable
                   :columns="offeringColumns"
-                  :data="courseDetail.offerings"
+
                   storage-key="faculty:course-offerings"
                   :max-business-columns="6"
                   config-version="2"
-                  pagination
-                  :default-page-size="10"
-                  stripe
-                  size="small"
-                />
+
+
+                  stripe :show-density="true" :show-column-settings="true" :data="offeringPagination.rows" :pagination="true" :page="offeringPagination.page" :page-size="offeringPagination.pageSize" :total="offeringPagination.total" @page-change="offeringPagination.changePage" @page-size-change="offeringPagination.changePageSize"/>
               </el-collapse-item>
             </el-collapse>
 
@@ -439,33 +426,31 @@
         </div>
         <section class="drawer-section">
           <div class="section-head"><div><h3>本学期教学任务</h3><p>联合授课不拆分贡献比例，所列学时不等同于人事核定工作量。</p></div></div>
-          <DataTable
+          <AppTable
             :columns="teacherCurrentColumns"
-            :data="teacherDrawer.data.currentCourses || []"
+
             storage-key="faculty:teacher-current-courses"
             :max-business-columns="6"
             config-version="2"
-            pagination
-            :default-page-size="10"
+
+
             stripe
-            size="small"
-            empty-text="当前学期暂无教学任务"
-          />
+
+            empty-text="当前学期暂无教学任务" :show-density="true" :show-column-settings="true" :data="currentCoursesPagination.rows" :pagination="true" :page="currentCoursesPagination.page" :page-size="currentCoursesPagination.pageSize" :total="currentCoursesPagination.total" @page-change="currentCoursesPagination.changePage" @page-size-change="currentCoursesPagination.changePageSize"/>
         </section>
         <section class="drawer-section teacher-history">
           <div class="section-head"><div><h3>近年授课经历</h3><p>用于判断课程经验与实际供给范围，不作教学质量排名。</p></div></div>
-          <DataTable
+          <AppTable
             :columns="teacherHistoryColumns"
-            :data="teacherDrawer.data.teachingHistory || []"
+
             storage-key="faculty:teacher-history"
             :max-business-columns="6"
             config-version="2"
-            pagination
-            :default-page-size="10"
+
+
             stripe
-            size="small"
-            empty-text="暂无历史记录"
-          />
+
+            empty-text="暂无历史记录" :show-density="true" :show-column-settings="true" :data="historyPagination.rows" :pagination="true" :page="historyPagination.page" :page-size="historyPagination.pageSize" :total="historyPagination.total" @page-change="historyPagination.changePage" @page-size-change="historyPagination.changePageSize"/>
         </section>
       </div>
     </el-drawer>
@@ -491,6 +476,7 @@
 </template>
 
 <script setup lang="ts">
+import { useTablePagination } from '@/composables/useTablePagination'
 import * as facultyApi from '@/api/teachingAnalysis/faculty'
 
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
@@ -499,7 +485,8 @@ import { ElMessage } from 'element-plus'
 
 import { getFilterMeta, type SemesterOpt } from '@/api/shared/filterMeta'
 import KpiCard from '@/components/KpiCard.vue'
-import DataTable, { type DataTableColumn } from '@/components/DataTable.vue'
+import AppTable from '@/components/AppTable.vue'
+import type { AppTableColumn } from '@/types/table'
 import { useBusinessPageTitle } from '@/utils/businessPage'
 
 type DrawerMode = 'queue' | 'course'
@@ -550,7 +537,8 @@ const isSchoolScope = computed(() => data.scope_mode !== 'college')
 const pageSubtitle = computed(() => isSchoolScope.value
   ? ''
   : `聚焦${data.college || '本学院'}责任课程，明确先核实哪门课、为什么以及缺少什么证据。`)
-const drawerWidth = computed(() => window.innerWidth >= 1600 ? '76%' : window.innerWidth >= 1200 ? '86%' : '96%')
+// 由 CSS 随视口实时计算，窗口缩放时仍保持屏幕的 2/3 宽度。
+const drawerWidth = 'calc(100vw * 2 / 3)'
 const drawerTitle = computed(() => drawerMode.value === 'course'
   ? `${selectedCourse.value?.name || '课程'} · 师资保障证据`
   : `${selectedCollege.value?.name || (isSchoolScope.value ? '全校' : data.college || '本学院')} · 课程核查队列`)
@@ -651,65 +639,66 @@ const managementKpis = computed(() => [
   },
 ])
 
-const collegeColumns: DataTableColumn[] = [
+const collegeColumns: AppTableColumn[] = [
   { key: 'college_name', label: '学院', minWidth: 180, fixed: 'left', required: true, region: 'identity' },
-  { key: 'evaluable_courses', label: '可评估课程', width: 105, align: 'right', required: true, region: 'business' },
-  { key: 'priority_review_courses', label: '优先核查', width: 100, align: 'center', required: true, region: 'business' },
-  { key: 'continuous_single_courses', label: '连续单点', width: 95, align: 'right', region: 'business' },
-  { key: 'structure_review_courses', label: '结构核查', width: 95, align: 'right', region: 'business' },
-  { key: 'data_candidate_courses', label: '数据候选', width: 95, align: 'right', region: 'business' },
-  { key: 'review_rate', label: '优先核查率', width: 105, align: 'right', region: 'business', defaultVisible: false },
-  { key: 'lessons', label: '教学班', width: 85, align: 'right', region: 'business', defaultVisible: false },
-  { key: 'enrolled', label: '学生人次', width: 95, align: 'right', region: 'business', defaultVisible: false },
+  { key: 'evaluable_courses', label: '可评估课程', minWidth: 105, align: 'center', required: true, region: 'business' },
+  { key: 'priority_review_courses', label: '优先核查', minWidth: 100, align: 'center', required: true, region: 'business' },
+  { key: 'continuous_single_courses', label: '连续单点', minWidth: 95, align: 'center', region: 'business' },
+  { key: 'structure_review_courses', label: '结构核查', minWidth: 95, align: 'center', region: 'business' },
+  { key: 'data_candidate_courses', label: '数据候选', minWidth: 95, align: 'center', region: 'business' },
+  { key: 'review_rate', label: '优先核查率', minWidth: 105, align: 'center', region: 'business', defaultVisible: false },
+  { key: 'lessons', label: '教学班', minWidth: 85, align: 'center', region: 'business', defaultVisible: false },
+  { key: 'enrolled', label: '学生人次', minWidth: 95, align: 'center', region: 'business', defaultVisible: false },
   { key: 'actions', label: '操作', width: 95, fixed: 'right', required: true, region: 'action' },
 ]
-const courseQueueColumns: DataTableColumn[] = [
-  { key: 'course_name', label: '课程', minWidth: 190, fixed: 'left', required: true, region: 'identity' },
-  { key: 'course_nature', label: '性质', width: 80, region: 'business' },
+// 抽屉内的数据列以较小 minWidth 作为相对权重随容器分配；标签、操作保留完整展示所需宽度。
+const courseQueueColumns: AppTableColumn[] = [
+  { key: 'course_name', label: '课程', minWidth: 19, fixed: 'left', required: true, region: 'identity' },
+  { key: 'course_nature', label: '性质', minWidth: 8, region: 'business' },
   { key: 'review_type', label: '核查类型', width: 100, required: true, region: 'business' },
-  { key: 'lesson_count', label: '教学班', width: 80, align: 'right', region: 'business' },
-  { key: 'enrolled', label: '学生人次', width: 90, align: 'right', required: true, region: 'business' },
-  { key: 'teacher_count', label: '教师', width: 70, align: 'right', region: 'business' },
-  { key: 'attention_reasons', label: '首要核查原因', minWidth: 280, tooltip: true, required: true, region: 'business' },
-  { key: 'college_name', label: '责任学院', minWidth: 160, defaultVisible: false, region: 'business' },
-  { key: 'continuity_observations', label: '历史观察次数', width: 110, align: 'right', defaultVisible: false, region: 'business' },
-  { key: 'title_completeness_rate', label: '职称证据率', width: 110, align: 'right', defaultVisible: false, region: 'business', formatter: row => `${row.title_completeness_rate}%` },
+  { key: 'lesson_count', label: '教学班', minWidth: 8, align: 'center', region: 'business' },
+  { key: 'enrolled', label: '学生人次', minWidth: 9, align: 'center', required: true, region: 'business' },
+  { key: 'teacher_count', label: '教师', minWidth: 7, align: 'center', region: 'business' },
+  { key: 'attention_reasons', label: '首要核查原因', minWidth: 28, tooltip: true, required: true, region: 'business' },
+  { key: 'college_name', label: '责任学院', minWidth: 16, defaultVisible: false, region: 'business' },
+  { key: 'continuity_observations', label: '历史观察次数', minWidth: 11, align: 'center', defaultVisible: false, region: 'business' },
+  { key: 'title_completeness_rate', label: '职称证据率', minWidth: 11, align: 'center', defaultVisible: false, region: 'business', formatter: row => `${row.title_completeness_rate}%` },
   { key: 'actions', label: '操作', width: 95, fixed: 'right', required: true, region: 'action' },
 ]
-const teamColumns: DataTableColumn[] = [
-  { key: 'display_name', label: '教师', minWidth: 110, fixed: 'left', required: true, region: 'identity' },
-  { key: 'team_role', label: '团队角色', width: 95, required: true, region: 'business' },
-  { key: 'lesson_count', label: '教学班', width: 80, align: 'right', required: true, region: 'business' },
-  { key: 'enrolled', label: '学生人次', width: 95, align: 'right', required: true, region: 'business' },
-  { key: 'lesson_share', label: '教学班占比', width: 105, align: 'right', region: 'business', formatter: row => `${row.lesson_share}%` },
-  { key: 'title', label: '职称', width: 105, region: 'business' },
-  { key: 'organization_id', label: '人事归属', minWidth: 160, region: 'business' },
-  { key: 'staff_id', label: '教师代码', width: 125, defaultVisible: false, region: 'business' },
+const teamColumns: AppTableColumn[] = [
+  { key: 'display_name', label: '教师', minWidth: 11, fixed: 'left', required: true, region: 'identity' },
+  { key: 'team_role', label: '团队角色', minWidth: 10, required: true, region: 'business' },
+  { key: 'lesson_count', label: '教学班', minWidth: 8, align: 'center', required: true, region: 'business' },
+  { key: 'enrolled', label: '学生人次', minWidth: 10, align: 'center', required: true, region: 'business' },
+  { key: 'lesson_share', label: '教学班占比', minWidth: 11, align: 'center', region: 'business', formatter: row => `${row.lesson_share}%` },
+  { key: 'title', label: '职称', minWidth: 11, region: 'business' },
+  { key: 'organization_id', label: '人事归属', minWidth: 16, region: 'business' },
+  { key: 'staff_id', label: '教师代码', minWidth: 13, defaultVisible: false, region: 'business' },
   { key: 'actions', label: '操作', width: 95, fixed: 'right', required: true, region: 'action' },
 ]
-const offeringColumns: DataTableColumn[] = [
-  { key: 'semesterId', label: '学期', width: 125, fixed: 'left', required: true, region: 'identity' },
-  { key: 'lessonCount', label: '教学班', width: 85, align: 'right', required: true, region: 'business' },
-  { key: 'teacherCount', label: '教师', width: 75, align: 'right', required: true, region: 'business' },
-  { key: 'enrolled', label: '学生人次', width: 100, align: 'right', region: 'business' },
-  { key: 'capacity', label: '容量', width: 85, align: 'right', region: 'business' },
-  { key: 'avgClassSize', label: '平均班额', width: 95, align: 'right', region: 'business' },
+const offeringColumns: AppTableColumn[] = [
+  { key: 'semesterId', label: '学期', minWidth: 13, fixed: 'left', required: true, region: 'identity' },
+  { key: 'lessonCount', label: '教学班', minWidth: 9, align: 'center', required: true, region: 'business' },
+  { key: 'teacherCount', label: '教师', minWidth: 8, align: 'center', required: true, region: 'business' },
+  { key: 'enrolled', label: '学生人次', minWidth: 10, align: 'center', region: 'business' },
+  { key: 'capacity', label: '容量', minWidth: 9, align: 'center', region: 'business' },
+  { key: 'avgClassSize', label: '平均班额', minWidth: 10, align: 'center', region: 'business' },
 ]
-const teacherCurrentColumns: DataTableColumn[] = [
+const teacherCurrentColumns: AppTableColumn[] = [
   { key: 'courseName', label: '课程', minWidth: 160, fixed: 'left', required: true, region: 'identity' },
-  { key: 'teamRole', label: '角色', width: 90, required: true, region: 'business' },
+  { key: 'teamRole', label: '角色', minWidth: 90, required: true, region: 'business' },
   { key: 'className', label: '教学班', minWidth: 160, region: 'business' },
-  { key: 'students', label: '学生数', width: 85, align: 'right', required: true, region: 'business' },
-  { key: 'hours', label: '学时', width: 75, align: 'right', region: 'business' },
+  { key: 'students', label: '学生数', minWidth: 85, align: 'center', required: true, region: 'business' },
+  { key: 'hours', label: '学时', minWidth: 75, align: 'center', region: 'business' },
   { key: 'courseDept', label: '课程责任学院', minWidth: 160, defaultVisible: false, region: 'business' },
 ]
-const teacherHistoryColumns: DataTableColumn[] = [
-  { key: 'semester', label: '学期', width: 125, fixed: 'left', required: true, region: 'identity' },
+const teacherHistoryColumns: AppTableColumn[] = [
+  { key: 'semester', label: '学期', minWidth: 125, fixed: 'left', required: true, region: 'identity' },
   { key: 'courseName', label: '课程', minWidth: 170, required: true, region: 'business' },
-  { key: 'teamRole', label: '角色', width: 90, region: 'business' },
-  { key: 'lessonCount', label: '教学班', width: 85, align: 'right', region: 'business' },
-  { key: 'students', label: '学生人次', width: 100, align: 'right', region: 'business' },
-  { key: 'hours', label: '学时', width: 75, align: 'right', region: 'business' },
+  { key: 'teamRole', label: '角色', minWidth: 90, region: 'business' },
+  { key: 'lessonCount', label: '教学班', minWidth: 85, align: 'center', region: 'business' },
+  { key: 'students', label: '学生人次', minWidth: 100, align: 'center', region: 'business' },
+  { key: 'hours', label: '学时', minWidth: 75, align: 'center', region: 'business' },
   { key: 'courseDept', label: '课程责任学院', minWidth: 160, defaultVisible: false, region: 'business' },
 ]
 
@@ -1000,6 +989,15 @@ onMounted(async () => {
 })
 // 离开页面时清理原定时器或监听，保留组件的资源释放流程。
 onBeforeUnmount(cancelPrefetch)
+
+// 全量结果在页面分页；不改变查询、汇总和证据数据。
+const offeringPagination = useTablePagination(() => courseDetail.value?.offerings || [], 10)
+
+// 全量结果在页面分页；不改变查询、汇总和证据数据。
+const currentCoursesPagination = useTablePagination(() => teacherDrawer.data.currentCourses || [], 10)
+
+// 全量结果在页面分页；不改变查询、汇总和证据数据。
+const historyPagination = useTablePagination(() => teacherDrawer.data.teachingHistory || [], 10)
 </script>
 
 <style scoped lang="scss">

@@ -67,7 +67,7 @@
         <el-col :span="14">
           <div class="sa-card">
             <div class="sa-card-title">达成度明细</div>
-            <DataTable :columns="requirementCols" :data="data.requirements" storage-key="curriculum:graduate-requirements" size="small" max-height="360">
+            <AppTable :columns="requirementCols" :data="data.requirements" storage-key="curriculum:graduate-requirements"  max-height="360" :show-density="true" :show-column-settings="true" :pagination="false">
               <template #col-achievement="{row}">
                 <div style="display:flex;align-items:center;gap:8px">
                   <el-progress
@@ -82,7 +82,7 @@
               <template #col-status="{row}">
                 <el-tag :type="row.status === '达标' ? 'success' : 'danger'" size="small">{{ row.status }}</el-tag>
               </template>
-            </DataTable>
+            </AppTable>
           </div>
         </el-col>
       </el-row>
@@ -128,14 +128,15 @@ import * as curriculumApi from '@/api/teachingAnalysis/curriculum'
 import { ref, reactive, computed, onMounted, watch } from 'vue'
 import KpiCard from '@/components/KpiCard.vue'
 import EChart from '@/components/EChart.vue'
-import DataTable, { type DataTableColumn } from '@/components/DataTable.vue'
+import AppTable from '@/components/AppTable.vue'
+import type { AppTableColumn } from '@/types/table'
 
 // 达成度明细表列定义（M6 DataTable；当前位于 v-if="false" 的停用模板中，保留迁移一致性）
-const requirementCols: DataTableColumn[] = [
-  { key: 'index', label: '#', width: 44, align: 'center' },
-  { key: 'name', label: '毕业要求', width: 160 },
+const requirementCols: AppTableColumn[] = [
+  { key: 'index', label: '#', minWidth: 44, align: 'center' },
+  { key: 'name', label: '毕业要求', minWidth: 160 },
   { key: 'achievement', label: '达成度', minWidth: 200 },
-  { key: 'status', label: '状态', width: 70, align: 'center' },
+  { key: 'status', label: '状态', minWidth: 70, align: 'center' },
 ]
 
 const props = defineProps<{ majorId?: string }>()

@@ -86,30 +86,49 @@
     </el-alert>
 
     <div class="sa-card account-table-card">
-      <div class="table-title">
-        <div>
-          <b>账号与接入状态</b>
-          <span>共 {{ total }} 个结果；点击账号在当前页面核查完整证据</span>
-        </div>
-      </div>
-      <DataTable
+      <AppTable
         :columns="columns"
         :data="users"
         storage-key="system:accounts"
+        show-density
+        show-column-settings
         :max-business-columns="6"
         :config-version="2"
-        v-model:page-size="pageSize"
+        :page="pagination.page"
+        :page-size="pagination.pageSize"
+        :total="pagination.total"
+        :loading="loading"
+        @page-change="changePage"
+        @page-size-change="changePageSize"
         :page-sizes="[10,20,50,100]"
         stripe
-        size="small"
-        v-loading="loading"
-        row-class-name="clickable-row"
-        @row-click="openDetail"
+        row-key="user_id"
       >
+        <!-- 标题复用表格工具栏左侧插槽，与密度和列设置共用一行。 -->
+        <template #toolbar>
+          <div class="table-title">
+            <b>账号与接入状态</b>
+            <span>共 {{ pagination.total }} 个结果；点击蓝色姓名或账号查看详情</span>
+          </div>
+        </template>
         <template #col-user="{ row }">
           <div class="user-cell">
-            <b>{{ row.name || '未填写姓名' }}</b>
-            <span>{{ row.username }}</span>
+            <button
+              v-if="row.name && canViewAccount(row)"
+              type="button"
+              class="user-cell__link user-cell__link--name"
+              :aria-label="`查看账号详情 ${row.name}`"
+              @click.stop="openDetail(row)"
+            >{{ row.name }}</button>
+            <b v-else>{{ row.name || '未填写姓名' }}</b>
+            <button
+              v-if="row.username && canViewAccount(row)"
+              type="button"
+              class="user-cell__link"
+              :aria-label="`查看账号 ${row.username}`"
+              @click.stop="openDetail(row)"
+            >{{ row.username }}</button>
+            <span v-else>{{ row.username || '—' }}</span>
           </div>
         </template>
         <template #col-account_source="{ row }">
@@ -154,7 +173,6 @@
         <template #col-staff_id="{ row }">{{ row.staff_id || '—' }}</template>
         <template #col-actions="{ row }">
           <div class="row-actions" @click.stop>
-            <el-button link type="primary" @click="openDetail(row)">查看</el-button>
             <el-dropdown trigger="click" @command="(command:any) => handleCommand(command,row)">
               <el-button link>更多<el-icon class="el-icon--right"><ArrowDown /></el-icon></el-button>
               <template #dropdown>
@@ -173,20 +191,12 @@
           </div>
         </template>
         <template #empty>
-          <el-empty description="当前条件下没有账号">
-            <el-button @click="resetFilters">清除查询条件</el-button>
+          <el-empty :description="loadError ? '账号列表加载失败，请重试' : '当前条件下没有账号'">
+            <el-button v-if="loadError" @click="loadUsers">重新加载</el-button>
+            <el-button v-else @click="resetFilters">清除查询条件</el-button>
           </el-empty>
         </template>
-      </DataTable>
-      <el-pagination
-        v-if="total"
-        v-model:current-page="page"
-        :page-size="pageSize"
-        :total="total"
-        layout="total, prev, pager, next, jumper"
-        size="small"
-        @current-change="loadUsers"
-      />
+      </AppTable>
     </div>
 
     <el-drawer v-model="detailVisible" size="640px" :title="`账号核查 · ${detail?.name || detail?.username || ''}`">
@@ -373,15 +383,15 @@
 
           <section class="detail-section">
             <div class="section-head"><div><h3>当前认证来源</h3><p>一个账号可以绑定多个入口，列表仍只保留一个账号事实。</p></div></div>
-            <el-table :data="readiness.providers || []" size="small">
-              <el-table-column label="认证来源" min-width="170">
-                <template #default="{row}">{{ providerLabel(row.provider) }}</template>
-              </el-table-column>
-              <el-table-column prop="active_count" label="有效映射" width="100" align="right" />
-              <el-table-column label="最近更新" min-width="150">
-                <template #default="{row}">{{ formatTime(row.last_updated_at) }}</template>
-              </el-table-column>
-            </el-table>
+            <AppTable
+              :columns="providerColumns"
+              storage-key="system:auth-providers"
+              :pagination="false"
+              :data="readiness.providers || []"
+            >
+              <template #col-provider="{row}">{{ providerLabel(row.provider) }}</template>
+              <template #col-last_updated_at="{row}">{{ formatTime(row.last_updated_at) }}</template>
+            </AppTable>
             <el-empty v-if="!readiness.providers?.length" :image-size="54" description="尚未接入认证来源" />
           </section>
         </template>
@@ -391,12 +401,14 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 import { ArrowDown, CircleCheckFilled, WarningFilled } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import DataTable from '@/components/DataTable.vue'
-import type { DataTableColumn } from '@/components/DataTable.vue'
+import AppTable from '@/components/AppTable.vue'
+import { TABLE_PAGE_SIZES, type AppTableColumn } from '@/types/table'
+import { tablePreferenceKey } from '@/utils/tablePreferences'
+import { rememberAccountListReturn, takeAccountListReturn } from '@/store/accountList'
 import * as accountsApi from '@/api/admin/accounts'
 
 type AnyRow = Record<string, any>
@@ -407,18 +419,21 @@ const router = useRouter()
 const users = ref<AnyRow[]>([])
 const roles = ref<RoleRow[]>([])
 const summary = reactive({ total:0, active:0, mapped:0, pendingAuth:0, permissionIssues:0, disabled:0 })
-const total = ref(0)
-const page = ref(1)
-const pageSize = ref(20)
+// 普通进入沿用 QuizTest 的 1 / 20；仅从数据权限返回时消费本次内存现场。
+const accountContextKey = tablePreferenceKey('system:accounts', 2)
+const returnState = takeAccountListReturn(accountContextKey)
+const pagination = reactive({ page: returnState?.page ?? 1, pageSize: returnState?.pageSize ?? 20, total: 0 })
 const loading = ref(false)
 const initialLoading = ref(true)
 const loadError = ref('')
-const activeCard = ref('')
+const activeCard = ref(returnState?.activeCard ?? '')
+let listRequestSequence = 0
 
 const filters = reactive({
   keyword:'', accountSource:'', roleId:'', authStatus:'', permissionStatus:'', status:'',
+  ...returnState?.filters,
 })
-const draft = reactive({ ...filters })
+const draft = reactive({ ...filters, ...returnState?.draft })
 
 const detailVisible = ref(false)
 const detailLoading = ref(false)
@@ -437,16 +452,17 @@ const readinessVisible = ref(false)
 const readinessLoading = ref(false)
 const readiness = ref<AnyRow|null>(null)
 
-const columns:DataTableColumn[] = [
-  {key:'user',label:'用户与账号',width:185,fixed:'left',required:true,region:'identity'},
-  {key:'account_source',label:'账号来源',width:100},
+// 数据列按最小宽度自适应，隐藏列后重新分配空间；操作列保留稳定宽度。
+const columns:AppTableColumn[] = [
+  {key:'user',label:'用户与账号',minWidth:185,fixed:'left',required:true,region:'identity'},
+  {key:'account_source',label:'账号来源',minWidth:100},
   {key:'auth',label:'统一身份认证',minWidth:170,tooltip:true},
   {key:'role',label:'默认工作身份',minWidth:145},
   {key:'permission',label:'权限准备度',minWidth:170},
-  {key:'status',label:'状态',width:86},
-  {key:'last_login',label:'最近登录',width:155,defaultVisible:false},
-  {key:'staff_id',label:'教职工号',width:145,defaultVisible:false,tooltip:true},
-  {key:'actions',label:'操作',width:100,fixed:'right',required:true,region:'action'},
+  {key:'status',label:'状态',minWidth:86},
+  {key:'last_login',label:'最近登录',minWidth:155,defaultVisible:false},
+  {key:'staff_id',label:'教职工号',minWidth:145,defaultVisible:false,tooltip:true},
+  {key:'actions',label:'操作',width:130,fixed:'right',required:true,region:'action'},
 ]
 
 // 根据账号汇总结果生成筛选卡片，不在前端重算后台统计。
@@ -458,44 +474,47 @@ const summaryCards = computed(() => [
   {key:'disabled',label:'已停用或归档',value:summary.disabled,description:'保留历史但禁止访问'},
 ])
 
-// 用当前已应用筛选和分页生成请求参数，保留原字段名。
-function queryString() {
-  const q = new URLSearchParams()
-  q.set('page',String(page.value)); q.set('page_size',String(pageSize.value))
-  if(filters.keyword) q.set('keyword',filters.keyword)
-  if(filters.accountSource) q.set('account_source',filters.accountSource)
-  if(filters.roleId) q.set('role_id',filters.roleId)
-  if(filters.authStatus) q.set('auth_status',filters.authStatus)
-  if(filters.permissionStatus) q.set('permission_status',filters.permissionStatus)
-  if(filters.status) q.set('status',filters.status)
-  return q.toString()
+// 捕获已应用筛选，参数命名与序列化交给 API 模块；不写入页面路由。
+function accountQuery(): accountsApi.AccountListQuery {
+  return { page: pagination.page, pageSize: pagination.pageSize, ...filters }
 }
 
-// 将已应用的筛选与分页写回地址，供刷新和权限页返回时恢复。
-function syncRoute() {
-  router.replace({query:{
-    ...(filters.keyword?{keyword:filters.keyword}:{}),
-    ...(filters.accountSource?{account_source:filters.accountSource}:{}),
-    ...(filters.roleId?{role_id:filters.roleId}:{}),
-    ...(filters.authStatus?{auth_status:filters.authStatus}:{}),
-    ...(filters.permissionStatus?{permission_status:filters.permissionStatus}:{}),
-    ...(filters.status?{status:filters.status}:{}),
-    ...(page.value>1?{page:String(page.value)}:{}),
-    ...(pageSize.value!==20?{page_size:String(pageSize.value)}:{}),
-  }})
-}
-
-// 按当前查询加载账号列表，同时维护总数、汇总和错误状态。
+// 每次捕获已应用条件；只有最新请求可以回写名单、汇总和分页。
 async function loadUsers() {
-  loading.value=true; loadError.value=''
+  const sequence = ++listRequestSequence
+  const query = accountQuery()
+  const requestedPageSize = pagination.pageSize
+  let requestedPage = pagination.page
+  loading.value = true
+  loadError.value = ''
   try {
-    const data:any = await accountsApi.listAccounts(queryString())
-    users.value=data.items||[]; total.value=Number(data.total||0)
-    Object.assign(summary,data.summary||{})
-    syncRoute()
+    while (true) {
+      const data:any = await accountsApi.listAccounts({ ...query, page: requestedPage })
+      if (sequence !== listRequestSequence) return
+      const resultTotal = Number(data.total || 0)
+      const lastPage = Math.max(1, Math.ceil(resultTotal / requestedPageSize))
+      // 账号状态或服务端总量变化后，回查最后有效页，不伪造或拼接当前页数据。
+      if (requestedPage > lastPage) {
+        requestedPage = lastPage
+        continue
+      }
+      users.value = data.items || []
+      pagination.total = resultTotal
+      pagination.page = requestedPage
+      Object.assign(summary, data.summary || {})
+      break
+    }
   } catch(error:any) {
-    loadError.value=error?.message||'请求失败'
-  } finally { loading.value=false; initialLoading.value=false }
+    if (sequence !== listRequestSequence) return
+    users.value = []
+    pagination.total = 0
+    loadError.value = error?.message || '请求失败'
+  } finally {
+    if (sequence === listRequestSequence) {
+      loading.value = false
+      initialLoading.value = false
+    }
+  }
 }
 
 // 读取可供账号创建和筛选使用的角色目录。
@@ -505,12 +524,12 @@ async function loadRoles() {
 
 // 将草稿筛选应用到结果查询，并沿用原分页重置规则。
 function applyFilters() {
-  Object.assign(filters,draft); activeCard.value=''; page.value=1; loadUsers()
+  Object.assign(filters,draft); activeCard.value=''; pagination.page=1; loadUsers()
 }
 // 恢复本页面既有筛选默认值后重新查询。
 function resetFilters() {
   Object.assign(filters,{keyword:'',accountSource:'',roleId:'',authStatus:'',permissionStatus:'',status:''})
-  Object.assign(draft,filters); activeCard.value=''; page.value=1; loadUsers()
+  Object.assign(draft,filters); activeCard.value=''; pagination.page=1; loadUsers()
 }
 // 把汇总卡片映射为现有账号筛选条件后查询。
 function applySummaryCard(key:string) {
@@ -520,11 +539,19 @@ function applySummaryCard(key:string) {
   if(key==='unmapped') filters.authStatus='unmapped'
   if(key==='issue') filters.permissionStatus='issue'
   if(key==='disabled') filters.status='disabled'
-  Object.assign(draft,filters); activeCard.value=key; page.value=1; loadUsers()
+  Object.assign(draft,filters); activeCard.value=key; pagination.page=1; loadUsers()
 }
 
-// 按用户主键加载详情，保留账号抽屉中的关联信息。
+// 列表和详情沿用同一管理权限；仅校验详情标识，不按目标账号的状态限制查看。
+function canViewAccount(row:AnyRow):boolean {
+  const id = row.user_id
+  if (typeof id !== 'number' && (typeof id !== 'string' || !/^\d+$/.test(id))) return false
+  return Number.isSafeInteger(Number(id)) && Number(id) > 0
+}
+
+// 按用户主键加载详情，保留账号抽屉中的关联信息；无有效标识时不发起请求。
 async function openDetail(row:AnyRow) {
+  if (!canViewAccount(row)) return
   detailVisible.value=true; detailLoading.value=true; detail.value=null
   try { detail.value=await accountsApi.getAccount(row.user_id) }
   finally { detailLoading.value=false }
@@ -615,10 +642,13 @@ async function resetPwd(row:AnyRow) {
 function isStrongPassword(value:string,username=''){
   return value.length>=12&&value.length<=128&&/[a-z]/.test(value)&&/[A-Z]/.test(value)&&/\d/.test(value)&&/[^A-Za-z0-9]/.test(value)&&(!username||!value.toLowerCase().includes(username.toLowerCase()))
 }
-// 携带账号与返回地址进入数据权限页，便于回到当前筛选现场。
+// 账号定向信息沿用原导航，列表筛选现场保存在内存中，不附加到返回地址。
 function goPermission(row:AnyRow) {
   detailVisible.value=false
-  router.push({path:'/admin/system/permissions',query:{username:row.username,returnTo:route.fullPath}})
+  rememberAccountListReturn(accountContextKey, {
+    page: pagination.page, pageSize: pagination.pageSize, filters, draft, activeCard: activeCard.value,
+  })
+  router.push({path:'/admin/system/permissions',query:{username:row.username,returnTo:route.path}})
 }
 // 将账号行菜单动作分派到既有查看或治理流程。
 function handleCommand(command:string,row:AnyRow) {
@@ -668,21 +698,44 @@ function activeStaffIds(data:AnyRow){return(data.staffBindings||[]).filter((item
 // 将账号治理审计动作映射为已有可读文案。
 function auditLabel(action:string){return({ 'rbac.user.create':'创建账号','rbac.user.update':'更新账号','rbac.user.status_update':'调整账号状态','rbac.user.archive':'归档账号','rbac.user.password_reset':'重置本地密码','rbac.user.auth_identity_update':'更新认证映射'} as AnyRow)[action]||action}
 
-// 按原监听条件响应筛选或标签变化，保留既有加载时机。
-watch(pageSize,()=>{page.value=1;loadUsers()})
-// 进入页面时沿用原初始化与路由参数恢复流程。
-onMounted(async()=>{
-  Object.assign(filters,{
-    keyword:String(route.query.keyword||''),accountSource:String(route.query.account_source||''),
-    roleId:String(route.query.role_id||''),authStatus:String(route.query.auth_status||''),
-    permissionStatus:String(route.query.permission_status||''),status:String(route.query.status||''),
-  })
-  Object.assign(draft,filters)
-  page.value=Math.max(Number(route.query.page||1),1)
-  pageSize.value=[10,20,50,100].includes(Number(route.query.page_size))?Number(route.query.page_size):20
-  try { await Promise.all([loadRoles(),loadUsers()]) }
-  finally { initialLoading.value=false }
+// 翻页只使用已应用筛选，不提交输入框中尚未查询的草稿。
+function changePage(value: number): void {
+  if (loading.value || value === pagination.page || !Number.isSafeInteger(value) || value < 1) return
+  pagination.page = value
+  void loadUsers()
+}
+
+// 页长操作统一回第一页并查询一次，不再叠加 watcher 和分页事件。
+function changePageSize(value: number): void {
+  if (loading.value || value === pagination.pageSize || !TABLE_PAGE_SIZES.some(size => size === value)) return
+  pagination.pageSize = value
+  pagination.page = 1
+  void loadUsers()
+}
+
+// 同一账号页打开旧链接时在导航阶段规范路径，离开页面不触发路由回写。
+onBeforeRouteUpdate(to => {
+  if (to.path === '/admin/system/accounts' && Object.keys(to.query).length) {
+    return { path: to.path, replace: true }
+  }
 })
+
+// 状态在 setup 中一次初始化，挂载时只发起一轮角色和名单查询。
+onMounted(async () => {
+  if (Object.keys(route.query).length) void router.replace({ path: '/admin/system/accounts' })
+  try { await Promise.all([loadRoles(), loadUsers()]) }
+  finally { initialLoading.value = false }
+})
+
+// 页面离开后，旧列表响应不再覆盖用户已进入的页面或路由。
+onBeforeUnmount(() => { listRequestSequence += 1 })
+// 列定义只负责展示；单元格内容和业务操作沿用原页面。
+const providerColumns: AppTableColumn[] = [
+  { key: "provider", label: "认证来源", minWidth: 170 },
+  { key: "active_count", label: "有效映射", minWidth: 100 },
+  { key: "last_updated_at", label: "最近更新", minWidth: 150 },
+]
+
 </script>
 
 <style scoped lang="scss">
@@ -781,14 +834,12 @@ onMounted(async()=>{
 
 .table-title {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 10px;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 12px;
 
-  div {
-    display: flex;
-    align-items: baseline;
-    gap: 12px;
+  b {
+    white-space: nowrap;
   }
 
   span {
@@ -807,6 +858,36 @@ onMounted(async()=>{
 .user-cell span,.auth-cell small,.inline-note {
   color: var(--sa-faint);
   font-size: 11px;
+}
+
+.user-cell {
+  // 悬停整个姓名与账号区域时，两行链接同步强调；灰色普通文字不参与。
+  &:hover .user-cell__link {
+    text-decoration: underline;
+  }
+
+  // 姓名和账号共用详情入口样式，保留姓名加粗、账号小字的层级。
+  &__link {
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--sa-primary);
+    font: inherit;
+    font-size: 11px;
+    text-align: inherit;
+    cursor: pointer;
+
+    &--name {
+      font-size: inherit;
+      font-weight: 700;
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--sa-primary);
+      outline-offset: 2px;
+      border-radius: var(--el-border-radius-small);
+    }
+  }
 }
 
 .auth-cell {
@@ -868,16 +949,20 @@ onMounted(async()=>{
 
 .account-table-card {
 
-  :deep(.el-pagination) {
-    justify-content: flex-end;
-    margin-top: 14px;
+  // 插槽内的纵向信息与横向操作组分别居中，作用范围限定在账号表格。
+  .user-cell,.auth-cell {
+    align-items: center;
+
+    > * {
+      max-width: 100%;
+    }
   }
 
-  :deep(.clickable-row) {
-    cursor: pointer;
+  .status-line,.row-actions {
+    justify-content: center;
   }
 
-  :deep(.clickable-row:hover td) {
+  :deep(.el-table__row:hover td) {
     background: #f8faff !important;
   }
 }

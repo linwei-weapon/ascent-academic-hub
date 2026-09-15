@@ -9,33 +9,28 @@
       <el-button type="primary" size="small" @click="openDialog()">+ 新建菜单</el-button>
     </div>
 
-    <div class="sa-card">
-      <el-table
+    <div class="sa-card menu-table-card">
+      <AppTable
+        :columns="menuColumns"
+        storage-key="system:menus"
+        :pagination="false"
         :data="menuTree"
         row-key="menu_id"
         default-expand-all
+        :indent="32"
         :tree-props="{ children: 'children' }"
-        size="small"
-        v-loading="loading"
+        :loading="loading"
       >
-        <el-table-column prop="sort_order" label="排序" width="70" align="center" />
-        <el-table-column prop="title" label="菜单名称" min-width="190" />
-        <el-table-column label="层级" width="90">
-          <template #default="{ row }">{{ row.parent_id ? '二级菜单' : '一级分组' }}</template>
-        </el-table-column>
-        <el-table-column prop="path" label="路由路径" min-width="220" />
-        <el-table-column prop="icon" label="图标" width="120" />
-        <el-table-column prop="role_count" label="授权角色" width="90" align="right" />
-        <el-table-column prop="menu_id" label="菜单 ID" min-width="200" />
-        <el-table-column label="操作" width="150">
-          <template #default="{ row }">
-            <el-button size="small" text type="primary" @click="openDialog(row)">编辑</el-button>
-            <el-popconfirm title="删除后所有角色将失去该菜单，确定？" @confirm="remove(row)">
-              <template #reference><el-button size="small" text type="danger">删除</el-button></template>
-            </el-popconfirm>
-          </template>
-        </el-table-column>
-      </el-table>
+        <!-- 编号保留自然宽度，与原生展开按钮相邻；层级位置由单元格布局控制。 -->
+        <template #col-sort_order="{ row }"><span class="menu-sort-value">{{ row.sort_order }}</span></template>
+        <template #col-level="{ row }">{{ row.parent_id ? '二级菜单' : '一级分组' }}</template>
+        <template #col-actions="{ row }">
+          <el-button size="small" text type="primary" @click="openDialog(row)">编辑</el-button>
+          <el-popconfirm title="删除后所有角色将失去该菜单，确定？" @confirm="remove(row)">
+            <template #reference><el-button size="small" text type="danger">删除</el-button></template>
+          </el-popconfirm>
+        </template>
+      </AppTable>
     </div>
 
     <el-dialog v-model="dialogVisible" :title="editing ? '编辑菜单' : '新建菜单'" width="460px">
@@ -81,6 +76,8 @@
 </template>
 
 <script setup lang="ts">
+import AppTable from '@/components/AppTable.vue'
+import type { AppTableColumn } from '@/types/table'
 import { computed, ref, reactive, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import * as menusApi from '@/api/admin/menus'
@@ -182,6 +179,19 @@ async function remove(row: any) {
 
 // 进入页面时沿用原初始化与路由参数恢复流程。
 onMounted(load)
+// 列定义只负责展示；单元格内容和业务操作沿用原页面。
+const menuColumns: AppTableColumn[] = [
+  // 为树形前缀和编号预留空间，保持子级向右缩进。
+  { key: "sort_order", label: "排序", minWidth: 120, align: "left" },
+  { key: "title", label: "菜单名称", minWidth: 190 },
+  { key: "level", label: "层级", minWidth: 90 },
+  { key: "path", label: "路由路径", minWidth: 220 },
+  { key: "icon", label: "图标", minWidth: 120 },
+  { key: "role_count", label: "授权角色", minWidth: 90 },
+  { key: "menu_id", label: "菜单 ID", minWidth: 200 },
+  { key: "actions", label: "操作", minWidth: 150 },
+]
+
 </script>
 
 <style scoped lang="scss">
@@ -191,6 +201,32 @@ onMounted(load)
   justify-content: space-between;
   align-items: flex-start;
   margin-bottom: 14px;
+}
+
+.menu-table-card {
+  // 编号两侧等分剩余空间，一级编号对齐表头中心；32px 原生缩进使子级中心右移 16px。
+  :deep(.el-table__body td:first-child .cell) {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 1fr);
+    align-items: center;
+    white-space: nowrap;
+
+    .el-table__indent {
+      grid-area: 1 / 1;
+    }
+
+    // 箭头在编号前紧邻排列，保留 Element Plus 的展开、收起和键盘操作。
+    .el-table__expand-icon,.el-table__placeholder {
+      grid-area: 1 / 2;
+      justify-self: end;
+      width: 20px;
+      height: 20px;
+    }
+  }
+
+  .menu-sort-value {
+    grid-area: 1 / 3;
+  }
 }
 
 // 静态控件尺寸与局部布局由 class 管理，动态样式保留在原数据绑定中。

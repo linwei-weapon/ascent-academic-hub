@@ -77,9 +77,23 @@
 
           <el-tab-pane :label="`草稿与发布（${draftRows.length}）`" name="drafts">
             <div class="sa-card table-card">
-              <DataTable :columns="draftColumns" :data="draftRows" storage-key="system:analysis-scheme-drafts"
-                :max-business-columns="6" :config-version="1" pagination :default-page-size="10"
-                size="small" stripe empty-text="暂无待发布草稿；可从“正在使用”基于产品模板创建">
+              <AppTable
+                show-density
+                show-column-settings
+                :columns="draftColumns"
+                :data="draftTable.rows"
+                storage-key="system:analysis-scheme-drafts"
+                :max-business-columns="6"
+                :config-version="1"
+                stripe
+                empty-text="暂无待发布草稿；可从“正在使用”基于产品模板创建"
+                :page="draftTable.page"
+                :page-size="draftTable.pageSize"
+                :total="draftTable.total"
+                :loading="loading"
+                @page-change="draftTable.changePage"
+                @page-size-change="draftTable.changePageSize"
+              >
                 <template #col-scheme="{row}">
                   <div class="main-cell">{{ row.scheme_name }}</div>
                   <div class="sub-cell">{{ row.skill_name }} · {{ row.version_no }}</div>
@@ -97,15 +111,29 @@
                     <el-button link type="primary" :disabled="row.test_status!=='passed'" @click="publishDraft(row)">发布</el-button>
                   </div>
                 </template>
-              </DataTable>
+              </AppTable>
             </div>
           </el-tab-pane>
 
           <el-tab-pane label="版本与变更" name="history">
             <div class="sa-card table-card">
-              <DataTable :columns="historyColumns" :data="historyRows" storage-key="system:analysis-scheme-history"
-                :max-business-columns="7" :config-version="1" pagination :default-page-size="10"
-                size="small" stripe empty-text="尚无学校方案版本，当前全部使用产品标准方案">
+              <AppTable
+                show-density
+                show-column-settings
+                :columns="historyColumns"
+                :data="historyTable.rows"
+                storage-key="system:analysis-scheme-history"
+                :max-business-columns="7"
+                :config-version="1"
+                stripe
+                empty-text="尚无学校方案版本，当前全部使用产品标准方案"
+                :page="historyTable.page"
+                :page-size="historyTable.pageSize"
+                :total="historyTable.total"
+                :loading="loading"
+                @page-change="historyTable.changePage"
+                @page-size-change="historyTable.changePageSize"
+              >
                 <template #col-scheme="{row}">
                   <div class="main-cell">{{ row.scheme_name }}</div>
                   <div class="sub-cell">{{ row.skill_name }} · {{ row.version_no }}</div>
@@ -120,7 +148,7 @@
                     <el-button v-if="row.status!=='draft'" link type="warning" @click="rollback(row)">基于此版本回滚</el-button>
                   </div>
                 </template>
-              </DataTable>
+              </AppTable>
             </div>
           </el-tab-pane>
         </el-tabs>
@@ -233,10 +261,12 @@
 </template>
 
 <script setup lang="ts">
+import { useTablePagination } from '@/composables/useTablePagination'
+import AppTable from '@/components/AppTable.vue'
+import type { AppTableColumn } from '@/types/table'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { InfoFilled } from '@element-plus/icons-vue'
-import DataTable, { type DataTableColumn } from '@/components/DataTable.vue'
 import { ROLE_LABELS } from '@/store/role'
 import {
   createSkillConfigDraft, exportSkillConfig, getDecisionSkillConfigs,
@@ -317,23 +347,23 @@ const historyRows = computed(() => data.items.flatMap((skill:any) =>
     ...row, action_type:row.action, skill_id:skill.skill_id, skill_name:skill.name,
   }))))
 
-const draftColumns:DataTableColumn[] = [
+const draftColumns:AppTableColumn[] = [
   {key:'scheme',label:'学校方案',required:true,region:'identity',fixed:'left',minWidth:220},
-  {key:'test_status',label:'发布前检查',width:125},
+  {key:'test_status',label:'发布前检查',minWidth:125},
   {key:'roleIds',label:'适用角色',minWidth:210},
   {key:'change_reason',label:'变更原因',minWidth:230,tooltip:true},
-  {key:'created_by',label:'创建人',width:110,defaultVisible:false},
+  {key:'created_by',label:'创建人',minWidth:110,defaultVisible:false},
   {key:'created_at',label:'创建时间',minWidth:170},
   {key:'action',label:'操作',required:true,region:'action',fixed:'right',width:190},
 ]
-const historyColumns:DataTableColumn[] = [
+const historyColumns:AppTableColumn[] = [
   {key:'scheme',label:'方案版本',required:true,region:'identity',fixed:'left',minWidth:220},
-  {key:'status',label:'状态',width:105},
+  {key:'status',label:'状态',minWidth:105},
   {key:'roleIds',label:'适用角色',minWidth:210},
   {key:'change_reason',label:'变更原因',minWidth:230,tooltip:true},
-  {key:'action_type',label:'形成方式',width:105,defaultVisible:false},
-  {key:'created_by',label:'创建人',width:105,defaultVisible:false},
-  {key:'published_by',label:'发布人',width:105,defaultVisible:false},
+  {key:'action_type',label:'形成方式',minWidth:105,defaultVisible:false},
+  {key:'created_by',label:'创建人',minWidth:105,defaultVisible:false},
+  {key:'published_by',label:'发布人',minWidth:105,defaultVisible:false},
   {key:'published_at',label:'发布时间',minWidth:170},
   {key:'action',label:'操作',required:true,region:'action',fixed:'right',width:215},
 ]
@@ -516,6 +546,9 @@ async function importPackage(event:Event) {
 }
 // 进入页面时沿用原初始化与路由参数恢复流程。
 onMounted(load)
+// 各标签页与抽屉独立持有分页状态，保留全量接口和原业务筛选。
+const draftTable = useTablePagination(() => draftRows.value)
+const historyTable = useTablePagination(() => historyRows.value)
 </script>
 
 <style scoped lang="scss">

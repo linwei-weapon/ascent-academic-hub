@@ -68,9 +68,9 @@
     <!-- 学生表格 -->
     <div class="sa-card student-table-card">
       <div class="sa-card-title list-title"><span>学生明细</span><span class="extra">点击姓名或“详情”在当前页面核查，筛选条件不会丢失</span></div>
-      <DataTable :columns="studentCols" :data="students" :storage-key="courseProfile ? 'dashboard:course-students' : 'students:list'"
+      <AppTable :columns="studentCols" :data="students" :storage-key="courseProfile ? 'dashboard:course-students' : 'students:list'"
         :max-business-columns="courseProfile ? 10 : 8" :config-version="courseProfile ? 1 : 2" stripe v-loading="loading"
-        class="student-table" v-model:page-size="pageSize">
+        class="student-table" :show-density="true" :show-column-settings="true" :pagination="true" :page="page" :page-size="pageSize" :total="total" @page-change="page = $event; loadPage($event)" @page-size-change="pageSize = $event" :loading="loading">
         <template #col-sid="{row}"><span class="tnum sid">{{ row.sid }}</span></template>
         <template #col-name="{row}"><el-button link type="primary" class="name-link" @click.stop="openReview(row)">{{ row.name }}</el-button></template>
         <template #col-major="{row}"><span>{{ row.majorName || row.major }}</span></template>
@@ -97,13 +97,11 @@
         <template #col-actions="{row}">
           <el-button size="small" type="primary" plain @click.stop="openReview(row)">详情</el-button>
         </template>
-      </DataTable>
+      </AppTable>
 
       <div v-if="!loading && students.length === 0" class="sa-faint" style="text-align:center;padding:40px">未找到匹配学生</div>
 
-      <div style="display:flex;justify-content:flex-end;margin-top:12px" v-if="total > 0">
-        <el-pagination v-model:current-page="page" :page-size="pageSize" :total="total" layout="total, prev, pager, next, jumper" size="small" @current-change="loadPage" />
-      </div>
+
     </div>
 
     <StudentEvidenceDrawer
@@ -126,7 +124,8 @@ import { useRoute, useRouter } from 'vue-router'
 import { getStudentAIInsight } from '@/api/teachingAnalysis/insights'
 import { getFilterMeta, type SemesterOpt, type MajorOpt, type ClassOpt } from '@/api/shared/filterMeta'
 import AIInsightDrawer from '@/components/AIInsightDrawer.vue'
-import DataTable, { type DataTableColumn } from '@/components/DataTable.vue'
+import AppTable from '@/components/AppTable.vue'
+import type { AppTableColumn } from '@/types/table'
 import StudentEvidenceDrawer from '@/components/StudentEvidenceDrawer.vue'
 
 const route = useRoute()
@@ -147,7 +146,7 @@ const fRetake = ref('')
 const fRequired = ref('')
 const keyword = ref('')
 const page = ref(1)
-// M6：每页行数由 DataTable 偏好驱动（v-model:page-size），变化时回到第一页重查
+// 公共分页只发出页长事件；页面保留原先回第一页重新查询的逻辑。
 const pageSize = ref(20)
 const initialized = ref(false)
 let requestSeq = 0
@@ -159,26 +158,26 @@ watch(pageSize, () => {
 })
 
 // 学生明细表列定义（M6 DataTable）
-const baseStudentCols: DataTableColumn[] = [
-  { key: 'sid', label: '学号', width: 130, fixed: 'left', region: 'identity', required: true },
-  { key: 'name', label: '姓名', width: 100, fixed: 'left', region: 'identity', required: true },
+const baseStudentCols: AppTableColumn[] = [
+  { key: 'sid', label: '学号', minWidth: 130, fixed: 'left', region: 'identity', required: true },
+  { key: 'name', label: '姓名', minWidth: 100, fixed: 'left', region: 'identity', required: true },
   { key: 'college', label: '学院', minWidth: 160, tooltip: true },
   { key: 'major', label: '专业', minWidth: 140, tooltip: true },
   { key: 'class', label: '班级', minWidth: 120, tooltip: true },
-  { key: 'grade', label: '年级', width: 82, align: 'center' },
-  { key: 'gpa', label: '筛选期GPA', width: 96, align: 'right', required: true },
-  { key: 'failCount', label: '筛选期未通过', width: 104, align: 'right' },
-  { key: 'alertLevel', label: '预警', width: 100 },
-  { key: 'attention', label: '管理关注', width: 105, align: 'center' },
+  { key: 'grade', label: '年级', minWidth: 82, align: 'center' },
+  { key: 'gpa', label: '筛选期GPA', minWidth: 96, align: 'center', required: true },
+  { key: 'failCount', label: '筛选期未通过', minWidth: 104, align: 'center' },
+  { key: 'alertLevel', label: '预警', minWidth: 100 },
+  { key: 'attention', label: '管理关注', minWidth: 105, align: 'center' },
   { key: 'actions', label: '操作', width: 88, align: 'center', fixed: 'right', region: 'action', required: true },
 ]
-const studentCols = computed<DataTableColumn[]>(() => {
+const studentCols = computed<AppTableColumn[]>(() => {
   if (!courseProfile.value) return baseStudentCols
   const columns = [...baseStudentCols]
   const gpaIndex = columns.findIndex(column => column.key === 'gpa')
   columns.splice(gpaIndex, 0,
-    { key: 'courseScore', label: '课程成绩', width: 104, align: 'right', required: true },
-    { key: 'courseGp', label: '课程成绩绩点(GP)', width: 144, align: 'right', required: true },
+    { key: 'courseScore', label: '课程成绩', minWidth: 104, align: 'center', required: true },
+    { key: 'courseGp', label: '课程成绩绩点(GP)', minWidth: 144, align: 'center', required: true },
   )
   return columns
 })

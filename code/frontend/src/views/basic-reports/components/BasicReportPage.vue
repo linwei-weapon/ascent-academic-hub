@@ -86,7 +86,8 @@
     <el-collapse v-if="result && !isRpt01 && !isRpt02 && !isRpt03 && !isRpt04A && !isRpt04B && !isRpt05 && !isRpt06 && !isFocusRoster" class="boundary-panel">
       <el-collapse-item title="数据来源、计算规则与适用边界" name="rules">
         <ul><li v-for="item in result.boundary" :key="item">{{ item }}</li></ul>
-        <el-table :data="result.rules" size="small" border><el-table-column prop="ruleId" label="规则编号" width="190" /><el-table-column prop="provenance" label="来源类型" width="120" /><el-table-column prop="source" label="复用来源" min-width="240" /><el-table-column prop="formula" label="计算方法" min-width="300" /><el-table-column prop="boundary" label="适用边界" min-width="300" /></el-table>
+        <AppTable :columns="ruleColumns" :data="result.rules" :storage-key="`basic-report:${definition.reportId}:rules`"
+          :pagination="false" default-density="compact" border />
       </el-collapse-item>
     </el-collapse>
   </div>
@@ -100,6 +101,8 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Download, QuestionFilled } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
+import AppTable from '@/components/AppTable.vue'
+import type { AppTableColumn } from '@/types/table'
 import BasicReportTable from './BasicReportTable.vue'
 import FailureOverviewTable from '../failure-overview/FailureOverviewTable.vue'
 import MajorMakeupComparisonTable from '../major-makeup-comparison/MajorMakeupComparisonTable.vue'
@@ -109,13 +112,22 @@ import * as basicReportsApi from '@/api/basicReports'
 import { authStore } from '@/store/auth'
 import { reportDefinitions, type BasicReportFilter } from '../config/reportDefinitions'
 
-// 将特有表格交给所属报表组件，其余报表继续共用 DataTable 展示。
+// 各报表通过公共 AppTable 或特有列插槽展示，查询与导出仍由本页面维护。
 const reportTables: Record<string, Component> = {
   'RPT-01': FailureOverviewTable,
   'RPT-02': MajorMakeupComparisonTable,
   'RPT-06': Cet4PassTable,
   'RPT-05': CourseMakeupComparisonTable,
 }
+
+// 保留来源与规则折叠区的完整列；是否展示仍沿用原报表判断。
+const ruleColumns: AppTableColumn[] = [
+  { key: 'ruleId', label: '规则编号', width: 190 },
+  { key: 'provenance', label: '来源类型', width: 120 },
+  { key: 'source', label: '复用来源', minWidth: 240 },
+  { key: 'formula', label: '计算方法', minWidth: 300 },
+  { key: 'boundary', label: '适用边界', minWidth: 300 },
+]
 
 const route = useRoute()
 const router = useRouter()

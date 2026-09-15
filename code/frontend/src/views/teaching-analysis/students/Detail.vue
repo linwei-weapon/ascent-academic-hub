@@ -159,24 +159,28 @@
         title="“尚无完成证据”仅表示当前成绩与认定记录未发现完成结果，不等同于漏选或不能毕业。" />
       <el-tabs v-model="planTab">
         <el-tab-pane label="明确未通过（可行动）" name="actionable">
-          <el-table :data="actionableCourses.items" size="small" empty-text="没有明确未通过的必修课程">
-            <el-table-column prop="course_id" label="课程代码" width="120" />
-            <el-table-column prop="course_name" label="课程名称" min-width="180" />
-            <el-table-column prop="module" label="模块" width="140" />
-            <el-table-column prop="suggested_term" label="建议学期" width="90" />
-            <el-table-column prop="effective_score" label="有效成绩" width="90" align="right" />
-            <el-table-column label="建议" width="100"><template #default><el-tag type="danger">优先重修</el-tag></template></el-table-column>
-          </el-table>
+          <AppTable :data="actionableCourses.items"  empty-text="没有明确未通过的必修课程" :columns="[]" storage-key="teaching-analysis:students:detail:1" :pagination="false">
+        <template #columns>
+            <el-table-column prop="course_id" label="课程代码" min-width="120" align="center" header-align="center"/>
+            <el-table-column prop="course_name" label="课程名称" min-width="180" align="center" header-align="center"/>
+            <el-table-column prop="module" label="模块" min-width="140" align="center" header-align="center"/>
+            <el-table-column prop="suggested_term" label="建议学期" min-width="90" align="center" header-align="center"/>
+            <el-table-column prop="effective_score" label="有效成绩" min-width="90" align="center" header-align="center"/>
+            <el-table-column label="建议" min-width="100" align="center" header-align="center"><template #default><el-tag type="danger">优先重修</el-tag></template></el-table-column>
+                  </template>
+      </AppTable>
         </el-tab-pane>
         <el-tab-pane :label="`尚无完成证据（前${candidateCourses.items.length}条）`" name="candidate">
-          <el-table :data="candidateCourses.items" size="small" empty-text="没有候选课程缺口">
-            <el-table-column prop="course_id" label="课程代码" width="120" />
-            <el-table-column prop="course_name" label="课程名称" min-width="180" />
-            <el-table-column prop="module" label="模块" width="140" />
-            <el-table-column prop="requirement_type" label="性质" width="80" />
-            <el-table-column prop="suggested_term" label="建议学期" width="90" />
-            <el-table-column label="状态" width="130"><template #default><el-tag type="info">待选课/认定核验</el-tag></template></el-table-column>
-          </el-table>
+          <AppTable :data="candidateCourses.items"  empty-text="没有候选课程缺口" :columns="[]" storage-key="teaching-analysis:students:detail:2" :pagination="false">
+        <template #columns>
+            <el-table-column prop="course_id" label="课程代码" min-width="120" align="center" header-align="center"/>
+            <el-table-column prop="course_name" label="课程名称" min-width="180" align="center" header-align="center"/>
+            <el-table-column prop="module" label="模块" min-width="140" align="center" header-align="center"/>
+            <el-table-column prop="requirement_type" label="性质" min-width="80" align="center" header-align="center"/>
+            <el-table-column prop="suggested_term" label="建议学期" min-width="90" align="center" header-align="center"/>
+            <el-table-column label="状态" min-width="130" align="center" header-align="center"><template #default><el-tag type="info">待选课/认定核验</el-tag></template></el-table-column>
+                  </template>
+      </AppTable>
           <div class="sa-faint" style="font-size:11px;margin-top:8px">候选总数 {{ candidateCourses.total }}，当前仅展示前100条。</div>
         </el-tab-pane>
       </el-tabs>
@@ -185,41 +189,45 @@
     <!-- V1.1 历史未通过溯源 -->
     <div class="sa-card" v-if="data.failTrace && data.failTrace.length">
       <div class="sa-card-title">历史未通过课程 <span class="extra">区分当前未解决与后续已通过</span></div>
-      <el-table :data="data.failTrace" size="small">
-        <el-table-column prop="courseName" label="课程" width="150" />
-        <el-table-column label="当前状态" width="112">
+      <AppTable :data="data.failTrace" :columns="[]" storage-key="teaching-analysis:students:detail:3" :pagination="false">
+        <template #columns>
+        <el-table-column prop="courseName" label="课程" min-width="150" align="center" header-align="center"/>
+        <el-table-column label="当前状态" min-width="112" align="center" header-align="center">
           <template #default="{row}">
             <el-tag size="small" :type="row.status === '当前未解决' ? 'danger' : row.status === '历史已解决' ? 'success' : 'info'">
               {{ row.repeatedUnresolved ? '重复未解决' : row.status }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="teacherName" label="任课教师" width="100" />
-        <el-table-column prop="college" label="开课学院" width="130" />
-        <el-table-column prop="failCount" label="挂科次数" width="80" align="right">
+        <el-table-column prop="teacherName" label="任课教师" min-width="100" align="center" header-align="center"/>
+        <el-table-column prop="college" label="开课学院" min-width="130" align="center" header-align="center"/>
+        <el-table-column prop="failCount" label="挂科次数" min-width="80" align="center" header-align="center">
           <template #default="{row}"><span class="tnum" style="color:#DC2626;font-weight:700">{{ row.failCount }}</span></template>
         </el-table-column>
-        <el-table-column label="挂科学期" min-width="180">
+        <el-table-column label="挂科学期" min-width="180" align="center" header-align="center">
           <template #default="{row}"><span v-for="(s,i) in (row.semesters||[])" :key="i"><el-tag size="small" type="danger" style="margin:1px">{{ s }}</el-tag></span></template>
         </el-table-column>
-        <el-table-column label="通过学期" width="130">
+        <el-table-column label="通过学期" min-width="130" align="center" header-align="center">
           <template #default="{row}">{{ row.resolvedSemester || '—' }}</template>
         </el-table-column>
-      </el-table>
+              </template>
+      </AppTable>
     </div>
 
     <div class="sa-card">
       <div class="sa-card-title">成绩明细 <span class="extra">挂科课程标红</span></div>
-      <el-table :data="data.scores" size="small">
-        <el-table-column prop="semester" label="学期" width="120" />
-        <el-table-column prop="courseCode" label="课程代码" width="110" />
-        <el-table-column prop="courseName" label="课程名称" min-width="150" />
-        <el-table-column prop="score" label="成绩" width="74" align="right"><template #default="{row}"><b class="tnum" :style="{color:row.passed?'#0D9488':'#E11D48'}">{{ row.score }}</b></template></el-table-column>
-        <el-table-column prop="gp" label="绩点" width="64" align="right"><template #default="{row}"><span class="tnum">{{ row.gp }}</span></template></el-table-column>
-        <el-table-column label="通过" width="60" align="center"><template #default="{row}"><span :style="{color:row.passed?'#0D9488':'#E11D48',fontWeight:700}">{{ row.passed ? '✓' : '✗' }}</span></template></el-table-column>
-        <el-table-column prop="takeType" label="修读类别" width="90" />
-        <el-table-column prop="examStatus" label="考试情况" width="90" />
-      </el-table>
+      <AppTable :data="data.scores" :columns="[]" storage-key="teaching-analysis:students:detail:4" :pagination="false">
+        <template #columns>
+        <el-table-column prop="semester" label="学期" min-width="120" align="center" header-align="center"/>
+        <el-table-column prop="courseCode" label="课程代码" min-width="110" align="center" header-align="center"/>
+        <el-table-column prop="courseName" label="课程名称" min-width="150" align="center" header-align="center"/>
+        <el-table-column prop="score" label="成绩" min-width="74" align="center" header-align="center"><template #default="{row}"><b class="tnum" :style="{color:row.passed?'#0D9488':'#E11D48'}">{{ row.score }}</b></template></el-table-column>
+        <el-table-column prop="gp" label="绩点" min-width="64" align="center" header-align="center"><template #default="{row}"><span class="tnum">{{ row.gp }}</span></template></el-table-column>
+        <el-table-column label="通过" min-width="60" align="center" header-align="center"><template #default="{row}"><span :style="{color:row.passed?'#0D9488':'#E11D48',fontWeight:700}">{{ row.passed ? '✓' : '✗' }}</span></template></el-table-column>
+        <el-table-column prop="takeType" label="修读类别" min-width="90" align="center" header-align="center"/>
+        <el-table-column prop="examStatus" label="考试情况" min-width="90" align="center" header-align="center"/>
+              </template>
+      </AppTable>
       <div class="sa-faint" style="font-size:11px;margin-top:12px;text-align:center">
         数据来源：教务系统 · 本页仅做数据展示，预警处理请在教务系统中操作
       </div>
@@ -230,6 +238,7 @@
 </template>
 
 <script setup lang="ts">
+import AppTable from '@/components/AppTable.vue'
 import * as studentsApi from '@/api/teachingAnalysis/students'
 
 import { reactive, ref, onMounted, computed } from 'vue'

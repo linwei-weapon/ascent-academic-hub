@@ -42,8 +42,8 @@
         </div>
         <div class="sa-card" style="margin-top:16px">
           <div class="sa-card-title">学院方案执行关注 <span class="extra">当前最多仅展示前 30 个学院</span></div>
-          <DataTable :columns="collegeColumns" :data="overview.colleges" storage-key="curriculum:college-overview"
-            :max-business-columns="8" :config-version="3" size="small" stripe v-loading="overviewLoading">
+          <AppTable :columns="collegeColumns" :data="overview.colleges" storage-key="curriculum:college-overview"
+            :max-business-columns="8" :config-version="3"  stripe v-loading="overviewLoading" :show-density="true" :show-column-settings="true" :pagination="false">
             <template #header-bindingRate>
               <span class="table-header-with-help">正确绑定率
                 <el-tooltip content="正确绑定学生/在籍学生*100%" placement="top">
@@ -64,13 +64,13 @@
             <template #col-verification="{row}"><el-button link type="warning" :disabled="!row.verification" @click="openStudents({college_name:row.collegeName,status:'数据候选'},`${row.collegeName}｜过期漏修`)">{{row.verification}}</el-button></template>
             <template #col-bindingReview="{row}"><el-button link type="warning" :disabled="!row.bindingReview" @click="openStudents({college_name:row.collegeName,status:'方案绑定待核验'},`${row.collegeName}｜绑定待核验`)">{{row.bindingReview}}</el-button></template>
             <template #col-action="{row}"><el-button link type="primary" @click="openStudents({college_name:row.collegeName},`${row.collegeName}｜查询范围学生`)">核查名单</el-button></template>
-          </DataTable>
+          </AppTable>
         </div>
         <el-row :gutter="16" style="margin-top:16px">
           <el-col :span="13"><div class="sa-card">
             <div class="sa-card-title">专业执行关注 <span class="extra">当前最多仅展示前 50 个专业</span></div>
-            <DataTable :columns="majorColumns" :data="overview.majors" storage-key="curriculum:major-overview"
-              :max-business-columns="8" :config-version="3" size="small" stripe max-height="420" v-loading="overviewLoading">
+            <AppTable :columns="majorColumns" :data="overview.majors" storage-key="curriculum:major-overview"
+              :max-business-columns="8" :config-version="3"  stripe max-height="420" v-loading="overviewLoading" :show-density="true" :show-column-settings="true" :pagination="false">
               <template #header-bindingRate>
                 <span class="table-header-with-help">正确绑定率
                   <el-tooltip content="正确绑定学生/在籍学生*100%" placement="top">
@@ -88,15 +88,15 @@
               </template>
               <template #col-bindingRate="{row}">{{row.bindingRate == null ? '—' : `${row.bindingRate}%`}}</template>
               <template #col-action="{row}"><el-button link type="primary" @click="openStudents({college_name:row.collegeName,major_name:row.majorName},`${row.majorName}｜执行核查`)">核查名单</el-button></template>
-            </DataTable>
+            </AppTable>
           </div></el-col>
           <el-col :span="11"><div class="sa-card">
             <div class="sa-card-title">必修课程瓶颈 <span class="extra">当前最多仅展示前 20 门课程</span></div>
-            <DataTable :columns="courseColumns" :data="overview.bottleneckCourses" storage-key="curriculum:bottleneck-courses"
-              :max-business-columns="4" :config-version="2" size="small" stripe max-height="420"
-              v-loading="courseLoading" element-loading-text="正在按需提取课程证据…">
+            <AppTable :columns="courseColumns" :data="overview.bottleneckCourses" storage-key="curriculum:bottleneck-courses"
+              :max-business-columns="4" :config-version="2"  stripe max-height="420"
+              v-loading="courseLoading" element-loading-text="正在按需提取课程证据…" :show-density="true" :show-column-settings="true" :pagination="false">
               <template #col-action="{row}"><el-button link type="primary" @click="openStudents({course_id:row.courseId},row.courseName)">学生</el-button></template>
-            </DataTable>
+            </AppTable>
           </div></el-col>
         </el-row>
       </el-tab-pane>
@@ -110,13 +110,13 @@
 
           <section class="sa-card" style="margin-bottom:16px">
             <div class="sa-card-title">模块要求与课程池 <span class="extra">课程池记录学分只描述可选范围，不等同学生应修学分</span></div>
-            <DataTable :columns="moduleStructureColumns" :data="moduleSummary"
+            <AppTable :columns="moduleStructureColumns" :data="moduleSummary"
               storage-key="curriculum:plan-modules" :max-business-columns="7"
-              :config-version="2" size="small" stripe v-loading="planLoading">
+              :config-version="2"  stripe v-loading="planLoading" :show-density="true" :show-column-settings="true" :pagination="false">
               <template #col-ruleLabel="{row}"><el-tag size="small" :type="row.ruleType==='not_assessable'?'info':'success'">{{row.ruleLabel}}</el-tag></template>
               <template #col-recordedCredits="{row}">{{Number(row.recordedCredits||0).toFixed(1)}}</template>
               <template #col-action="{row}"><el-button link type="primary" @click="openModuleCourses(row)">课程明细</el-button></template>
-            </DataTable>
+            </AppTable>
           </section>
 
           <div class="sa-card plan-text-card" style="margin-bottom:16px" v-if="plan.graduationRequirements.length">
@@ -173,23 +173,21 @@
     </el-tabs>
     <el-drawer v-model="moduleDrawer.visible" :title="`${moduleDrawer.module?.name || ''}｜课程池明细`" size="820px">
       <el-alert type="info" :closable="false" show-icon title="课程池明细用于解释方案结构；选修池课程不等同每名学生都必须完成。" style="margin-bottom:12px" />
-      <DataTable :columns="moduleCourseColumns" :data="moduleDrawer.module?.courses || []"
+      <AppTable :columns="moduleCourseColumns"
         storage-key="curriculum:module-courses" :max-business-columns="6"
-        :config-version="2" :pagination="true" :default-page-size="20" size="small">
+        :config-version="2" :show-density="true" :show-column-settings="true" :data="moduleCoursesPagination.rows" :pagination="true" :page="moduleCoursesPagination.page" :page-size="moduleCoursesPagination.pageSize" :total="moduleCoursesPagination.total" @page-change="moduleCoursesPagination.changePage" @page-size-change="moduleCoursesPagination.changePageSize">
         <template #col-suggestedTerm="{row}">{{row.suggestedTerm || '—'}}</template>
-      </DataTable>
+      </AppTable>
     </el-drawer>
     <el-drawer v-model="studentDialog.visible" :title="`${studentDialog.title}｜方案执行学生名单`" size="980px">
-      <DataTable :columns="studentListColumns" :data="studentDialog.items"
+      <AppTable :columns="studentListColumns" :data="studentDialog.items"
         storage-key="curriculum:management-students" :max-business-columns="10"
-        :config-version="5" :page-size="studentDialog.pageSize" @update:page-size="onStudentPageSize"
-        size="small" stripe v-loading="studentDialog.loading" element-loading-text="正在加载核查名单…">
+        :config-version="5"
+         stripe v-loading="studentDialog.loading" element-loading-text="正在加载核查名单…" :show-density="true" :show-column-settings="true" :pagination="true" :page="studentDialog.page" :page-size="studentDialog.pageSize" :total="studentDialog.total" @page-change="studentDialog.page = $event; loadStudentPage()" @page-size-change="onStudentPageSize" :loading="studentDialog.loading">
         <template #col-evidenceStatus="{row}"><el-tag size="small" :type="row.evidenceStatus==='明确需处理'?'danger':row.evidenceStatus==='数据候选'||row.evidenceStatus==='方案绑定待核验'?'warning':'info'">{{studentEvidenceStatusLabel(row.evidenceStatus)}}</el-tag></template>
         <template #col-action="{row}"><el-button v-if="row.coverageStatus==='matched'" link type="primary" @click="studentProfile(row)">执行详情</el-button><span v-else class="sa-faint">先核验绑定</span></template>
-      </DataTable>
-      <el-pagination v-if="studentDialog.total" v-model:current-page="studentDialog.page"
-        :page-size="studentDialog.pageSize" :total="studentDialog.total"
-        layout="total, prev, pager, next" class="drawer-pager" @current-change="loadStudentPage" />
+      </AppTable>
+
     </el-drawer>
     <el-drawer v-model="studentEvidence.visible" :title="`${studentEvidence.data.student?.display_name || ''}｜培养方案执行详情`" size="760px" append-to-body>
       <div v-loading="studentEvidence.loading">
@@ -225,19 +223,20 @@
           <el-descriptions-item label="有课程替代证据">{{ studentEvidence.data.summary?.courses_with_substitution || 0 }} 门</el-descriptions-item>
         </el-descriptions>
         <h4 class="evidence-title">必修未通过课程</h4>
-        <DataTable :columns="failedEvidenceColumns" :data="studentEvidence.data.failed_courses || []"
+        <AppTable :columns="failedEvidenceColumns" :data="studentEvidence.data.failed_courses || []"
           storage-key="curriculum:overview-student-failed-evidence" :max-business-columns="5"
-          :config-version="2" size="small" empty-text="当前没有必修未通过课程" />
+          :config-version="2"  empty-text="当前没有必修未通过课程" :show-density="true" :show-column-settings="true" :pagination="false"/>
         <h4 class="evidence-title">到期缺修读结果记录</h4>
-        <DataTable :columns="candidateEvidenceColumns" :data="studentEvidence.data.candidate_courses || []"
+        <AppTable :columns="candidateEvidenceColumns" :data="studentEvidence.data.candidate_courses || []"
           storage-key="curriculum:overview-student-candidate-evidence" :max-business-columns="4"
-          :config-version="2" size="small" max-height="280" empty-text="当前没有到期缺修读结果" />
+          :config-version="2"  max-height="280" empty-text="当前没有到期缺修读结果" :show-density="true" :show-column-settings="true" :pagination="false"/>
       </div>
     </el-drawer>
   </div>
 </template>
 
 <script setup lang="ts">
+import { useTablePagination } from '@/composables/useTablePagination'
 import * as curriculumApi from '@/api/teachingAnalysis/curriculum'
 
 
@@ -246,7 +245,8 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { QuestionFilled } from '@element-plus/icons-vue'
 import KpiCard from '@/components/KpiCard.vue'
-import DataTable, { type DataTableColumn } from '@/components/DataTable.vue'
+import AppTable from '@/components/AppTable.vue'
+import type { AppTableColumn } from '@/types/table'
 import ProgressView from './Progress.vue'
 import GraduationReadiness from './GraduationReadiness.vue'
 import { useBusinessPageTitle } from '@/utils/businessPage'
@@ -291,81 +291,81 @@ const overview = reactive<any>({ summary:{}, colleges:[], majors:[], bottleneckC
 const studentDialog = reactive<any>({visible:false,loading:false,title:'',items:[],definition:'',params:{},page:1,pageSize:50,total:0})
 const studentEvidence = reactive<any>({visible:false,loading:false,data:{student:{},summary:{},failed_courses:[],candidate_courses:[],boundary:''}})
 const moduleDrawer=reactive<any>({visible:false,module:null})
-const collegeColumns:DataTableColumn[]=[
+const collegeColumns:AppTableColumn[]=[
   {key:'collegeName',label:'学院',minWidth:180,fixed:'left',required:true,region:'identity'},
-  {key:'totalStudents',label:'学生总数',width:90,align:'right'},
-  {key:'matchedStudents',label:'正确绑定学生',width:110,align:'right'},
-  {key:'bindingRate',label:'正确绑定率',width:100,align:'right',required:true},
-  {key:'actionRequired',label:'必修未通过',width:100,align:'right'},
-  {key:'verification',label:'过期漏修',width:90,align:'right'},
-  {key:'bindingReview',label:'绑定待核验',width:105,align:'right'},
-  {key:'outsideSourceScope',label:'方案源未覆盖',width:110,align:'right',defaultVisible:false},
+  {key:'totalStudents',label:'学生总数',minWidth:90,align:'center'},
+  {key:'matchedStudents',label:'正确绑定学生',minWidth:110,align:'center'},
+  {key:'bindingRate',label:'正确绑定率',minWidth:100,align:'center',required:true},
+  {key:'actionRequired',label:'必修未通过',minWidth:100,align:'center'},
+  {key:'verification',label:'过期漏修',minWidth:90,align:'center'},
+  {key:'bindingReview',label:'绑定待核验',minWidth:105,align:'center'},
+  {key:'outsideSourceScope',label:'方案源未覆盖',minWidth:110,align:'center',defaultVisible:false},
   {key:'action',label:'操作',width:90,fixed:'right',required:true,region:'action'},
 ]
-const majorColumns:DataTableColumn[]=[
+const majorColumns:AppTableColumn[]=[
   {key:'collegeName',label:'学院',minWidth:140,fixed:'left',required:true,region:'identity'},
   {key:'majorName',label:'专业',minWidth:150,fixed:'left',required:true,region:'identity'},
-  {key:'totalStudents',label:'学生总数',width:90,align:'right'},
-  {key:'matchedStudents',label:'正确绑定学生',width:110,align:'right'},
-  {key:'bindingRate',label:'正确绑定率',width:100,align:'right'},
-  {key:'actionRequired',label:'必修未通过',width:100,align:'right'},
-  {key:'verification',label:'过期漏修',width:90,align:'right'},
-  {key:'bindingReview',label:'绑定待核验',width:105,align:'right'},
+  {key:'totalStudents',label:'学生总数',minWidth:90,align:'center'},
+  {key:'matchedStudents',label:'正确绑定学生',minWidth:110,align:'center'},
+  {key:'bindingRate',label:'正确绑定率',minWidth:100,align:'center'},
+  {key:'actionRequired',label:'必修未通过',minWidth:100,align:'center'},
+  {key:'verification',label:'过期漏修',minWidth:90,align:'center'},
+  {key:'bindingReview',label:'绑定待核验',minWidth:105,align:'center'},
   {key:'action',label:'操作',width:105,fixed:'right',required:true,region:'action'},
 ]
-const courseColumns:DataTableColumn[]=[
+const courseColumns:AppTableColumn[]=[
   {key:'courseName',label:'课程',minWidth:170,fixed:'left',required:true,region:'identity',tooltip:true},
-  {key:'actionRequiredStudents',label:'必修未通过',width:110,align:'right',required:true},
-  {key:'verificationStudents',label:'过期漏修',width:90,align:'right'},
-  {key:'affectedMajors',label:'涉及专业',width:85,align:'right'},
+  {key:'actionRequiredStudents',label:'必修未通过',minWidth:110,align:'center',required:true},
+  {key:'verificationStudents',label:'过期漏修',minWidth:90,align:'center'},
+  {key:'affectedMajors',label:'涉及专业',minWidth:85,align:'center'},
   {key:'action',label:'操作',width:70,fixed:'right',required:true,region:'action'},
 ]
-const moduleStructureColumns:DataTableColumn[]=[
+const moduleStructureColumns:AppTableColumn[]=[
   {key:'name',label:'模块',minWidth:180,fixed:'left',required:true,region:'identity',tooltip:true},
-  {key:'nature',label:'性质',width:110},
+  {key:'nature',label:'性质',minWidth:110},
   {key:'ruleLabel',label:'采用规则',minWidth:190,required:true,tooltip:true},
-  {key:'courseCount',label:'课程池',width:85,align:'right'},
-  {key:'recordedCredits',label:'课程池记录学分',width:125,align:'right'},
+  {key:'courseCount',label:'课程池',minWidth:85,align:'center'},
+  {key:'recordedCredits',label:'课程池记录学分',minWidth:125,align:'center'},
   {key:'sourceReference',label:'规则来源',minWidth:180,defaultVisible:false,tooltip:true},
   {key:'action',label:'操作',width:85,fixed:'right',required:true,region:'action'},
 ]
-const moduleCourseColumns:DataTableColumn[]=[
-  {key:'courseId',label:'课程代码',width:130,fixed:'left',required:true,region:'identity'},
+const moduleCourseColumns:AppTableColumn[]=[
+  {key:'courseId',label:'课程代码',minWidth:130,fixed:'left',required:true,region:'identity'},
   {key:'courseName',label:'课程名称',minWidth:210,fixed:'left',required:true,region:'identity',tooltip:true},
-  {key:'requirementType',label:'性质',width:80},
-  {key:'credits',label:'学分',width:75,align:'right'},
-  {key:'suggestedTerm',label:'建议学期',width:90},
-  {key:'organizationId',label:'开课单位代码',width:120,defaultVisible:false},
+  {key:'requirementType',label:'性质',minWidth:80},
+  {key:'credits',label:'学分',minWidth:75,align:'center'},
+  {key:'suggestedTerm',label:'建议学期',minWidth:90},
+  {key:'organizationId',label:'开课单位代码',minWidth:120,defaultVisible:false},
 ]
-const studentListColumns:DataTableColumn[]=[
-  {key:'studentId',label:'学号',width:130,fixed:'left',required:true,region:'identity'},
-  {key:'name',label:'姓名',width:90,fixed:'left',required:true,region:'identity'},
-  {key:'grade',label:'年级',width:75},
+const studentListColumns:AppTableColumn[]=[
+  {key:'studentId',label:'学号',minWidth:130,fixed:'left',required:true,region:'identity'},
+  {key:'name',label:'姓名',minWidth:90,fixed:'left',required:true,region:'identity'},
+  {key:'grade',label:'年级',minWidth:75},
   {key:'collegeName',label:'学院',minWidth:140},
   {key:'majorName',label:'专业',minWidth:140},
-  {key:'studentStatus',label:'学籍状态',width:90},
-  {key:'completedModules',label:'已达到模块',width:100,align:'right'},
-  {key:'assessableModules',label:'可核查模块',width:100,align:'right'},
-  {key:'failedRequired',label:'必修未通过',width:100,align:'right'},
-  {key:'verificationRequired',label:'过期漏修',width:90,align:'right'},
-  {key:'evidenceStatus',label:'状态',width:140,required:true},
+  {key:'studentStatus',label:'学籍状态',minWidth:90},
+  {key:'completedModules',label:'已达到模块',minWidth:100,align:'center'},
+  {key:'assessableModules',label:'可核查模块',minWidth:100,align:'center'},
+  {key:'failedRequired',label:'必修未通过',minWidth:100,align:'center'},
+  {key:'verificationRequired',label:'过期漏修',minWidth:90,align:'center'},
+  {key:'evidenceStatus',label:'状态',minWidth:140,required:true},
   {key:'statusReason',label:'状态原因',minWidth:260,required:true,tooltip:true},
   {key:'action',label:'操作',width:85,fixed:'right',required:true,region:'action'},
 ]
 function studentEvidenceStatusLabel(status:string){
   return ({'明确需处理':'必修未通过','数据候选':'过期漏修'} as Record<string,string>)[status] || status
 }
-const failedEvidenceColumns:DataTableColumn[]=[
+const failedEvidenceColumns:AppTableColumn[]=[
   {key:'course_name',label:'课程',minWidth:160,fixed:'left',required:true,region:'identity',tooltip:true},
-  {key:'effective_score',label:'成绩',width:70,align:'right'},
-  {key:'lesson_count',label:'历史教学班',width:100,align:'right'},
-  {key:'substitution_count',label:'替代证据',width:90,align:'right'},
+  {key:'effective_score',label:'成绩',minWidth:70,align:'center'},
+  {key:'lesson_count',label:'历史教学班',minWidth:100,align:'center'},
+  {key:'substitution_count',label:'替代证据',minWidth:90,align:'center'},
   {key:'reason',label:'核查原因与动作',minWidth:280,required:true,tooltip:true},
 ]
-const candidateEvidenceColumns:DataTableColumn[]=[
+const candidateEvidenceColumns:AppTableColumn[]=[
   {key:'course_name',label:'课程',minWidth:160,fixed:'left',required:true,region:'identity',tooltip:true},
-  {key:'suggested_term',label:'建议学期',width:90},
-  {key:'lesson_count',label:'历史教学班',width:100,align:'right'},
+  {key:'suggested_term',label:'建议学期',minWidth:90},
+  {key:'lesson_count',label:'历史教学班',minWidth:100,align:'center'},
   {key:'reason',label:'核查原因与动作',minWidth:300,required:true,tooltip:true},
 ]
 function openModuleCourses(row:any){moduleDrawer.module=row;moduleDrawer.visible=true}
@@ -584,6 +584,9 @@ onMounted(async () => {
   finally { optionsLoading.value=false }
   loadActiveTab(activeTab.value)
 })
+
+// 全量结果在页面分页；不改变查询、汇总和证据数据。
+const moduleCoursesPagination = useTablePagination(() => moduleDrawer.module?.courses || [], 20)
 </script>
 
 <style scoped lang="scss">

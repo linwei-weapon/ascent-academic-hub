@@ -254,20 +254,18 @@
           <span class="list-filter-hint">不改变上方管理指标和组织图表</span>
         </div>
 
-        <DataTable
+        <AppTable
           :columns="studentColumns"
           :data="rows"
           storage-key="alert:student-list"
           config-version="3"
           :max-business-columns="8"
-          :page-size="pagination.pageSize"
-          :page-sizes="[10, 20, 50]"
-          size="small"
+
+
+
           empty-text="当前条件下没有预警学生"
           row-class-name="row-clickable"
-          @row-click="showStudent"
-          @update:page-size="changePageSize"
-        >
+          @row-click="showStudent" :show-density="true" :show-column-settings="true" :pagination="true" :page="pagination.page" :page-size="pagination.pageSize" :total="pagination.total" @page-change="pagination.page = $event; loadStudentPage()" @page-size-change="changePageSize" :page-sizes="[10, 20, 50]">
           <template #header-primaryReason>
             <KpiLabel
               label="主要触发证据"
@@ -313,18 +311,9 @@
               </el-button>
             </div>
           </template>
-        </DataTable>
+        </AppTable>
 
-        <div class="external-pager">
-          <el-pagination
-            v-model:current-page="pagination.page"
-            :page-size="pagination.pageSize"
-            :total="pagination.total"
-            layout="total, prev, pager, next"
-            small
-            @current-change="loadStudentPage"
-          />
-        </div>
+
       </section>
     </template>
 
@@ -354,7 +343,8 @@ import { ElMessage } from 'element-plus'
 import { getAlertSummaryAIInsight, getStudentAIInsight } from '@/api/teachingAnalysis/insights'
 import EChart from '@/components/EChart.vue'
 import KpiLabel from '@/components/KpiLabel.vue'
-import DataTable, { type DataTableColumn } from '@/components/DataTable.vue'
+import AppTable from '@/components/AppTable.vue'
+import type { AppTableColumn } from '@/types/table'
 import AIInsightDrawer from '@/components/AIInsightDrawer.vue'
 import AlertStudentDrawer from './AlertStudentDrawer.vue'
 
@@ -473,49 +463,49 @@ const kpiCards = computed(() => {
   return cards
 })
 
-const studentColumns = computed<DataTableColumn[]>(() => {
-  const columns: DataTableColumn[] = [
+const studentColumns = computed<AppTableColumn[]>(() => {
+  const columns: AppTableColumn[] = [
     {
-      key: 'student', label: '学生', width: 126, fixed: 'left',
+      key: 'student', label: '学生', minWidth: 126, fixed: 'left',
       required: true, region: 'identity',
     },
   ]
   if (meta.scope?.type === 'all') {
     columns.push({
-      key: 'collegeName', label: '学院', width: 150,
+      key: 'collegeName', label: '学院', minWidth: 150,
       region: 'business', tooltip: true,
     })
   }
   if (['all', 'college', 'major'].includes(meta.scope?.type)) {
     columns.push({
-      key: 'majorName', label: '专业', width: 145,
+      key: 'majorName', label: '专业', minWidth: 145,
       region: 'business', tooltip: true,
     })
   }
   columns.push(
     {
-      key: 'className', label: '班级', width: 145, region: 'business',
+      key: 'className', label: '班级', minWidth: 145, region: 'business',
       tooltip: true, defaultVisible: true,
     },
     {
-      key: 'grade', label: '年级', width: 84, region: 'business',
+      key: 'grade', label: '年级', minWidth: 84, region: 'business',
       defaultVisible: true,
     },
     {
-      key: 'highestLevel', label: '最高风险', width: 84,
+      key: 'highestLevel', label: '最高风险', minWidth: 84,
       required: true, region: 'business',
     },
     {
       key: 'primaryReason', label: '主要触发证据', minWidth: 245,
       required: true, region: 'business', tooltip: true,
     },
-    { key: 'alertCount', label: '规则命中', width: 84, region: 'business' },
+    { key: 'alertCount', label: '规则命中', minWidth: 84, region: 'business' },
     {
-      key: 'managementLabel', label: '核查状态', width: 110,
+      key: 'managementLabel', label: '核查状态', minWidth: 110,
       required: true, region: 'business',
     },
     {
-      key: 'latestAt', label: '最近变化', width: 138,
+      key: 'latestAt', label: '最近变化', minWidth: 138,
       region: 'business', defaultVisible: false,
     },
     {
@@ -1276,6 +1266,12 @@ onMounted(async () => {
 }
 
 .student-cell {
+  // 姓名按钮和学号共用居中轴，避免块级按钮停在单元格左侧。
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+
   button {
     display: block;
     padding: 0;

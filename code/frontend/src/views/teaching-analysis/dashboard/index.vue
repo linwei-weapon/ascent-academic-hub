@@ -85,9 +85,9 @@
           {{ data.scope?.restricted ? '授权范围学院概览' : '学院偏离与变化' }}
           <span class="extra">默认优先显示偏离较大的学院，点击学院进入证据详情</span>
         </div>
-        <DataTable :columns="collegeCols" :data="collegeRows" storage-key="dashboard:college-compare"
-          :max-business-columns="7" :config-version="3" stripe size="small"
-          @row-click="goCollege" row-class-name="college-row-clickable">
+        <AppTable :columns="collegeCols" :data="collegeRows" storage-key="dashboard:college-compare"
+          :max-business-columns="7" :config-version="3" stripe
+          @row-click="goCollege" row-class-name="college-row-clickable" :show-density="true" :show-column-settings="true" :pagination="false">
           <template #toolbar>
             <el-select v-model="collegeSortKey" size="small" style="width:190px">
               <el-option label="按挂科学生率从高到低" value="fail" />
@@ -106,16 +106,16 @@
           <template #col-alertRate="{row}">{{ row.alertRate }}</template>
           <template #col-resultCoverageRate="{row}">{{ row.resultCoverageRate == null ? '—' : `${row.resultCoverageRate}%` }}</template>
           <template #col-drill><span class="college-link">详情</span></template>
-        </DataTable>
+        </AppTable>
         <div class="card-actions"><el-button size="small" @click="goStudents">查看{{ data.scope?.restricted ? '范围内' : '全校' }}学生名单</el-button></div>
       </div>
 
       <div v-if="data.scope?.restricted && canCompareColleges" class="sa-card dashboard-card">
         <div class="sa-card-title">跨学院聚合参照 <span class="extra">他院只提供聚合比较，不能进入学生明细</span></div>
         <el-alert type="info" :closable="false" show-icon :title="comparison.definition.boundary" style="margin-bottom:10px" />
-        <DataTable :columns="comparisonCols" :data="comparison.items"
+        <AppTable :columns="comparisonCols" :data="comparison.items"
           storage-key="dashboard:college-aggregate-compare" :max-business-columns="5"
-          :config-version="1" stripe size="small" @row-click="goComparisonCollege">
+          :config-version="1" stripe  @row-click="goComparisonCollege" :show-density="true" :show-column-settings="true" :pagination="false">
           <template #col-collegeName="{row}"><span :class="row.canDrillDown ? 'college-link' : ''">{{ row.collegeName }}</span><el-tag v-if="row.canDrillDown" size="small" effect="plain" style="margin-left:6px">本院</el-tag></template>
           <template #header-weightedAverageScore><span>加权平均分 <KpiLabel label="" :formula="comparison.definition.weightedAverageScore" /></span></template>
           <template #col-weightedAverageScore="{row}">{{ row.weightedAverageScore ?? '—' }}</template>
@@ -126,7 +126,7 @@
           <template #header-activeAlertStudentRate><span>有效预警学生率 <KpiLabel label="" :formula="comparison.definition.activeAlertStudentRate" /></span></template>
           <template #col-activeAlertStudentRate="{row}">{{ row.activeAlertStudentRate == null ? '—' : `${row.activeAlertStudentRate}%` }}</template>
           <template #col-detailPermission="{row}"><span :class="row.canDrillDown ? 'college-link' : 'sa-faint'">{{ row.canDrillDown ? '查看本院' : '仅可比较' }}</span></template>
-        </DataTable>
+        </AppTable>
       </div>
 
       <el-row :gutter="16" class="dashboard-section">
@@ -140,9 +140,9 @@
         <el-col :span="16">
           <div id="focus-courses" class="sa-card">
             <div class="sa-card-title">本学期重点核查课程 TOP10 <span class="extra">按受影响学生数优先，同规模参考变化和公共必修属性</span></div>
-            <DataTable :columns="focusCourseCols" :data="failCourses" storage-key="dashboard:focus-courses"
-              :max-business-columns="6" :config-version="2" stripe size="small"
-              @row-click="goCourse" row-class-name="college-row-clickable">
+            <AppTable :columns="focusCourseCols" :data="failCourses" storage-key="dashboard:focus-courses"
+              :max-business-columns="6" :config-version="2" stripe
+              @row-click="goCourse" row-class-name="college-row-clickable" :show-density="true" :show-column-settings="true" :pagination="false">
               <template #col-priorityRank="{row}"><b class="tnum">#{{ row.priorityRank }}</b></template>
               <template #col-name="{row}"><span class="college-link">{{ row.name }}</span></template>
               <template #col-failRate="{row}"><b class="tnum risk-number">{{ row.failRate }}%</b></template>
@@ -151,7 +151,7 @@
               <template #col-courseGroup="{row}"><el-tag v-if="row.courseGroup" size="small" effect="plain" :type="row.courseGroup==='公共必修'?'warning':'info'">{{ row.courseGroup }}</el-tag><span v-else>—</span></template>
               <template #col-firstPassRate="{row}">{{ row.firstPassRate == null ? '—' : `${row.firstPassRate}%` }}</template>
               <template #col-drill><span class="college-link">详情</span></template>
-            </DataTable>
+            </AppTable>
           </div>
         </el-col>
       </el-row>
@@ -185,7 +185,8 @@ import { useRoute, useRouter } from 'vue-router'
 import KpiLabel from '@/components/KpiLabel.vue';
 import EChart from '@/components/EChart.vue';
 import BusinessPageContext from '@/components/BusinessPageContext.vue';
-import DataTable, { type DataTableColumn } from '@/components/DataTable.vue';
+import AppTable from '@/components/AppTable.vue'
+import type { AppTableColumn } from '@/types/table'
 import MetricHistoryDialog from '@/components/MetricHistoryDialog.vue';
 import { getFilterMeta, type SemesterOpt } from '@/api/shared/filterMeta';
 import { SUMMARY_HISTORY_METRIC_IDS } from '@/utils/dashboardHistory';
@@ -199,38 +200,38 @@ const comparison = reactive<any>({ items:[], definition:{} });
 const canCompareColleges = computed(() => !!authStore.user?.permissionContext?.comparisonScope?.allowOtherOrganizations);
 
 // 学院横向对比表列定义（M6 DataTable）
-const collegeCols: DataTableColumn[] = [
-  { key: 'name', label: '学院', width: 170, fixed: 'left', region: 'identity', required: true },
-  { key: 'students', label: '在籍学生', width: 84, align: 'right', defaultVisible: false },
-  { key: 'currentFailRate', label: '当前挂科学生率', width: 118, align: 'right', required: true },
-  { key: 'currentFailVsScopePp', label: '较范围均值', width: 105, align: 'right' },
-  { key: 'currentFailChangePp', label: '较上期变化', width: 105, align: 'right' },
-  { key: 'avgGpa', label: '平均 GPA', width: 90, align: 'right' },
-  { key: 'avgGpaRank', label: 'GPA 排名', width: 90, align: 'center' },
-  { key: 'alertRate', label: '有效预警学生率', width: 118, align: 'right' },
-  { key: 'resultCoverageRate', label: '有效成绩覆盖率', width: 118, align: 'right' },
+const collegeCols: AppTableColumn[] = [
+  { key: 'name', label: '学院', minWidth: 170, fixed: 'left', region: 'identity', required: true },
+  { key: 'students', label: '在籍学生', minWidth: 84, align: 'center', defaultVisible: false },
+  { key: 'currentFailRate', label: '当前挂科学生率', minWidth: 118, align: 'center', required: true },
+  { key: 'currentFailVsScopePp', label: '较范围均值', minWidth: 105, align: 'center' },
+  { key: 'currentFailChangePp', label: '较上期变化', minWidth: 105, align: 'center' },
+  { key: 'avgGpa', label: '平均 GPA', minWidth: 90, align: 'center' },
+  { key: 'avgGpaRank', label: 'GPA 排名', minWidth: 90, align: 'center' },
+  { key: 'alertRate', label: '有效预警学生率', minWidth: 118, align: 'center' },
+  { key: 'resultCoverageRate', label: '有效成绩覆盖率', minWidth: 118, align: 'center' },
   { key: 'drill', label: '详情', width: 52, fixed: 'right', region: 'action', required: true },
 ];
-const comparisonCols: DataTableColumn[] = [
+const comparisonCols: AppTableColumn[] = [
   { key: 'collegeName', label: '学院', minWidth: 170, fixed: 'left', region: 'identity', required: true },
-  { key: 'students', label: '在籍学生', width: 90, align: 'right' },
-  { key: 'weightedAverageScore', label: '加权平均分', width: 118, align: 'right' },
-  { key: 'averageGpa', label: '平均GPA', width: 100, align: 'right' },
-  { key: 'currentFailStudentRate', label: '当前挂科学生率', width: 130, align: 'right', required: true },
-  { key: 'activeAlertStudentRate', label: '有效预警学生率', width: 125, align: 'right' },
+  { key: 'students', label: '在籍学生', minWidth: 90, align: 'center' },
+  { key: 'weightedAverageScore', label: '加权平均分', minWidth: 118, align: 'center' },
+  { key: 'averageGpa', label: '平均GPA', minWidth: 100, align: 'center' },
+  { key: 'currentFailStudentRate', label: '当前挂科学生率', minWidth: 130, align: 'center', required: true },
+  { key: 'activeAlertStudentRate', label: '有效预警学生率', minWidth: 125, align: 'center' },
   { key: 'detailPermission', label: '明细权限', width: 95, align: 'center', fixed: 'right', region: 'action', required: true },
 ];
-const focusCourseCols: DataTableColumn[] = [
-  { key: 'priorityRank', label: '优先级', width: 68, fixed: 'left', region: 'identity', required: true },
+const focusCourseCols: AppTableColumn[] = [
+  { key: 'priorityRank', label: '优先级', minWidth: 68, fixed: 'left', region: 'identity', required: true },
   { key: 'name', label: '课程', minWidth: 160, fixed: 'left', region: 'identity', required: true },
-  { key: 'affectedStudents', label: '受影响学生', width: 96, align: 'right', required: true },
-  { key: 'failRate', label: '当前未通过率', width: 106, align: 'right', required: true },
-  { key: 'changePp', label: '较上期变化', width: 102, align: 'right' },
+  { key: 'affectedStudents', label: '受影响学生', minWidth: 96, align: 'center', required: true },
+  { key: 'failRate', label: '当前未通过率', minWidth: 106, align: 'center', required: true },
+  { key: 'changePp', label: '较上期变化', minWidth: 102, align: 'center' },
   { key: 'selectionReason', label: '入选原因', minWidth: 220, tooltip: true, required: true },
-  { key: 'courseGroup', label: '课程类别', width: 90, align: 'center' },
-  { key: 'college', label: '开课学院', width: 120, defaultVisible: false },
-  { key: 'firstPassRate', label: '首次通过率', width: 96, align: 'right', defaultVisible: false },
-  { key: 'avgScore', label: '平均分', width: 76, align: 'right', defaultVisible: false },
+  { key: 'courseGroup', label: '课程类别', minWidth: 90, align: 'center' },
+  { key: 'college', label: '开课学院', minWidth: 120, defaultVisible: false },
+  { key: 'firstPassRate', label: '首次通过率', minWidth: 96, align: 'center', defaultVisible: false },
+  { key: 'avgScore', label: '平均分', minWidth: 76, align: 'center', defaultVisible: false },
   { key: 'drill', label: '详情', width: 52, fixed: 'right', region: 'action', required: true },
 ];
 

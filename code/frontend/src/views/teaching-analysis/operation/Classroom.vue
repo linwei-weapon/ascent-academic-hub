@@ -57,8 +57,8 @@
     <div class="sa-card">
       <div class="sa-card-title">楼宇实际占用负荷 <KpiLabel label="" formula="楼宇负荷=已占用教室日节次÷该楼宇已观测教室数×实际采集日期数×纳入节次数" /></div>
       <div class="chart-note">优先关注占用负荷高且记录量大的楼宇；“待映射”表示源教室名称尚不能可靠归属楼宇。</div>
-      <DataTable :columns="buildingCols" :data="data.buildings" storage-key="operation:classroom-buildings"
-        size="small" stripe max-height="430" :max-business-columns="5">
+      <AppTable :columns="buildingCols" :data="data.buildings" storage-key="operation:classroom-buildings"
+         stripe max-height="430" :max-business-columns="5" :show-density="true" :show-column-settings="true" :pagination="false">
         <template #header-occupiedRoomSlots>
           <span class="metric-header">
             占用教室日节次
@@ -101,7 +101,7 @@
         </template>
         <template #col-attention="{row}"><el-tag size="small" :type="buildingAttention(row).type">{{ buildingAttention(row).label }}</el-tag></template>
         <template #col-actions="{row}"><el-button link type="primary" @click="openBuildingReview(row)">详情</el-button></template>
-      </DataTable>
+      </AppTable>
     </div>
 
     <el-alert v-if="data.summary.overlapRecords || data.summary.pendingMappingRecords" class="quality" type="warning" :closable="false" show-icon
@@ -140,7 +140,8 @@ import EChart from '@/components/EChart.vue'
 import KpiCard from '@/components/KpiCard.vue'
 import KpiLabel from '@/components/KpiLabel.vue'
 import AIInsightDrawer from '@/components/AIInsightDrawer.vue'
-import DataTable, { type DataTableColumn } from '@/components/DataTable.vue'
+import AppTable from '@/components/AppTable.vue'
+import type { AppTableColumn } from '@/types/table'
 import { getClassroomOccupancyAIInsight } from '@/api/teachingAnalysis/insights'
 
 const loading = ref(false)
@@ -175,14 +176,14 @@ const buildingAttentionRules = [
   '3. 教学楼为“待映射”：数据核验；',
   '4. 其余：常规。',
 ]
-const buildingCols:DataTableColumn[] = [
+const buildingCols:AppTableColumn[] = [
   {key:'name',label:'楼宇',minWidth:170,required:true,region:'identity',fixed:'left'},
-  {key:'observedRooms',label:'已观测教室',width:120,align:'right',required:true},
-  {key:'observedDates',label:'采集日期',width:105,align:'right'},
-  {key:'occupancyRecords',label:'占用记录',width:120,align:'right',required:true},
-  {key:'occupiedRoomSlots',label:'占用教室日节次',width:145,align:'right'},
+  {key:'observedRooms',label:'已观测教室',minWidth:120,align:'center',required:true},
+  {key:'observedDates',label:'采集日期',minWidth:105,align:'center'},
+  {key:'occupancyRecords',label:'占用记录',minWidth:120,align:'center',required:true},
+  {key:'occupiedRoomSlots',label:'占用教室日节次',minWidth:145,align:'center'},
   {key:'observedLoadPct',label:'观测负荷',minWidth:220,required:true},
-  {key:'attention',label:'管理关注',width:100},
+  {key:'attention',label:'管理关注',minWidth:100},
   {key:'actions',label:'操作',width:80,required:true,region:'action',fixed:'right'},
 ]
 

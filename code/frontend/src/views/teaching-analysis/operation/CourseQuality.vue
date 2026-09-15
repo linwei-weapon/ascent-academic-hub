@@ -18,28 +18,30 @@
   <section v-if="!loadError" class="sa-card">
     <div class="sa-card-title">公共必修课重点关注</div>
     <el-empty v-if="!pubCourses.length" description="当前筛选范围内没有满足样本要求的公共必修课" :image-size="70"/>
-    <DataTable v-else :columns="publicCols" :data="pubCourses" storage-key="reports:course-quality-public"
-      stripe :row-class-name="pubRowClass" class="clickable" :max-business-columns="5">
+    <AppTable v-else :columns="publicCols" :data="pubCourses" storage-key="reports:course-quality-public"
+      stripe :row-class-name="pubRowClass" class="clickable" :max-business-columns="5" :show-density="true" :show-column-settings="true" :pagination="false">
       <template #col-first_pass_rate="{row}"><b class="tnum" :style="{color:belowAvg(row)?'#E11D48':'#0D9488'}">{{pct(row.first_pass_rate)}}</b><el-tag v-if="belowAvg(row)" type="danger" size="small" effect="plain" style="margin-left:6px">低于均值</el-tag></template>
       <template #col-makeup_pass_rate="{row}">{{pct(row.makeup_pass_rate)}}</template>
       <template #col-retake_pass_rate="{row}">{{pct(row.retake_pass_rate)}}</template>
       <template #col-attention_reasons="{row}"><el-tag v-for="r in row.attention_reasons" :key="r" :type="tagType(r)" size="small" class="reason">{{reasonText(r,row)}}</el-tag></template>
       <template #col-actions="{row}"><el-button link type="primary" :loading="detailLoading&&selected===row.course_id" @click.stop="selectCourse(row)">{{selected===row.course_id?'正在查看':'查看学期变化'}}</el-button></template>
-    </DataTable>
+    </AppTable>
   </section>
 
-  <section v-if="!loadError" class="sa-card" v-loading="loading"><div class="sa-card-title">需要进一步核查的课程</div><DataTable :columns="courseCols" :data="data.courses" storage-key="reports:course-quality" stripe :row-class-name="rowClass" v-model:page-size="pageSize" :default-page-size="50" config-version="2"><template #col-course_group="{row}"><el-tag size="small" effect="plain" :type="groupTagType(row.course_group)">{{row.course_group||'—'}}</el-tag></template><template #col-first_pass_rate="{row}"><b class="tnum" :style="{color:row.first_pass_rate==null?'#94a3b8':row.first_pass_rate>=85?'#0D9488':row.first_pass_rate<70?'#E11D48':'#334155'}">{{pct(row.first_pass_rate)}}</b></template><template #col-makeup_pass_rate="{row}">{{pct(row.makeup_pass_rate)}}</template><template #col-retake_pass_rate="{row}">{{pct(row.retake_pass_rate)}}</template><template #col-fail_rate="{row}">{{pct(row.fail_rate)}}</template><template #col-volatility="{row}">{{row.volatility}} 个百分点</template><template #col-attention_reasons="{row}"><el-tag v-for="r in row.attention_reasons" :key="r" :type="tagType(r)" size="small" class="reason">{{reasonText(r,row)}}</el-tag></template><template #col-actions="{row}"><el-button link type="primary" :loading="detailLoading&&selected===row.course_id" @click="selectCourse(row)">{{selected===row.course_id?'正在查看':'查看学期变化'}}</el-button></template></DataTable><el-pagination v-if="data.total" v-model:current-page="page" :page-size="pageSize" :total="data.total" layout="total, prev, pager, next" @current-change="load"/></section>
+  <section v-if="!loadError" class="sa-card" v-loading="loading"><div class="sa-card-title">需要进一步核查的课程</div><AppTable :columns="courseCols" :data="data.courses" storage-key="reports:course-quality" stripe :row-class-name="rowClass"   config-version="2" :show-density="true" :show-column-settings="true" :pagination="true" :page="page" :page-size="pageSize" :total="data.total" @page-change="page = $event; load()" @page-size-change="pageSize = $event"><template #col-course_group="{row}"><el-tag size="small" effect="plain" :type="groupTagType(row.course_group)">{{row.course_group||'—'}}</el-tag></template><template #col-first_pass_rate="{row}"><b class="tnum" :style="{color:row.first_pass_rate==null?'#94a3b8':row.first_pass_rate>=85?'#0D9488':row.first_pass_rate<70?'#E11D48':'#334155'}">{{pct(row.first_pass_rate)}}</b></template><template #col-makeup_pass_rate="{row}">{{pct(row.makeup_pass_rate)}}</template><template #col-retake_pass_rate="{row}">{{pct(row.retake_pass_rate)}}</template><template #col-fail_rate="{row}">{{pct(row.fail_rate)}}</template><template #col-volatility="{row}">{{row.volatility}} 个百分点</template><template #col-attention_reasons="{row}"><el-tag v-for="r in row.attention_reasons" :key="r" :type="tagType(r)" size="small" class="reason">{{reasonText(r,row)}}</el-tag></template><template #col-actions="{row}"><el-button link type="primary" :loading="detailLoading&&selected===row.course_id" @click="selectCourse(row)">{{selected===row.course_id?'正在查看':'查看学期变化'}}</el-button></template></AppTable></section>
   <el-drawer v-model="detailDrawer" :title="`${detail.course_name || '课程'}｜学期结果信息`" size="920px">
     <div v-loading="detailLoading" class="detail">
       <h4>学期变化</h4>
-      <el-table :data="detail.trends" size="small">
-        <el-table-column prop="semester_id" label="学期"/><el-table-column prop="students" label="学生数"/>
-        <el-table-column prop="avg_score" label="平均分"/>
-        <el-table-column label="首次通过率"><template #default="{row}">{{pct(row.first_pass_rate)}}</template></el-table-column>
-        <el-table-column label="补考通过率"><template #default="{row}">{{pct(row.makeup_pass_rate)}}</template></el-table-column>
-        <el-table-column label="重修通过率"><template #default="{row}">{{pct(row.retake_pass_rate)}}</template></el-table-column>
-        <el-table-column prop="retake_attempts" label="重修记录"/>
-      </el-table>
+      <AppTable :data="detail.trends" :columns="[]" storage-key="teaching-analysis:operation:coursequality:3" :pagination="false">
+        <template #columns>
+        <el-table-column prop="semester_id" label="学期" align="center" header-align="center"/><el-table-column prop="students" label="学生数" align="center" header-align="center"/>
+        <el-table-column prop="avg_score" label="平均分" align="center" header-align="center"/>
+        <el-table-column label="首次通过率" align="center" header-align="center"><template #default="{row}">{{pct(row.first_pass_rate)}}</template></el-table-column>
+        <el-table-column label="补考通过率" align="center" header-align="center"><template #default="{row}">{{pct(row.makeup_pass_rate)}}</template></el-table-column>
+        <el-table-column label="重修通过率" align="center" header-align="center"><template #default="{row}">{{pct(row.retake_pass_rate)}}</template></el-table-column>
+        <el-table-column prop="retake_attempts" label="重修记录" align="center" header-align="center"/>
+              </template>
+      </AppTable>
     </div>
   </el-drawer>
 </div></template>
@@ -48,7 +50,8 @@ import * as operationApi from '@/api/teachingAnalysis/operation'
 
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 ;
-import DataTable, { type DataTableColumn } from '@/components/DataTable.vue';
+import AppTable from '@/components/AppTable.vue'
+import type { AppTableColumn } from '@/types/table'
 
 const COURSE_GROUPS = ['公共必修', '专业必修', '选修', '实践', '其他'];
 const KPI_TOOLTIPS = {
@@ -67,27 +70,27 @@ const page = ref(1), pageSize = ref(50), selected = ref(''), requestId = ref(0);
 watch(pageSize, () => { page.value = 1; load(); });
 
 // 需要进一步核查的课程表列定义（M6 DataTable）
-const courseCols: DataTableColumn[] = [
+const courseCols: AppTableColumn[] = [
   { key: 'course_name', label: '课程', minWidth: 170, required: true, region: 'identity', fixed: 'left' },
-  { key: 'course_group', label: '课程类别', width: 96 },
-  { key: 'observed_terms', label: '达到样本要求的学期数', width: 145 },
-  { key: 'student_term_count', label: '修读学生人次', width: 105 },
-  { key: 'failures', label: '未通过记录数', width: 105 },
-  { key: 'first_pass_rate', label: '首次通过率', width: 100, required: true },
-  { key: 'makeup_pass_rate', label: '补考通过率', width: 100 },
-  { key: 'retake_pass_rate', label: '重修通过率', width: 100 },
-  { key: 'fail_rate', label: '首次未通过率', width: 105 },
-  { key: 'volatility', label: '首次通过率最大差值', width: 150 },
-  { key: 'retake_attempts', label: '重修记录人次', width: 105 },
+  { key: 'course_group', label: '课程类别', minWidth: 96 },
+  { key: 'observed_terms', label: '达到样本要求的学期数', minWidth: 145 },
+  { key: 'student_term_count', label: '修读学生人次', minWidth: 105 },
+  { key: 'failures', label: '未通过记录数', minWidth: 105 },
+  { key: 'first_pass_rate', label: '首次通过率', minWidth: 100, required: true },
+  { key: 'makeup_pass_rate', label: '补考通过率', minWidth: 100 },
+  { key: 'retake_pass_rate', label: '重修通过率', minWidth: 100 },
+  { key: 'fail_rate', label: '首次未通过率', minWidth: 105 },
+  { key: 'volatility', label: '首次通过率最大差值', minWidth: 150 },
+  { key: 'retake_attempts', label: '重修记录人次', minWidth: 105 },
   { key: 'attention_reasons', label: '关注原因', minWidth: 250, required: true },
   { key: 'actions', label: '操作', width: 125, fixed: 'right', required: true, region: 'action' },
 ];
-const publicCols: DataTableColumn[] = [
+const publicCols: AppTableColumn[] = [
   {key:'course_name',label:'课程',minWidth:180,required:true,region:'identity',fixed:'left'},
-  {key:'student_term_count',label:'修读学生人次',width:105,align:'right',required:true},
-  {key:'first_pass_rate',label:'首次通过率',width:115,required:true},
-  {key:'makeup_pass_rate',label:'补考通过率',width:100},
-  {key:'retake_pass_rate',label:'重修通过率',width:100},
+  {key:'student_term_count',label:'修读学生人次',minWidth:105,align:'center',required:true},
+  {key:'first_pass_rate',label:'首次通过率',minWidth:115,required:true},
+  {key:'makeup_pass_rate',label:'补考通过率',minWidth:100},
+  {key:'retake_pass_rate',label:'重修通过率',minWidth:100},
   {key:'attention_reasons',label:'关注原因',minWidth:220,required:true},
   {key:'actions',label:'操作',width:125,required:true,region:'action',fixed:'right'},
 ];

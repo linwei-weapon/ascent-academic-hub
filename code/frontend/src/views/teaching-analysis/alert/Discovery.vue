@@ -84,34 +84,40 @@
 
     <div v-if="discovered.approved.length" class="sa-card" style="margin-top:14px">
       <div class="sa-card-title">已采纳建议</div>
-      <el-table :data="discovered.approved" size="small">
-        <el-table-column prop="name" label="规则建议" min-width="220" />
-        <el-table-column prop="approvedAt" label="采纳时间" width="180" />
-        <el-table-column label="治理衔接" min-width="180">
+      <AppTable :data="discovered.approved" :columns="[]" storage-key="teaching-analysis:alert:discovery:1" :pagination="false">
+        <template #columns>
+        <el-table-column prop="name" label="规则建议" min-width="220" align="center" header-align="center"/>
+        <el-table-column prop="approvedAt" label="采纳时间" min-width="180" align="center" header-align="center"/>
+        <el-table-column label="治理衔接" min-width="180" align="center" header-align="center">
           <template #default="{row}">
             <span v-if="row.detail?.governance_change_id">规则变更单 #{{ row.detail.governance_change_id }}</span>
             <span v-else class="sa-faint">历史规则</span>
           </template>
         </el-table-column>
-        <el-table-column width="130"><template #default><span class="sa-faint">已进入上方规则治理流程</span></template></el-table-column>
-      </el-table>
+        <el-table-column min-width="130" align="center" header-align="center"><template #default><span class="sa-faint">已进入上方规则治理流程</span></template></el-table-column>
+              </template>
+      </AppTable>
     </div>
 
     <div v-if="discovered.rejected.length" class="sa-card" style="margin-top:14px">
       <div class="sa-card-title">已拒绝建议（{{ discovered.rejected.length }}）</div>
-      <el-table :data="discovered.rejected" size="small" max-height="280">
-        <el-table-column prop="name" label="规则建议" min-width="220" />
-        <el-table-column prop="createdAt" label="发现时间" width="180" />
-        <el-table-column prop="riskRatio" label="风险倍数" width="100" />
-      </el-table>
+      <AppTable :data="discovered.rejected"  max-height="280" :columns="[]" storage-key="teaching-analysis:alert:discovery:2" :pagination="false">
+        <template #columns>
+        <el-table-column prop="name" label="规则建议" min-width="220" align="center" header-align="center"/>
+        <el-table-column prop="createdAt" label="发现时间" min-width="180" align="center" header-align="center"/>
+        <el-table-column prop="riskRatio" label="风险倍数" min-width="100" align="center" header-align="center"/>
+              </template>
+      </AppTable>
     </div>
     <div v-if="discovered.superseded.length" class="sa-card" style="margin-top:14px">
       <div class="sa-card-title">已被新一轮分析替代（{{ discovered.superseded.length }}）</div>
-      <el-table :data="discovered.superseded" size="small" max-height="240">
-        <el-table-column prop="name" label="历史建议" min-width="220" />
-        <el-table-column prop="createdAt" label="发现时间" width="180" />
-        <el-table-column prop="riskRatio" label="当时风险倍数" width="120" />
-      </el-table>
+      <AppTable :data="discovered.superseded"  max-height="240" :columns="[]" storage-key="teaching-analysis:alert:discovery:3" :pagination="false">
+        <template #columns>
+        <el-table-column prop="name" label="历史建议" min-width="220" align="center" header-align="center"/>
+        <el-table-column prop="createdAt" label="发现时间" min-width="180" align="center" header-align="center"/>
+        <el-table-column prop="riskRatio" label="当时风险倍数" min-width="120" align="center" header-align="center"/>
+              </template>
+      </AppTable>
     </div>
     </template>
 
@@ -148,15 +154,17 @@
 
         <section class="confirmation-section">
           <h4>样本库表数据清单</h4>
-          <el-table :data="preview.tables || []" size="small" max-height="250" border>
-            <el-table-column prop="tableLabel" label="库表中文名称" min-width="180" />
-            <el-table-column prop="tableName" label="库表英文名称" min-width="180" />
-            <el-table-column label="拟参与计算数据量" width="160" align="right">
+          <AppTable :data="preview.tables || []"  max-height="250" border :columns="[]" storage-key="teaching-analysis:alert:discovery:4" :pagination="false">
+        <template #columns>
+            <el-table-column prop="tableLabel" label="库表中文名称" min-width="180" align="center" header-align="center"/>
+            <el-table-column prop="tableName" label="库表英文名称" min-width="180" align="center" header-align="center"/>
+            <el-table-column label="拟参与计算数据量" min-width="160" align="center" header-align="center">
               <template #default="{ row }">
                 {{ Number(row.rowCount || 0).toLocaleString() }} 条
               </template>
             </el-table-column>
-          </el-table>
+                  </template>
+      </AppTable>
         </section>
 
         <section class="confirmation-section">
@@ -190,6 +198,7 @@
 </template>
 
 <script setup lang="ts">
+import AppTable from '@/components/AppTable.vue'
 import * as rulesApi from '@/api/teachingAnalysis/rules'
 
 withDefaults(defineProps<{embedded?:boolean}>(), {embedded:false})

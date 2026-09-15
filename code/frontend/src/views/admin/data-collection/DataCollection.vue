@@ -57,32 +57,49 @@
 
       <el-tabs v-model="activeTab" class="collection-tabs" @tab-change="onTabChange">
         <el-tab-pane label="数据源接入态势" name="sources">
-          <div class="sa-card filters">
-            <el-select v-model="draftFilters.domain" clearable placeholder="全部数据域">
-              <el-option v-for="item in overview.domains || []" :key="item.label"
-                :label="`${item.label}（${item.count}）`" :value="domainCode(item.label)" />
-            </el-select>
-            <el-select v-model="draftFilters.status" clearable placeholder="全部状态">
-              <el-option label="已接入" value="connected" />
-              <el-option label="尚未接入" value="missing" />
-              <el-option label="超过更新周期" value="overdue" />
-              <el-option label="最近处理失败" value="failed" />
-              <el-option label="正在更新" value="running" />
-              <el-option label="有待核验项" value="attention" />
-            </el-select>
-            <el-input v-model="draftFilters.keyword" clearable
-              placeholder="搜索数据源、来源系统或影响模块" @keyup.enter="applyFilters" />
-            <el-button type="primary" @click="applyFilters">应用筛选</el-button>
-            <el-button @click="resetFilters">重置</el-button>
-            <span v-if="filterDirty" class="filter-dirty">筛选条件尚未应用</span>
-          </div>
-          <div v-if="sourceLoading && sources.length" class="updating-bar">正在按新条件更新，当前结果暂时保留…</div>
           <div class="sa-card table-card" v-loading="sourceLoading && !!sources.length" element-loading-text="正在更新数据源状态…">
-            <DataTable :columns="sourceColumns" :data="sources" storage-key="system:data-sources"
-              :max-business-columns="7" :config-version="1" :page-size="sourcePageSize"
-              size="small" stripe empty-text="当前条件下没有数据源"
-              @update:page-size="changeSourcePageSize" @row-click="row=>openSource(row.sourceCode)"
-              row-class-name="clickable-row">
+            <AppTable
+              show-density
+              show-column-settings
+              :columns="sourceColumns"
+              :data="sources"
+              storage-key="system:data-sources"
+              :max-business-columns="7"
+              :config-version="1"
+              :page-size="sourcePageSize"
+              stripe
+              empty-text="当前条件下没有数据源"
+              @page-size-change="changeSourcePageSize"
+              @row-click="row=>openSource(row.sourceCode)"
+              row-class-name="clickable-row"
+              :page="sourcePage"
+              :total="sourceTotal"
+              :loading="sourceLoading"
+              @page-change="loadSources"
+            >
+              <!-- 筛选与提示复用工具栏左侧区域，右侧保留表格显示设置。 -->
+              <template #toolbar>
+                <div class="filters">
+                  <el-select v-model="draftFilters.domain" clearable placeholder="全部数据域">
+                    <el-option v-for="item in overview.domains || []" :key="item.label"
+                      :label="`${item.label}（${item.count}）`" :value="domainCode(item.label)" />
+                  </el-select>
+                  <el-select v-model="draftFilters.status" clearable placeholder="全部状态">
+                    <el-option label="已接入" value="connected" />
+                    <el-option label="尚未接入" value="missing" />
+                    <el-option label="超过更新周期" value="overdue" />
+                    <el-option label="最近处理失败" value="failed" />
+                    <el-option label="正在更新" value="running" />
+                    <el-option label="有待核验项" value="attention" />
+                  </el-select>
+                  <el-input v-model="draftFilters.keyword" clearable
+                    placeholder="搜索数据源、来源系统或影响模块" @keyup.enter="applyFilters" />
+                  <el-button type="primary" @click="applyFilters">应用筛选</el-button>
+                  <el-button @click="resetFilters">重置</el-button>
+                  <span v-if="filterDirty" class="filter-dirty">筛选条件尚未应用</span>
+                </div>
+                <div v-if="sourceLoading && sources.length" class="updating-bar">正在按新条件更新，当前结果暂时保留…</div>
+              </template>
               <template #col-source="{row}">
                 <div class="source-identity"><b>{{ row.sourceName }}</b><span>{{ row.sourceSystem }}</span></div>
               </template>
@@ -97,33 +114,50 @@
               <template #col-sourceRows="{row}">{{ formatNumber(row.sourceRows) }}</template>
               <template #col-downstream="{row}">{{ (row.downstreamModules || []).join('、') }}</template>
               <template #col-action><el-button link type="primary">核查</el-button></template>
-            </DataTable>
+            </AppTable>
             <div class="pager">
-              <span>共 {{ sourceTotal }} 项；接入状态与质量校验状态分开呈现。</span>
-              <el-pagination v-model:current-page="sourcePage" :page-size="sourcePageSize"
-                :total="sourceTotal" layout="prev, pager, next" small @current-change="loadSources" />
+              <span>接入状态与质量校验状态分开呈现。</span>
+
             </div>
           </div>
         </el-tab-pane>
 
         <el-tab-pane label="运行与异常" name="runs">
-          <el-alert title="运行记录用于核查某次处理读了哪些批次、生成了多少结果以及哪些校验需要关注；不会在主表直接展示原始JSON。" type="info" :closable="false" show-icon />
-          <div class="sa-card run-filters">
-            <el-select v-model="runFilters.task" clearable placeholder="全部任务" @change="loadRuns(1)">
-              <el-option v-for="task in overview.tasks || []" :key="task.task" :label="task.name" :value="task.task" />
-            </el-select>
-            <el-select v-model="runFilters.status" clearable placeholder="全部状态" @change="loadRuns(1)">
-              <el-option label="成功" value="success" />
-              <el-option label="失败" value="failed" />
-              <el-option label="执行中" value="running" />
-            </el-select>
-          </div>
           <div class="sa-card table-card" v-loading="runLoading">
-            <DataTable :columns="runColumns" :data="runs" storage-key="system:etl-runs"
-              :max-business-columns="7" :config-version="1" :page-size="runPageSize"
-              size="small" stripe empty-text="尚无运行记录"
-              @update:page-size="changeRunPageSize" @row-click="row=>openRun(row.run_id)"
-              row-class-name="clickable-row">
+            <AppTable
+              show-density
+              show-column-settings
+              :columns="runColumns"
+              :data="runs"
+              storage-key="system:etl-runs"
+              :max-business-columns="7"
+              :config-version="1"
+              :page-size="runPageSize"
+              stripe
+              empty-text="尚无运行记录"
+              @page-size-change="changeRunPageSize"
+              @row-click="row=>openRun(row.run_id)"
+              row-class-name="clickable-row"
+              :page="runPage"
+              :total="runTotal"
+              :loading="runLoading"
+              @page-change="loadRuns"
+            >
+              <template #toolbar>
+                <div class="run-toolbar">
+                  <div class="run-filters">
+                    <el-select v-model="runFilters.task" clearable placeholder="全部任务" @change="loadRuns(1)">
+                      <el-option v-for="task in overview.tasks || []" :key="task.task" :label="task.name" :value="task.task" />
+                    </el-select>
+                    <el-select v-model="runFilters.status" clearable placeholder="全部状态" @change="loadRuns(1)">
+                      <el-option label="成功" value="success" />
+                      <el-option label="失败" value="failed" />
+                      <el-option label="执行中" value="running" />
+                    </el-select>
+                  </div>
+                  <el-alert class="table-note" title="运行记录用于核查某次处理读了哪些批次、生成了多少结果以及哪些校验需要关注；不会在主表直接展示原始JSON。" type="info" :closable="false" show-icon />
+                </div>
+              </template>
               <template #col-task="{row}">
                 <div class="source-identity"><b>{{ row.taskName }}</b><span>运行 #{{ row.run_id }}</span></div>
               </template>
@@ -133,26 +167,40 @@
               <template #col-duration_ms="{row}">{{ formatDuration(row.duration_ms) }}</template>
               <template #col-rows_written="{row}">{{ formatNumber(row.rows_written) }}</template>
               <template #col-action><el-button link type="primary">详情</el-button></template>
-            </DataTable>
+            </AppTable>
             <div class="pager">
-              <span>共 {{ runTotal }} 次运行；失败原因和技术证据在详情中查看。</span>
-              <el-pagination v-model:current-page="runPage" :page-size="runPageSize"
-                :total="runTotal" layout="prev, pager, next" small @current-change="loadRuns" />
+              <span>失败原因和技术证据在详情中查看。</span>
+
             </div>
           </div>
         </el-tab-pane>
 
         <el-tab-pane label="交付接入清单" name="checklist">
-          <el-alert title="该清单用于学校接口准备和实施核验，不在本页配置字段映射或修改学校主数据。" type="info" :closable="false" show-icon />
           <div class="sa-card table-card" v-loading="checklistLoading">
-            <DataTable :columns="checklistColumns" :data="checklistRows"
-              storage-key="system:data-source-checklist" :max-business-columns="6"
-              :config-version="1" pagination :default-page-size="10" size="small" stripe>
+            <AppTable
+              show-density
+              show-column-settings
+              :columns="checklistColumns"
+              :data="checklistTable.rows"
+              storage-key="system:data-source-checklist"
+              :max-business-columns="6"
+              :config-version="1"
+              stripe
+              :page="checklistTable.page"
+              :page-size="checklistTable.pageSize"
+              :total="checklistTable.total"
+              :loading="checklistLoading"
+              @page-change="checklistTable.changePage"
+              @page-size-change="checklistTable.changePageSize"
+            >
+              <template #toolbar>
+                <el-alert class="table-note" title="该清单用于学校接口准备和实施核验，不在本页配置字段映射或修改学校主数据。" type="info" :closable="false" show-icon />
+              </template>
               <template #col-source="{row}"><div class="source-identity"><b>{{ row.sourceName }}</b><span>{{ row.domainName }}</span></div></template>
               <template #col-status="{row}"><el-tag size="small" effect="plain" :type="accessTag(row.accessStatus)">{{ row.accessStatusLabel }}</el-tag></template>
               <template #col-downstream="{row}">{{ (row.downstreamModules || []).join('、') }}</template>
               <template #col-action="{row}"><el-button link type="primary" @click.stop="openSource(row.sourceCode)">证据</el-button></template>
-            </DataTable>
+            </AppTable>
           </div>
         </el-tab-pane>
       </el-tabs>
@@ -179,14 +227,27 @@
             <section class="definition-block"><span>计数边界</span><p>{{ sourceDetail.governance?.countBoundary }}</p></section>
           </el-tab-pane>
           <el-tab-pane :label="`最近批次（${sourceDetail.batches?.length || 0}）`">
-            <DataTable :columns="batchColumns" :data="sourceDetail.batches || []"
+            <AppTable
+              show-density
+              show-column-settings
+              :columns="batchColumns"
+              :data="batchTable.rows"
               :storage-key="`system:source-batches:${sourceDetail.source.sourceCode}`"
-              :max-business-columns="6" :config-version="1" pagination :default-page-size="10" size="small" stripe>
+              :max-business-columns="6"
+              :config-version="1"
+              stripe
+              :page="batchTable.page"
+              :page-size="batchTable.pageSize"
+              :total="batchTable.total"
+              :loading="sourceDetailLoading"
+              @page-change="batchTable.changePage"
+              @page-size-change="batchTable.changePageSize"
+            >
               <template #col-ingested_at="{row}">{{ formatTime(row.ingested_at) }}</template>
               <template #col-row_count="{row}">{{ formatNumber(row.row_count) }}</template>
               <template #col-accepted_count="{row}">{{ formatNumber(row.accepted_count) }}</template>
               <template #col-qualityLabel="{row}"><el-tag size="small" effect="plain" :type="row.quality_status==='warning'?'warning':'success'">{{ row.qualityLabel }}</el-tag></template>
-            </DataTable>
+            </AppTable>
           </el-tab-pane>
           <el-tab-pane label="校验与映射">
             <el-alert v-if="!sourceDetail.mappings?.length && !sourceDetail.roomQuality"
@@ -203,16 +264,30 @@
             <el-alert class="boundary-note" :title="sourceDetail.governance?.correctionBoundary" type="info" :closable="false" show-icon />
           </el-tab-pane>
           <el-tab-pane :label="`关联运行（${sourceDetail.runs?.length || 0}）`">
-            <DataTable :columns="sourceRunColumns" :data="sourceDetail.runs || []"
+            <AppTable
+              show-density
+              show-column-settings
+              :columns="sourceRunColumns"
+              :data="sourceRunTable.rows"
               :storage-key="`system:source-runs:${sourceDetail.source.sourceCode}`"
-              :max-business-columns="5" :config-version="1" pagination :default-page-size="10" size="small" stripe
-              @row-click="row=>openRun(row.run_id)" row-class-name="clickable-row">
+              :max-business-columns="5"
+              :config-version="1"
+              stripe
+              @row-click="row=>openRun(row.run_id)"
+              row-class-name="clickable-row"
+              :page="sourceRunTable.page"
+              :page-size="sourceRunTable.pageSize"
+              :total="sourceRunTable.total"
+              :loading="sourceDetailLoading"
+              @page-change="sourceRunTable.changePage"
+              @page-size-change="sourceRunTable.changePageSize"
+            >
               <template #col-taskName="{row}">{{ row.taskName }}</template>
               <template #col-status="{row}"><el-tag size="small" effect="plain" :type="runTag(row.status)">{{ runStatusLabel(row.status) }}</el-tag></template>
               <template #col-started_at="{row}">{{ formatTime(row.started_at) }}</template>
               <template #col-duration_ms="{row}">{{ formatDuration(row.duration_ms) }}</template>
               <template #col-action><el-button link type="primary">详情</el-button></template>
-            </DataTable>
+            </AppTable>
           </el-tab-pane>
         </el-tabs>
       </template>
@@ -237,13 +312,26 @@
             <el-empty v-if="!runDetail.checks?.length" description="本次运行没有结构化校验明细" :image-size="70" />
           </el-tab-pane>
           <el-tab-pane :label="`输入批次（${runDetail.batches?.length || 0}）`">
-            <DataTable :columns="runBatchColumns" :data="runDetail.batches || []"
+            <AppTable
+              show-density
+              show-column-settings
+              :columns="runBatchColumns"
+              :data="runBatchTable.rows"
               :storage-key="`system:run-batches:${runDetail.run.run_id}`"
-              :max-business-columns="5" :config-version="1" pagination :default-page-size="10" size="small" stripe>
+              :max-business-columns="5"
+              :config-version="1"
+              stripe
+              :page="runBatchTable.page"
+              :page-size="runBatchTable.pageSize"
+              :total="runBatchTable.total"
+              :loading="runDetailLoading"
+              @page-change="runBatchTable.changePage"
+              @page-size-change="runBatchTable.changePageSize"
+            >
               <template #col-ingested_at="{row}">{{ formatTime(row.ingested_at) }}</template>
               <template #col-row_count="{row}">{{ formatNumber(row.row_count) }}</template>
               <template #col-accepted_count="{row}">{{ formatNumber(row.accepted_count) }}</template>
-            </DataTable>
+            </AppTable>
           </el-tab-pane>
           <el-tab-pane label="技术证据">
             <el-alert :title="runDetail.boundary" type="info" :closable="false" show-icon />
@@ -272,9 +360,11 @@
 </template>
 
 <script setup lang="ts">
+import { useTablePagination } from '@/composables/useTablePagination'
+import AppTable from '@/components/AppTable.vue'
+import type { AppTableColumn } from '@/types/table'
 import { computed, onBeforeUnmount, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import DataTable, { type DataTableColumn } from '@/components/DataTable.vue'
 import * as dataCollectionApi from '@/api/admin/dataCollection'
 
 const initialLoading = ref(true)
@@ -333,61 +423,61 @@ const cards = computed(() => [
     help:'代码映射、空间匹配、结构校验等需要反馈源系统核查的记录数。', action:'查看问题证据', tone:overview.attentionItems?'warning':'normal'},
 ])
 
-const sourceColumns:DataTableColumn[] = [
+const sourceColumns:AppTableColumn[] = [
   {key:'source',label:'数据源',required:true,region:'identity',fixed:'left',minWidth:220},
   {key:'domainName',label:'数据域',minWidth:145},
-  {key:'access',label:'接入状态',width:125},
+  {key:'access',label:'接入状态',minWidth:125},
   {key:'validation',label:'校验状态',minWidth:145},
   {key:'lastIngestedAt',label:'最近接入',minWidth:165},
-  {key:'sourceRows',label:'源行数',width:110,align:'right'},
+  {key:'sourceRows',label:'源行数',minWidth:110},
   {key:'updateCycle',label:'更新周期',minWidth:150,defaultVisible:false},
   {key:'sourceFile',label:'最近文件/接口',minWidth:180,tooltip:true,defaultVisible:false},
   {key:'downstream',label:'影响模块',minWidth:240,tooltip:true},
   {key:'managementUse',label:'管理用途',minWidth:240,tooltip:true,defaultVisible:false},
   {key:'action',label:'操作',required:true,region:'action',fixed:'right',width:90},
 ]
-const runColumns:DataTableColumn[] = [
+const runColumns:AppTableColumn[] = [
   {key:'task',label:'任务',required:true,region:'identity',fixed:'left',minWidth:220},
   {key:'sources',label:'输入数据源',minWidth:240,tooltip:true},
-  {key:'status',label:'状态',width:100},
+  {key:'status',label:'状态',minWidth:100},
   {key:'started_at',label:'开始时间',minWidth:165},
-  {key:'duration_ms',label:'耗时',width:105,align:'right'},
-  {key:'rows_written',label:'生成记录',width:110,align:'right'},
+  {key:'duration_ms',label:'耗时',minWidth:105},
+  {key:'rows_written',label:'生成记录',minWidth:110},
   {key:'triggered_by',label:'触发方式/人员',minWidth:130},
   {key:'errorSummary',label:'失败摘要',minWidth:220,tooltip:true,defaultVisible:false},
   {key:'action',label:'操作',required:true,region:'action',fixed:'right',width:90},
 ]
-const checklistColumns:DataTableColumn[] = [
+const checklistColumns:AppTableColumn[] = [
   {key:'source',label:'数据源',required:true,region:'identity',fixed:'left',minWidth:220},
   {key:'sourceSystem',label:'来源系统',minWidth:170},
-  {key:'deliveryMode',label:'交付方式',width:120},
+  {key:'deliveryMode',label:'交付方式',minWidth:120},
   {key:'requiredFields',label:'关键字段',minWidth:300,tooltip:true},
   {key:'updateCycle',label:'建议更新周期',minWidth:170},
   {key:'downstream',label:'影响模块',minWidth:240,tooltip:true},
-  {key:'status',label:'当前状态',width:125},
+  {key:'status',label:'当前状态',minWidth:125},
   {key:'action',label:'操作',required:true,region:'action',fixed:'right',width:90},
 ]
-const batchColumns:DataTableColumn[] = [
+const batchColumns:AppTableColumn[] = [
   {key:'source_file',label:'文件/接口',required:true,region:'identity',minWidth:190,tooltip:true},
   {key:'ingested_at',label:'接入时间',minWidth:165},
-  {key:'row_count',label:'源行数',width:100,align:'right'},
-  {key:'accepted_count',label:'写入记录',width:105,align:'right'},
-  {key:'qualityLabel',label:'基础校验',width:140},
+  {key:'row_count',label:'源行数',minWidth:100},
+  {key:'accepted_count',label:'写入记录',minWidth:105},
+  {key:'qualityLabel',label:'基础校验',minWidth:140},
 ]
-const sourceRunColumns:DataTableColumn[] = [
+const sourceRunColumns:AppTableColumn[] = [
   {key:'taskName',label:'运行任务',required:true,region:'identity',minWidth:220},
-  {key:'status',label:'状态',width:100},
+  {key:'status',label:'状态',minWidth:100},
   {key:'started_at',label:'开始时间',minWidth:165},
-  {key:'duration_ms',label:'耗时',width:100,align:'right'},
-  {key:'rows_written',label:'生成记录',width:110,align:'right'},
+  {key:'duration_ms',label:'耗时',minWidth:100},
+  {key:'rows_written',label:'生成记录',minWidth:110},
   {key:'action',label:'操作',required:true,region:'action',fixed:'right',width:80},
 ]
-const runBatchColumns:DataTableColumn[] = [
+const runBatchColumns:AppTableColumn[] = [
   {key:'source_name',label:'数据源',required:true,region:'identity',minWidth:180},
   {key:'source_file',label:'文件/接口',minWidth:180,tooltip:true},
   {key:'ingested_at',label:'接入时间',minWidth:165},
-  {key:'row_count',label:'源行数',width:100,align:'right'},
-  {key:'accepted_count',label:'写入记录',width:105,align:'right'},
+  {key:'row_count',label:'源行数',minWidth:100},
+  {key:'accepted_count',label:'写入记录',minWidth:105},
 ]
 
 // 从当前数据源详情生成抽屉标题。
@@ -584,6 +674,11 @@ function schedulePoll(runId:number|undefined) {
 onBeforeUnmount(()=>{ if(pollTimer) window.clearTimeout(pollTimer) })
 // 进入采集工作区时加载原有总览与列表。
 reloadAll()
+// 各标签页与抽屉独立持有分页状态，保留全量接口和原业务筛选。
+const checklistTable = useTablePagination(() => checklistRows.value)
+const batchTable = useTablePagination(() => sourceDetail.batches || [])
+const sourceRunTable = useTablePagination(() => sourceDetail.runs || [])
+const runBatchTable = useTablePagination(() => runDetail.batches || [])
 </script>
 
 <style scoped lang="scss">
@@ -780,9 +875,16 @@ reloadAll()
 .filters,.run-filters {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
-  padding: 12px;
-  margin-bottom: 10px;
+
+  .el-select,.el-input {
+    max-width: 100%;
+  }
+
+  .el-button + .el-button {
+    margin-left: 0;
+  }
 }
 
 .filters {
@@ -799,8 +901,24 @@ reloadAll()
 .run-filters {
 
   .el-select {
-    width: 250px;
+    width: 190px;
   }
+}
+
+.run-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+
+  .table-note {
+    flex: 1 1 320px;
+    min-width: 0;
+  }
+}
+
+.table-note {
+  padding: 6px 10px;
 }
 
 .filter-dirty {
@@ -809,6 +927,7 @@ reloadAll()
 }
 
 .updating-bar {
+  margin-top: 8px;
   padding: 7px 12px;
   background: var(--sa-track);
   color: var(--sa-primary);
@@ -818,6 +937,25 @@ reloadAll()
 
 .table-card {
   padding: 14px;
+
+  // 保留右侧设置的完整宽度；空间不足时，左侧筛选在卡片内自然换行。
+  :deep(.app-table__tools) {
+    flex-shrink: 0;
+  }
+
+  @media (max-width:800px) {
+    :deep(.app-table__toolbar) {
+      flex-wrap: wrap;
+    }
+
+    :deep(.app-table__extra) {
+      flex-basis: 100%;
+    }
+
+    :deep(.app-table__tools) {
+      margin-left: auto;
+    }
+  }
 }
 
 .pager {

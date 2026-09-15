@@ -69,16 +69,16 @@
               <div class="metric"><span class="m-label">未解除预警</span><b class="tnum" :style="{ color: c.openAlerts ? '#E11D48' : '#0D9488' }">{{ c.openAlerts }}件</b></div>
             </div>
             <div v-if="expanded.has(c.classId)" class="class-card__students" @click.stop>
-              <DataTable :columns="classStudentCols" :data="c.students"
-                storage-key="students:my-class-students" :pagination="true"
-                :default-page-size="10" :max-business-columns="4" :config-version="1"
-                size="small" max-height="360" @row-click="openEvidence" row-class-name="row-clickable">
+              <ClassStudentsTable
+                storage-key="students:my-class-students"
+                 :max-business-columns="4" :config-version="1"
+                 max-height="360" @row-click="openEvidence" row-class-name="row-clickable" :columns="classStudentCols" :data="c.students">
                 <template #col-name="{ row }"><span class="link">{{ row.name }}</span></template>
                 <template #col-gpa="{ row }"><b class="tnum">{{ gpaText(row.gpa) }}</b></template>
                 <template #col-failCount="{ row }"><span class="tnum" :style="{ color: row.failCount ? '#E11D48' : '#64748B' }">{{ row.failCount }}门</span></template>
                 <template #col-creditRatio="{ row }"><span class="tnum">{{ pctText(row.creditRatio) }}</span></template>
                 <template #col-openAlerts="{ row }"><span class="tnum" :style="{ color: row.openAlerts ? '#E11D48' : '#64748B' }">{{ row.openAlerts }}件</span></template>
-              </DataTable>
+              </ClassStudentsTable>
             </div>
           </div>
         </div>
@@ -87,7 +87,7 @@
       <!-- 导师视图：我的学生表 -->
       <div v-else class="sa-card">
         <div class="sa-card-title">我的学生 <KpiLabel label="" formula="按有效导师—学生关系取数；GPA 为本学期学分加权 GPA，未通过门数为本学期真实未通过课程数" /></div>
-        <DataTable :columns="myStudentCols" :data="data.students" storage-key="students:my-students" size="small" @row-click="openEvidence" row-class-name="row-clickable">
+        <AppTable :columns="myStudentCols" :data="data.students" storage-key="students:my-students"  @row-click="openEvidence" row-class-name="row-clickable" :show-density="true" :show-column-settings="true" :pagination="false">
           <template #col-name="{ row }"><span class="link">{{ row.name }}</span></template>
           <template #col-gpa="{ row }"><b class="tnum">{{ gpaText(row.gpa) }}</b></template>
           <template #col-failCount="{ row }"><span class="tnum" :style="{ color: row.failCount ? '#E11D48' : '#64748B' }">{{ row.failCount }}门</span></template>
@@ -100,7 +100,7 @@
             <span v-else class="sa-faint">—</span>
           </template>
           <template #col-openAlerts="{ row }"><span class="tnum" :style="{ color: row.openAlerts ? '#E11D48' : '#64748B' }">{{ row.openAlerts }}件</span></template>
-        </DataTable>
+        </AppTable>
       </div>
     </template>
     <StudentEvidenceDrawer
@@ -112,6 +112,7 @@
 </template>
 
 <script setup lang="ts">
+import ClassStudentsTable from './ClassStudentsTable.vue'
 import * as studentsApi from '@/api/teachingAnalysis/students'
 
 
@@ -119,7 +120,8 @@ import { reactive, ref, computed, onMounted } from 'vue'
 import { ArrowDown } from '@element-plus/icons-vue'
 import KpiCard from '@/components/KpiCard.vue'
 import KpiLabel from '@/components/KpiLabel.vue'
-import DataTable, { type DataTableColumn } from '@/components/DataTable.vue'
+import AppTable from '@/components/AppTable.vue'
+import type { AppTableColumn } from '@/types/table'
 import BusinessPageContext from '@/components/BusinessPageContext.vue'
 import StudentEvidenceDrawer from '@/components/StudentEvidenceDrawer.vue'
 import { authStore } from '@/store/auth'
@@ -172,20 +174,20 @@ function failRateSub(summary: any) {
 }
 
 // 导师视图「我的学生」表列定义（M6 DataTable）
-const myStudentCols: DataTableColumn[] = [
-  { key: 'name', label: '姓名', width: 120 },
+const myStudentCols: AppTableColumn[] = [
+  { key: 'name', label: '姓名', minWidth: 120 },
   { key: 'className', label: '行政班', minWidth: 150, tooltip: true },
-  { key: 'gpa', label: 'GPA', width: 90, align: 'right' },
-  { key: 'failCount', label: '本学期挂科', width: 110, align: 'right' },
+  { key: 'gpa', label: 'GPA', minWidth: 90, align: 'center' },
+  { key: 'failCount', label: '本学期挂科', minWidth: 110, align: 'center' },
   { key: 'creditRatio', label: '学分完成率', minWidth: 150 },
-  { key: 'openAlerts', label: '未解除预警', width: 100, align: 'right' },
+  { key: 'openAlerts', label: '未解除预警', minWidth: 100, align: 'center' },
 ]
-const classStudentCols: DataTableColumn[] = [
-  { key: 'name', label: '姓名', width: 120, fixed: 'left', region: 'identity', required: true },
-  { key: 'gpa', label: '本学期GPA', width: 105, align: 'right', required: true },
-  { key: 'failCount', label: '本学期未通过', width: 120, align: 'right', required: true },
-  { key: 'creditRatio', label: '学分完成率', width: 115, align: 'right' },
-  { key: 'openAlerts', label: '未解除预警', width: 110, align: 'right' },
+const classStudentCols: AppTableColumn[] = [
+  { key: 'name', label: '姓名', minWidth: 120, fixed: 'left', region: 'identity', required: true },
+  { key: 'gpa', label: '本学期GPA', minWidth: 105, align: 'center', required: true },
+  { key: 'failCount', label: '本学期未通过', minWidth: 120, align: 'center', required: true },
+  { key: 'creditRatio', label: '学分完成率', minWidth: 115, align: 'center' },
+  { key: 'openAlerts', label: '未解除预警', minWidth: 110, align: 'center' },
 ]
 
 function toggleClass(classId: string) {

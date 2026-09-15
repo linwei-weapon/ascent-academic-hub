@@ -37,12 +37,14 @@
       <el-col :span="12">
         <div class="sa-card">
           <div class="sa-card-title">本学期教学班明细 <span class="extra">展示 {{ data.currentCourses.length }}/{{ data.currentCourseTotal }} 条，最多100条</span></div>
-          <el-table v-if="data.currentCourses && data.currentCourses.length" :data="data.currentCourses" size="small" @row-click="goCourse" row-class-name="row-clickable">
-            <el-table-column prop="courseName" label="课程" width="140"><template #default="{row}"><span class="link">{{ row.courseName }}</span></template></el-table-column>
-            <el-table-column prop="className" label="教学班" min-width="130" />
-            <el-table-column prop="students" label="学生数" width="74" align="right" />
-            <el-table-column prop="hours" label="学时" width="64" align="right" />
-          </el-table>
+          <AppTable v-if="data.currentCourses && data.currentCourses.length" :data="data.currentCourses"  @row-click="goCourse" row-class-name="row-clickable" :columns="[]" storage-key="teaching-analysis:faculty:detail:1" :pagination="false">
+        <template #columns>
+            <el-table-column prop="courseName" label="课程" min-width="140" align="center" header-align="center"><template #default="{row}"><span class="link">{{ row.courseName }}</span></template></el-table-column>
+            <el-table-column prop="className" label="教学班" min-width="130" align="center" header-align="center"/>
+            <el-table-column prop="students" label="学生数" min-width="74" align="center" header-align="center"/>
+            <el-table-column prop="hours" label="学时" min-width="64" align="center" header-align="center"/>
+                  </template>
+      </AppTable>
           <div v-else class="sa-faint" style="font-size:12px">本学期暂无授课</div>
         </div>
       </el-col>
@@ -50,13 +52,15 @@
 
     <div class="sa-card">
       <div class="sa-card-title">近年授课历史</div>
-      <el-table v-if="data.teachingHistory && data.teachingHistory.length" :data="data.teachingHistory" size="small">
-        <el-table-column prop="semester" label="学期" width="130" />
-        <el-table-column prop="courseName" label="课程" min-width="150" />
-        <el-table-column prop="students" label="修读人数" width="90" align="right" />
-        <el-table-column prop="avgScore" label="平均分" width="84" align="right"><template #default="{row}"><b class="tnum">{{ row.avgScore }}</b></template></el-table-column>
-        <el-table-column prop="passRate" label="通过率" width="84" align="right"><template #default="{row}"><span class="tnum">{{ row.passRate }}</span></template></el-table-column>
-      </el-table>
+      <AppTable v-if="data.teachingHistory && data.teachingHistory.length" :data="data.teachingHistory" :columns="[]" storage-key="teaching-analysis:faculty:detail:2" :pagination="false">
+        <template #columns>
+        <el-table-column prop="semester" label="学期" min-width="130" align="center" header-align="center"/>
+        <el-table-column prop="courseName" label="课程" min-width="150" align="center" header-align="center"/>
+        <el-table-column prop="students" label="修读人数" min-width="90" align="center" header-align="center"/>
+        <el-table-column prop="avgScore" label="平均分" min-width="84" align="center" header-align="center"><template #default="{row}"><b class="tnum">{{ row.avgScore }}</b></template></el-table-column>
+        <el-table-column prop="passRate" label="通过率" min-width="84" align="center" header-align="center"><template #default="{row}"><span class="tnum">{{ row.passRate }}</span></template></el-table-column>
+              </template>
+      </AppTable>
       <div v-else class="sa-faint" style="font-size:12px">暂无授课历史</div>
     </div>
 
@@ -78,18 +82,21 @@
     <div v-if="v2Preference.loaded" class="sa-card" style="margin-top:16px">
       <div class="sa-card-title">V2 历史实际排课时间分布 <span class="extra">{{ v2Preference.semester }} · 非教师主动填报</span></div>
       <el-alert type="success" :closable="false" show-icon :title="v2Preference.scope" style="margin-bottom:12px" />
-      <el-table :data="preferenceRows" size="small" stripe>
-        <el-table-column prop="day" label="星期" width="100" />
-        <el-table-column prop="morning" label="上午排课次数" align="right" />
-        <el-table-column prop="afternoon" label="下午排课次数" align="right" />
-        <el-table-column prop="evening" label="晚间排课次数" align="right" />
-        <el-table-column prop="total" label="合计" align="right" />
-      </el-table>
+      <AppTable :data="preferenceRows"  stripe :columns="[]" storage-key="teaching-analysis:faculty:detail:3" :pagination="false">
+        <template #columns>
+        <el-table-column prop="day" label="星期" min-width="100" align="center" header-align="center"/>
+        <el-table-column prop="morning" label="上午排课次数" align="center" header-align="center"/>
+        <el-table-column prop="afternoon" label="下午排课次数" align="center" header-align="center"/>
+        <el-table-column prop="evening" label="晚间排课次数" align="center" header-align="center"/>
+        <el-table-column prop="total" label="合计" align="center" header-align="center"/>
+              </template>
+      </AppTable>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
+import AppTable from '@/components/AppTable.vue'
 import * as facultyApi from '@/api/teachingAnalysis/faculty'
 
 

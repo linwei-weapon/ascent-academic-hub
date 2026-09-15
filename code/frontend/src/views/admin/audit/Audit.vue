@@ -14,27 +14,33 @@
         </el-select>
         <el-button size="small" @click="load(page)">刷新</el-button>
       </div>
-      <el-table :data="rows" size="small" v-loading="loading">
-        <el-table-column prop="created_at" label="时间" width="190" />
-        <el-table-column prop="actor" label="操作人" width="130" />
-        <el-table-column label="操作" min-width="210"><template #default="{row}"><div>{{ actionLabel(row.action) }}</div><div class="sub-cell">{{ row.action }}</div></template></el-table-column>
-        <el-table-column label="对象" min-width="150"><template #default="{row}">{{ row.target_type || '—' }} · {{ row.target_id || '—' }}</template></el-table-column>
-        <el-table-column prop="result" label="结果" width="100"><template #default="{row}"><el-tag size="small" :type="row.result==='success'?'success':row.result==='failed'?'danger':'warning'">{{ row.result }}</el-tag></template></el-table-column>
-        <el-table-column prop="client_key" label="客户端" width="130" />
-        <el-table-column label="详情" min-width="220" show-overflow-tooltip><template #default="{row}">{{ detailText(row.detail) }}</template></el-table-column>
-      </el-table>
-      <el-pagination class="audit-pagination" background small
-        layout="total, prev, pager, next" :total="total" :page-size="pageSize"
-        :current-page="page" @current-change="load" />
+      <AppTable
+        :columns="auditColumns"
+        storage-key="system:audit"
+        :page="page"
+        :page-size="pageSize"
+        :total="total"
+        @page-change="load"
+        @page-size-change="changePageSize"
+        :data="rows"
+        :loading="loading"
+      >
+        <template #col-action="{row}"><div>{{ actionLabel(row.action) }}</div><div class="sub-cell">{{ row.action }}</div></template>
+        <template #col-target="{row}">{{ row.target_type || '—' }} · {{ row.target_id || '—' }}</template>
+        <template #col-result="{row}"><el-tag size="small" :type="row.result==='success'?'success':row.result==='failed'?'danger':'warning'">{{ row.result }}</el-tag></template>
+        <template #col-detail="{row}">{{ detailText(row.detail) }}</template>
+      </AppTable>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
+import AppTable from '@/components/AppTable.vue'
+import type { AppTableColumn } from '@/types/table'
 import { onMounted, ref } from 'vue'
 import * as auditApi from '@/api/admin/audit'
 const rows = ref<any[]>([]), total = ref(0), page = ref(1), loading = ref(false)
-const pageSize = 50
+const pageSize = ref(20)
 const action = ref('')
 const actions = ref<any[]>([])
 const labels:Record<string,string> = {
@@ -63,15 +69,33 @@ const detailText = (detail:any) => detail && Object.keys(detail).length ? JSON.s
 async function load(target=1) {
   loading.value = true
   try {
-    const qs = new URLSearchParams({page:String(target),page_size:String(pageSize)})
+    const qs = new URLSearchParams({page:String(target),page_size:String(pageSize.value)})
     if (action.value) qs.set('action', action.value)
     const data:any = await auditApi.listSecurityAudit(qs.toString())
     rows.value = data.list || []; total.value = data.total || 0; page.value = target
     actions.value = data.actions || []
   } finally { loading.value = false }
 }
+// 调整页长后从第一页查询，保留当前审计动作筛选。
+function changePageSize(value: number) {
+  if (value === pageSize.value) return
+  pageSize.value = value
+  load(1)
+}
+
 // 进入页面时沿用原初始化与路由参数恢复流程。
 onMounted(() => load(1))
+// 列定义只负责展示；单元格内容和业务操作沿用原页面。
+const auditColumns: AppTableColumn[] = [
+  { key: "created_at", label: "时间", minWidth: 190 },
+  { key: "actor", label: "操作人", minWidth: 130 },
+  { key: "action", label: "操作", minWidth: 210 },
+  { key: "target", label: "对象", minWidth: 150 },
+  { key: "result", label: "结果", minWidth: 100 },
+  { key: "client_key", label: "客户端", minWidth: 130 },
+  { key: "detail", label: "详情", minWidth: 220, tooltip: true },
+]
+
 </script>
 
 <style scoped lang="scss">
@@ -97,8 +121,4 @@ onMounted(() => load(1))
   width: 220px;
 }
 
-.audit-pagination {
-  margin-top: 12px;
-  justify-content: flex-end;
-}
 </style>

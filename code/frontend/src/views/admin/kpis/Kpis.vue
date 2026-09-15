@@ -61,13 +61,34 @@
           <div v-if="listLoading && rows.length" class="updating-bar">正在按新条件更新指标目录，当前结果暂时保留…</div>
           <div class="sa-card table-card" v-loading="listLoading && !!rows.length"
             element-loading-text="正在更新指标目录…">
-            <DataTable
-              :columns="columns" :data="rows" storage-key="system:metric-catalog"
-              :max-business-columns="7" :config-version="1" :page-size="pageSize"
-              size="small" stripe empty-text="当前条件下没有指标"
-              @update:page-size="changePageSize" @row-click="openDetail"
+            <AppTable
+              show-density
+              show-column-settings
+              :columns="columns"
+              :data="rows"
+              storage-key="system:metric-catalog"
+              :max-business-columns="7"
+              :config-version="1"
+              :page-size="pageSize"
+              stripe
+              empty-text="当前条件下没有指标"
+              @page-size-change="changePageSize"
+              @row-click="openDetail"
               row-class-name="metric-row"
+              :page="page"
+              :total="total"
+              :loading="listLoading"
+              @page-change="changePage"
             >
+              <!-- 口径说明放入表格上方工具栏，与右侧显示设置同排。 -->
+              <template #toolbar>
+                <el-alert
+                  title="候选指标表示尚待学校确认，不等于功能缺失。"
+                  type="info"
+                  :closable="false"
+                  show-icon
+                />
+              </template>
               <template #col-identity="{row}">
                 <div class="metric-identity"><b>{{ row.name }}</b><span>{{ row.metric_id }}</span></div>
               </template>
@@ -86,28 +107,37 @@
                 <span v-else class="sa-faint">尚未绑定</span>
               </template>
               <template #col-action><el-button link type="primary">核查口径</el-button></template>
-            </DataTable>
-            <div class="pager">
-              <span>共 {{ total }} 项；候选指标表示尚待学校确认，不等于功能缺失。</span>
-              <el-pagination v-model:current-page="page" :page-size="pageSize" :total="total"
-                layout="prev, pager, next" small @current-change="loadList" />
-            </div>
+            </AppTable>
           </div>
         </el-tab-pane>
 
         <el-tab-pane label="页面引用与一致性" name="pages">
           <el-alert title="只有建立了“指标定义—计算实现—使用页面”显式绑定的指标，才计为已验证；能显示数字不等于口径已经登记。" type="info" :closable="false" show-icon />
           <div class="sa-card table-card page-table" v-loading="pagesLoading">
-            <DataTable :columns="pageColumns" :data="pageRows" storage-key="system:metric-page-bindings"
-              :max-business-columns="5" :config-version="1" pagination :default-page-size="10"
-              size="small" stripe empty-text="尚无已登记的页面引用">
+            <AppTable
+              show-density
+              show-column-settings
+              :columns="pageColumns"
+              :data="pageTable.rows"
+              storage-key="system:metric-page-bindings"
+              :max-business-columns="5"
+              :config-version="1"
+              stripe
+              empty-text="尚无已登记的页面引用"
+              :page="pageTable.page"
+              :page-size="pageTable.pageSize"
+              :total="pageTable.total"
+              :loading="pagesLoading"
+              @page-change="pageTable.changePage"
+              @page-size-change="pageTable.changePageSize"
+            >
               <template #col-page_path="{row}"><code>{{ row.page_path }}</code></template>
               <template #col-status="{row}">
                 <el-tag size="small" effect="plain" :type="row.issue_count ? 'danger' : 'success'">
                   {{ row.issue_count ? `${row.issue_count} 项待核查` : '版本一致' }}
                 </el-tag>
               </template>
-            </DataTable>
+            </AppTable>
           </div>
         </el-tab-pane>
 
@@ -180,12 +210,15 @@
           </el-tab-pane>
           <el-tab-pane label="变更记录">
             <el-alert :title="detail.governance?.changeRule" type="info" :closable="false" show-icon />
-            <el-table :data="detail.displayHistory || []" size="small" class="metric-history-table">
-              <el-table-column prop="changed_at" label="时间" width="160" />
-              <el-table-column prop="changed_by" label="操作人" width="100" />
-              <el-table-column prop="change_reason" label="展示配置变更原因" min-width="220" />
+            <AppTable
+              :columns="displayHistoryColumns"
+              storage-key="system:metric-display-history"
+              :pagination="false"
+              :data="detail.displayHistory || []"
+              class="metric-history-table"
+            >
               <template #empty><el-empty description="暂无展示配置变更记录" :image-size="70" /></template>
-            </el-table>
+            </AppTable>
           </el-tab-pane>
         </el-tabs>
       </template>
@@ -194,10 +227,12 @@
 </template>
 
 <script setup lang="ts">
+import { useTablePagination } from '@/composables/useTablePagination'
+import AppTable from '@/components/AppTable.vue'
+import type { AppTableColumn } from '@/types/table'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import DataTable, { type DataTableColumn } from '@/components/DataTable.vue'
 import * as kpisApi from '@/api/admin/kpis'
 
 const router = useRouter()
@@ -228,26 +263,26 @@ const cards = computed(() => [
   {key:'retired',label:'已停用或迁移',value:summary.retired || 0,help:'不再进入正式页面，但保留历史版本和迁移证据。',action:'查看退出原因'},
 ])
 
-const columns:DataTableColumn[] = [
+const columns:AppTableColumn[] = [
   {key:'identity',label:'指标',required:true,region:'identity',fixed:'left',minWidth:210},
   {key:'domain',label:'业务域',minWidth:150},
-  {key:'definition_status_label',label:'定义状态',width:125},
+  {key:'definition_status_label',label:'定义状态',minWidth:125},
   {key:'implementation_status_label',label:'实现状态',minWidth:145},
   {key:'formula',label:'计算逻辑摘要',minWidth:280,tooltip:true},
   {key:'management_value',label:'管理价值',minWidth:240,tooltip:true,defaultVisible:false},
   {key:'boundary',label:'边界与待确认',minWidth:240,tooltip:true,defaultVisible:false},
   {key:'data_source',label:'数据来源',minWidth:180,tooltip:true},
   {key:'grain',label:'统计粒度',minWidth:140,defaultVisible:false},
-  {key:'page_count',label:'页面引用',width:120},
-  {key:'version',label:'版本',width:85},
+  {key:'page_count',label:'页面引用',minWidth:120},
+  {key:'version',label:'版本',minWidth:85},
   {key:'technical_kpi_id',label:'技术标识',minWidth:170,tooltip:true,defaultVisible:false},
   {key:'action',label:'操作',required:true,region:'action',fixed:'right',width:110},
 ]
-const pageColumns:DataTableColumn[] = [
+const pageColumns:AppTableColumn[] = [
   {key:'page_path',label:'使用页面',required:true,region:'identity',fixed:'left',minWidth:260},
-  {key:'metric_count',label:'已绑定指标',width:130},
-  {key:'consistent_count',label:'版本一致',width:120},
-  {key:'issue_count',label:'待核查',width:110},
+  {key:'metric_count',label:'已绑定指标',minWidth:130},
+  {key:'consistent_count',label:'版本一致',minWidth:120},
+  {key:'issue_count',label:'待核查',minWidth:110},
   {key:'updated_at',label:'最近核验',minWidth:165},
   {key:'status',label:'核查结果',required:true,region:'action',fixed:'right',width:140},
 ]
@@ -315,6 +350,13 @@ function applyCard(key:string) {
   page.value = 1
   loadList()
 }
+// 公共分页事件只触发一次查询，沿用当前指标筛选。
+function changePage(value: number) {
+  if (value === page.value || listLoading.value) return
+  page.value = value
+  loadList()
+}
+
 // 切换指标页长后重置页码并重新读取。
 function changePageSize(value:number) {
   if (value === pageSize.value) return
@@ -371,6 +413,15 @@ async function exportCatalog() {
 
 // 进入页面时沿用原初始化与路由参数恢复流程。
 onMounted(reloadAll)
+// 列定义只负责展示；单元格内容和业务操作沿用原页面。
+const displayHistoryColumns: AppTableColumn[] = [
+  { key: "changed_at", label: "时间", minWidth: 160 },
+  { key: "changed_by", label: "操作人", minWidth: 100 },
+  { key: "change_reason", label: "展示配置变更原因", minWidth: 220 },
+]
+
+// 各标签页与抽屉独立持有分页状态，保留全量接口和原业务筛选。
+const pageTable = useTablePagination(() => pageRows.value)
 </script>
 
 <style scoped lang="scss">
@@ -491,24 +542,20 @@ onMounted(reloadAll)
   flex-direction: column;
   gap: 3px;
 
-  b {
-    color: #0f172a;
+  // 名称与编号共用原详情入口，以主题链接色标识可点击内容。
+  b, span {
+    color: var(--sa-primary);
   }
 
   span {
-    color: var(--sa-faint);
     font-size: 11px;
   }
-}
 
-.pager {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-  margin-top: 12px;
-  color: var(--sa-muted);
-  font-size: 12px;
+  &:hover {
+    b, span {
+      text-decoration: underline;
+    }
+  }
 }
 
 :deep(.metric-row) {
@@ -669,7 +716,7 @@ onMounted(reloadAll)
     grid-template-columns: 1fr;
   }
 
-  .pager,.page-head {
+  .page-head {
     align-items: stretch;
     flex-direction: column;
   }
