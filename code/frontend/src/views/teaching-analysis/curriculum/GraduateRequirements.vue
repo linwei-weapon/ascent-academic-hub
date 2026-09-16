@@ -1,0 +1,313 @@
+<!-- 培养质量分析：GraduateRequirements 页面或专用组件，保留原业务与权限行为。 -->
+<template>
+  <div>
+    <template v-if="!embedded">
+      <el-breadcrumb separator="›" style="margin-bottom:12px">
+        <el-breadcrumb-item :to="{path:'/admin/curriculum'}">培养方案分析</el-breadcrumb-item>
+        <el-breadcrumb-item>毕业要求达成度</el-breadcrumb-item>
+      </el-breadcrumb>
+
+      <div class="sa-head-row">
+        <div>
+          <h2 class="sa-page-title">毕业要求达成度</h2>
+          <p class="sa-page-sub">
+            培养方案毕业要求 × 课程模块支撑矩阵，基于课程目标达成度加权计算 ·
+            达成标准 ≥65%
+          </p>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <span class="sa-faint" style="font-size:12px">专业：</span>
+          <el-select v-model="major" size="small" style="width:160px" @change="load">
+            <el-option v-for="m in majors" :key="m.id" :label="m.name" :value="m.id" />
+          </el-select>
+        </div>
+      </div>
+    </template>
+
+    <template v-if="data.requirements.length">
+      <el-alert type="warning" :closable="false" show-icon :title="data.boundaryNote" style="margin-bottom:14px" />
+      <div class="sa-kpi-row" style="margin-bottom:16px">
+        <KpiCard label="毕业要求" :value="data.requirements.length" sub="方案原文" tone="teal" hint="当前专业培养方案中明确列出的毕业要求条数" />
+        <KpiCard label="独立指标点" :value="data.indicatorCount" sub="尚未提供" tone="amber" hint="原始材料中独立编号的毕业要求指标点" />
+        <KpiCard label="课程支撑关系" :value="data.courseMappingCount" sub="尚未提供" tone="amber" hint="课程对毕业要求或指标点的正式支撑矩阵记录数" />
+      </div>
+      <div class="sa-card">
+        <div class="sa-card-title">毕业要求原文 <span class="extra">不同专业条数可以不同，不套用通用12条模板</span></div>
+        <div v-for="row in data.requirements" :key="row.requirementId" class="real-requirement">
+          <el-tag size="small">{{ row.requirementNo }}</el-tag>
+          <div><b>{{ row.title }}</b><p>{{ row.text }}</p><small>来源：{{ row.sourceFile }}</small></div>
+        </div>
+      </div>
+      <div class="sa-card" style="margin-top:14px">
+        <div class="sa-card-title">达成度计算条件</div>
+        <p class="evidence-note">只有取得“指标点—支撑课程—评价环节—目标值—实际评价结果”的完整证据链后，系统才展示达成度和雷达图。当前不再用课程平均分或通过率代替毕业要求达成度。</p>
+      </div>
+    </template>
+
+    <template v-if="false">
+      <!-- 总达成度 -->
+      <div class="sa-kpi-row" style="margin-bottom:16px">
+        <KpiCard
+          label="毕业要求综合达成度"
+          :value="data.overallAchievement"
+          :sub="data.overallStatus"
+          :tone="data.overallAchievement >= 65 ? 'teal' : 'danger'"
+          hint="12 条毕业要求按学分加权平均"
+        />
+      </div>
+
+      <!-- 雷达图 -->
+      <el-row :gutter="16" style="margin-bottom:16px">
+        <el-col :span="10">
+          <div class="sa-card">
+            <div class="sa-card-title">毕业要求达成度雷达图</div>
+            <EChart v-if="data.requirements.length" :option="radarOption" :height="360" />
+          </div>
+        </el-col>
+        <el-col :span="14">
+          <div class="sa-card">
+            <div class="sa-card-title">达成度明细</div>
+            <AppTable :columns="requirementCols" :data="data.requirements" storage-key="curriculum:graduate-requirements"  max-height="360" :show-density="true" :show-column-settings="true" :pagination="false">
+              <template #col-achievement="{row}">
+                <div style="display:flex;align-items:center;gap:8px">
+                  <el-progress
+                    :percentage="Math.min(row.achievement, 100)"
+                    :stroke-width="8"
+                    :color="row.achievement >= 65 ? '#0D9488' : '#E11D48'"
+                    style="flex:1"
+                  />
+                  <span class="tnum" :style="{color: row.achievement >= 65 ? '#0D9488' : '#E11D48', fontWeight:700, minWidth:'40px', textAlign:'right'}">{{ row.achievement }}%</span>
+                </div>
+              </template>
+              <template #col-status="{row}">
+                <el-tag :type="row.status === '达标' ? 'success' : 'danger'" size="small">{{ row.status }}</el-tag>
+              </template>
+            </AppTable>
+          </div>
+        </el-col>
+      </el-row>
+
+      <!-- 支撑矩阵表 -->
+      <div class="sa-card">
+        <div class="sa-card-title">课程模块 → 毕业要求支撑矩阵 <span class="extra">数字为支撑权重（0-3）</span></div>
+        <div style="overflow-x:auto">
+          <table class="matrix-table">
+            <thead>
+              <tr>
+                <th class="matrix-hd module-col">课程模块</th>
+                <th v-for="(req, i) in reqNames" :key="i" class="matrix-hd req-col">{{ i + 1 }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="mod in planModules" :key="mod">
+                <td class="matrix-cell module-col">{{ mod }}</td>
+                <td v-for="(req, i) in reqNames" :key="i" class="matrix-cell req-col" :class="weightClass(getWeight(mod, i))">
+                  {{ getWeight(mod, i) || '' }}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="sa-faint" style="font-size:11px;margin-top:8px">
+          ※ 12 条毕业要求编号：1-工程知识 2-问题分析 3-设计/开发解决方案 4-研究 5-使用现代工具
+          6-工程与社会 7-环境和可持续发展 8-职业规范 9-个人和团队 10-沟通 11-项目管理 12-终身学习
+        </div>
+      </div>
+    </template>
+
+    <div v-else class="sa-card" style="margin-top:14px">
+      <el-empty :image-size="110" description="暂无毕业要求达成度数据" />
+    </div>
+  </div>
+</template>
+
+<script setup lang="ts">
+import * as curriculumApi from '@/api/teachingAnalysis/curriculum'
+
+
+import { ref, reactive, computed, onMounted, watch } from 'vue'
+import KpiCard from '@/components/KpiCard.vue'
+import EChart from '@/components/EChart.vue'
+import AppTable from '@/components/AppTable.vue'
+import type { AppTableColumn } from '@/types/table'
+
+// 达成度明细表列定义（M6 DataTable；当前位于 v-if="false" 的停用模板中，保留迁移一致性）
+const requirementCols: AppTableColumn[] = [
+  { key: 'index', label: '#', minWidth: 44, align: 'center' },
+  { key: 'name', label: '毕业要求', minWidth: 160 },
+  { key: 'achievement', label: '达成度', minWidth: 200 },
+  { key: 'status', label: '状态', minWidth: 70, align: 'center' },
+]
+
+const props = defineProps<{ majorId?: string }>()
+const embedded = computed(() => !!props.majorId)
+
+const majors = [
+  { id: 'me_safety', name: '安全工程' },
+  { id: 'pe_ocean', name: '海洋油气工程' },
+]
+const major = ref(props.majorId || 'me_safety')
+
+const reqNames = computed(() => data.requirementNames || [])
+const weightMatrix = computed<Record<string, number[]>>(() => data.supportMatrix || {})
+const planModules = computed(() => data.planModules || [])
+
+function getWeight(mod: string, idx: number): number {
+  return weightMatrix.value[mod]?.[idx] || 0
+}
+
+function weightClass(w: number): string {
+  if (w >= 3) return 'w-high'
+  if (w >= 2) return 'w-mid'
+  if (w >= 1) return 'w-low'
+  return 'w-none'
+}
+
+const data = reactive<{ requirements: any[]; overallAchievement: number; overallStatus: string;
+  indicatorCount:number; courseMappingCount:number; boundaryNote:string;
+  requirementNames: string[]; supportMatrix: Record<string, number[]>; planModules: string[] }>({
+  requirements: [], overallAchievement: 0, overallStatus: '', indicatorCount:0, courseMappingCount:0, boundaryNote:'', requirementNames: [], supportMatrix: {}, planModules: [],
+})
+
+// 按当前页面上下文读取数据，沿用原加载状态和异常处理。
+async function load() {
+  try {
+    const d = await curriculumApi.getGraduateRequirementPlan(major.value)
+    if (d) Object.assign(data, d.evidence, { requirements:d.requirements || [] })
+    else data.requirements = []
+  } catch {
+    data.requirements = []
+  }
+}
+
+// 雷达图指标最大值100
+const radarOption = computed(() => {
+  const items = data.requirements || []
+  return {
+    radar: {
+      center: ['50%', '54%'],
+      radius: '64%',
+      indicator: items.map((r: any) => ({ name: r.index + '.' + r.name, max: 100 })),
+      axisName: { color: '#475569', fontSize: 11, borderRadius: 3, padding: [3, 5] as any },
+      splitArea: { areaStyle: { color: ['#fff', '#f8fafc'] } },
+      splitLine: { lineStyle: { color: '#E2E8F0' } },
+    },
+    series: [{
+      type: 'radar',
+      symbol: 'circle',
+      symbolSize: 5,
+      lineStyle: { width: 2, color: '#4F46E5' },
+      areaStyle: { color: 'rgba(79,70,229,0.12)' },
+      itemStyle: { color: '#4F46E5' },
+      data: [{
+        value: items.map((r: any) => r.achievement),
+        name: '达成度',
+      }],
+      markLine: {
+        silent: true, symbol: 'none',
+        data: [{ name: '达标线', value: 65 }],
+        lineStyle: { color: '#D97706', type: 'dashed' },
+        label: { formatter: '65%', color: '#D97706', fontSize: 10 },
+      },
+    }],
+  }
+})
+
+// 进入页面时执行原初始化流程，恢复路由条件与可用选项。
+onMounted(load)
+// 按既有监听条件响应路由、筛选或身份变化，保留原重载与清理时机。
+watch(() => props.majorId, value => { if (value) { major.value = value; load() } })
+</script>
+
+<style scoped lang="scss">
+// 按页面区域、后代元素和状态组织，保留原选择器顺序与作用范围。
+.sa-head-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 14px;
+}
+
+.matrix-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.matrix-hd {
+  padding: 6px 4px;
+  text-align: center;
+  color: #64748B;
+  font-weight: 600;
+  background: #f8fafc;
+  border: 1px solid #E2E8F0;
+}
+
+.matrix-cell {
+  padding: 4px;
+  text-align: center;
+  border: 1px solid #E2E8F0;
+  font-weight: 600;
+}
+
+.module-col {
+  min-width: 130px;
+  text-align: left;
+  padding-left: 8px;
+  color: #334155;
+}
+
+.req-col {
+  min-width: 28px;
+}
+
+.w-high {
+  background: #4F46E5;
+  color: #fff;
+}
+
+.w-mid {
+  background: #A5B4FC;
+  color: #1E293B;
+}
+
+.w-low {
+  background: #EEF2FF;
+  color: #475569;
+}
+
+.w-none {
+  background: #fff;
+  color: #CBD5E1;
+}
+
+.real-requirement {
+  display: flex;
+  gap: 10px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--sa-border);
+  &:last-child {
+    border-bottom: 0;
+  }
+  b {
+    color: #334155;
+    font-size: 13px;
+  }
+  p {
+    color: #475569;
+    font-size: 12px;
+    line-height: 1.7;
+    margin: 6px 0;
+  }
+  small {
+    color: #94A3B8;
+  }
+}
+
+.evidence-note {
+  margin: 0;
+  color: #475569;
+  font-size: 13px;
+  line-height: 1.8;
+}
+</style>

@@ -84,16 +84,12 @@
           <span>历年学期明细</span>
           <span class="extra">{{ tableRows.length }} 个学期</span>
         </div>
-        <DataTable
+        <AppTable
           :columns="tableColumns"
-          :data="tableRows"
+
           :storage-key="`dashboard:metric-history:${metricId}`"
           :max-business-columns="5"
-          :config-version="2"
-          :pagination="true"
-          :page-size="10"
-          size="small"
-        />
+          :config-version="2" :show-density="true" :show-column-settings="true" :data="periodPagination.rows" :pagination="true" :page="periodPagination.page" :page-size="periodPagination.pageSize" :total="periodPagination.total" @page-change="periodPagination.changePage" @page-size-change="periodPagination.changePageSize"/>
       </section>
 
       <el-alert type="info" :closable="false" show-icon title="数据来源与使用边界"
@@ -103,9 +99,11 @@
 </template>
 
 <script setup lang="ts">
+import { useTablePagination } from '@/composables/useTablePagination'
 import { computed, nextTick, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import DataTable, { type DataTableColumn } from '@/components/DataTable.vue'
+import AppTable from '@/components/AppTable.vue'
+import type { AppTableColumn } from '@/types/table'
 import EChart from '@/components/EChart.vue'
 import { http } from '@/utils/http'
 import { DASHBOARD_HISTORY_METRICS } from '@/utils/dashboardHistory'
@@ -167,18 +165,18 @@ const boundaryText = computed(() => [
   data.value.boundary || '',
 ].filter(Boolean).join('；'))
 
-const tableColumns = computed<DataTableColumn[]>(() => {
-  const base: DataTableColumn[] = [
+const tableColumns = computed<AppTableColumn[]>(() => {
+  const base: AppTableColumn[] = [
     { key: 'semesterLabel', label: '学年学期', minWidth: 180, fixed: 'left', region: 'identity', required: true },
-    { key: 'valueText', label: data.value.metric?.label || metricConfig.value?.label || '指标值', width: 140, align: 'right', required: true },
-    { key: 'changeText', label: '较上学期', width: 120, align: 'right' },
+    { key: 'valueText', label: data.value.metric?.label || metricConfig.value?.label || '指标值', minWidth: 140, align: 'center', required: true },
+    { key: 'changeText', label: '较上学期', minWidth: 120, align: 'center' },
   ]
   if (data.value.metric?.chart === 'gpa' || metricConfig.value?.chart === 'gpa') {
-    base.push({ key: 'numerator', label: '有 GPA 学生数', width: 135, align: 'right' })
+    base.push({ key: 'numerator', label: '有 GPA 学生数', minWidth: 135, align: 'center' })
   } else {
     base.push(
-      { key: 'numerator', label: data.value.metric?.numeratorLabel || '分子', width: 140, align: 'right' },
-      { key: 'denominator', label: data.value.metric?.denominatorLabel || '分母', width: 140, align: 'right' },
+      { key: 'numerator', label: data.value.metric?.numeratorLabel || '分子', minWidth: 140, align: 'center' },
+      { key: 'denominator', label: data.value.metric?.denominatorLabel || '分母', minWidth: 140, align: 'center' },
     )
   }
   return base
@@ -342,6 +340,9 @@ watch(
   },
   { immediate: true },
 )
+
+// 全量结果在页面分页；不改变查询、汇总和证据数据。
+const periodPagination = useTablePagination(() => tableRows.value, 10)
 </script>
 
 <style scoped>

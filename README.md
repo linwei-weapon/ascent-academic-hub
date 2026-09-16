@@ -2,6 +2,8 @@
 
 An internal data aggregation and analytics dashboard.
 
+Architecture renovation starts with [project architecture and documentation conventions](文档/项目架构与文档管理约定.md) and [AGENTS.md](AGENTS.md). Step ARCH-01 establishes the conventions only; API migration and runtime verification are pending.
+
 ## Stack
 
 - **Frontend**: Vue 3 + TypeScript + Vite + Element Plus + ECharts + Pinia
@@ -44,7 +46,7 @@ On Windows, running `scripts\start.bat` before setup is complete explains why de
 │   ├── frontend/         # Vue 3 SPA
 │   └── scripts/          # Startup scripts
 ├── datasource/           # Source databases
-└── docs/                 # Documentation
+└── 文档/                 # Documentation
 ```
 
 ## Notes

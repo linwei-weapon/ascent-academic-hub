@@ -93,8 +93,8 @@ async function download(path: string): Promise<void> {
 export const http = {
   get: <T = any>(p: string) => request<T>(p),
   getSilent: <T = any>(p: string) => request<T>(p, {}, true),
-  post: <T = any>(p: string, data?: unknown) =>
-    request<T>(p, { method: 'POST', body: JSON.stringify(data ?? {}) }),
+  post: <T = any>(p: string, data?: unknown, opts: Pick<RequestInit, 'signal'> = {}) =>
+    request<T>(p, { ...opts, method: 'POST', body: JSON.stringify(data ?? {}) }),
   put: <T = any>(p: string, data?: unknown) =>
     request<T>(p, { method: 'PUT', body: JSON.stringify(data ?? {}) }),
   del: <T = any>(p: string) => request<T>(p, { method: 'DELETE' }),

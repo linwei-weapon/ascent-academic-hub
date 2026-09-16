@@ -1,5 +1,7 @@
 import sqlite3
+import tempfile
 import unittest
+from unittest.mock import patch
 
 from backend.api.routers import v2
 from backend.api.routers.v2 import early_setback_options, early_setback_topic
@@ -55,6 +57,12 @@ def make_conn():
 class EarlySetbackTopicTest(unittest.TestCase):
     def setUp(self):
         v2._QUERY_CACHE.clear()
+        # 查询使用内存夹具；缓存时间戳也隔离，避免依赖开发者本地分析库。
+        cache_file = tempfile.NamedTemporaryFile(suffix=".sqlite")
+        self.addCleanup(cache_file.close)
+        cache_path = patch.object(v2.settings, "V2_DB_PATH", cache_file.name)
+        cache_path.start()
+        self.addCleanup(cache_path.stop)
         self.conn = make_conn()
         self.user = {"role_id": "dean", "username": "dean"}
 

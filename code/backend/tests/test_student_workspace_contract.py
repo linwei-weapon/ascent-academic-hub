@@ -10,11 +10,11 @@ class StudentWorkspaceContractTest(unittest.TestCase):
         return (ROOT / relative).read_text(encoding="utf-8")
 
     def test_canonical_route_uses_role_aware_workspace(self):
-        router = self.read("frontend/src/router/index.ts")
-        workspace = self.read("frontend/src/views/admin/students/Workspace.vue")
+        router = self.read("frontend/src/router/modules/teachingAnalysis.ts")
+        workspace = self.read("frontend/src/views/teaching-analysis/students/Workspace.vue")
 
         self.assertIn(
-            "students/analysis', component: () => import('@/views/admin/students/Workspace.vue')",
+            "students/analysis', component: () => import('@/views/teaching-analysis/students/Workspace.vue')",
             router,
         )
         self.assertIn("path: 'students/my', redirect:", router)
@@ -42,8 +42,8 @@ class StudentWorkspaceContractTest(unittest.TestCase):
         self.assertNotIn('("/admin/students/my",', target_section)
 
     def test_relationship_workspace_returns_to_canonical_entry(self):
-        my_scope = self.read("frontend/src/views/admin/students/MyScope.vue")
-        analysis = self.read("frontend/src/views/admin/students/Analysis.vue")
+        my_scope = self.read("frontend/src/views/teaching-analysis/students/MyScope.vue")
+        analysis = self.read("frontend/src/views/teaching-analysis/students/Analysis.vue")
         drawer = self.read("frontend/src/components/StudentEvidenceDrawer.vue")
 
         self.assertIn("'我的学生学业关注'", my_scope)
@@ -55,7 +55,7 @@ class StudentWorkspaceContractTest(unittest.TestCase):
 
     def test_management_workspace_uses_explainable_growth_contract(self):
         analysis = self.read(
-            "frontend/src/views/admin/students/Analysis.vue"
+            "frontend/src/views/teaching-analysis/students/Analysis.vue"
         )
         router = self.read("backend/api/routers/students.py")
         growth = self.read("backend/api/student_growth.py")
@@ -83,7 +83,7 @@ class StudentWorkspaceContractTest(unittest.TestCase):
 
     def test_growth_filters_cascade_and_comparable_board_drills_down(self):
         analysis = self.read(
-            "frontend/src/views/admin/students/Analysis.vue"
+            "frontend/src/views/teaching-analysis/students/Analysis.vue"
         )
 
         self.assertNotIn('v-model="draft.grade"', analysis)
@@ -165,7 +165,7 @@ class StudentWorkspaceContractTest(unittest.TestCase):
 
     def test_growth_organization_comparison_follows_query_level(self):
         analysis = self.read(
-            "frontend/src/views/admin/students/Analysis.vue"
+            "frontend/src/views/teaching-analysis/students/Analysis.vue"
         )
 
         self.assertNotIn("管理关注分组", analysis)
@@ -214,7 +214,7 @@ class StudentWorkspaceContractTest(unittest.TestCase):
 
     def test_growth_evidence_list_columns_match_copy_contract(self):
         analysis = self.read(
-            "frontend/src/views/admin/students/Analysis.vue"
+            "frontend/src/views/teaching-analysis/students/Analysis.vue"
         )
         student_columns = analysis.split(
             "const studentCols", 1
@@ -237,9 +237,9 @@ class StudentWorkspaceContractTest(unittest.TestCase):
     def test_student_evidence_drawer_is_shared_by_all_student_workspaces(self):
         drawer = self.read("frontend/src/components/StudentEvidenceDrawer.vue")
         for relative in (
-            "frontend/src/views/admin/students/Analysis.vue",
-            "frontend/src/views/admin/students/List.vue",
-            "frontend/src/views/admin/students/MyScope.vue",
+            "frontend/src/views/teaching-analysis/students/Analysis.vue",
+            "frontend/src/views/teaching-analysis/students/List.vue",
+            "frontend/src/views/teaching-analysis/students/MyScope.vue",
         ):
             page = self.read(relative)
             self.assertIn("<StudentEvidenceDrawer", page)
@@ -269,7 +269,7 @@ class StudentWorkspaceContractTest(unittest.TestCase):
         self.assertNotIn("evidenceDescription", drawer)
 
     def test_student_profile_failure_history_shows_pass_semester(self):
-        detail = self.read("frontend/src/views/admin/student/Detail.vue")
+        detail = self.read("frontend/src/views/teaching-analysis/students/Detail.vue")
         failure_history = detail.split("历史未通过课程", 1)[1].split(
             "成绩明细", 1
         )[0]
@@ -283,13 +283,13 @@ class StudentWorkspaceContractTest(unittest.TestCase):
         )
 
     def test_student_profile_uses_business_growth_heading(self):
-        detail = self.read("frontend/src/views/admin/student/Detail.vue")
+        detail = self.read("frontend/src/views/teaching-analysis/students/Detail.vue")
 
         self.assertIn("学业成长指标", detail)
         self.assertNotIn(">V2 成长指标 ", detail)
 
     def test_student_profile_uses_compact_academic_review_copy(self):
-        detail = self.read("frontend/src/views/admin/student/Detail.vue")
+        detail = self.read("frontend/src/views/teaching-analysis/students/Detail.vue")
 
         self.assertIn(">学业研判</el-button>", detail)
         self.assertIn('title="学业研判"', detail)
@@ -306,7 +306,7 @@ class StudentWorkspaceContractTest(unittest.TestCase):
         self.assertIn("data.enrollOn = `${growth.student.entry_grade}年`", detail)
 
     def test_student_profile_academic_review_hides_auxiliary_copy_and_shows_all_evidence(self):
-        detail = self.read("frontend/src/views/admin/student/Detail.vue")
+        detail = self.read("frontend/src/views/teaching-analysis/students/Detail.vue")
         drawer = detail.split("<AIInsightDrawer", 1)[1].split("/>", 1)[0]
 
         for prop in (
@@ -335,8 +335,8 @@ class StudentWorkspaceContractTest(unittest.TestCase):
         self.assertIn('aria-label="查看研判依据"', shared_drawer)
 
     def test_growth_and_legacy_lists_restore_url_context(self):
-        analysis = self.read("frontend/src/views/admin/students/Analysis.vue")
-        legacy_list = self.read("frontend/src/views/admin/students/List.vue")
+        analysis = self.read("frontend/src/views/teaching-analysis/students/Analysis.vue")
+        legacy_list = self.read("frontend/src/views/teaching-analysis/students/List.vue")
         drawer = self.read("frontend/src/components/StudentEvidenceDrawer.vue")
 
         for token in (
@@ -359,9 +359,9 @@ class StudentWorkspaceContractTest(unittest.TestCase):
         self.assertIn("withScrollPosition(", drawer)
 
     def test_student_workspaces_have_local_retry_and_paginated_class_rows(self):
-        analysis = self.read("frontend/src/views/admin/students/Analysis.vue")
-        legacy_list = self.read("frontend/src/views/admin/students/List.vue")
-        my_scope = self.read("frontend/src/views/admin/students/MyScope.vue")
+        analysis = self.read("frontend/src/views/teaching-analysis/students/Analysis.vue")
+        legacy_list = self.read("frontend/src/views/teaching-analysis/students/List.vue")
+        my_scope = self.read("frontend/src/views/teaching-analysis/students/MyScope.vue")
 
         self.assertIn("重新加载名单", analysis)
         self.assertIn("重新加载组织比较", analysis)
@@ -370,8 +370,10 @@ class StudentWorkspaceContractTest(unittest.TestCase):
         self.assertIn("重新加载</el-button>", legacy_list)
         self.assertIn("重新加载</el-button>", my_scope)
         self.assertIn('storage-key="students:my-class-students"', my_scope)
-        self.assertIn(':pagination="true"', my_scope)
-        self.assertIn(':default-page-size="10"', my_scope)
+        class_table = self.read("frontend/src/views/teaching-analysis/students/ClassStudentsTable.vue")
+        self.assertIn("<ClassStudentsTable", my_scope)
+        self.assertIn(':page="pagination.page" :page-size="pagination.pageSize" :total="pagination.total"', class_table)
+        self.assertIn("useTablePagination(() => props.data, 10)", class_table)
         self.assertIn(":max-business-columns=\"4\"", my_scope)
         self.assertNotIn("<el-table :data=\"c.students\"", my_scope)
 

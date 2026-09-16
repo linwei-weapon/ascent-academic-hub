@@ -68,14 +68,12 @@
                   <p>GPA和未通过课程均来自同一学期的有效成绩记录。</p>
                 </div>
               </div>
-              <DataTable
+              <AppTable
                 :columns="semesterColumns"
                 :data="semesterRows"
                 storage-key="student-evidence:semesters"
                 :max-business-columns="5"
-                :config-version="1"
-                size="small"
-              />
+                :config-version="1" :show-density="true" :show-column-settings="true" :pagination="false"/>
               <el-empty v-if="!semesterRows.length" description="暂无可比较的学期成绩证据" :image-size="64" />
             </section>
 
@@ -122,22 +120,20 @@
               title="状态按课程最新有效修读结果判断"
               description="“历史已解决”只作为成长轨迹证据，不继续计入当前未解决风险；“重复未解决”是当前未解决课程的高优先子集。"
             />
-            <DataTable
+            <AppTable
               :key="failureView"
               :columns="failureColumns"
               :data="visibleFailures"
               :storage-key="`student-evidence:failures:${failureView}`"
               :max-business-columns="failureView === 'resolved' ? 6 : 5"
-              :config-version="2"
-              size="small"
-            >
+              :config-version="2" :show-density="true" :show-column-settings="true" :pagination="false">
               <template #col-status="{ row }">
                 <el-tag size="small" :type="row.repeatedUnresolved ? 'danger' : row.status === '历史已解决' ? 'success' : 'warning'">
                   {{ row.repeatedUnresolved ? '重复未解决' : row.status }}
                 </el-tag>
               </template>
               <template #col-semesters="{ row }">{{ (row.semesters || []).join('、') }}</template>
-            </DataTable>
+            </AppTable>
             <el-empty v-if="!visibleFailures.length" :description="failureEmptyText" :image-size="64" />
           </el-tab-pane>
 
@@ -147,18 +143,16 @@
               title="预警状态与人工核查状态分别记录"
               description="当前规则不再命中，不会删除历史预警；已有核查记录，也不代表风险信号已经消失。"
             />
-            <DataTable
+            <AppTable
               :columns="alertColumns"
               :data="alertHistory"
               storage-key="student-evidence:alerts"
               :max-business-columns="5"
-              :config-version="1"
-              size="small"
-            >
+              :config-version="1" :show-density="true" :show-column-settings="true" :pagination="false">
               <template #col-active="{ row }">
                 <el-tag size="small" :type="row.active ? 'danger' : 'info'">{{ row.active ? '当前有效' : '历史记录' }}</el-tag>
               </template>
-            </DataTable>
+            </AppTable>
             <el-empty v-if="!alertHistory.length" description="暂无预警记录" :image-size="64" />
 
             <div v-if="interventions.length" class="intervention-list">
@@ -185,7 +179,8 @@
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { http } from '@/utils/http'
-import DataTable, { type DataTableColumn } from '@/components/DataTable.vue'
+import AppTable from '@/components/AppTable.vue'
+import type { AppTableColumn } from '@/types/table'
 import KpiCard from '@/components/KpiCard.vue'
 import { withScrollPosition } from '@/utils/dashboardDrill'
 
@@ -213,38 +208,38 @@ const activeTab = ref('summary')
 const failureView = ref<'current' | 'repeated' | 'resolved'>('current')
 let requestSequence = 0
 
-const semesterColumns: DataTableColumn[] = [
-  { key: 'semester', label: '学期', width: 150, fixed: 'left', region: 'identity', required: true },
-  { key: 'gpa', label: '学分加权GPA', width: 120, align: 'right', required: true },
-  { key: 'gpaDeltaText', label: '较前一学期', width: 110, align: 'right' },
-  { key: 'failCount', label: '未通过课程', width: 110, align: 'right', required: true },
-  { key: 'failDeltaText', label: '较前一学期', width: 110, align: 'right' },
-  { key: 'earnedCredits', label: '本学期获得学分', width: 130, align: 'right' },
+const semesterColumns: AppTableColumn[] = [
+  { key: 'semester', label: '学期', minWidth: 150, fixed: 'left', region: 'identity', required: true },
+  { key: 'gpa', label: '学分加权GPA', minWidth: 120, align: 'center', required: true },
+  { key: 'gpaDeltaText', label: '较前一学期', minWidth: 110, align: 'center' },
+  { key: 'failCount', label: '未通过课程', minWidth: 110, align: 'center', required: true },
+  { key: 'failDeltaText', label: '较前一学期', minWidth: 110, align: 'center' },
+  { key: 'earnedCredits', label: '本学期获得学分', minWidth: 130, align: 'center' },
 ]
-const baseFailureColumns: DataTableColumn[] = [
+const baseFailureColumns: AppTableColumn[] = [
   { key: 'courseName', label: '课程', minWidth: 190, fixed: 'left', region: 'identity', required: true },
-  { key: 'status', label: '当前状态', width: 112, required: true },
-  { key: 'failCount', label: '未通过次数', width: 105, align: 'right', required: true },
+  { key: 'status', label: '当前状态', minWidth: 112, required: true },
+  { key: 'failCount', label: '未通过次数', minWidth: 105, align: 'center', required: true },
   { key: 'semesters', label: '挂科学期', minWidth: 180 },
-  { key: 'teacherName', label: '授课教师', width: 110 },
+  { key: 'teacherName', label: '授课教师', minWidth: 110 },
   { key: 'college', label: '开课单位', minWidth: 150 },
 ]
-const failureColumns = computed<DataTableColumn[]>(() => {
+const failureColumns = computed<AppTableColumn[]>(() => {
   if (failureView.value !== 'resolved') return baseFailureColumns
   const columns = [...baseFailureColumns]
   const failSemesterIndex = columns.findIndex(column => column.key === 'semesters')
   columns.splice(failSemesterIndex + 1, 0, {
-    key: 'resolvedSemester', label: '通过学期', width: 150, required: true,
+    key: 'resolvedSemester', label: '通过学期', minWidth: 150, required: true,
   })
   return columns
 })
-const alertColumns: DataTableColumn[] = [
-  { key: 'time', label: '生成时间', width: 150, fixed: 'left', region: 'identity', required: true },
-  { key: 'active', label: '风险状态', width: 100, required: true },
-  { key: 'level', label: '等级', width: 76 },
+const alertColumns: AppTableColumn[] = [
+  { key: 'time', label: '生成时间', minWidth: 150, fixed: 'left', region: 'identity', required: true },
+  { key: 'active', label: '风险状态', minWidth: 100, required: true },
+  { key: 'level', label: '等级', minWidth: 76 },
   { key: 'type', label: '预警类型', minWidth: 130 },
-  { key: 'changeType', label: '与上次相比', width: 105 },
-  { key: 'workflowStatusLabel', label: '核查状态', width: 110 },
+  { key: 'changeType', label: '与上次相比', minWidth: 105 },
+  { key: 'workflowStatusLabel', label: '核查状态', minWidth: 110 },
   { key: 'detail', label: '触发证据', minWidth: 220, tooltip: true },
 ]
 

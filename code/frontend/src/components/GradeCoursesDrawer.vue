@@ -16,21 +16,16 @@
     <div v-if="initialLoading" class="drawer-loading"><el-skeleton :rows="9" animated /></div>
     <template v-else>
       <div v-if="loading" class="refresh-note">正在按新条件更新，当前结果暂时保留…</div>
-      <DataTable :columns="columns" :data="rows" :storage-key="`dashboard:grade-courses:${majorId}:${grade}`"
-        :max-business-columns="5" :config-version="1" :page-size="pagination.pageSize"
-        :page-sizes="[10,20,50]" size="small" empty-text="本学期暂无符合条件的课程"
-        @update:page-size="changePageSize">
+      <AppTable :columns="columns" :data="rows" :storage-key="`dashboard:grade-courses:${majorId}:${grade}`"
+        :max-business-columns="5" :config-version="1"
+          empty-text="本学期暂无符合条件的课程" :show-density="true" :show-column-settings="true" :pagination="true" :page="pagination.page" :page-size="pagination.pageSize" :total="pagination.total" @page-change="pagination.page = $event; loadRows()" @page-size-change="changePageSize" :page-sizes="[10,20,50]">
         <template #col-courseName="{row}">
           <button class="course-link" type="button" @click="openCourse(row)">{{ row.courseName }}</button>
         </template>
         <template #col-failRate="{row}">{{ row.failRate == null ? '—' : `${row.failRate}%` }}</template>
         <template #col-action="{row}"><el-button link type="primary" @click="openCourse(row)">详情</el-button></template>
-      </DataTable>
-      <div class="external-pager">
-        <el-pagination v-model:current-page="pagination.page" :page-size="pagination.pageSize"
-          :total="pagination.total" layout="total, prev, pager, next" small
-          @current-change="loadRows" />
-      </div>
+      </AppTable>
+
     </template>
   </el-drawer>
 </template>
@@ -39,7 +34,8 @@
 import { reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { http } from '@/utils/http'
-import DataTable, { type DataTableColumn } from '@/components/DataTable.vue'
+import AppTable from '@/components/AppTable.vue'
+import type { AppTableColumn } from '@/types/table'
 
 const props = withDefaults(defineProps<{
   modelValue: boolean
@@ -61,12 +57,12 @@ const loading = ref(false)
 const loadError = ref('')
 let requestSequence = 0
 
-const columns: DataTableColumn[] = [
-  { key: 'courseId', label: '课程代码', width: 115, fixed: 'left', region: 'identity', required: true },
+const columns: AppTableColumn[] = [
+  { key: 'courseId', label: '课程代码', minWidth: 115, fixed: 'left', region: 'identity', required: true },
   { key: 'courseName', label: '课程名称', minWidth: 190, fixed: 'left', region: 'identity', required: true },
-  { key: 'failCount', label: '未通过人次', width: 110, align: 'right', required: true },
-  { key: 'totalCount', label: '有效成绩人次', width: 120, align: 'right', required: true },
-  { key: 'failRate', label: '未通过人次率', width: 120, align: 'right', required: true },
+  { key: 'failCount', label: '未通过人次', minWidth: 110, align: 'center', required: true },
+  { key: 'totalCount', label: '有效成绩人次', minWidth: 120, align: 'center', required: true },
+  { key: 'failRate', label: '未通过人次率', minWidth: 120, align: 'center', required: true },
   { key: 'action', label: '详情', width: 62, fixed: 'right', region: 'action', required: true },
 ]
 

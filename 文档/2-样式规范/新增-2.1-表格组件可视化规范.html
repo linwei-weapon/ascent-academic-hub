@@ -1,0 +1,1307 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Ascent UI · Table 表格组件规范</title>
+  <style>
+    /* 文档框架参考 QuizTestDemo 的样式规范；组件样稿沿用高校平台的 Style A。 */
+    :root {
+      --bg:#f5f6f8; --surface:#fff; --ink:#1e293b; --muted:#64748b; --faint:#94a3b8;
+      --line:#eaedf2; --primary:#4f46e5; --track:#eef2ff; --success:#0d9488;
+      --warning:#d97706; --danger:#e11d48; --radius:14px;
+      --sans:Inter,"Noto Sans SC",system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
+      --mono:"SFMono-Regular",Consolas,monospace;
+    }
+    * { box-sizing:border-box; }
+    html { scroll-behavior:smooth; scroll-padding-top:28px; }
+    body { margin:0; color:var(--ink); background:var(--bg); font:14px/1.65 var(--sans); }
+    button,input,select { font:inherit; }
+    button,a,input,select { -webkit-tap-highlight-color:transparent; }
+    button { cursor:pointer; }
+    button:disabled { cursor:not-allowed; opacity:.48; }
+    a { color:var(--primary); text-decoration:none; }
+    a:hover { text-decoration:underline; }
+    :focus-visible { outline:2px solid var(--primary); outline-offset:3px; }
+    [hidden] { display:none!important; }
+    h1,h2,h3,p { margin-top:0; }
+    h1 { font-size:48px; letter-spacing:-.045em; line-height:1.15; margin-bottom:18px; }
+    h2 { font-size:23px; letter-spacing:-.025em; line-height:1.4; margin-bottom:5px; }
+    h3 { font-size:15px; margin-bottom:9px; }
+    p { margin-bottom:12px; }
+    code { font:12px/1.65 var(--mono); overflow-wrap:anywhere; }
+    .shell { display:grid; grid-template-columns:234px minmax(0,1fr); }
+    .sidebar { position:sticky; top:0; height:100vh; border-right:1px solid var(--line); background:#fff; padding:30px 20px; display:flex; flex-direction:column; }
+    .brand { display:flex; align-items:center; gap:11px; margin:0 8px 38px; }
+    .brand-mark { width:36px; height:36px; border-radius:10px; display:grid; place-items:center; background:var(--primary); color:#fff; font-weight:750; }
+    .brand b { display:block; font-size:17px; letter-spacing:-.03em; }
+    .brand small { color:var(--faint); font-size:10px; letter-spacing:.15em; text-transform:uppercase; }
+    .nav-label { font-size:10px; letter-spacing:.15em; color:var(--faint); margin:0 12px 10px; text-transform:uppercase; }
+    .component-link { display:flex; justify-content:space-between; align-items:center; padding:11px 13px; border-radius:8px; background:var(--primary); color:#fff; font-weight:650; margin-bottom:28px; }
+    .component-link small { color:#d9d6fe; font:11px var(--mono); }
+    .nav { display:grid; gap:4px; }
+    .nav a { color:var(--muted); border-radius:7px; padding:8px 12px; font-size:13px; }
+    .nav a span { color:var(--faint); font:11px var(--mono); margin-right:10px; }
+    .nav a.active { color:var(--primary); background:var(--track); font-weight:650; }
+    .nav a:hover { text-decoration:none; background:var(--bg); }
+    .sidebar-note { margin-top:auto; padding:14px; border:1px solid var(--line); background:#fafbfc; border-radius:10px; font-size:12px; color:var(--muted); }
+    .sidebar-note b { color:var(--ink); display:block; margin-bottom:4px; }
+    .main { min-width:0; padding:46px 42px 72px; }
+    .content { max-width:1180px; margin:auto; }
+    .eyebrow { display:flex; align-items:center; gap:8px; color:var(--primary); font:11px var(--mono); letter-spacing:.12em; text-transform:uppercase; margin-bottom:17px; }
+    .eyebrow:before { content:""; width:7px; height:7px; border-radius:50%; background:currentColor; }
+    .hero { display:flex; align-items:flex-start; justify-content:space-between; gap:32px; }
+    .lead { color:var(--muted); font-size:15px; max-width:720px; line-height:1.85; }
+    .hero-number { flex-shrink:0; text-align:right; padding-top:14px; }
+    .hero-number b { display:block; font-size:55px; color:var(--primary); font-weight:600; line-height:1.2; letter-spacing:-.07em; }
+    .hero-number span { color:var(--muted); font-size:12px; }
+    .chips { display:flex; flex-wrap:wrap; gap:8px; margin:20px 0; }
+    .chip { padding:4px 10px; border:1px solid var(--line); background:#fff; border-radius:5px; color:var(--muted); font-size:11px; }
+    .overview-stats { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin-top:26px; }
+    .stat { background:#fff; border:1px solid var(--line); border-radius:10px; padding:15px 18px; }
+    .stat b { font:600 23px/1.4 var(--sans); margin-right:7px; font-variant-numeric:tabular-nums; }
+    .stat span { color:var(--muted); font-size:12px; }
+    .stat small { display:block; color:var(--faint); font-size:11px; margin-top:4px; }
+    .section { margin-top:48px; scroll-margin-top:28px; }
+    .section-head { display:flex; gap:13px; align-items:flex-start; margin-bottom:18px; }
+    .section-index { width:28px; height:28px; flex-shrink:0; border:1px solid #dce1ea; border-radius:6px; display:grid; place-items:center; color:var(--muted); font:11px var(--mono); margin-top:3px; }
+    .section-description { color:var(--muted); font-size:13px; margin:0; }
+    .section-source { margin-left:auto; color:var(--faint); font:11px/1.7 var(--mono); text-align:right; padding-top:6px; }
+    .card { border:1px solid var(--line); border-radius:var(--radius); background:#fff; }
+    .card-pad { padding:22px; }
+    .anatomy { display:grid; grid-template-columns:minmax(0,1fr) 242px; overflow:hidden; }
+    .anatomy-stage { padding:22px; min-width:0; background:linear-gradient(145deg,#fafbff,#fff); }
+    .spec-panel { border-left:1px solid var(--line); padding:23px 20px; }
+    .spec-panel .caption { margin-bottom:16px; color:var(--primary); font:11px var(--mono); }
+    .spec-row { display:flex; gap:8px; justify-content:space-between; padding:9px 0; border-bottom:1px solid var(--line); font-size:12px; }
+    .spec-row dt { color:var(--muted); }
+    .spec-row dd { text-align:right; margin:0; font-weight:600; }
+    .note { color:var(--muted); font-size:12px; line-height:1.75; margin:13px 0 0; }
+    .annotated-title { display:flex; align-items:center; justify-content:space-between; gap:14px; margin-bottom:15px; }
+    .annotated-title b { font-size:14px; }
+    .mark { display:inline-grid; place-items:center; width:21px; height:21px; background:var(--track); color:var(--primary); border:1px solid #d9dcff; border-radius:50%; font:11px var(--mono); vertical-align:middle; margin-right:6px; }
+    .legend { display:flex; flex-wrap:wrap; gap:12px 20px; color:var(--muted); font-size:12px; margin-top:18px; }
+    .table-scroll { overflow:auto; min-width:0; }
+    .visual-table { border-collapse:separate; border-spacing:0; width:100%; table-layout:fixed; font-size:14px; color:#606266; font-variant-numeric:tabular-nums; --cell-py:8px; }
+    .visual-table th,.visual-table td { padding:var(--cell-py) 12px; text-align:center; border-bottom:1px solid var(--line); line-height:24px; overflow-wrap:anywhere; }
+    .visual-table th { background:var(--track); color:#909399; font-size:12.5px; font-weight:600; }
+    .visual-table tbody td { background:#fff; }
+    .visual-table tbody tr:nth-child(even) td { background:#fafafa; }
+    .visual-table tbody tr:hover td { background:#f8faff; }
+    .visual-table.density-compact { --cell-py:4px; font-size:12px; }
+    .visual-table.density-loose { --cell-py:12px; }
+    .mini-table { min-width:460px; }
+    .mini-table th,.mini-table td { padding:8px; }
+    .identity { display:flex; flex-direction:column; align-items:center; gap:2px; line-height:23px; }
+    .identity b { font-weight:650; }
+    .identity small { font-size:11px; line-height:23px; }
+    .identity.disabled { color:var(--faint); }
+    .tag { display:inline-block; border:1px solid #b7b1ff; color:var(--primary); border-radius:4px; padding:0 6px; font-size:12px; line-height:20px; white-space:nowrap; }
+    .tag.success { color:var(--success); border-color:#95d5cd; }
+    .tag.warning { color:var(--warning); border-color:#f3ca94; }
+    .tag.muted { color:#909399; border-color:#d3d5da; }
+    .status-dot { display:inline-flex; gap:6px; align-items:center; color:var(--success); font-size:12px; white-space:nowrap; }
+    .status-dot:before { content:""; width:7px; height:7px; border-radius:50%; background:#10b981; }
+    .status-dot.warning { color:var(--warning); }
+    .status-dot.warning:before { background:#f59e0b; }
+    .btn { border:1px solid #dcdfe6; background:#fff; color:#606266; border-radius:5px; padding:5px 12px; font-size:12px; line-height:22px; white-space:nowrap; }
+    .btn:hover:not(:disabled) { border-color:#a5a0f4; color:var(--primary); background:#f7f7ff; }
+    .btn.primary { color:#fff; background:var(--primary); border-color:var(--primary); }
+    .btn.small { padding:0 9px; line-height:24px; }
+    .btn.link { border:0; background:none; padding:0 4px; color:var(--primary); }
+    .btn.link:hover:not(:disabled) { background:none; text-decoration:underline; }
+    .control { height:34px; border:1px solid #dcdfe6; border-radius:5px; background:#fff; padding:0 10px; color:#606266; min-width:0; }
+    .control:focus { border-color:var(--primary); }
+    .palette { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-top:14px; }
+    .color-item { display:flex; align-items:center; gap:10px; border:1px solid var(--line); border-radius:9px; background:#fff; padding:12px; min-width:0; }
+    .swatch { width:30px; height:30px; border:1px solid #e8e9ef; border-radius:7px; flex-shrink:0; background:var(--swatch); }
+    .color-item b { display:block; font-size:12px; }
+    .color-item code { color:var(--muted); font-size:10px; }
+    .density-overview { margin-top:28px; }
+    .density-overview > h3 { font-size:18px; margin-bottom:6px; }
+    .density-overview > .section-description { margin-bottom:16px; }
+    .density-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:14px; }
+    .density-card { padding:18px; overflow:hidden; }
+    .density-card.recommended { border-color:#beb9fa; }
+    .density-label { display:flex; justify-content:space-between; margin-bottom:14px; }
+    .density-label b { font-size:14px; }
+    .density-label span { color:var(--muted); font:11px var(--mono); }
+    .density-card .visual-table { min-width:230px; }
+    .density-card .btn { display:inline-flex; align-items:center; height:24px; vertical-align:top; }
+    .density-card p { margin:13px 0 0; color:var(--muted); font-size:12px; }
+    .rule-note { padding:13px 16px; border-left:3px solid var(--primary); background:var(--track); border-radius:0 6px 6px 0; color:#535a80; font-size:12px; margin-top:16px; }
+    .alert { display:flex; align-items:flex-start; gap:9px; padding:10px 12px; border-radius:5px; background:#f0f1f4; color:var(--muted); font-size:12px; line-height:1.8; }
+    .alert-icon { background:var(--muted); color:#fff; font:italic 700 10px/14px Georgia,serif; text-align:center; width:14px; height:14px; margin-top:4px; border-radius:50%; flex-shrink:0; }
+    .combo-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+    .combo { min-width:0; padding:20px; }
+    .combo p { color:var(--muted); font-size:12px; }
+    .combo .visual-table { min-width:330px; }
+    .tree-number { display:grid; grid-template-columns:var(--indent,0px) minmax(0,1fr) auto minmax(0,1fr); align-items:center; white-space:nowrap; }
+    .tree-indent { grid-area:1/1; }
+    .tree-toggle,.tree-placeholder { grid-area:1/2; width:20px; height:20px; justify-self:end; }
+    .tree-toggle { border:0; padding:0; background:none; color:#909399; display:grid; place-items:center; }
+    .tree-chevron { display:block; width:6px; height:6px; border-right:1px solid; border-bottom:1px solid; transform:rotate(-45deg); transition:transform .15s; }
+    .tree-toggle[aria-expanded="true"] .tree-chevron { transform:rotate(45deg); }
+    .tree-value { grid-area:1/3; }
+    .tree-number.is-child { --indent:32px; }
+    .feature-list { display:grid; gap:12px; margin-top:14px; }
+    .feature-row { padding:13px; background:#fafbfc; border:1px solid var(--line); border-radius:8px; }
+    .feature-row b { display:block; font-size:13px; margin-bottom:4px; }
+    .feature-row p { margin:0; }
+    .slot-sample { padding:14px; background:#fff; border:1px solid var(--line); border-radius:9px; }
+    .slot-row { display:flex; gap:12px; align-items:center; }
+    .slot-row .alert { flex:1; min-width:0; }
+    .slot-row .btn { flex-shrink:0; }
+    .mapping-toolbar { display:flex; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:14px; }
+    .mapping-toolbar input { width:240px; }
+    .mapping-toolbar select { width:140px; }
+    .mapping-count { color:var(--muted); font-size:12px; margin-left:auto; }
+    .usage-table { border-collapse:collapse; width:100%; font-size:12px; min-width:820px; }
+    .usage-table th { text-align:left; padding:12px 14px; background:#f8f9fb; border-bottom:1px solid var(--line); color:var(--muted); font-weight:600; white-space:nowrap; }
+    .usage-table td { padding:12px 14px; border-bottom:1px solid var(--line); vertical-align:top; }
+    .usage-table tr:last-child td { border-bottom:0; }
+    .usage-table tbody tr:hover { background:#fafbff; }
+    .usage-table td b { display:block; font-size:12px; }
+    .usage-table td small { color:var(--faint); display:block; font-size:10px; margin-top:3px; }
+    .usage-table code { font-size:10px; color:var(--muted); }
+    .pill { display:inline-block; padding:2px 7px; border-radius:4px; font-size:11px; background:#ecf8f5; color:#187f72; white-space:nowrap; }
+    .pill.off { background:#f1f3f6; color:#8b95a5; }
+    .source-links { display:flex; flex-wrap:wrap; gap:7px 12px; }
+    .footer { margin-top:44px; border-top:1px solid #e0e4ec; padding-top:20px; display:flex; justify-content:space-between; gap:18px; flex-wrap:wrap; color:var(--faint); font-size:11px; }
+    @media (max-width:1250px) {
+      .main { padding:36px 26px 60px; }
+      .anatomy { grid-template-columns:minmax(0,1fr); }
+      .spec-panel { border-left:0; border-top:1px solid var(--line); }
+      .spec-panel dl { display:grid; grid-template-columns:1fr 1fr; gap:0 28px; margin:0; }
+      .density-grid { gap:10px; }
+      .density-card { padding:14px; }
+    }
+    @media (max-width:1000px) {
+      .shell { grid-template-columns:196px minmax(0,1fr); }
+      .sidebar { padding:26px 14px; }
+      .hero-number { display:none; }
+      .density-grid { grid-template-columns:1fr; }
+      .palette,.combo-grid { grid-template-columns:1fr 1fr; }
+      .density-card .table-scroll { max-width:100%; }
+      .section-source { display:none; }
+    }
+    @media (max-width:760px) {
+      html { scroll-padding-top:16px; }
+      .shell { display:block; }
+      .sidebar { position:static; width:auto; height:auto; padding:18px; border-right:0; border-bottom:1px solid var(--line); }
+      .brand { margin:0 0 14px; }
+      .component-link,.sidebar .nav-label,.sidebar-note { display:none; }
+      .nav { display:flex; overflow:auto; white-space:nowrap; padding-bottom:4px; }
+      .nav a { padding:7px 9px; }
+      .nav a span { display:none; }
+      .main { padding:28px 16px 45px; }
+      h1 { font-size:37px; }
+      h2 { font-size:20px; }
+      .overview-stats,.palette { grid-template-columns:1fr 1fr; }
+      .anatomy-stage,.combo { padding:14px; }
+      .spec-panel dl,.combo-grid { grid-template-columns:1fr; }
+      .section { margin-top:34px; }
+      .mapping-toolbar input { flex:1; width:auto; min-width:130px; }
+      .mapping-count { margin-left:0; }
+      .slot-row { flex-wrap:wrap; }
+      .slot-row .alert { flex-basis:100%; }
+      .slot-row .btn { margin-left:auto; }
+    }
+    @media (prefers-reduced-motion:reduce) { html { scroll-behavior:auto; } *,*:before,*:after { animation-duration:.01ms!important; transition:none!important; } }
+    @media print {
+      .sidebar { display:none!important; }
+      .shell { display:block; }
+      .main { padding:0; }
+      .card { break-inside:avoid; }
+      .section { break-inside:auto; }
+      body { background:white; }
+      .table-scroll { overflow:visible; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar" aria-label="组件规范导航">
+      <div class="brand"><div class="brand-mark">A</div><div><b>Ascent UI</b><small>Design system</small></div></div>
+      <div class="nav-label">Components / 组件</div>
+      <a class="component-link" href="#overview"><span>Table 表格</span><small>01</small></a>
+      <div class="nav-label">On this page / 本页</div>
+      <nav class="nav">
+        <a href="#anatomy" class="active"><span>01</span>基础结构</a>
+        <a href="#composition"><span>02</span>组合示例</a>
+        <a href="#usage"><span>03</span>当前项目使用</a>
+      </nav>
+      <div class="sidebar-note"><b>表格组件 · 可视化说明</b>本页只覆盖 AppTable 与 AppPagination。<br />离线示例数据 · 可直接打开<br /><a href="../3-技术文档/新增-公共表格与分页组件说明-20260915.md">查看统一组件说明 ↗</a></div>
+    </aside>
+    <main class="main"><div class="content">
+      <header id="overview">
+        <div class="eyebrow">Component 01 / Data display</div>
+        <div class="hero"><div><h1>Table 表格</h1><p class="lead">用一致的表头、密度和分页组织名单与业务证据。<br />这里展示组件的基础结构、密度与组合样式，以及它在高校平台中的实际使用位置。</p></div><div class="hero-number"><b>107</b><span>现行菜单与详情表格已接入</span></div></div>
+        <div class="chips"><span class="chip">AppTable + AppPagination</span><span class="chip">Vue 3 · Element Plus</span><span class="chip">Style A · 靛蓝清爽</span><span class="chip">核对日期 2026.09.15</span><span class="chip">独立 HTML · 无外部依赖</span></div>
+        <div class="overview-stats"><div class="stat"><b>23</b><span>个菜单</span><small>系统管理 8 · 基础报表 9 · 教学分析 6</small></div><div class="stat"><b>107</b><span>处接入</span><small>包含标签页和详情抽屉</small></div><div class="stat"><b>80</b><span>处开启显示设置</span><small>按页面需求开启密度与列设置</small></div><div class="stat"><b>38</b><span>处使用分页</span><small>另 69 处完整展示，不拆页</small></div></div>
+      </header>
+
+      <section class="section" id="anatomy" aria-labelledby="anatomy-title">
+        <div class="section-head"><span class="section-index">01</span><div><h2 id="anatomy-title">基础结构</h2><p class="section-description">工具栏、表头、业务单元格与分页，共同组成一张表格。</p></div><span class="section-source">AppTable.vue<br />AppPagination.vue</span></div>
+        <div class="card anatomy">
+          <div class="anatomy-stage">
+            <div class="annotated-title"><b><span class="mark">1</span>账号与接入状态</b><a href="#density">查看密度对比 ↓</a></div>
+            <div class="table-scroll"><table class="visual-table mini-table" aria-label="表格基础结构示例"><thead><tr><th><span class="mark">2</span>用户与账号</th><th>账号来源</th><th>权限准备度</th><th>状态</th></tr></thead><tbody>
+              <tr><td><div class="identity" style="color:var(--primary)"><b>校领导（示例）</b><small>demo_leader</small></div></td><td><span class="tag">本地账号</span></td><td><span class="status-dot">权限就绪</span></td><td><span class="tag success">已启用</span></td></tr>
+              <tr><td><div class="identity" style="color:var(--primary)"><b>教务处（示例）</b><small>demo_dean</small></div></td><td><span class="tag">学校同步</span></td><td><span class="status-dot">权限就绪</span></td><td><span class="tag success">已启用</span></td></tr>
+              <tr><td><div class="identity disabled"><b>待识别账号</b><small>无有效账号标识</small></div></td><td><span class="tag muted">待核查</span></td><td><span class="status-dot warning">需要处理</span></td><td><span class="tag muted">—</span></td></tr>
+            </tbody></table></div>
+            <div class="legend"><span><span class="mark">3</span>标签、圆点和蓝色链接由页面插槽提供</span><span><span class="mark">4</span>分页紧跟表格下方</span></div>
+            <p class="note">上方为结构样稿，非实际账号数据。表头与内容默认居中；行内操作、提示和字段语义由业务页面决定。</p>
+          </div>
+          <aside class="spec-panel"><div class="caption">Default / 当前默认</div><dl>
+            <div class="spec-row"><dt>表头背景</dt><dd>#EEF2FF</dd></div><div class="spec-row"><dt>表头字号 / 字重</dt><dd>12.5px / 600</dd></div><div class="spec-row"><dt>默认对齐</dt><dd>表头 / 内容居中</dd></div><div class="spec-row"><dt>工具栏下间距</dt><dd>12px</dd></div><div class="spec-row"><dt>设置项间距</dt><dd>8px</dd></div><div class="spec-row"><dt>分页上间距 / 内边距</dt><dd>16px / 16px</dd></div><div class="spec-row"><dt>分页默认值</dt><dd>第 1 页 · 20 条</dd></div>
+          </dl><p class="note">卡片由页面提供；公共表格负责展示，不发起业务请求。</p></aside>
+        </div>
+        <div class="palette"><div class="color-item"><span class="swatch" style="--swatch:#4f46e5"></span><div><b>操作 / 可点击</b><code>--sa-primary · #4F46E5</code></div></div><div class="color-item"><span class="swatch" style="--swatch:#eef2ff"></span><div><b>表头背景</b><code>--sa-track · #EEF2FF</code></div></div><div class="color-item"><span class="swatch" style="--swatch:#eaedf2"></span><div><b>表格分隔线</b><code>--sa-border · #EAEDF2</code></div></div><div class="color-item"><span class="swatch" style="--swatch:#0d9488"></span><div><b>成功状态</b><code>--sa-teal · #0D9488</code></div></div></div>
+        <div class="density-overview" id="density" aria-labelledby="density-title">
+          <h3 id="density-title">尺寸与密度</h3>
+          <p class="section-description">密度调整字号和留白，多行文字、标签或按钮会自然撑高单元格。</p>
+        <div class="density-grid">
+          <article class="card density-card"><div class="density-label"><b>紧凑</b><span>compact → small</span></div><div class="table-scroll"><table class="visual-table density-compact" aria-label="紧凑密度样例"><thead><tr><th>名称</th><th>操作</th></tr></thead><tbody><tr><td>教务处</td><td><span class="btn link small" title="操作文字样式示例">编辑</span></td></tr></tbody></table></div><p>单行操作样例约 <b>33px</b>。适合信息量较大的名单。</p></article>
+          <article class="card density-card recommended"><div class="density-label"><b>默认</b><span>default → default</span></div><div class="table-scroll"><table class="visual-table" aria-label="默认密度样例"><thead><tr><th>名称</th><th>操作</th></tr></thead><tbody><tr><td>教务处</td><td><span class="btn link small" title="操作文字样式示例">编辑</span></td></tr></tbody></table></div><p>单行操作样例约 <b>41px</b>。角色管理使用此档并隐藏切换入口。</p></article>
+          <article class="card density-card"><div class="density-label"><b>宽松</b><span>loose → large</span></div><div class="table-scroll"><table class="visual-table density-loose" aria-label="宽松密度样例"><thead><tr><th>名称</th><th>操作</th></tr></thead><tbody><tr><td>教务处</td><td><span class="btn link small" title="操作文字样式示例">编辑</span></td></tr></tbody></table></div><p>单行操作样例约 <b>49px</b>。为复杂内容提供更多留白。</p></article>
+        </div>
+        <div class="rule-note">上述高度对应当前角色表这类带小按钮的单行内容，不是组件固定行高。账号页姓名与账号为两行，行高会更大。切换密度不改变页码、页长或请求数据。</div>
+        </div>
+      </section>
+
+      <section class="section" id="composition" aria-labelledby="composition-title">
+        <div class="section-head"><span class="section-index">02</span><div><h2 id="composition-title">组合示例</h2><p class="section-description">组件提供统一容器，页面通过配置与插槽表达不同业务内容。</p></div></div>
+        <div class="combo-grid">
+          <article class="card combo"><h3>菜单树 / 原生展开与收起</h3><p>一级编号位于表头正下方，箭头紧贴编号；子级中心向右偏移 16px。菜单树完整展示，不分页。</p><div class="table-scroll"><table class="visual-table" id="tree-table" aria-label="菜单树示例"><colgroup><col style="width:120px" /><col /></colgroup><thead><tr><th>排序</th><th>菜单名称</th></tr></thead><tbody id="tree-body"></tbody></table></div><p class="note">这是菜单页面的局部布局，不强加给其他表格。点击箭头或使用键盘 Enter / Space 展开。</p></article>
+          <article class="card combo"><h3>提示、状态与详情入口</h3><p>提示放在表格上方，与右侧设置同排；标签和状态圆点由业务页面的单元格插槽提供。</p><div class="slot-sample"><div class="slot-row"><div class="alert"><span class="alert-icon" aria-hidden="true">i</span><span>候选指标表示尚待学校确认，不等于功能缺失。</span></div><span class="btn small" title="表格设置的布局示例">⚙ 列设置</span></div></div><div class="feature-list"><div class="feature-row"><b>蓝色名称与编号</b><p>账号和指标用蓝色标记详情入口，悬停两行同步显示下划线。账号缺少有效标识时显示灰色普通文字。</p></div><div class="feature-row"><b>标签 / 状态点</b><p><span class="tag">本地账号</span> <span class="tag warning">待映射</span> <span class="status-dot">权限就绪</span><br />具体文案、色彩语义及是否可操作由页面决定。</p></div><div class="feature-row"><b>筛选栏与提示都在卡片内</b><p>数据采集监控的三个主标签页已采用左侧筛选 / 提示、右侧表格设置的布局，窄屏时自然换行。</p></div></div></article>
+        </div>
+      </section>
+
+      <section class="section" id="usage" aria-labelledby="usage-title">
+        <div class="section-head"><span class="section-index">03</span><div><h2 id="usage-title">当前项目使用</h2><p class="section-description">系统管理 18 处、基础报表 9 处、教学分析 80 处。教学分析另有 11 处未开放的历史或方案结构子表，未计入现行入口。详情子表从对应主菜单进入。</p></div><span class="section-source">src/views/admin/*<br />src/views/basic-reports/*<br />src/views/teaching-analysis/*</span></div>
+        <div class="mapping-toolbar"><input class="control" id="usage-search" aria-label="搜索接入位置" placeholder="搜索模块、表格或存储标识" /><select class="control" id="usage-filter" aria-label="筛选分页方式"><option value="all">全部分页方式</option><option value="server">服务端分页</option><option value="client">前端分页</option><option value="none">不分页</option></select><span class="mapping-count" id="usage-count"></span></div>
+        <div class="card table-scroll"><table class="usage-table" aria-label="当前项目表格接入清单"><thead><tr><th>模块 / 表格</th><th>分页方式</th><th>密度 / 列设置</th><th>存储标识</th><th>使用入口</th></tr></thead><tbody id="usage-body"></tbody></table></div>
+        <p class="note">范围说明：系统参数是表单，没有表格；旧 DecisionConfig.vue 已无当前菜单入口，其旧路由重定向到分析方案管理。基础报表的来源规则折叠区保留原显示条件，当前九张报表均不显示该区，因此不计入主表数量。本页不表示全站其他业务表格已迁移。页面链接需要本地项目在 3006 端口运行并具备系统管理权限；源码入口可从本地文件打开。</p>
+      </section>
+
+      <footer class="footer"><span>Ascent Academic Hub · 表格组件可视化规范</span><span>参考：QuizTestDemo / 文档 / 2.1 样式规范.html · 核对：2026-09-15</span></footer>
+    </div></main>
+  </div>
+  <script>
+    'use strict';
+    // 只处理离线树形示例、接入清单筛选和章节定位。
+    const $ = id => document.getElementById(id);
+    const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const tree=[{number:1,title:'教学管理分析',children:[{number:101,title:'教学数据总览'},{number:102,title:'学业预警监控'}]},{number:2,title:'AI 管理决策',children:[{number:201,title:'管理要情'},{number:202,title:'决策研判'}]},{number:3,title:'系统管理',children:[{number:301,title:'账号管理'},{number:302,title:'角色管理'}]}];
+    const expanded=new Set([3]);
+    function renderTree() { $('tree-body').innerHTML=tree.map(parent=>'<tr><td><div class="tree-number"><button class="tree-toggle" type="button" data-tree="'+parent.number+'" aria-label="'+(expanded.has(parent.number)?'收起':'展开')+parent.title+'" aria-expanded="'+expanded.has(parent.number)+'"><span class="tree-chevron" aria-hidden="true"></span></button><span class="tree-value">'+parent.number+'</span></div></td><td>'+parent.title+'</td></tr>'+(expanded.has(parent.number)?parent.children.map(child=>'<tr><td><div class="tree-number is-child"><span class="tree-indent"></span><span class="tree-placeholder"></span><span class="tree-value">'+child.number+'</span></div></td><td>'+child.title+'</td></tr>').join(''):'')).join(''); }
+    $('tree-body').addEventListener('click',event=>{const button=event.target.closest('[data-tree]');if(!button)return;const id=Number(button.dataset.tree);expanded.has(id)?expanded.delete(id):expanded.add(id);renderTree();$('tree-body').querySelector('[data-tree="'+id+'"]').focus();});
+    // 使用清单按 2026-09-15 的页面接入及分页实现核对；不读取服务端数据。
+    const usages=[
+      {module:'账号管理',name:'账号与接入状态',place:'主表',mode:'server',tools:true,key:'system:accounts',file:'accounts/Accounts.vue',line:89,route:'accounts'},
+      {module:'账号管理',name:'认证来源',place:'认证接入检查抽屉',mode:'none',tools:false,key:'system:auth-providers',file:'accounts/Accounts.vue',line:386,route:'accounts'},
+      {module:'角色管理',name:'角色与功能权限',place:'主表',mode:'client',tools:false,key:'system:roles',file:'roles/Roles.vue',line:14,route:'roles'},
+      {module:'菜单管理',name:'菜单树',place:'主表 · 树形',mode:'none',tools:false,key:'system:menus',file:'menus/Menus.vue',line:13,route:'menus'},
+      {module:'数据权限',name:'账号与数据范围',place:'标签页',mode:'client',tools:false,key:'system:permission-users',file:'permissions/Permissions.vue',line:60,route:'permissions'},
+      {module:'数据权限',name:'带班与带生关系',place:'标签页',mode:'server',tools:false,key:'system:staff-relationships',file:'permissions/Permissions.vue',line:135,route:'permissions'},
+      {module:'审计日志',name:'安全审计记录',place:'主表',mode:'server',tools:false,key:'system:audit',file:'audit/Audit.vue',line:17,route:'audit'},
+      {module:'指标与口径管理',name:'指标目录',place:'标签页',mode:'server',tools:true,key:'system:metric-catalog',file:'kpis/Kpis.vue',line:64,route:'kpis'},
+      {module:'指标与口径管理',name:'页面引用与一致性',place:'标签页',mode:'client',tools:true,key:'system:metric-page-bindings',file:'kpis/Kpis.vue',line:117,route:'kpis'},
+      {module:'指标与口径管理',name:'展示配置变更记录',place:'指标详情抽屉',mode:'none',tools:false,key:'system:metric-display-history',file:'kpis/Kpis.vue',line:213,route:'kpis'},
+      {module:'分析方案管理',name:'草稿与发布',place:'标签页',mode:'client',tools:true,key:'system:analysis-scheme-drafts',file:'schemes/Schemes.vue',line:80,route:'schemes'},
+      {module:'分析方案管理',name:'版本与变更',place:'标签页',mode:'client',tools:true,key:'system:analysis-scheme-history',file:'schemes/Schemes.vue',line:120,route:'schemes'},
+      {module:'数据采集监控',name:'数据源接入态势',place:'标签页',mode:'server',tools:true,key:'system:data-sources',file:'data-collection/DataCollection.vue',line:61,route:'data-collection'},
+      {module:'数据采集监控',name:'运行与异常',place:'标签页',mode:'server',tools:true,key:'system:etl-runs',file:'data-collection/DataCollection.vue',line:127,route:'data-collection'},
+      {module:'数据采集监控',name:'交付接入清单',place:'标签页',mode:'client',tools:true,key:'system:data-source-checklist',file:'data-collection/DataCollection.vue',line:180,route:'data-collection'},
+      {module:'数据采集监控',name:'最近批次',place:'数据源详情抽屉',mode:'client',tools:true,key:'system:source-batches:{sourceCode}',file:'data-collection/DataCollection.vue',line:230,route:'data-collection'},
+      {module:'数据采集监控',name:'关联运行',place:'数据源详情抽屉',mode:'client',tools:true,key:'system:source-runs:{sourceCode}',file:'data-collection/DataCollection.vue',line:267,route:'data-collection'},
+      {module:'数据采集监控',name:'输入批次',place:'运行详情抽屉',mode:'client',tools:true,key:'system:run-batches:{runId}',file:'data-collection/DataCollection.vue',line:315,route:'data-collection'},
+      {area:'basic-reports',module:'基础报表',name:'年级总体挂科情况',place:'RPT-01 · 主表',mode:'none',tools:true,key:'basic-report:RPT-01',file:'components/BasicReportTable.vue',line:3,route:'failure-overview'},
+      {area:'basic-reports',module:'基础报表',name:'各专业补考前后挂科率比较',place:'RPT-02 · 主表',mode:'none',tools:true,key:'basic-report:RPT-02',file:'components/BasicReportTable.vue',line:3,route:'major-makeup-comparison'},
+      {area:'basic-reports',module:'基础报表',name:'各专业整体与男女挂科率比较',place:'RPT-03 · 主表',mode:'none',tools:true,key:'basic-report:RPT-03',file:'components/BasicReportTable.vue',line:3,route:'major-gender-failure'},
+      {area:'basic-reports',module:'基础报表',name:'各班级挂科门数具体情况',place:'RPT-04A · 主表',mode:'none',tools:true,key:'basic-report:RPT-04A',file:'components/BasicReportTable.vue',line:3,route:'class-failure-count'},
+      {area:'basic-reports',module:'基础报表',name:'各班级成绩分布',place:'RPT-04B · 主表',mode:'none',tools:true,key:'basic-report:RPT-04B',file:'components/BasicReportTable.vue',line:3,route:'class-score-distribution'},
+      {area:'basic-reports',module:'基础报表',name:'补考前后课程通过情况对比',place:'RPT-05 · 分组表头',mode:'none',tools:false,key:'basic-report:RPT-05',file:'course-makeup-comparison/CourseMakeupComparisonTable.vue',line:3,route:'course-makeup-comparison'},
+      {area:'basic-reports',module:'基础报表',name:'各班大学英语四级通过情况',place:'RPT-06 · 主表',mode:'none',tools:true,key:'basic-report:RPT-06',file:'components/BasicReportTable.vue',line:3,route:'cet4-pass'},
+      {area:'basic-reports',module:'基础报表',name:'重点关注学生名单',place:'RPT-07 · 主表',mode:'none',tools:true,key:'basic-report:RPT-07',file:'components/BasicReportTable.vue',line:3,route:'focus-students'},
+      {area:'basic-reports',module:'基础报表',name:'校级学业警示学生名单',place:'RPT-08 · 主表',mode:'none',tools:true,key:'basic-report:RPT-08',file:'components/BasicReportTable.vue',line:3,route:'academic-warning-roster'},
+    ];
+    usages.push(...[
+  {
+    "module": "学业预警监控",
+    "name": "已批准规则",
+    "place": "页面 / 详情子表",
+    "mode": "none",
+    "tools": false,
+    "key": "teaching-analysis:alert:discovery:1",
+    "file": "alert/Discovery.vue",
+    "line": 87,
+    "source": "../../code/frontend/src/views/teaching-analysis/alert/Discovery.vue",
+    "href": "http://127.0.0.1:3006/#/admin/alert?tab=rules"
+  },
+  {
+    "module": "学业预警监控",
+    "name": "已拒绝规则",
+    "place": "页面 / 详情子表",
+    "mode": "none",
+    "tools": false,
+    "key": "teaching-analysis:alert:discovery:2",
+    "file": "alert/Discovery.vue",
+    "line": 104,
+    "source": "../../code/frontend/src/views/teaching-analysis/alert/Discovery.vue",
+    "href": "http://127.0.0.1:3006/#/admin/alert?tab=rules"
+  },
+  {
+    "module": "学业预警监控",
+    "name": "已替代规则",
+    "place": "页面 / 详情子表",
+    "mode": "none",
+    "tools": false,
+    "key": "teaching-analysis:alert:discovery:3",
+    "file": "alert/Discovery.vue",
+    "line": 114,
+    "source": "../../code/frontend/src/views/teaching-analysis/alert/Discovery.vue",
+    "href": "http://127.0.0.1:3006/#/admin/alert?tab=rules"
+  },
+  {
+    "module": "学业预警监控",
+    "name": "候选规则预览",
+    "place": "页面 / 详情子表",
+    "mode": "none",
+    "tools": false,
+    "key": "teaching-analysis:alert:discovery:4",
+    "file": "alert/Discovery.vue",
+    "line": 157,
+    "source": "../../code/frontend/src/views/teaching-analysis/alert/Discovery.vue",
+    "href": "http://127.0.0.1:3006/#/admin/alert?tab=rules"
+  },
+  {
+    "module": "学业预警监控",
+    "name": "年级分布",
+    "place": "页面 / 详情子表",
+    "mode": "none",
+    "tools": true,
+    "key": "alert:early-setback:grade",
+    "file": "alert/EarlySetback.vue",
+    "line": 88,
+    "source": "../../code/frontend/src/views/teaching-analysis/alert/EarlySetback.vue",
+    "href": "http://127.0.0.1:3006/#/admin/alert?tab=early-risk"
+  },
+  {
+    "module": "学业预警监控",
+    "name": "关注课程",
+    "place": "页面 / 详情子表",
+    "mode": "none",
+    "tools": true,
+    "key": "alert:early-setback:courses",
+    "file": "alert/EarlySetback.vue",
+    "line": 107,
+    "source": "../../code/frontend/src/views/teaching-analysis/alert/EarlySetback.vue",
+    "href": "http://127.0.0.1:3006/#/admin/alert?tab=early-risk"
+  },
+  {
+    "module": "学业预警监控",
+    "name": "关注专业",
+    "place": "页面 / 详情子表",
+    "mode": "none",
+    "tools": true,
+    "key": "alert:early-setback:majors",
+    "file": "alert/EarlySetback.vue",
+    "line": 124,
+    "source": "../../code/frontend/src/views/teaching-analysis/alert/EarlySetback.vue",
+    "href": "http://127.0.0.1:3006/#/admin/alert?tab=early-risk"
+  },
+  {
+    "module": "学业预警监控",
+    "name": "学生名单",
+    "place": "页面 / 详情子表",
+    "mode": "server",
+    "tools": true,
+    "key": "alert:early-setback:students",
+    "file": "alert/EarlySetback.vue",
+    "line": 155,
+    "source": "../../code/frontend/src/views/teaching-analysis/alert/EarlySetback.vue",
+    "href": "http://127.0.0.1:3006/#/admin/alert?tab=early-risk"
+  },
+  {
+    "module": "学业预警监控",
+    "name": "预警学生名单",
+    "place": "页面 / 详情子表",
+    "mode": "server",
+    "tools": true,
+    "key": "alert:student-list",
+    "file": "alert/index.vue",
+    "line": 257,
+    "source": "../../code/frontend/src/views/teaching-analysis/alert/index.vue",
+    "href": "http://127.0.0.1:3006/#/admin/alert"
+  },
+  {
+    "module": "学业预警监控",
+    "name": "生产规则",
+    "place": "页面 / 详情子表",
+    "mode": "none",
+    "tools": false,
+    "key": "teaching-analysis:alert:rulegovernance:1",
+    "file": "alert/RuleGovernance.vue",
+    "line": 22,
+    "source": "../../code/frontend/src/views/teaching-analysis/alert/RuleGovernance.vue",
+    "href": "http://127.0.0.1:3006/#/admin/alert?tab=rules"
+  },
+  {
+    "module": "学业预警监控",
+    "name": "规则变更",
+    "place": "页面 / 详情子表",
+    "mode": "none",
+    "tools": false,
+    "key": "teaching-analysis:alert:rulegovernance:2",
+    "file": "alert/RuleGovernance.vue",
+    "line": 62,
+    "source": "../../code/frontend/src/views/teaching-analysis/alert/RuleGovernance.vue",
+    "href": "http://127.0.0.1:3006/#/admin/alert?tab=rules"
+  },
+  {
+    "module": "学业预警监控",
+    "name": "候选学生",
+    "place": "页面 / 详情子表",
+    "mode": "server",
+    "tools": false,
+    "key": "teaching-analysis:alert:rulegovernance:3",
+    "file": "alert/RuleGovernance.vue",
+    "line": 285,
+    "source": "../../code/frontend/src/views/teaching-analysis/alert/RuleGovernance.vue",
+    "href": "http://127.0.0.1:3006/#/admin/alert?tab=rules"
+  },
+  {
+    "module": "学业预警监控",
+    "name": "参数差异",
+    "place": "页面 / 详情子表",
+    "mode": "none",
+    "tools": false,
+    "key": "teaching-analysis:alert:rulegovernance:4",
+    "file": "alert/RuleGovernance.vue",
+    "line": 299,
+    "source": "../../code/frontend/src/views/teaching-analysis/alert/RuleGovernance.vue",
+    "href": "http://127.0.0.1:3006/#/admin/alert?tab=rules"
+  },
+  {
+    "module": "学业预警监控",
+    "name": "影响分布交叉表",
+    "place": "页面 / 详情子表",
+    "mode": "none",
+    "tools": false,
+    "key": "teaching-analysis:alert:rulegovernance:5",
+    "file": "alert/RuleGovernance.vue",
+    "line": 314,
+    "source": "../../code/frontend/src/views/teaching-analysis/alert/RuleGovernance.vue",
+    "href": "http://127.0.0.1:3006/#/admin/alert?tab=rules"
+  },
+  {
+    "module": "培养质量分析",
+    "name": "毕业专业",
+    "place": "页面 / 详情子表",
+    "mode": "client",
+    "tools": true,
+    "key": "curriculum:graduation-majors",
+    "file": "curriculum/GraduationReadiness.vue",
+    "line": 43,
+    "source": "../../code/frontend/src/views/teaching-analysis/curriculum/GraduationReadiness.vue",
+    "href": "http://127.0.0.1:3006/#/admin/curriculum?tab=graduation-readiness"
+  },
+  {
+    "module": "培养质量分析",
+    "name": "毕业课程",
+    "place": "页面 / 详情子表",
+    "mode": "client",
+    "tools": true,
+    "key": "curriculum:graduation-courses",
+    "file": "curriculum/GraduationReadiness.vue",
+    "line": 56,
+    "source": "../../code/frontend/src/views/teaching-analysis/curriculum/GraduationReadiness.vue",
+    "href": "http://127.0.0.1:3006/#/admin/curriculum?tab=graduation-readiness"
+  },
+  {
+    "module": "培养质量分析",
+    "name": "毕业准备学生",
+    "place": "页面 / 详情子表",
+    "mode": "server",
+    "tools": true,
+    "key": "curriculum:graduation-students",
+    "file": "curriculum/GraduationReadiness.vue",
+    "line": 81,
+    "source": "../../code/frontend/src/views/teaching-analysis/curriculum/GraduationReadiness.vue",
+    "href": "http://127.0.0.1:3006/#/admin/curriculum?tab=graduation-readiness"
+  },
+  {
+    "module": "培养质量分析",
+    "name": "未通过证据",
+    "place": "页面 / 详情子表",
+    "mode": "none",
+    "tools": true,
+    "key": "curriculum:graduation-failed-evidence",
+    "file": "curriculum/GraduationReadiness.vue",
+    "line": 107,
+    "source": "../../code/frontend/src/views/teaching-analysis/curriculum/GraduationReadiness.vue",
+    "href": "http://127.0.0.1:3006/#/admin/curriculum?tab=graduation-readiness"
+  },
+  {
+    "module": "培养质量分析",
+    "name": "候选课程证据",
+    "place": "页面 / 详情子表",
+    "mode": "none",
+    "tools": true,
+    "key": "curriculum:graduation-candidate-evidence",
+    "file": "curriculum/GraduationReadiness.vue",
+    "line": 109,
+    "source": "../../code/frontend/src/views/teaching-analysis/curriculum/GraduationReadiness.vue",
+    "href": "http://127.0.0.1:3006/#/admin/curriculum?tab=graduation-readiness"
+  },
+  {
+    "module": "培养质量分析",
+    "name": "开课保障",
+    "place": "页面 / 详情子表",
+    "mode": "none",
+    "tools": true,
+    "key": "curriculum:graduation-supply",
+    "file": "curriculum/GraduationReadiness.vue",
+    "line": 124,
+    "source": "../../code/frontend/src/views/teaching-analysis/curriculum/GraduationReadiness.vue",
+    "href": "http://127.0.0.1:3006/#/admin/curriculum?tab=graduation-readiness"
+  },
+  {
+    "module": "培养质量分析",
+    "name": "受影响学生",
+    "place": "页面 / 详情子表",
+    "mode": "server",
+    "tools": true,
+    "key": "curriculum:graduation-supply-students",
+    "file": "curriculum/GraduationReadiness.vue",
+    "line": 126,
+    "source": "../../code/frontend/src/views/teaching-analysis/curriculum/GraduationReadiness.vue",
+    "href": "http://127.0.0.1:3006/#/admin/curriculum?tab=graduation-readiness"
+  },
+  {
+    "module": "培养质量分析",
+    "name": "学院方案执行",
+    "place": "页面 / 详情子表",
+    "mode": "none",
+    "tools": true,
+    "key": "curriculum:college-overview",
+    "file": "curriculum/index.vue",
+    "line": 45,
+    "source": "../../code/frontend/src/views/teaching-analysis/curriculum/index.vue",
+    "href": "http://127.0.0.1:3006/#/admin/curriculum"
+  },
+  {
+    "module": "培养质量分析",
+    "name": "专业方案执行",
+    "place": "页面 / 详情子表",
+    "mode": "none",
+    "tools": true,
+    "key": "curriculum:major-overview",
+    "file": "curriculum/index.vue",
+    "line": 72,
+    "source": "../../code/frontend/src/views/teaching-analysis/curriculum/index.vue",
+    "href": "http://127.0.0.1:3006/#/admin/curriculum"
+  },
+  {
+    "module": "培养质量分析",
+    "name": "课程瓶颈",
+    "place": "页面 / 详情子表",
+    "mode": "none",
+    "tools": true,
+    "key": "curriculum:bottleneck-courses",
+    "file": "curriculum/index.vue",
+    "line": 95,
+    "source": "../../code/frontend/src/views/teaching-analysis/curriculum/index.vue",
+    "href": "http://127.0.0.1:3006/#/admin/curriculum"
+  },
+  {
+    "module": "培养质量分析",
+    "name": "核查学生名单",
+    "place": "页面 / 详情子表",
+    "mode": "server",
+    "tools": true,
+    "key": "curriculum:management-students",
+    "file": "curriculum/index.vue",
+    "line": 183,
+    "source": "../../code/frontend/src/views/teaching-analysis/curriculum/index.vue",
+    "href": "http://127.0.0.1:3006/#/admin/curriculum"
+  },
+  {
+    "module": "培养质量分析",
+    "name": "必修未通过证据",
+    "place": "页面 / 详情子表",
+    "mode": "none",
+    "tools": true,
+    "key": "curriculum:overview-student-failed-evidence",
+    "file": "curriculum/index.vue",
+    "line": 226,
+    "source": "../../code/frontend/src/views/teaching-analysis/curriculum/index.vue",
+    "href": "http://127.0.0.1:3006/#/admin/curriculum"
+  },
+  {
+    "module": "培养质量分析",
+    "name": "过期漏修证据",
+    "place": "页面 / 详情子表",
+    "mode": "none",
+    "tools": true,
+    "key": "curriculum:overview-student-candidate-evidence",
+    "file": "curriculum/index.vue",
+    "line": 230,
+    "source": "../../code/frontend/src/views/teaching-analysis/curriculum/index.vue",
+    "href": "http://127.0.0.1:3006/#/admin/curriculum"
+  },
+  {
+    "module": "培养质量分析",
+    "name": "学生进度",
+    "place": "页面 / 详情子表",
+    "mode": "client",
+    "tools": true,
+    "key": "curriculum:student-progress",
+    "file": "curriculum/Progress.vue",
+    "line": 15,
+    "source": "../../code/frontend/src/views/teaching-analysis/curriculum/Progress.vue",
+    "href": "http://127.0.0.1:3006/#/admin/curriculum?tab=progress"
+  },
+  {
+    "module": "培养质量分析",
+    "name": "模块进度",
+    "place": "页面 / 详情子表",
+    "mode": "none",
+    "tools": true,
+    "key": "curriculum:student-module-detail",
+    "file": "curriculum/Progress.vue",
+    "line": 66,
+    "source": "../../code/frontend/src/views/teaching-analysis/curriculum/Progress.vue",
+    "href": "http://127.0.0.1:3006/#/admin/curriculum?tab=progress"
+  },
+  {
+    "module": "培养质量分析",
+    "name": "未通过课程",
+    "place": "页面 / 详情子表",
+    "mode": "none",
+    "tools": true,
+    "key": "curriculum:student-failed-courses",
+    "file": "curriculum/Progress.vue",
+    "line": 74,
+    "source": "../../code/frontend/src/views/teaching-analysis/curriculum/Progress.vue",
+    "href": "http://127.0.0.1:3006/#/admin/curriculum?tab=progress"
+  },
+  {
+    "module": "培养质量分析",
+    "name": "过期漏修课程",
+    "place": "页面 / 详情子表",
+    "mode": "none",
+    "tools": true,
+    "key": "curriculum:student-candidate-courses",
+    "file": "curriculum/Progress.vue",
+    "line": 78,
+    "source": "../../code/frontend/src/views/teaching-analysis/curriculum/Progress.vue",
+    "href": "http://127.0.0.1:3006/#/admin/curriculum?tab=progress"
+  },
+  {
+    "module": "培养质量分析",
+    "name": "全部课程证据",
+    "place": "页面 / 详情子表",
+    "mode": "client",
+    "tools": true,
+    "key": "curriculum:student-all-plan-courses",
+    "file": "curriculum/Progress.vue",
+    "line": 89,
+    "source": "../../code/frontend/src/views/teaching-analysis/curriculum/Progress.vue",
+    "href": "http://127.0.0.1:3006/#/admin/curriculum?tab=progress"
+  },
+  {
+    "module": "教学数据总览",
+    "name": "课程班级分布",
+    "place": "页面 / 详情子表",
+    "mode": "client",
+    "tools": true,
+    "key": "dashboard:course-class-distribution",
+    "file": "dashboard/CourseDetail.vue",
+    "line": 60,
+    "source": "../../code/frontend/src/views/teaching-analysis/dashboard/CourseDetail.vue",
+    "href": "http://127.0.0.1:3006/#/admin/dashboard"
+  },
+  {
+    "module": "教学数据总览",
+    "name": "专业对比",
+    "place": "页面 / 详情子表",
+    "mode": "none",
+    "tools": true,
+    "key": "dashboard:college-majors",
+    "file": "dashboard/Detail.vue",
+    "line": 33,
+    "source": "../../code/frontend/src/views/teaching-analysis/dashboard/Detail.vue",
+    "href": "http://127.0.0.1:3006/#/admin/dashboard"
+  },
+  {
+    "module": "教学数据总览",
+    "name": "学院偏离",
+    "place": "页面 / 详情子表",
+    "mode": "none",
+    "tools": true,
+    "key": "dashboard:college-detail-deviation",
+    "file": "dashboard/Detail.vue",
+    "line": 65,
+    "source": "../../code/frontend/src/views/teaching-analysis/dashboard/Detail.vue",
+    "href": "http://127.0.0.1:3006/#/admin/dashboard"
+  },
+  {
+    "module": "教学数据总览",
+    "name": "年级结果",
+    "place": "页面 / 详情子表",
+    "mode": "none",
+    "tools": true,
+    "key": "dashboard:college-grade-results",
+    "file": "dashboard/Detail.vue",
+    "line": 94,
+    "source": "../../code/frontend/src/views/teaching-analysis/dashboard/Detail.vue",
+    "href": "http://127.0.0.1:3006/#/admin/dashboard"
+  },
+  {
+    "module": "教学数据总览",
+    "name": "重点课程",
+    "place": "页面 / 详情子表",
+    "mode": "none",
+    "tools": true,
+    "key": "dashboard:college-focus-courses",
+    "file": "dashboard/Detail.vue",
+    "line": 106,
+    "source": "../../code/frontend/src/views/teaching-analysis/dashboard/Detail.vue",
+    "href": "http://127.0.0.1:3006/#/admin/dashboard"
+  },
+  {
+    "module": "教学数据总览",
+    "name": "学院偏离与变化",
+    "place": "页面 / 详情子表",
+    "mode": "none",
+    "tools": true,
+    "key": "dashboard:college-compare",
+    "file": "dashboard/index.vue",
+    "line": 88,
+    "source": "../../code/frontend/src/views/teaching-analysis/dashboard/index.vue",
+    "href": "http://127.0.0.1:3006/#/admin/dashboard"
+  },
+  {
+    "module": "教学数据总览",
+    "name": "跨学院聚合比较",
+    "place": "页面 / 详情子表",
+    "mode": "none",
+    "tools": true,
+    "key": "dashboard:college-aggregate-compare",
+    "file": "dashboard/index.vue",
+    "line": 116,
+    "source": "../../code/frontend/src/views/teaching-analysis/dashboard/index.vue",
+    "href": "http://127.0.0.1:3006/#/admin/dashboard"
+  },
+  {
+    "module": "教学数据总览",
+    "name": "重点课程",
+    "place": "页面 / 详情子表",
+    "mode": "none",
+    "tools": true,
+    "key": "dashboard:focus-courses",
+    "file": "dashboard/index.vue",
+    "line": 143,
+    "source": "../../code/frontend/src/views/teaching-analysis/dashboard/index.vue",
+    "href": "http://127.0.0.1:3006/#/admin/dashboard"
+  },
+  {
+    "module": "教学数据总览",
+    "name": "年级课程",
+    "place": "页面 / 详情子表",
+    "mode": "none",
+    "tools": true,
+    "key": "`dashboard:major-grade-courses:${g.grade}`",
+    "file": "dashboard/MajorDetail.vue",
+    "line": 60,
+    "source": "../../code/frontend/src/views/teaching-analysis/dashboard/MajorDetail.vue",
+    "href": "http://127.0.0.1:3006/#/admin/dashboard"
+  },
+  {
+    "module": "师资保障分析",
+    "name": "学院师资保障",
+    "place": "页面 / 详情子表",
+    "mode": "none",
+    "tools": true,
+    "key": "faculty:college-assurance",
+    "file": "faculty/Index.vue",
+    "line": 105,
+    "source": "../../code/frontend/src/views/teaching-analysis/faculty/Index.vue",
+    "href": "http://127.0.0.1:3006/#/admin/faculty"
+  },
+  {
+    "module": "师资保障分析",
+    "name": "课程核查队列",
+    "place": "页面 / 详情子表",
+    "mode": "server",
+    "tools": true,
+    "key": "faculty:course-review-queue",
+    "file": "faculty/Index.vue",
+    "line": 251,
+    "source": "../../code/frontend/src/views/teaching-analysis/faculty/Index.vue",
+    "href": "http://127.0.0.1:3006/#/admin/faculty"
+  },
+  {
+    "module": "师资保障分析",
+    "name": "课程团队",
+    "place": "页面 / 详情子表",
+    "mode": "none",
+    "tools": true,
+    "key": "faculty:course-team",
+    "file": "faculty/Index.vue",
+    "line": 349,
+    "source": "../../code/frontend/src/views/teaching-analysis/faculty/Index.vue",
+    "href": "http://127.0.0.1:3006/#/admin/faculty"
+  },
+  {
+    "module": "师资保障分析",
+    "name": "教学班历史",
+    "place": "页面 / 详情子表",
+    "mode": "client",
+    "tools": true,
+    "key": "faculty:course-offerings",
+    "file": "faculty/Index.vue",
+    "line": 370,
+    "source": "../../code/frontend/src/views/teaching-analysis/faculty/Index.vue",
+    "href": "http://127.0.0.1:3006/#/admin/faculty"
+  },
+  {
+    "module": "师资保障分析",
+    "name": "教师当前课程",
+    "place": "页面 / 详情子表",
+    "mode": "client",
+    "tools": true,
+    "key": "faculty:teacher-current-courses",
+    "file": "faculty/Index.vue",
+    "line": 429,
+    "source": "../../code/frontend/src/views/teaching-analysis/faculty/Index.vue",
+    "href": "http://127.0.0.1:3006/#/admin/faculty"
+  },
+  {
+    "module": "师资保障分析",
+    "name": "教师教学历史",
+    "place": "页面 / 详情子表",
+    "mode": "client",
+    "tools": true,
+    "key": "faculty:teacher-history",
+    "file": "faculty/Index.vue",
+    "line": 443,
+    "source": "../../code/frontend/src/views/teaching-analysis/faculty/Index.vue",
+    "href": "http://127.0.0.1:3006/#/admin/faculty"
+  },
+  {
+    "module": "教学运行分析",
+    "name": "楼宇使用",
+    "place": "页面 / 详情子表",
+    "mode": "none",
+    "tools": true,
+    "key": "operation:classroom-buildings",
+    "file": "operation/Classroom.vue",
+    "line": 60,
+    "source": "../../code/frontend/src/views/teaching-analysis/operation/Classroom.vue",
+    "href": "http://127.0.0.1:3006/#/admin/operation/classroom"
+  },
+  {
+    "module": "教学运行分析",
+    "name": "公共课程结果",
+    "place": "页面 / 详情子表",
+    "mode": "none",
+    "tools": true,
+    "key": "reports:course-quality-public",
+    "file": "operation/CourseQuality.vue",
+    "line": 21,
+    "source": "../../code/frontend/src/views/teaching-analysis/operation/CourseQuality.vue",
+    "href": "http://127.0.0.1:3006/#/admin/operation/course-quality"
+  },
+  {
+    "module": "教学运行分析",
+    "name": "待核查课程",
+    "place": "页面 / 详情子表",
+    "mode": "server",
+    "tools": true,
+    "key": "reports:course-quality",
+    "file": "operation/CourseQuality.vue",
+    "line": 31,
+    "source": "../../code/frontend/src/views/teaching-analysis/operation/CourseQuality.vue",
+    "href": "http://127.0.0.1:3006/#/admin/operation/course-quality"
+  },
+  {
+    "module": "教学运行分析",
+    "name": "学期变化",
+    "place": "页面 / 详情子表",
+    "mode": "none",
+    "tools": false,
+    "key": "teaching-analysis:operation:coursequality:3",
+    "file": "operation/CourseQuality.vue",
+    "line": 35,
+    "source": "../../code/frontend/src/views/teaching-analysis/operation/CourseQuality.vue",
+    "href": "http://127.0.0.1:3006/#/admin/operation/course-quality"
+  },
+  {
+    "module": "教学运行分析",
+    "name": "数据质量问题",
+    "place": "页面 / 详情子表",
+    "mode": "none",
+    "tools": false,
+    "key": "teaching-analysis:operation:courses:1",
+    "file": "operation/Courses.vue",
+    "line": 39,
+    "source": "../../code/frontend/src/views/teaching-analysis/operation/Courses.vue",
+    "href": "http://127.0.0.1:3006/#/admin/operation/courses"
+  },
+  {
+    "module": "教学运行分析",
+    "name": "开课前十",
+    "place": "页面 / 详情子表",
+    "mode": "none",
+    "tools": true,
+    "key": "operation:courses-top10",
+    "file": "operation/Courses.vue",
+    "line": 57,
+    "source": "../../code/frontend/src/views/teaching-analysis/operation/Courses.vue",
+    "href": "http://127.0.0.1:3006/#/admin/operation/courses"
+  },
+  {
+    "module": "教学运行分析",
+    "name": "学院开课",
+    "place": "页面 / 详情子表",
+    "mode": "none",
+    "tools": true,
+    "key": "operation:courses-college",
+    "file": "operation/Courses.vue",
+    "line": 72,
+    "source": "../../code/frontend/src/views/teaching-analysis/operation/Courses.vue",
+    "href": "http://127.0.0.1:3006/#/admin/operation/courses"
+  },
+  {
+    "module": "教学运行分析",
+    "name": "全部教学班",
+    "place": "页面 / 详情子表",
+    "mode": "server",
+    "tools": true,
+    "key": "operation:courses-all",
+    "file": "operation/Courses.vue",
+    "line": 115,
+    "source": "../../code/frontend/src/views/teaching-analysis/operation/Courses.vue",
+    "href": "http://127.0.0.1:3006/#/admin/operation/courses"
+  },
+  {
+    "module": "教学运行分析",
+    "name": "重点课程时段",
+    "place": "页面 / 详情子表",
+    "mode": "none",
+    "tools": true,
+    "key": "operation:schedule-focus",
+    "file": "operation/ScheduleAnalysis.vue",
+    "line": 31,
+    "source": "../../code/frontend/src/views/teaching-analysis/operation/ScheduleAnalysis.vue",
+    "href": "http://127.0.0.1:3006/#/admin/operation/schedule-analysis"
+  },
+  {
+    "module": "教学运行分析",
+    "name": "时段课程明细",
+    "place": "页面 / 详情子表",
+    "mode": "none",
+    "tools": false,
+    "key": "teaching-analysis:operation:scheduleanalysis:2",
+    "file": "operation/ScheduleAnalysis.vue",
+    "line": 44,
+    "source": "../../code/frontend/src/views/teaching-analysis/operation/ScheduleAnalysis.vue",
+    "href": "http://127.0.0.1:3006/#/admin/operation/schedule-analysis"
+  },
+  {
+    "module": "教学运行分析",
+    "name": "学院调停课",
+    "place": "页面 / 详情子表",
+    "mode": "none",
+    "tools": true,
+    "key": "operation:schedule-changes-dept",
+    "file": "operation/ScheduleChanges.vue",
+    "line": 27,
+    "source": "../../code/frontend/src/views/teaching-analysis/operation/ScheduleChanges.vue",
+    "href": "http://127.0.0.1:3006/#/admin/operation/schedule-changes"
+  },
+  {
+    "module": "教学运行分析",
+    "name": "高频教师",
+    "place": "页面 / 详情子表",
+    "mode": "none",
+    "tools": true,
+    "key": "operation:schedule-changes-teachers",
+    "file": "operation/ScheduleChanges.vue",
+    "line": 49,
+    "source": "../../code/frontend/src/views/teaching-analysis/operation/ScheduleChanges.vue",
+    "href": "http://127.0.0.1:3006/#/admin/operation/schedule-changes"
+  },
+  {
+    "module": "教学运行分析",
+    "name": "教师原因分布",
+    "place": "页面 / 详情子表",
+    "mode": "none",
+    "tools": false,
+    "key": "teaching-analysis:operation:schedulechanges:3",
+    "file": "operation/ScheduleChanges.vue",
+    "line": 66,
+    "source": "../../code/frontend/src/views/teaching-analysis/operation/ScheduleChanges.vue",
+    "href": "http://127.0.0.1:3006/#/admin/operation/schedule-changes"
+  },
+  {
+    "module": "教学运行分析",
+    "name": "数据质量问题",
+    "place": "页面 / 详情子表",
+    "mode": "none",
+    "tools": false,
+    "key": "teaching-analysis:operation:teacherload:1",
+    "file": "operation/TeacherLoad.vue",
+    "line": 19,
+    "source": "../../code/frontend/src/views/teaching-analysis/operation/TeacherLoad.vue",
+    "href": "http://127.0.0.1:3006/#/admin/operation/teacher-load"
+  },
+  {
+    "module": "教学运行分析",
+    "name": "职称负荷",
+    "place": "页面 / 详情子表",
+    "mode": "none",
+    "tools": true,
+    "key": "operation:teacher-load-title",
+    "file": "operation/TeacherLoad.vue",
+    "line": 37,
+    "source": "../../code/frontend/src/views/teaching-analysis/operation/TeacherLoad.vue",
+    "href": "http://127.0.0.1:3006/#/admin/operation/teacher-load"
+  },
+  {
+    "module": "教学运行分析",
+    "name": "教师核查队列",
+    "place": "页面 / 详情子表",
+    "mode": "none",
+    "tools": true,
+    "key": "operation:teacher-load-review",
+    "file": "operation/TeacherLoad.vue",
+    "line": 41,
+    "source": "../../code/frontend/src/views/teaching-analysis/operation/TeacherLoad.vue",
+    "href": "http://127.0.0.1:3006/#/admin/operation/teacher-load"
+  },
+  {
+    "module": "教学运行分析",
+    "name": "学院负荷",
+    "place": "页面 / 详情子表",
+    "mode": "none",
+    "tools": true,
+    "key": "operation:teacher-load-college",
+    "file": "operation/TeacherLoad.vue",
+    "line": 51,
+    "source": "../../code/frontend/src/views/teaching-analysis/operation/TeacherLoad.vue",
+    "href": "http://127.0.0.1:3006/#/admin/operation/teacher-load"
+  },
+  {
+    "module": "教学运行分析",
+    "name": "课程构成",
+    "place": "页面 / 详情子表",
+    "mode": "none",
+    "tools": false,
+    "key": "teaching-analysis:operation:teacherload:5",
+    "file": "operation/TeacherLoad.vue",
+    "line": 65,
+    "source": "../../code/frontend/src/views/teaching-analysis/operation/TeacherLoad.vue",
+    "href": "http://127.0.0.1:3006/#/admin/operation/teacher-load"
+  },
+  {
+    "module": "学生成长与学业分析",
+    "name": "组织比较",
+    "place": "页面 / 详情子表",
+    "mode": "none",
+    "tools": true,
+    "key": "students:growth-organizations",
+    "file": "students/Analysis.vue",
+    "line": 123,
+    "source": "../../code/frontend/src/views/teaching-analysis/students/Analysis.vue",
+    "href": "http://127.0.0.1:3006/#/admin/students/analysis"
+  },
+  {
+    "module": "学生成长与学业分析",
+    "name": "关注学生",
+    "place": "页面 / 详情子表",
+    "mode": "server",
+    "tools": true,
+    "key": "students:growth-priority-list",
+    "file": "students/Analysis.vue",
+    "line": 169,
+    "source": "../../code/frontend/src/views/teaching-analysis/students/Analysis.vue",
+    "href": "http://127.0.0.1:3006/#/admin/students/analysis"
+  },
+  {
+    "module": "学生成长与学业分析",
+    "name": "明确未通过课程",
+    "place": "页面 / 详情子表",
+    "mode": "none",
+    "tools": false,
+    "key": "teaching-analysis:students:detail:1",
+    "file": "students/Detail.vue",
+    "line": 162,
+    "source": "../../code/frontend/src/views/teaching-analysis/students/Detail.vue",
+    "href": "http://127.0.0.1:3006/#/admin/students/analysis"
+  },
+  {
+    "module": "学生成长与学业分析",
+    "name": "候选课程",
+    "place": "页面 / 详情子表",
+    "mode": "none",
+    "tools": false,
+    "key": "teaching-analysis:students:detail:2",
+    "file": "students/Detail.vue",
+    "line": 174,
+    "source": "../../code/frontend/src/views/teaching-analysis/students/Detail.vue",
+    "href": "http://127.0.0.1:3006/#/admin/students/analysis"
+  },
+  {
+    "module": "学生成长与学业分析",
+    "name": "课程修读轨迹",
+    "place": "页面 / 详情子表",
+    "mode": "none",
+    "tools": false,
+    "key": "teaching-analysis:students:detail:3",
+    "file": "students/Detail.vue",
+    "line": 192,
+    "source": "../../code/frontend/src/views/teaching-analysis/students/Detail.vue",
+    "href": "http://127.0.0.1:3006/#/admin/students/analysis"
+  },
+  {
+    "module": "学生成长与学业分析",
+    "name": "成绩记录",
+    "place": "页面 / 详情子表",
+    "mode": "none",
+    "tools": false,
+    "key": "teaching-analysis:students:detail:4",
+    "file": "students/Detail.vue",
+    "line": 219,
+    "source": "../../code/frontend/src/views/teaching-analysis/students/Detail.vue",
+    "href": "http://127.0.0.1:3006/#/admin/students/analysis"
+  },
+  {
+    "module": "学生成长与学业分析",
+    "name": "学生清单",
+    "place": "页面 / 详情子表",
+    "mode": "server",
+    "tools": true,
+    "key": "courseProfile ? 'dashboard:course-students' : 'students:list'",
+    "file": "students/List.vue",
+    "line": 71,
+    "source": "../../code/frontend/src/views/teaching-analysis/students/List.vue",
+    "href": "http://127.0.0.1:3006/#/admin/students/list"
+  },
+  {
+    "module": "学生成长与学业分析",
+    "name": "班级学生",
+    "place": "页面 / 详情子表",
+    "mode": "client",
+    "tools": true,
+    "key": "students:my-class-students",
+    "file": "students/MyScope.vue",
+    "line": 72,
+    "source": "../../code/frontend/src/views/teaching-analysis/students/MyScope.vue",
+    "href": "http://127.0.0.1:3006/#/admin/students/analysis"
+  },
+  {
+    "module": "学生成长与学业分析",
+    "name": "导师学生",
+    "place": "页面 / 详情子表",
+    "mode": "none",
+    "tools": true,
+    "key": "students:my-students",
+    "file": "students/MyScope.vue",
+    "line": 90,
+    "source": "../../code/frontend/src/views/teaching-analysis/students/MyScope.vue",
+    "href": "http://127.0.0.1:3006/#/admin/students/analysis"
+  },
+  {
+    "module": "教学数据总览",
+    "name": "历史指标学期明细",
+    "place": "共用弹层",
+    "mode": "client",
+    "tools": true,
+    "key": "`dashboard:metric-history:${metricId}`",
+    "file": "MetricHistoryDialog.vue",
+    "line": 87,
+    "source": "../../code/frontend/src/components/MetricHistoryDialog.vue",
+    "href": "http://127.0.0.1:3006/#/admin/dashboard"
+  },
+  {
+    "module": "教学数据总览",
+    "name": "年级课程明细",
+    "place": "共用弹层",
+    "mode": "server",
+    "tools": true,
+    "key": "`dashboard:grade-courses:${majorId}:${grade}`",
+    "file": "GradeCoursesDrawer.vue",
+    "line": 19,
+    "source": "../../code/frontend/src/components/GradeCoursesDrawer.vue",
+    "href": "http://127.0.0.1:3006/#/admin/dashboard"
+  },
+  {
+    "module": "学生成长与学业分析",
+    "name": "学期变化",
+    "place": "共用弹层",
+    "mode": "none",
+    "tools": true,
+    "key": "student-evidence:semesters",
+    "file": "StudentEvidenceDrawer.vue",
+    "line": 74,
+    "source": "../../code/frontend/src/components/StudentEvidenceDrawer.vue",
+    "href": "http://127.0.0.1:3006/#/admin/students/analysis"
+  },
+  {
+    "module": "学生成长与学业分析",
+    "name": "课程证据",
+    "place": "共用弹层",
+    "mode": "none",
+    "tools": true,
+    "key": "`student-evidence:failures:${failureView}`",
+    "file": "StudentEvidenceDrawer.vue",
+    "line": 126,
+    "source": "../../code/frontend/src/components/StudentEvidenceDrawer.vue",
+    "href": "http://127.0.0.1:3006/#/admin/students/analysis"
+  },
+  {
+    "module": "学生成长与学业分析",
+    "name": "预警与核查记录",
+    "place": "共用弹层",
+    "mode": "none",
+    "tools": true,
+    "key": "student-evidence:alerts",
+    "file": "StudentEvidenceDrawer.vue",
+    "line": 149,
+    "source": "../../code/frontend/src/components/StudentEvidenceDrawer.vue",
+    "href": "http://127.0.0.1:3006/#/admin/students/analysis"
+  },
+  {
+    "module": "教学数据总览",
+    "name": "专业预警学生",
+    "place": "共用弹层",
+    "mode": "server",
+    "tools": true,
+    "key": "dashboard:major-alert-students",
+    "file": "MajorAlertStudentsDialog.vue",
+    "line": 34,
+    "source": "../../code/frontend/src/components/MajorAlertStudentsDialog.vue",
+    "href": "http://127.0.0.1:3006/#/admin/dashboard"
+  }
+]);
+    const modeNames={server:'服务端分页',client:'前端分页',none:'不分页'};
+    function renderUsage() {
+      const query=$('usage-search').value.trim().toLowerCase(),mode=$('usage-filter').value;
+      const rows=usages.filter(row=>(mode==='all'||row.mode===mode)&&(row.module+' '+row.name+' '+row.key).toLowerCase().includes(query));
+      $('usage-count').textContent='显示 '+rows.length+' / '+usages.length+' 处接入';
+      $('usage-body').innerHTML=rows.length?rows.map(row=>'<tr><td><b>'+row.module+'</b>'+row.name+'<small>'+row.place+'</small></td><td>'+modeNames[row.mode]+'</td><td><span class="pill '+(row.tools?'':'off')+'">'+(row.tools?'两项开启':'两项隐藏')+'</span></td><td><code>'+escapeHtml(row.key)+'</code></td><td><div class="source-links"><a href="'+(row.source||'../../code/frontend/src/views/'+(row.area||'admin')+'/'+row.file)+'">源码 ↗</a><a href="'+(row.href||'http://127.0.0.1:3006/#/admin/'+(row.area==='basic-reports'?'basic-reports':'system')+'/'+row.route)+'" target="_blank" rel="noopener">页面 ↗</a></div><small>'+row.file+' · L'+row.line+'</small></td></tr>').join(''):'<tr><td colspan="5">没有匹配的接入位置。</td></tr>';
+    }
+    $('usage-search').addEventListener('input',renderUsage);$('usage-filter').addEventListener('change',renderUsage);
+    const sections=[...document.querySelectorAll('section[id]')],navLinks=[...document.querySelectorAll('.nav a')];
+    function updateNav() { let current=sections[0].id;for(const section of sections)if(section.getBoundingClientRect().top<=140)current=section.id;for(const link of navLinks){const active=link.getAttribute('href')==='#'+current;link.classList.toggle('active',active);if(active)link.setAttribute('aria-current','location');else link.removeAttribute('aria-current');} }
+    window.addEventListener('scroll',updateNav,{passive:true});
+    renderTree();renderUsage();updateNav();
+  </script>
+</body>
+</html>

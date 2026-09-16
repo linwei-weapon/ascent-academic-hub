@@ -116,9 +116,10 @@ body {
 .el-table {
   --el-table-border-color: var(--sa-border);
   --el-table-header-bg-color: #f8fafc;
-  --el-table-header-text-color: #475569;
+  // 显式保留原表头与正文灰色，避免全量样式加载顺序改变现有表格配色。
+  --el-table-header-text-color: var(--el-text-color-secondary);
   --el-table-row-hover-bg-color: var(--sa-row-hover);
-  --el-table-text-color: var(--sa-text);
+  --el-table-text-color: var(--el-text-color-regular);
   font-variant-numeric: tabular-nums;
 }
 .el-table th.el-table__cell {

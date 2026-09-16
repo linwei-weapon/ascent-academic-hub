@@ -11,7 +11,7 @@ class P3ModuleReorganizationTest(unittest.TestCase):
         return (ROOT / relative).read_text(encoding="utf-8")
 
     def test_legacy_fact_topics_redirect_to_primary_modules(self):
-        router = self.read("frontend/src/router/index.ts")
+        router = self.read("frontend/src/router/modules/teachingAnalysis.ts")
         expected = {
             "reports/early-setback": "/admin/alert?tab=early-risk",
             "reports/graduation-readiness": "/admin/curriculum?tab=graduation-readiness",
@@ -21,13 +21,13 @@ class P3ModuleReorganizationTest(unittest.TestCase):
         }
         for legacy, target in expected.items():
             self.assertIn(f"path: '{legacy}', redirect: '{target}'", router)
-        self.assertNotIn("import('@/views/admin/reports/FacultyResourceRisk.vue')", router)
-        self.assertNotIn("import('@/views/admin/reports/ScheduleStrategy.vue')", router)
+        self.assertNotIn("import('@/views/reports/FacultyResourceRisk.vue')", router)
+        self.assertNotIn("import('@/views/reports/ScheduleStrategy.vue')", router)
 
     def test_primary_workspaces_absorb_topic_capabilities(self):
-        alert = self.read("frontend/src/views/admin/alert/Workspace.vue")
-        curriculum = self.read("frontend/src/views/admin/curriculum/index.vue")
-        operation = self.read("frontend/src/views/admin/operation/Index.vue")
+        alert = self.read("frontend/src/views/teaching-analysis/alert/Workspace.vue")
+        curriculum = self.read("frontend/src/views/teaching-analysis/curriculum/index.vue")
+        operation = self.read("frontend/src/views/teaching-analysis/operation/Index.vue")
         self.assertIn('label="低年级风险观察"', alert)
         self.assertIn("<EarlySetback", alert)
         self.assertIn('label="毕业准备与课程保障"', curriculum)
@@ -61,23 +61,24 @@ class P3ModuleReorganizationTest(unittest.TestCase):
         self.assertIn("permissionContext?.detailScope", component)
         self.assertIn("activeRoleName", component)
         for page in (
-            "frontend/src/views/admin/dashboard/index.vue",
-            "frontend/src/views/admin/faculty/Index.vue",
+            "frontend/src/views/teaching-analysis/dashboard/index.vue",
         ):
             self.assertIn("BusinessPageContext", self.read(page), page)
-        student_growth = self.read("frontend/src/views/admin/students/Analysis.vue")
+        student_growth = self.read("frontend/src/views/teaching-analysis/students/Analysis.vue")
         self.assertNotIn("BusinessPageContext", student_growth)
-        curriculum = self.read("frontend/src/views/admin/curriculum/index.vue")
+        faculty = self.read("frontend/src/views/teaching-analysis/faculty/Index.vue")
+        self.assertNotIn("BusinessPageContext", faculty)
+        curriculum = self.read("frontend/src/views/teaching-analysis/curriculum/index.vue")
         self.assertNotIn("BusinessPageContext", curriculum)
-        alert = self.read("frontend/src/views/admin/alert/Workspace.vue")
+        alert = self.read("frontend/src/views/teaching-analysis/alert/Workspace.vue")
         self.assertNotIn("BusinessPageContext", alert)
         self.assertIn("最新预警统计时间", alert)
-        operation = self.read("frontend/src/views/admin/operation/Index.vue")
+        operation = self.read("frontend/src/views/teaching-analysis/operation/Index.vue")
         self.assertNotIn("BusinessPageContext", operation)
         self.assertNotIn("当前数据覆盖", operation)
 
     def test_course_supply_uses_one_filter_snapshot_without_college_drill(self):
-        page = self.read("frontend/src/views/admin/operation/Courses.vue")
+        page = self.read("frontend/src/views/teaching-analysis/operation/Courses.vue")
         self.assertIn('placeholder="全部学院"', page)
         self.assertNotIn('placeholder="课程代码/名称"', page)
         self.assertIn("const params = buildCourseParams()", page)
@@ -113,7 +114,7 @@ class P3ModuleReorganizationTest(unittest.TestCase):
         )
 
     def test_curriculum_student_list_uses_review_queue_labels(self):
-        curriculum = self.read("frontend/src/views/admin/curriculum/index.vue")
+        curriculum = self.read("frontend/src/views/teaching-analysis/curriculum/index.vue")
         self.assertIn("{key:'failedRequired',label:'必修未通过'", curriculum)
         self.assertIn("{key:'verificationRequired',label:'过期漏修'", curriculum)
         self.assertIn("studentEvidenceStatusLabel(row.evidenceStatus)", curriculum)
@@ -129,7 +130,8 @@ class P3ModuleReorganizationTest(unittest.TestCase):
         positions = [student_columns.index(column) for column in ordered_columns]
         self.assertEqual(sorted(positions), positions)
         self.assertIn('storage-key="curriculum:management-students" :max-business-columns="10"', curriculum)
-        self.assertIn(':config-version="5" :page-size="studentDialog.pageSize"', curriculum)
+        self.assertIn(':config-version="5"', curriculum)
+        self.assertIn(':page-size="studentDialog.pageSize"', curriculum)
 
         college_columns = curriculum[
             curriculum.index("const collegeColumns"):curriculum.index("const majorColumns")
@@ -139,8 +141,8 @@ class P3ModuleReorganizationTest(unittest.TestCase):
         self.assertIn("`${row.collegeName}｜必修未通过`", curriculum)
 
     def test_curriculum_plan_structure_module_is_hidden(self):
-        curriculum = self.read("frontend/src/views/admin/curriculum/index.vue")
-        router = self.read("frontend/src/router/index.ts")
+        curriculum = self.read("frontend/src/views/teaching-analysis/curriculum/index.vue")
+        router = self.read("frontend/src/router/modules/teachingAnalysis.ts")
         self.assertIn("const showPlanStructure = false", curriculum)
         self.assertIn(
             '<el-tab-pane v-if="showPlanStructure" label="方案结构与要求" name="plan">',
@@ -152,8 +154,8 @@ class P3ModuleReorganizationTest(unittest.TestCase):
         self.assertEqual(router.count("redirect: '/admin/curriculum'"), 2)
 
     def test_curriculum_progress_uses_review_queue_labels_and_reason(self):
-        curriculum = self.read("frontend/src/views/admin/curriculum/index.vue")
-        progress = self.read("frontend/src/views/admin/curriculum/Progress.vue")
+        curriculum = self.read("frontend/src/views/teaching-analysis/curriculum/index.vue")
+        progress = self.read("frontend/src/views/teaching-analysis/curriculum/Progress.vue")
         progress_tab = curriculum[curriculum.index('<el-tab-pane label="学生进度核查"'):]
         filter_order = tuple(
             progress_tab.index(f'placeholder="{label}"')
@@ -224,7 +226,7 @@ class P3ModuleReorganizationTest(unittest.TestCase):
         self.assertEqual(2, progress.count('class="tab-help-icon"'))
 
     def test_curriculum_student_evidence_uses_due_study_result_labels(self):
-        curriculum = self.read("frontend/src/views/admin/curriculum/index.vue")
+        curriculum = self.read("frontend/src/views/teaching-analysis/curriculum/index.vue")
         self.assertIn('class="description-label-with-help">必修未通过', curriculum)
         self.assertIn('aria-label="查看必修未通过计算说明"', curriculum)
         self.assertIn('<h4 class="evidence-title">必修未通过课程</h4>', curriculum)
@@ -240,7 +242,7 @@ class P3ModuleReorganizationTest(unittest.TestCase):
         self.assertNotIn('必须先核验选课、免修与认定数据', curriculum)
 
     def test_curriculum_overview_cards_disclose_display_limits(self):
-        curriculum = self.read("frontend/src/views/admin/curriculum/index.vue")
+        curriculum = self.read("frontend/src/views/teaching-analysis/curriculum/index.vue")
         for title, note in (
             ("学院方案执行关注", "当前最多仅展示前 30 个学院"),
             ("专业执行关注", "当前最多仅展示前 50 个专业"),
@@ -252,7 +254,7 @@ class P3ModuleReorganizationTest(unittest.TestCase):
             )
 
     def test_curriculum_student_evidence_summary_has_metric_tooltips(self):
-        curriculum = self.read("frontend/src/views/admin/curriculum/index.vue")
+        curriculum = self.read("frontend/src/views/teaching-analysis/curriculum/index.vue")
         expected = (
             "该学生的必修课程中，教学任务里没有找到任何历史教学班记录的课程数",
             "该学生尚未达到要求的培养方案模块中，当前有效成绩仍为未通过的必修课程数",
@@ -264,7 +266,7 @@ class P3ModuleReorganizationTest(unittest.TestCase):
         self.assertEqual(curriculum.count('class="description-help-icon"'), 3)
 
     def test_alert_monitor_followup_ui_contract(self):
-        monitor = self.read("frontend/src/views/admin/alert/index.vue")
+        monitor = self.read("frontend/src/views/teaching-analysis/alert/index.vue")
         self.assertIn("<b>查询条件</b>", monitor)
         self.assertNotIn("<b>当前快照</b>", monitor)
         self.assertIn("key: 'grade', label: '年级'", monitor)
@@ -274,11 +276,11 @@ class P3ModuleReorganizationTest(unittest.TestCase):
         self.assertIn("position: 'insideEndTop'", monitor)
         self.assertIn("rotate: 0", monitor)
         self.assertEqual(2, monitor.count(':height="395"'))
-        self.assertIn(".chart-card { height: 495px; }", monitor)
+        self.assertRegex(monitor, r"\.chart-card\s*\{\s*height:\s*495px;")
         self.assertIn("fourKpiPresetExpectedTotal", monitor)
 
     def test_early_setback_followup_ui_contract(self):
-        page = self.read("frontend/src/views/admin/reports/EarlySetback.vue")
+        page = self.read("frontend/src/views/teaching-analysis/alert/EarlySetback.vue")
         self.assertNotIn("群体筛查不等于个人原因判断", page)
         self.assertNotIn("学生指标均按学号去重", page)
         self.assertNotIn("不同年级的后续观察时长不同", page)
@@ -302,7 +304,7 @@ class P3ModuleReorganizationTest(unittest.TestCase):
             student_columns.index("{ key: 'class_code', label: '班级'"),
             student_columns.index("{ key: 'entry_grade', label: '年级'"),
         )
-        drawer = self.read("frontend/src/views/admin/alert/EarlySetbackDrawer.vue")
+        drawer = self.read("frontend/src/views/teaching-analysis/alert/EarlySetbackDrawer.vue")
         self.assertIn("no_setback: '大一未出现未通过'", drawer)
         self.assertNotIn("这是核查线索，不是个人原因判断", drawer)
         self.assertNotIn("历史预警用于理解风险变化", drawer)
@@ -312,13 +314,15 @@ class P3ModuleReorganizationTest(unittest.TestCase):
         self.assertNotIn("`学期${index + 1}`", drawer)
 
     def test_college_comparison_separates_compare_and_drill(self):
-        dashboard = self.read("frontend/src/views/admin/dashboard/index.vue")
-        self.assertIn("/admin/meta/college-comparison", dashboard)
+        dashboard = self.read("frontend/src/views/teaching-analysis/dashboard/index.vue")
+        api = self.read("frontend/src/api/teachingAnalysis/dashboard.ts")
+        self.assertIn("dashboardApi.getCollegeComparison(qs)", dashboard)
+        self.assertIn("/admin/meta/college-comparison", api)
         self.assertIn("if (!row.canDrillDown) return", dashboard)
         self.assertIn("仅可比较", dashboard)
 
     def test_teacher_load_followup_ui_contract(self):
-        page = self.read("frontend/src/views/admin/operation/TeacherLoad.vue")
+        page = self.read("frontend/src/views/teaching-analysis/operation/TeacherLoad.vue")
         self.assertLess(page.index('placeholder="全部学院"'), page.index('placeholder="全部职称"'))
         self.assertNotIn("真实教学任务 ·", page)
         self.assertNotIn(":title=\"data.workloadPolicy.statement\"", page)
@@ -350,34 +354,34 @@ class P3ModuleReorganizationTest(unittest.TestCase):
 
     def test_operation_formal_tables_follow_public_table_contract(self):
         expected_storage_keys = {
-            "frontend/src/views/admin/operation/Courses.vue": (
+            "frontend/src/views/teaching-analysis/operation/Courses.vue": (
                 "operation:courses-top10", "operation:courses-college", "operation:courses-all",
             ),
-            "frontend/src/views/admin/operation/ScheduleAnalysis.vue": (
+            "frontend/src/views/teaching-analysis/operation/ScheduleAnalysis.vue": (
                 "operation:schedule-focus",
             ),
-            "frontend/src/views/admin/operation/Classroom.vue": (
+            "frontend/src/views/teaching-analysis/operation/Classroom.vue": (
                 "operation:classroom-buildings",
             ),
-            "frontend/src/views/admin/operation/TeacherLoad.vue": (
+            "frontend/src/views/teaching-analysis/operation/TeacherLoad.vue": (
                 "operation:teacher-load-title", "operation:teacher-load-review",
                 "operation:teacher-load-college",
             ),
-            "frontend/src/views/admin/operation/ScheduleChanges.vue": (
+            "frontend/src/views/teaching-analysis/operation/ScheduleChanges.vue": (
                 "operation:schedule-changes-dept", "operation:schedule-changes-teachers",
             ),
-            "frontend/src/views/admin/reports/CourseQuality.vue": (
+            "frontend/src/views/teaching-analysis/operation/CourseQuality.vue": (
                 "reports:course-quality-public", "reports:course-quality",
             ),
         }
         for page, storage_keys in expected_storage_keys.items():
             source = self.read(page)
-            self.assertIn("DataTable", source, page)
+            self.assertIn("AppTable", source, page)
             for storage_key in storage_keys:
                 self.assertIn(storage_key, source, page)
 
     def test_course_quality_uses_one_summary_request_and_drawer_detail(self):
-        frontend = self.read("frontend/src/views/admin/reports/CourseQuality.vue")
+        frontend = self.read("frontend/src/views/teaching-analysis/operation/CourseQuality.vue")
         backend = self.read("backend/api/routers/v2.py")
         self.assertNotIn("loadPublic", frontend)
         self.assertIn("publicRequiredTop", frontend)

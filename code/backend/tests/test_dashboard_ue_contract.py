@@ -14,7 +14,7 @@ BACKEND = ROOT / "code" / "backend"
 class DashboardUeContractTest(unittest.TestCase):
     def test_alert_student_list_query_and_reset_keep_the_list_baseline(self):
         alert_page = (
-            FRONTEND / "views" / "admin" / "alert" / "index.vue"
+            FRONTEND / "views" / "teaching-analysis" / "alert" / "index.vue"
         ).read_text(encoding="utf-8")
         self.assertIn(
             '@click="applyListFilters">\n            查询\n          </el-button>',
@@ -44,7 +44,7 @@ class DashboardUeContractTest(unittest.TestCase):
 
     def test_rule_discovery_requires_manifest_consent_and_shows_run_status(self):
         discovery = (
-            FRONTEND / "views" / "admin" / "alert" / "Discovery.vue"
+            FRONTEND / "views" / "teaching-analysis" / "alert" / "Discovery.vue"
         ).read_text(encoding="utf-8")
         for marker in (
             "本次计算样本库表总数",
@@ -55,8 +55,8 @@ class DashboardUeContractTest(unittest.TestCase):
             "免责说明协议",
             "拒绝",
             "执行",
-            "/admin/settings/rules/discovery/preview",
-            "/admin/settings/rules/discovery/status",
+            "rulesApi.getDiscoveryPreview()",
+            "rulesApi.getDiscoveryStatus()",
             "manifestFingerprint",
             "consentAccepted",
             ':disabled="!consentAccepted"',
@@ -64,6 +64,10 @@ class DashboardUeContractTest(unittest.TestCase):
             "新一轮分析运行中",
         ):
             self.assertIn(marker, discovery)
+        api = (FRONTEND / "api" / "teachingAnalysis" / "rules.ts").read_text(encoding="utf-8")
+        self.assertIn("/admin/settings/rules/discovery/preview", api)
+        self.assertIn("/admin/settings/rules/discovery/status", api)
+        self.assertIn("/trial-script", api)
         self.assertNotIn("新一轮分析会将当前待审核建议标记", discovery)
         self.assertNotIn('class="model-boundary"', discovery)
         self.assertNotIn("<span>数据总量</span>", discovery)
@@ -72,14 +76,15 @@ class DashboardUeContractTest(unittest.TestCase):
 
     def test_draft_rule_change_supports_trial_script_maintenance(self):
         settings = (
-            FRONTEND / "views" / "admin" / "settings" / "index.vue"
+            FRONTEND / "views" / "teaching-analysis" / "alert" / "RuleGovernance.vue"
         ).read_text(encoding="utf-8")
         for marker in (
             "试算脚本维护",
             "普通SQL",
             "存储过程",
             "scriptDialogVisible",
-            "/trial-script",
+            "rulesApi.getRuleTrialScript",
+            "rulesApi.updateRuleTrialScript",
             "保存",
             "取消",
         ):
@@ -101,16 +106,16 @@ class DashboardUeContractTest(unittest.TestCase):
 
     def test_dashboard_path_tables_use_public_component(self):
         targets = [
-            FRONTEND / "views" / "admin" / "dashboard" / "index.vue",
-            FRONTEND / "views" / "admin" / "dashboard" / "Detail.vue",
-            FRONTEND / "views" / "admin" / "dashboard" / "MajorDetail.vue",
-            FRONTEND / "views" / "admin" / "dashboard" / "CourseDetail.vue",
-            FRONTEND / "views" / "admin" / "students" / "List.vue",
+            FRONTEND / "views" / "teaching-analysis" / "dashboard" / "index.vue",
+            FRONTEND / "views" / "teaching-analysis" / "dashboard" / "Detail.vue",
+            FRONTEND / "views" / "teaching-analysis" / "dashboard" / "MajorDetail.vue",
+            FRONTEND / "views" / "teaching-analysis" / "dashboard" / "CourseDetail.vue",
+            FRONTEND / "views" / "teaching-analysis" / "students" / "List.vue",
         ]
         for target in targets:
             source = target.read_text(encoding="utf-8")
-            self.assertIn("<DataTable", source, target.name)
-            self.assertNotIn("<el-table", source, target.name)
+            self.assertIn("<AppTable", source, target.name)
+            self.assertNotRegex(source, r"<el-table(?:\s|>)", target.name)
             self.assertIn("max-business-columns", source, target.name)
             self.assertIn("config-version", source, target.name)
 
@@ -119,7 +124,7 @@ class DashboardUeContractTest(unittest.TestCase):
             ROOT / "code" / "backend" / "api" / "routers" / "dashboard.py"
         ).read_text(encoding="utf-8")
         frontend = (
-            FRONTEND / "views" / "admin" / "dashboard" / "index.vue"
+            FRONTEND / "views" / "teaching-analysis" / "dashboard" / "index.vue"
         ).read_text(encoding="utf-8")
         for marker in (
             '"managementSummary": management_summary',
@@ -147,13 +152,13 @@ class DashboardUeContractTest(unittest.TestCase):
             ROOT / "code" / "backend" / "api" / "routers" / "dashboard.py"
         ).read_text(encoding="utf-8")
         college = (
-            FRONTEND / "views" / "admin" / "dashboard" / "Detail.vue"
+            FRONTEND / "views" / "teaching-analysis" / "dashboard" / "Detail.vue"
         ).read_text(encoding="utf-8")
         major = (
-            FRONTEND / "views" / "admin" / "dashboard" / "MajorDetail.vue"
+            FRONTEND / "views" / "teaching-analysis" / "dashboard" / "MajorDetail.vue"
         ).read_text(encoding="utf-8")
         course = (
-            FRONTEND / "views" / "admin" / "dashboard" / "CourseDetail.vue"
+            FRONTEND / "views" / "teaching-analysis" / "dashboard" / "CourseDetail.vue"
         ).read_text(encoding="utf-8")
         for marker in (
             '"currentFailVsCollegePp"',
@@ -209,10 +214,10 @@ class DashboardUeContractTest(unittest.TestCase):
 
     def test_drill_navigation_preserves_list_and_scroll_context(self):
         college = (
-            FRONTEND / "views" / "admin" / "dashboard" / "Detail.vue"
+            FRONTEND / "views" / "teaching-analysis" / "dashboard" / "Detail.vue"
         ).read_text(encoding="utf-8")
         student = (
-            FRONTEND / "views" / "admin" / "student" / "Detail.vue"
+            FRONTEND / "views" / "teaching-analysis" / "students" / "Detail.vue"
         ).read_text(encoding="utf-8")
         router = (
             FRONTEND / "router" / "index.ts"
@@ -224,7 +229,7 @@ class DashboardUeContractTest(unittest.TestCase):
         )
         self.assertIn("savedPosition || { top: 0 }", router)
         student_list = (
-            FRONTEND / "views" / "admin" / "students" / "List.vue"
+            FRONTEND / "views" / "teaching-analysis" / "students" / "List.vue"
         ).read_text(encoding="utf-8")
         self.assertIn("function currentListQuery()", student_list)
         self.assertIn("page: page.value > 1 ? String(page.value)", student_list)
@@ -281,7 +286,7 @@ class DashboardUeContractTest(unittest.TestCase):
         self.assertNotIn("#col-status", history)
         for page_name in ("index.vue", "Detail.vue", "MajorDetail.vue"):
             page = (
-                FRONTEND / "views" / "admin" / "dashboard" / page_name
+                FRONTEND / "views" / "teaching-analysis" / "dashboard" / page_name
             ).read_text(encoding="utf-8")
             self.assertIn(':semester-options="semesters"', page)
 
@@ -296,7 +301,7 @@ class DashboardUeContractTest(unittest.TestCase):
             self.assertIn(marker, major_alerts)
         self.assertIn("semester?: string", major_alerts)
         alert_student_drawer = (
-            FRONTEND / "views" / "admin" / "alert" / "AlertStudentDrawer.vue"
+            FRONTEND / "views" / "teaching-analysis" / "alert" / "AlertStudentDrawer.vue"
         ).read_text(encoding="utf-8")
         self.assertIn('label="预警核查摘要" name="summary"', alert_student_drawer)
         self.assertNotIn('label="核查摘要" name="summary"', alert_student_drawer)
@@ -318,7 +323,7 @@ class DashboardUeContractTest(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn('"ruleId": a["rule_id"]', alert_router)
         trajectory_card = (
-            FRONTEND / "views" / "admin" / "alert" / "TrajectoryCard.vue"
+            FRONTEND / "views" / "teaching-analysis" / "alert" / "TrajectoryCard.vue"
         ).read_text(encoding="utf-8")
         self.assertIn("同类预警后续轨迹", trajectory_card)
         self.assertIn('v-if="showHeader"', trajectory_card)
@@ -328,7 +333,7 @@ class DashboardUeContractTest(unittest.TestCase):
         self.assertNotIn("发生在当前学期，尚无后续学期数据", trajectory_card)
 
         major_detail = (
-            FRONTEND / "views" / "admin" / "dashboard" / "MajorDetail.vue"
+            FRONTEND / "views" / "teaching-analysis" / "dashboard" / "MajorDetail.vue"
         ).read_text(encoding="utf-8")
         self.assertIn(':semester="semLabel"', major_detail)
 
@@ -343,7 +348,7 @@ class DashboardUeContractTest(unittest.TestCase):
         self.assertIn("{{ semester }}", grade_courses)
 
         course_detail = (
-            FRONTEND / "views" / "admin" / "dashboard" / "CourseDetail.vue"
+            FRONTEND / "views" / "teaching-analysis" / "dashboard" / "CourseDetail.vue"
         ).read_text(encoding="utf-8")
         self.assertNotIn("sortHistoryPeriodsDescending", course_detail)
         student_evidence = (
@@ -355,9 +360,10 @@ class DashboardUeContractTest(unittest.TestCase):
         router = (FRONTEND / "router" / "index.ts").read_text(encoding="utf-8")
         menu = (FRONTEND / "utils" / "menu.ts").read_text(encoding="utf-8")
         student_list = (
-            FRONTEND / "views" / "admin" / "students" / "List.vue"
+            FRONTEND / "views" / "teaching-analysis" / "students" / "List.vue"
         ).read_text(encoding="utf-8")
-        self.assertIn("course/:id/students", router)
+        module_router = (FRONTEND / "router" / "modules" / "teachingAnalysis.ts").read_text(encoding="utf-8")
+        self.assertIn("course/:id/students", module_router)
         self.assertIn("path.startsWith('/admin/course/')", menu)
         self.assertIn("课程-学生学业画像", student_list)
         self.assertIn(":disabled=\"courseProfile\"", student_list)

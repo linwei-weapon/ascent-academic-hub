@@ -1,0 +1,1353 @@
+{
+  "schemaVersion": 1,
+  "kind": "documentation-module-index",
+  "task": "ARCH-02",
+  "date": "2026-09-14",
+  "pathBase": "repository-root",
+  "usage": "仅文档索引，不参与菜单、权限或运行时配置。",
+  "canonicalIndexForThisStep": "文档/文档管理/新增-modules.json",
+  "namingOverride": "按用户要求替代规划中的docs/modules.json；不创建同内容别名，不修改已有规格。",
+  "baseline": {
+    "branch": "20260912-RenovationProject",
+    "commit": "dce5d52",
+    "verification": "static-files-only; no databases or live API queried"
+  },
+  "navigation": "文档/文档管理/新增-文档导航.md",
+  "guide": "文档/文档管理/新增-模块索引说明.md",
+  "dataSourceDefinitions": [
+    {
+      "id": "legacy",
+      "name": "既有分析库",
+      "runtimeLocation": "code/backend/db/analytics.sqlite",
+      "evidenceFiles": [
+        "code/backend/api/db.py",
+        "code/backend/etl/schema.sql"
+      ],
+      "notes": "运行时文件不要求存在于源码克隆；本轮不复制、不初始化。"
+    },
+    {
+      "id": "v2",
+      "name": "V2分析库",
+      "runtimeLocation": "code/backend/db/analytics_v2.sqlite",
+      "evidenceFiles": [
+        "code/backend/api/db.py",
+        "code/backend/etl/schema_v2.sql"
+      ],
+      "notes": "事实、关系与聚合，具体表以相关查询为准。"
+    },
+    {
+      "id": "term-sources",
+      "name": "学期源库和输入文件",
+      "runtimeLocation": "由backend.etl.config与v2_sources配置解析",
+      "evidenceFiles": [
+        "code/backend/etl/config.py",
+        "code/backend/etl/v2_sources.py",
+        "code/backend/etl/extract_ts.py",
+        "code/backend/api/basic_reports/service.py"
+      ],
+      "notes": "四级累计等报表可能读取学期源库，不能只检查双分析库。"
+    },
+    {
+      "id": "platform",
+      "name": "平台配置、身份与会话",
+      "runtimeLocation": "既有分析库中的平台表，不是第三个业务数据库",
+      "evidenceFiles": [
+        "code/backend/api/permission_context.py",
+        "code/backend/skills/store.py",
+        "code/backend/skills/config_store.py",
+        "code/backend/api/security_governance.py"
+      ],
+      "notes": "账号、权限、规则、方案、审计、会话受控持久化。"
+    }
+  ],
+  "sharedCapabilities": [
+    {
+      "id": "transport",
+      "name": "HTTP传输",
+      "files": [
+        "code/frontend/src/utils/http.ts"
+      ],
+      "notes": "JSON和下载已有封装；部分fetch与SSE仍有独立处理。"
+    },
+    {
+      "id": "identity",
+      "name": "工作身份与权限",
+      "files": [
+        "code/frontend/src/store/auth.ts",
+        "code/frontend/src/store/role.ts",
+        "code/frontend/src/utils/menu.ts",
+        "code/backend/api/deps.py",
+        "code/backend/api/permission_context.py",
+        "code/backend/permission_catalog.py"
+      ],
+      "notes": "菜单、动作、明细、比较和人员关系授权。"
+    },
+    {
+      "id": "routing",
+      "name": "路由与应用外壳",
+      "files": [
+        "code/frontend/src/router/index.ts",
+        "code/frontend/src/views/admin/Layout.vue",
+        "code/frontend/src/main.ts",
+        "code/frontend/src/App.vue"
+      ],
+      "notes": "路由、兼容地址和应用入口。"
+    },
+    {
+      "id": "metadata",
+      "name": "筛选元数据",
+      "files": [
+        "code/frontend/src/utils/meta.ts",
+        "code/frontend/src/utils/v2meta.ts",
+        "code/backend/api/routers/meta.py"
+      ],
+      "notes": "按接口当前语义核对缓存和范围。"
+    },
+    {
+      "id": "data",
+      "name": "数据与指标公共实现",
+      "files": [
+        "code/backend/api/db.py",
+        "code/backend/api/settings.py",
+        "code/backend/api/envelope.py",
+        "code/backend/api/academic_metrics.py",
+        "code/backend/api/historical_roster.py",
+        "code/backend/api/routers/v2.py",
+        "code/backend/metric_catalog.py",
+        "code/backend/etl/schema.sql",
+        "code/backend/etl/schema_v2.sql",
+        "code/backend/etl/schema_room_occupancy.sql"
+      ],
+      "notes": "V2 Router为多业务共用容器；schema与迁移共同描述结构。"
+    },
+    {
+      "id": "ui",
+      "name": "公共组件和主题",
+      "files": [
+        "code/frontend/src/components",
+        "code/frontend/src/assets/styles",
+        "code/frontend/src/utils/businessPage.ts",
+        "code/frontend/src/utils/export.ts"
+      ],
+      "notes": "复用现有组件，不以索引替代组件API。"
+    },
+    {
+      "id": "ai",
+      "name": "教学洞察与兼容专家",
+      "files": [
+        "code/frontend/src/utils/ai.ts",
+        "code/frontend/src/utils/aiInsight.ts",
+        "code/frontend/src/types/ai.ts",
+        "code/backend/api/routers/ai.py",
+        "code/backend/ai_experts/registry.py",
+        "code/backend/ai_experts/versions.py"
+      ],
+      "notes": "旧ai.py仍服务教学页面；不得整体认定为无用。"
+    },
+    {
+      "id": "audit",
+      "name": "安全、审计和运行入口",
+      "files": [
+        "code/backend/api/main.py",
+        "code/backend/api/security.py",
+        "code/backend/api/security_governance.py"
+      ],
+      "notes": "仅定位现有实现，不代表本次已验证运行或权限。"
+    }
+  ],
+  "applicationRoutes": [
+    {
+      "path": "/admin/",
+      "kind": "redirect",
+      "redirect": "/admin/dashboard"
+    },
+    {
+      "path": "/",
+      "kind": "redirect",
+      "redirect": "/admin/dashboard"
+    },
+    {
+      "path": "/:pathMatch(.*)*",
+      "kind": "redirect",
+      "redirect": "/admin/dashboard"
+    },
+    {
+      "path": "/admin",
+      "kind": "layout",
+      "page": "code/frontend/src/views/admin/Layout.vue"
+    }
+  ],
+  "modules": [
+    {
+      "id": "auth",
+      "name": "登录与工作身份",
+      "purpose": "登录、身份切换、菜单准入和无权限反馈。",
+      "current": {
+        "routes": [
+          {
+            "path": "/login",
+            "kind": "page",
+            "page": "code/frontend/src/views/Login.vue"
+          },
+          {
+            "path": "/admin/forbidden",
+            "kind": "page",
+            "page": "code/frontend/src/views/admin/Forbidden.vue"
+          }
+        ],
+        "viewFiles": [
+          "code/frontend/src/views/admin/Forbidden.vue",
+          "code/frontend/src/views/Login.vue"
+        ],
+        "requestHelpers": [
+          "code/frontend/src/store/auth.ts",
+          "code/frontend/src/store/role.ts"
+        ],
+        "typeFiles": [
+          "code/frontend/src/store/auth.ts"
+        ],
+        "backendFiles": [
+          "code/backend/api/routers/auth.py"
+        ],
+        "apiGroups": [
+          {
+            "file": "code/backend/api/routers/auth.py",
+            "prefix": "/api/auth"
+          }
+        ],
+        "dataSources": [
+          "platform"
+        ],
+        "documents": [
+          "文档/4-需求文档/105-本科教学分析与学业决策支持平台PRD.md",
+          "文档/4-需求文档/4.10-登录角色与权限/86-P2数据权限契约与验收记录.md"
+        ],
+        "relevantTests": [
+          "code/backend/tests/test_account_governance.py",
+          "code/backend/tests/test_menu_structure.py",
+          "code/backend/tests/test_permission_context.py"
+        ],
+        "notes": [
+          "文件归属不等于每个Vue文件都有独立菜单；未路由文件可能是子组件或兼容实现。",
+          "空typeFiles表示未登记独立类型文件，不表示没有局部类型。",
+          "相关测试只登记位置，本次未运行。"
+        ]
+      },
+      "target": {
+        "status": "not-implemented",
+        "apiModule": "code/frontend/src/api/auth.ts"
+      },
+      "sharedDependencies": [
+        "transport",
+        "identity",
+        "routing",
+        "data",
+        "ui",
+        "audit"
+      ]
+    },
+    {
+      "id": "dashboard",
+      "name": "教学数据总览",
+      "purpose": "全校、学院、专业、课程分析及学生证据下钻。",
+      "current": {
+        "routes": [
+          {
+            "path": "/admin/dashboard",
+            "kind": "page",
+            "page": "code/frontend/src/views/admin/dashboard/index.vue"
+          },
+          {
+            "path": "/admin/college/:id",
+            "kind": "page",
+            "page": "code/frontend/src/views/admin/dashboard/Detail.vue"
+          },
+          {
+            "path": "/admin/major/:id",
+            "kind": "page",
+            "page": "code/frontend/src/views/admin/dashboard/MajorDetail.vue"
+          },
+          {
+            "path": "/admin/course/:id",
+            "kind": "page",
+            "page": "code/frontend/src/views/admin/dashboard/CourseDetail.vue"
+          },
+          {
+            "path": "/admin/course/:id/students",
+            "kind": "page",
+            "page": "code/frontend/src/views/admin/students/List.vue"
+          }
+        ],
+        "viewFiles": [
+          "code/frontend/src/views/admin/dashboard/CourseDetail.vue",
+          "code/frontend/src/views/admin/dashboard/Detail.vue",
+          "code/frontend/src/views/admin/dashboard/index.vue",
+          "code/frontend/src/views/admin/dashboard/MajorDetail.vue"
+        ],
+        "requestHelpers": [
+          "code/frontend/src/utils/dashboardDrill.ts",
+          "code/frontend/src/utils/dashboardHistory.ts"
+        ],
+        "typeFiles": [],
+        "backendFiles": [
+          "code/backend/api/routers/dashboard.py",
+          "code/backend/api/academic_metrics.py"
+        ],
+        "apiGroups": [
+          {
+            "file": "code/backend/api/routers/dashboard.py",
+            "prefix": "/api/admin"
+          }
+        ],
+        "dataSources": [
+          "legacy",
+          "v2"
+        ],
+        "documents": [
+          "文档/4-需求文档/4.1-教学数据总览/106-教学数据总览功能指标详细需求说明.md",
+          "文档/4-需求文档/4.1-教学数据总览/94-教学数据总览UE深度走查与优化方案.md",
+          "文档/4-需求文档/4.1-教学数据总览/51-数据大屏与五级下钻收口记录.md"
+        ],
+        "relevantTests": [
+          "code/backend/tests/test_academic_metrics.py",
+          "code/backend/tests/test_dashboard_course_contract.py",
+          "code/backend/tests/test_dashboard_drill_contract.py",
+          "code/backend/tests/test_dashboard_history_contract.py",
+          "code/backend/tests/test_dashboard_metric_contract.py",
+          "code/backend/tests/test_dashboard_ue_contract.py"
+        ],
+        "notes": [
+          "文件归属不等于每个Vue文件都有独立菜单；未路由文件可能是子组件或兼容实现。",
+          "空typeFiles表示未登记独立类型文件，不表示没有局部类型。",
+          "相关测试只登记位置，本次未运行。"
+        ]
+      },
+      "target": {
+        "status": "not-implemented",
+        "apiModule": "code/frontend/src/api/dashboard.ts"
+      },
+      "sharedDependencies": [
+        "transport",
+        "identity",
+        "routing",
+        "data",
+        "ui",
+        "audit",
+        "metadata",
+        "ai"
+      ]
+    },
+    {
+      "id": "alerts",
+      "name": "学业预警监控",
+      "purpose": "预警、低年级受挫、轨迹、规则及自发现。",
+      "current": {
+        "routes": [
+          {
+            "path": "/admin/alert",
+            "kind": "page",
+            "page": "code/frontend/src/views/admin/alert/Workspace.vue"
+          },
+          {
+            "path": "/admin/alert/monitor",
+            "kind": "redirect",
+            "redirect": "/admin/alert?tab=monitor"
+          },
+          {
+            "path": "/admin/alert/rules",
+            "kind": "redirect",
+            "redirect": "/admin/alert?tab=rules"
+          },
+          {
+            "path": "/admin/alert/discovery",
+            "kind": "redirect",
+            "redirect": "/admin/alert?tab=rules"
+          },
+          {
+            "path": "/admin/reports/early-setback",
+            "kind": "redirect",
+            "redirect": "/admin/alert?tab=early-risk"
+          }
+        ],
+        "viewFiles": [
+          "code/frontend/src/views/admin/alert/AlertStudentDrawer.vue",
+          "code/frontend/src/views/admin/alert/Discovery.vue",
+          "code/frontend/src/views/admin/alert/EarlySetbackDrawer.vue",
+          "code/frontend/src/views/admin/alert/index.vue",
+          "code/frontend/src/views/admin/alert/TrajectoryCard.vue",
+          "code/frontend/src/views/admin/alert/Workspace.vue",
+          "code/frontend/src/views/admin/reports/EarlySetback.vue",
+          "code/frontend/src/views/admin/settings/index.vue"
+        ],
+        "requestHelpers": [
+          "code/frontend/src/utils/ai.ts"
+        ],
+        "typeFiles": [],
+        "backendFiles": [
+          "code/backend/api/routers/alert.py",
+          "code/backend/api/routers/alert_monitor.py",
+          "code/backend/api/routers/alert_trajectory.py",
+          "code/backend/api/routers/alert_assignment.py",
+          "code/backend/api/routers/settings.py",
+          "code/backend/etl/alert_engine.py",
+          "code/backend/etl/rule_discovery.py"
+        ],
+        "apiGroups": [
+          {
+            "file": "code/backend/api/routers/alert.py",
+            "prefix": "/api/admin"
+          },
+          {
+            "file": "code/backend/api/routers/alert_monitor.py",
+            "prefix": "/api/admin/alerts"
+          },
+          {
+            "file": "code/backend/api/routers/alert_trajectory.py",
+            "prefix": "/api/admin"
+          },
+          {
+            "file": "code/backend/api/routers/settings.py",
+            "prefix": "/api/admin"
+          }
+        ],
+        "dataSources": [
+          "legacy",
+          "v2",
+          "platform"
+        ],
+        "documents": [
+          "文档/4-需求文档/4.2-学业预警监控/108-学业预警监控各模块功能及指标点详细需求说明.md",
+          "文档/4-需求文档/4.2-学业预警监控/95-学业预警监控UE深度走查与优化方案.md",
+          "文档/4-需求文档/4.2-学业预警监控/73-学业风险与低年级受挫专题实现说明.md",
+          "文档/4-需求文档/4.2-学业预警监控/23-预警风险周期与重复命中策略.md"
+        ],
+        "relevantTests": [
+          "code/backend/tests/test_alert_monitor.py",
+          "code/backend/tests/test_alert_trajectory.py",
+          "code/backend/tests/test_early_setback_topic.py",
+          "code/backend/tests/test_rule_change_analysis_distribution.py",
+          "code/backend/tests/test_rule_change_trial_script.py",
+          "code/backend/tests/test_rule_discovery_execution.py",
+          "code/backend/tests/test_rule_governance_visibility.py"
+        ],
+        "notes": [
+          "文件归属不等于每个Vue文件都有独立菜单；未路由文件可能是子组件或兼容实现。",
+          "空typeFiles表示未登记独立类型文件，不表示没有局部类型。",
+          "相关测试只登记位置，本次未运行。"
+        ]
+      },
+      "target": {
+        "status": "not-implemented",
+        "apiModule": "code/frontend/src/api/alerts.ts"
+      },
+      "sharedDependencies": [
+        "transport",
+        "identity",
+        "routing",
+        "data",
+        "ui",
+        "audit",
+        "metadata",
+        "ai"
+      ]
+    },
+    {
+      "id": "operation",
+      "name": "教学运行分析",
+      "purpose": "课程、教室、调停课、教师负荷、排课和课程质量。",
+      "current": {
+        "routes": [
+          {
+            "path": "/admin/operation/courses",
+            "kind": "page",
+            "page": "code/frontend/src/views/admin/operation/Index.vue"
+          },
+          {
+            "path": "/admin/operation/classroom",
+            "kind": "page",
+            "page": "code/frontend/src/views/admin/operation/Index.vue"
+          },
+          {
+            "path": "/admin/operation/schedule-changes",
+            "kind": "page",
+            "page": "code/frontend/src/views/admin/operation/Index.vue"
+          },
+          {
+            "path": "/admin/operation/teacher-load",
+            "kind": "page",
+            "page": "code/frontend/src/views/admin/operation/Index.vue"
+          },
+          {
+            "path": "/admin/operation/schedule-analysis",
+            "kind": "page",
+            "page": "code/frontend/src/views/admin/operation/Index.vue"
+          },
+          {
+            "path": "/admin/operation/course-quality",
+            "kind": "page",
+            "page": "code/frontend/src/views/admin/operation/Index.vue"
+          },
+          {
+            "path": "/admin/reports/course-quality",
+            "kind": "redirect",
+            "redirect": "/admin/operation/course-quality"
+          },
+          {
+            "path": "/admin/reports/schedule-strategy",
+            "kind": "redirect",
+            "redirect": "/admin/operation/schedule-analysis"
+          }
+        ],
+        "viewFiles": [
+          "code/frontend/src/views/admin/operation/Classroom.vue",
+          "code/frontend/src/views/admin/operation/Courses.vue",
+          "code/frontend/src/views/admin/operation/Index.vue",
+          "code/frontend/src/views/admin/operation/ScheduleAnalysis.vue",
+          "code/frontend/src/views/admin/operation/ScheduleChanges.vue",
+          "code/frontend/src/views/admin/operation/TeacherLoad.vue",
+          "code/frontend/src/views/admin/reports/CourseQuality.vue"
+        ],
+        "requestHelpers": [
+          "code/frontend/src/utils/ai.ts"
+        ],
+        "typeFiles": [],
+        "backendFiles": [
+          "code/backend/api/routers/operation.py",
+          "code/backend/etl/v2_teaching_loader.py",
+          "code/backend/etl/room_occupancy_loader.py"
+        ],
+        "apiGroups": [
+          {
+            "file": "code/backend/api/routers/operation.py",
+            "prefix": "/api/admin/operation"
+          }
+        ],
+        "dataSources": [
+          "legacy",
+          "v2"
+        ],
+        "documents": [
+          "文档/4-需求文档/4.3-教学运行分析/109-教学运行分析各模块功能及指标点详细需求说明.md",
+          "文档/4-需求文档/4.3-教学运行分析/96-教学运行分析UE深度走查与优化方案.md",
+          "文档/3-技术文档/67-教学运行与师资生产数据契约.md",
+          "文档/4-需求文档/公共需求/68-教学运行与师资分析PRD及API契约.md",
+          "文档/4-需求文档/4.3-教学运行分析/79-实际教室使用数据接入与生产结构说明.md"
+        ],
+        "relevantTests": [
+          "code/backend/tests/test_classroom_ui_contract.py",
+          "code/backend/tests/test_course_pass_stat.py",
+          "code/backend/tests/test_course_quality_ui_contract.py",
+          "code/backend/tests/test_operation_indicator_trust.py",
+          "code/backend/tests/test_schedule_analysis_ui_contract.py",
+          "code/backend/tests/test_schedule_changes_ui_contract.py"
+        ],
+        "notes": [
+          "文件归属不等于每个Vue文件都有独立菜单；未路由文件可能是子组件或兼容实现。",
+          "空typeFiles表示未登记独立类型文件，不表示没有局部类型。",
+          "相关测试只登记位置，本次未运行。"
+        ]
+      },
+      "target": {
+        "status": "not-implemented",
+        "apiModule": "code/frontend/src/api/operation.ts"
+      },
+      "sharedDependencies": [
+        "transport",
+        "identity",
+        "routing",
+        "data",
+        "ui",
+        "audit",
+        "metadata",
+        "ai"
+      ]
+    },
+    {
+      "id": "curriculum",
+      "name": "培养质量分析",
+      "purpose": "方案执行、学生进度、毕业准备与课程保障。",
+      "current": {
+        "routes": [
+          {
+            "path": "/admin/curriculum",
+            "kind": "page",
+            "page": "code/frontend/src/views/admin/curriculum/index.vue"
+          },
+          {
+            "path": "/admin/curriculum/progress",
+            "kind": "redirect",
+            "redirect": "/admin/curriculum?tab=progress"
+          },
+          {
+            "path": "/admin/curriculum/course-objectives/:id",
+            "kind": "redirect",
+            "redirect": "/admin/curriculum"
+          },
+          {
+            "path": "/admin/curriculum/graduate-requirements/:id",
+            "kind": "redirect",
+            "redirect": "/admin/curriculum"
+          },
+          {
+            "path": "/admin/reports/graduation-readiness",
+            "kind": "redirect",
+            "redirect": "/admin/curriculum?tab=graduation-readiness"
+          }
+        ],
+        "viewFiles": [
+          "code/frontend/src/views/admin/curriculum/CourseObjectives.vue",
+          "code/frontend/src/views/admin/curriculum/Governance.vue",
+          "code/frontend/src/views/admin/curriculum/GraduateRequirements.vue",
+          "code/frontend/src/views/admin/curriculum/index.vue",
+          "code/frontend/src/views/admin/curriculum/Progress.vue",
+          "code/frontend/src/views/admin/reports/GraduationReadiness.vue"
+        ],
+        "requestHelpers": [
+          "code/frontend/src/utils/ai.ts"
+        ],
+        "typeFiles": [],
+        "backendFiles": [
+          "code/backend/api/routers/curriculum.py",
+          "code/backend/etl/v2_student_plan_loader.py",
+          "code/backend/etl/v2_growth_builder.py"
+        ],
+        "apiGroups": [
+          {
+            "file": "code/backend/api/routers/curriculum.py",
+            "prefix": "/api/admin"
+          }
+        ],
+        "dataSources": [
+          "legacy",
+          "v2"
+        ],
+        "documents": [
+          "文档/4-需求文档/4.4-培养质量分析/111-培养质量分析各模块功能及指标点详细需求说明.md",
+          "文档/4-需求文档/4.4-培养质量分析/97-培养质量分析UE深度走查与优化方案.md",
+          "文档/4-需求文档/4.4-培养质量分析/培养质量分析生产接口交接.md",
+          "文档/4-需求文档/4.4-培养质量分析/74-培养方案完成与毕业准备度专题实现说明.md"
+        ],
+        "relevantTests": [
+          "code/backend/tests/test_curriculum_progress_builder.py",
+          "code/backend/tests/test_graduation_readiness_ui_contract.py",
+          "code/backend/tests/test_v2_student_plan_loader.py"
+        ],
+        "notes": [
+          "文件归属不等于每个Vue文件都有独立菜单；未路由文件可能是子组件或兼容实现。",
+          "空typeFiles表示未登记独立类型文件，不表示没有局部类型。",
+          "相关测试只登记位置，本次未运行。"
+        ]
+      },
+      "target": {
+        "status": "not-implemented",
+        "apiModule": "code/frontend/src/api/curriculum.ts"
+      },
+      "sharedDependencies": [
+        "transport",
+        "identity",
+        "routing",
+        "data",
+        "ui",
+        "audit",
+        "metadata",
+        "ai"
+      ]
+    },
+    {
+      "id": "faculty",
+      "name": "师资保障分析",
+      "purpose": "师资结构、课程团队和教师保障；教师API同时在公共清单登记。",
+      "current": {
+        "routes": [
+          {
+            "path": "/admin/faculty",
+            "kind": "page",
+            "page": "code/frontend/src/views/admin/faculty/Index.vue"
+          },
+          {
+            "path": "/admin/faculty/team",
+            "kind": "redirect",
+            "redirect": "dynamic: see router/index.ts"
+          },
+          {
+            "path": "/admin/faculty/:id",
+            "kind": "redirect",
+            "redirect": "dynamic: see router/index.ts"
+          },
+          {
+            "path": "/admin/reports/faculty-resource-risk",
+            "kind": "redirect",
+            "redirect": "/admin/faculty"
+          }
+        ],
+        "viewFiles": [
+          "code/frontend/src/views/admin/faculty/Detail.vue",
+          "code/frontend/src/views/admin/faculty/Index.vue",
+          "code/frontend/src/views/admin/faculty/Team.vue"
+        ],
+        "requestHelpers": [
+          "code/frontend/src/utils/ai.ts"
+        ],
+        "typeFiles": [],
+        "backendFiles": [
+          "code/backend/api/routers/faculty.py",
+          "code/backend/api/routers/teacher.py",
+          "code/backend/etl/v2_teaching_loader.py"
+        ],
+        "apiGroups": [
+          {
+            "file": "code/backend/api/routers/faculty.py",
+            "prefix": "/api/admin/faculty"
+          },
+          {
+            "file": "code/backend/api/routers/teacher.py",
+            "prefix": "/api/teacher"
+          }
+        ],
+        "dataSources": [
+          "legacy",
+          "v2"
+        ],
+        "documents": [
+          "文档/4-需求文档/4.5-师资保障分析/98-师资保障分析UE深度走查与优化方案.md",
+          "文档/4-需求文档/4.5-师资保障分析/78-本科教学师资保障分析重构说明.md",
+          "文档/3-技术文档/67-教学运行与师资生产数据契约.md",
+          "文档/4-需求文档/公共需求/68-教学运行与师资分析PRD及API契约.md"
+        ],
+        "relevantTests": [
+          "code/backend/tests/test_faculty_assurance.py",
+          "code/backend/tests/test_v2_teaching_loader.py"
+        ],
+        "notes": [
+          "文件归属不等于每个Vue文件都有独立菜单；未路由文件可能是子组件或兼容实现。",
+          "空typeFiles表示未登记独立类型文件，不表示没有局部类型。",
+          "相关测试只登记位置，本次未运行。"
+        ]
+      },
+      "target": {
+        "status": "not-implemented",
+        "apiModule": "code/frontend/src/api/faculty.ts"
+      },
+      "sharedDependencies": [
+        "transport",
+        "identity",
+        "routing",
+        "data",
+        "ui",
+        "audit",
+        "metadata",
+        "ai"
+      ]
+    },
+    {
+      "id": "students",
+      "name": "学生成长与学业分析",
+      "purpose": "按身份显示分析/所带学生工作区、名单和学生详情；旧学生详情接口位于alert Router。",
+      "current": {
+        "routes": [
+          {
+            "path": "/admin/student/:id",
+            "kind": "page",
+            "page": "code/frontend/src/views/admin/student/Detail.vue"
+          },
+          {
+            "path": "/admin/students/analysis",
+            "kind": "page",
+            "page": "code/frontend/src/views/admin/students/Workspace.vue"
+          },
+          {
+            "path": "/admin/students/my",
+            "kind": "redirect",
+            "redirect": "dynamic: see router/index.ts"
+          },
+          {
+            "path": "/admin/students/list",
+            "kind": "page",
+            "page": "code/frontend/src/views/admin/students/List.vue"
+          }
+        ],
+        "viewFiles": [
+          "code/frontend/src/views/admin/student/Detail.vue",
+          "code/frontend/src/views/admin/students/Analysis.vue",
+          "code/frontend/src/views/admin/students/List.vue",
+          "code/frontend/src/views/admin/students/MyScope.vue",
+          "code/frontend/src/views/admin/students/Workspace.vue"
+        ],
+        "requestHelpers": [
+          "code/frontend/src/utils/ai.ts"
+        ],
+        "typeFiles": [],
+        "backendFiles": [
+          "code/backend/api/routers/students.py",
+          "code/backend/api/routers/alert.py",
+          "code/backend/api/student_growth.py",
+          "code/backend/etl/v2_growth_builder.py"
+        ],
+        "apiGroups": [
+          {
+            "file": "code/backend/api/routers/alert.py",
+            "prefix": "/api/admin"
+          },
+          {
+            "file": "code/backend/api/routers/students.py",
+            "prefix": "/api/admin/students"
+          }
+        ],
+        "dataSources": [
+          "legacy",
+          "v2"
+        ],
+        "documents": [
+          "文档/4-需求文档/4.6-学生成长与学业分析/99-学生成长与学业分析UE深度走查与优化方案.md",
+          "文档/4-需求文档/4.6-学生成长与学业分析/65-V2学生详情前端切换报告.md",
+          "文档/4-需求文档/4.10-登录角色与权限/64-V2数据范围映射报告.md",
+          "文档/4-需求文档/4.6-学生成长与学业分析/61-V2课程缺口与成长轨迹构建报告.md"
+        ],
+        "relevantTests": [
+          "code/backend/tests/test_my_scope.py",
+          "code/backend/tests/test_staff_scope_assignment.py",
+          "code/backend/tests/test_student_evidence.py",
+          "code/backend/tests/test_student_growth.py",
+          "code/backend/tests/test_student_growth_indexes.py",
+          "code/backend/tests/test_student_workspace_contract.py",
+          "code/backend/tests/test_v2_growth_builder.py"
+        ],
+        "notes": [
+          "文件归属不等于每个Vue文件都有独立菜单；未路由文件可能是子组件或兼容实现。",
+          "空typeFiles表示未登记独立类型文件，不表示没有局部类型。",
+          "相关测试只登记位置，本次未运行。"
+        ]
+      },
+      "target": {
+        "status": "not-implemented",
+        "apiModule": "code/frontend/src/api/students.ts"
+      },
+      "sharedDependencies": [
+        "transport",
+        "identity",
+        "routing",
+        "data",
+        "ui",
+        "audit",
+        "metadata",
+        "ai"
+      ]
+    },
+    {
+      "id": "decision",
+      "name": "AI管理决策",
+      "purpose": "决策简报、四类Skill、专家问策、会话和独立证据窗口。",
+      "current": {
+        "routes": [
+          {
+            "path": "/admin/verify/signal/:signalId",
+            "kind": "page",
+            "page": "code/frontend/src/views/admin/verify/SignalEvidence.vue"
+          },
+          {
+            "path": "/admin/verify/signal/:signalId/detail",
+            "kind": "page",
+            "page": "code/frontend/src/views/admin/verify/SignalDetail.vue"
+          },
+          {
+            "path": "/admin/reports",
+            "kind": "redirect",
+            "redirect": "/admin/reports/decision"
+          },
+          {
+            "path": "/admin/reports/decision",
+            "kind": "page",
+            "page": "code/frontend/src/views/admin/reports/decision/index.vue"
+          },
+          {
+            "path": "/admin/reports/decision/skills/:skillId",
+            "kind": "page",
+            "page": "code/frontend/src/views/admin/reports/decision/workspaces/SkillWorkspace.vue"
+          },
+          {
+            "path": "/admin/reports/advice",
+            "kind": "page",
+            "page": "code/frontend/src/views/admin/reports/advice/index.vue"
+          },
+          {
+            "path": "/admin/reports/advice/:skillId",
+            "kind": "page",
+            "page": "code/frontend/src/views/admin/reports/advice/Chat.vue"
+          },
+          {
+            "path": "/admin/reports/management-briefing",
+            "kind": "redirect",
+            "redirect": "/admin/reports/decision"
+          },
+          {
+            "path": "/admin/reports/decision-simulation",
+            "kind": "redirect",
+            "redirect": "/admin/reports/decision"
+          }
+        ],
+        "viewFiles": [
+          "code/frontend/src/views/admin/reports/advice/Chat.vue",
+          "code/frontend/src/views/admin/reports/advice/index.vue",
+          "code/frontend/src/views/admin/reports/decision/components/cards/ConclusionCard.vue",
+          "code/frontend/src/views/admin/reports/decision/components/cards/RiskCard.vue",
+          "code/frontend/src/views/admin/reports/decision/components/SkillSection.vue",
+          "code/frontend/src/views/admin/reports/decision/components/ToplineBar.vue",
+          "code/frontend/src/views/admin/reports/decision/index.vue",
+          "code/frontend/src/views/admin/reports/decision/workspaces/AlertPriorityWorkspace.vue",
+          "code/frontend/src/views/admin/reports/decision/workspaces/CourseQualityWorkspace.vue",
+          "code/frontend/src/views/admin/reports/decision/workspaces/FacultyStructureWorkspace.vue",
+          "code/frontend/src/views/admin/reports/decision/workspaces/GraduationGapWorkspace.vue",
+          "code/frontend/src/views/admin/reports/decision/workspaces/SkillWorkspace.vue",
+          "code/frontend/src/views/admin/verify/SignalDetail.vue",
+          "code/frontend/src/views/admin/verify/SignalEvidence.vue"
+        ],
+        "requestHelpers": [
+          "code/frontend/src/utils/decision.ts"
+        ],
+        "typeFiles": [
+          "code/frontend/src/types/decision.ts"
+        ],
+        "backendFiles": [
+          "code/backend/api/routers/ai_decision.py",
+          "code/backend/skills/registry.py",
+          "code/backend/skills/protocol.py",
+          "code/backend/skills/briefing.py",
+          "code/backend/skills/advice.py",
+          "code/backend/skills/chat.py",
+          "code/backend/skills/store.py",
+          "code/backend/skills/merger.py",
+          "code/backend/skills/narrative.py",
+          "code/backend/skills/llm_client.py",
+          "code/backend/skills/llm_config.py",
+          "code/backend/skills/graduation_gap.py",
+          "code/backend/skills/course_quality.py",
+          "code/backend/skills/alert_priority.py",
+          "code/backend/skills/faculty_structure.py"
+        ],
+        "apiGroups": [
+          {
+            "file": "code/backend/api/routers/ai_decision.py",
+            "prefix": "/api/admin/ai/decision"
+          }
+        ],
+        "dataSources": [
+          "legacy",
+          "v2",
+          "platform"
+        ],
+        "documents": [
+          "文档/4-需求文档/4.7-AI管理决策/91-AI决策Skill链路与决策简报实现记录.md",
+          "文档/4-需求文档/4.7-AI管理决策/83-AI管理决策体验重构修改计划.md",
+          "文档/4-需求文档/4.7-AI管理决策/81-AI管理能力重构实施方案.md",
+          "文档/4-需求文档/4.7-AI管理决策/88-P4AI管理决策重构验收记录.md"
+        ],
+        "relevantTests": [
+          "code/backend/tests/test_ai_expert_protocol.py",
+          "code/backend/tests/test_decision_advice.py",
+          "code/backend/tests/test_decision_briefing.py",
+          "code/backend/tests/test_decision_config.py",
+          "code/backend/tests/test_decision_detail.py",
+          "code/backend/tests/test_decision_golden.py",
+          "code/backend/tests/test_decision_llm.py",
+          "code/backend/tests/test_decision_skills.py",
+          "code/backend/tests/test_management_briefing_events.py"
+        ],
+        "notes": [
+          "文件归属不等于每个Vue文件都有独立菜单；未路由文件可能是子组件或兼容实现。",
+          "空typeFiles表示未登记独立类型文件，不表示没有局部类型。",
+          "相关测试只登记位置，本次未运行。"
+        ]
+      },
+      "target": {
+        "status": "not-implemented",
+        "apiModule": "code/frontend/src/api/decision.ts"
+      },
+      "sharedDependencies": [
+        "transport",
+        "identity",
+        "routing",
+        "data",
+        "ui",
+        "audit",
+        "ai"
+      ]
+    },
+    {
+      "id": "basic-reports",
+      "name": "基础报表",
+      "purpose": "九张固定口径报表共用页面、定义、快照查询与受控Excel导出。",
+      "current": {
+        "routes": [
+          {
+            "path": "/admin/basic-reports/failure-overview",
+            "kind": "page",
+            "page": "code/frontend/src/views/admin/basic-reports/BasicReportPage.vue"
+          },
+          {
+            "path": "/admin/basic-reports/major-makeup-comparison",
+            "kind": "page",
+            "page": "code/frontend/src/views/admin/basic-reports/BasicReportPage.vue"
+          },
+          {
+            "path": "/admin/basic-reports/major-gender-failure",
+            "kind": "page",
+            "page": "code/frontend/src/views/admin/basic-reports/BasicReportPage.vue"
+          },
+          {
+            "path": "/admin/basic-reports/class-failure-count",
+            "kind": "page",
+            "page": "code/frontend/src/views/admin/basic-reports/BasicReportPage.vue"
+          },
+          {
+            "path": "/admin/basic-reports/class-score-distribution",
+            "kind": "page",
+            "page": "code/frontend/src/views/admin/basic-reports/BasicReportPage.vue"
+          },
+          {
+            "path": "/admin/basic-reports/course-makeup-comparison",
+            "kind": "page",
+            "page": "code/frontend/src/views/admin/basic-reports/BasicReportPage.vue"
+          },
+          {
+            "path": "/admin/basic-reports/cet4-pass",
+            "kind": "page",
+            "page": "code/frontend/src/views/admin/basic-reports/BasicReportPage.vue"
+          },
+          {
+            "path": "/admin/basic-reports/focus-students",
+            "kind": "page",
+            "page": "code/frontend/src/views/admin/basic-reports/BasicReportPage.vue"
+          },
+          {
+            "path": "/admin/basic-reports/academic-warning-roster",
+            "kind": "page",
+            "page": "code/frontend/src/views/admin/basic-reports/BasicReportPage.vue"
+          }
+        ],
+        "viewFiles": [
+          "code/frontend/src/views/admin/basic-reports/BasicReportPage.vue"
+        ],
+        "requestHelpers": [],
+        "typeFiles": [
+          "code/frontend/src/views/admin/basic-reports/reportDefinitions.ts"
+        ],
+        "backendFiles": [
+          "code/backend/api/routers/basic_reports.py",
+          "code/backend/api/basic_reports/catalog.py",
+          "code/backend/api/basic_reports/service.py",
+          "code/backend/api/basic_reports/exporter.py",
+          "code/backend/api/basic_reports/rule_registry.py"
+        ],
+        "apiGroups": [
+          {
+            "file": "code/backend/api/routers/basic_reports.py",
+            "prefix": "/api/admin/basic-reports"
+          }
+        ],
+        "dataSources": [
+          "legacy",
+          "v2",
+          "term-sources"
+        ],
+        "documents": [
+          "文档/4-需求文档/4.8-基础报表/110-基础报表9个统计分析报表详细功能需求说明书.md",
+          "文档/4-需求文档/4.8-基础报表/0728基础报表需求.md"
+        ],
+        "relevantTests": [
+          "code/backend/tests/test_basic_report_contract.py",
+          "code/backend/tests/test_basic_report_demo_bootstrap.py"
+        ],
+        "notes": [
+          "文件归属不等于每个Vue文件都有独立菜单；未路由文件可能是子组件或兼容实现。",
+          "空typeFiles表示未登记独立类型文件，不表示没有局部类型。",
+          "相关测试只登记位置，本次未运行。"
+        ]
+      },
+      "target": {
+        "status": "not-implemented",
+        "apiModule": "code/frontend/src/api/basicReports.ts"
+      },
+      "sharedDependencies": [
+        "transport",
+        "identity",
+        "routing",
+        "data",
+        "ui",
+        "audit"
+      ]
+    },
+    {
+      "id": "system",
+      "name": "系统管理",
+      "purpose": "账号、角色、数据权限、菜单、指标、学校方案、审计和参数；预警规则归预警模块。",
+      "current": {
+        "routes": [
+          {
+            "path": "/admin/system/accounts",
+            "kind": "page",
+            "page": "code/frontend/src/views/admin/system/Accounts.vue"
+          },
+          {
+            "path": "/admin/system/menus",
+            "kind": "page",
+            "page": "code/frontend/src/views/admin/system/Menus.vue"
+          },
+          {
+            "path": "/admin/system/roles",
+            "kind": "page",
+            "page": "code/frontend/src/views/admin/system/Roles.vue"
+          },
+          {
+            "path": "/admin/system/permissions",
+            "kind": "page",
+            "page": "code/frontend/src/views/admin/system/Permissions.vue"
+          },
+          {
+            "path": "/admin/system/audit",
+            "kind": "page",
+            "page": "code/frontend/src/views/admin/system/Audit.vue"
+          },
+          {
+            "path": "/admin/system/kpis",
+            "kind": "page",
+            "page": "code/frontend/src/views/admin/system/Kpis.vue"
+          },
+          {
+            "path": "/admin/system/schemes",
+            "kind": "page",
+            "page": "code/frontend/src/views/admin/system/Schemes.vue"
+          },
+          {
+            "path": "/admin/system/decision-config",
+            "kind": "redirect",
+            "redirect": "/admin/system/schemes"
+          },
+          {
+            "path": "/admin/settings",
+            "kind": "page",
+            "page": "code/frontend/src/views/admin/system/Parameters.vue"
+          }
+        ],
+        "viewFiles": [
+          "code/frontend/src/views/admin/system/Accounts.vue",
+          "code/frontend/src/views/admin/system/Audit.vue",
+          "code/frontend/src/views/admin/system/DecisionConfig.vue",
+          "code/frontend/src/views/admin/system/Kpis.vue",
+          "code/frontend/src/views/admin/system/Menus.vue",
+          "code/frontend/src/views/admin/system/Parameters.vue",
+          "code/frontend/src/views/admin/system/Permissions.vue",
+          "code/frontend/src/views/admin/system/Roles.vue",
+          "code/frontend/src/views/admin/system/Schemes.vue"
+        ],
+        "requestHelpers": [
+          "code/frontend/src/utils/decision.ts"
+        ],
+        "typeFiles": [],
+        "backendFiles": [
+          "code/backend/api/routers/admin_rbac.py",
+          "code/backend/api/routers/system_management.py",
+          "code/backend/api/routers/settings.py",
+          "code/backend/api/routers/ai_decision.py",
+          "code/backend/skills/config_store.py",
+          "code/backend/metric_catalog.py",
+          "code/backend/permission_catalog.py"
+        ],
+        "apiGroups": [
+          {
+            "file": "code/backend/api/routers/admin_rbac.py",
+            "prefix": "/api/admin/rbac"
+          },
+          {
+            "file": "code/backend/api/routers/ai_decision.py",
+            "prefix": "/api/admin/ai/decision"
+          },
+          {
+            "file": "code/backend/api/routers/settings.py",
+            "prefix": "/api/admin"
+          },
+          {
+            "file": "code/backend/api/routers/system_management.py",
+            "prefix": "/api/admin/system"
+          }
+        ],
+        "dataSources": [
+          "platform"
+        ],
+        "documents": [
+          "文档/4-需求文档/4.10-登录角色与权限/100-账号管理UE深度走查与优化方案.md",
+          "文档/4-需求文档/4.9-系统管理/101-指标与口径管理UE深度走查与优化方案.md",
+          "文档/4-需求文档/4.9-系统管理/103-分析方案管理UE深度走查与优化方案.md",
+          "文档/4-需求文档/4.9-系统管理/89-P5系统管理收口验收记录.md",
+          "文档/4-需求文档/4.10-登录角色与权限/86-P2数据权限契约与验收记录.md"
+        ],
+        "relevantTests": [
+          "code/backend/tests/test_account_governance.py",
+          "code/backend/tests/test_decision_config.py",
+          "code/backend/tests/test_system_management.py"
+        ],
+        "notes": [
+          "文件归属不等于每个Vue文件都有独立菜单；未路由文件可能是子组件或兼容实现。",
+          "空typeFiles表示未登记独立类型文件，不表示没有局部类型。",
+          "相关测试只登记位置，本次未运行。"
+        ]
+      },
+      "target": {
+        "status": "not-implemented",
+        "apiModule": "code/frontend/src/api/system.ts"
+      },
+      "sharedDependencies": [
+        "transport",
+        "identity",
+        "routing",
+        "data",
+        "ui",
+        "audit",
+        "ai"
+      ]
+    },
+    {
+      "id": "data-collection",
+      "name": "数据采集与ETL",
+      "purpose": "采集监控、输入批次、质量、运行台账和ETL加工；预警/培养等具体builder另在业务登记。",
+      "current": {
+        "routes": [
+          {
+            "path": "/admin/system/data-collection",
+            "kind": "page",
+            "page": "code/frontend/src/views/admin/system/DataCollection.vue"
+          }
+        ],
+        "viewFiles": [
+          "code/frontend/src/views/admin/system/DataCollection.vue"
+        ],
+        "requestHelpers": [],
+        "typeFiles": [],
+        "backendFiles": [
+          "code/backend/api/routers/data_collection.py",
+          "code/backend/data_collection_catalog.py",
+          "code/backend/etl/config.py",
+          "code/backend/etl/v2_sources.py",
+          "code/backend/etl/run_log.py",
+          "code/backend/etl/run_etl.py",
+          "code/backend/etl/init_v2.py",
+          "code/backend/etl/v2_master_loader.py",
+          "code/backend/etl/v2_history_loader.py",
+          "code/backend/etl/v2_grade_loader.py",
+          "code/backend/etl/v2_legacy_grade_bridge.py",
+          "code/backend/etl/v2_course_pass_builder.py",
+          "code/backend/etl/v2_scope_loader.py",
+          "code/backend/etl/v2_curriculum_document_loader.py"
+        ],
+        "apiGroups": [
+          {
+            "file": "code/backend/api/routers/data_collection.py",
+            "prefix": "/api/admin/system/data-collection"
+          }
+        ],
+        "dataSources": [
+          "legacy",
+          "v2",
+          "term-sources",
+          "platform"
+        ],
+        "documents": [
+          "文档/4-需求文档/4.9-系统管理/102-数据采集监控UE深度走查与优化方案.md",
+          "文档/3-技术文档/92-数据架构分层与指标登记规范.md",
+          "文档/3-技术文档/07-数据初始化与ETL.md",
+          "文档/3-技术文档/56-原型真实数据接入与生产数据模型.md",
+          "文档/3-技术文档/57-V2主数据接入质量报告.md",
+          "文档/3-技术文档/59-V2历史学籍与异动接入报告.md",
+          "文档/3-技术文档/60-V2成绩与课程替代接入报告.md",
+          "文档/3-技术文档/62-V2教学运行与人员关系接入报告.md"
+        ],
+        "relevantTests": [
+          "code/backend/tests/test_data_collection.py",
+          "code/backend/tests/test_v2_api.py",
+          "code/backend/tests/test_v2_grade_loader.py",
+          "code/backend/tests/test_v2_growth_builder.py",
+          "code/backend/tests/test_v2_history_loader.py",
+          "code/backend/tests/test_v2_legacy_grade_bridge.py",
+          "code/backend/tests/test_v2_master_loader.py",
+          "code/backend/tests/test_v2_schema.py",
+          "code/backend/tests/test_v2_student_plan_loader.py",
+          "code/backend/tests/test_v2_teaching_loader.py"
+        ],
+        "notes": [
+          "文件归属不等于每个Vue文件都有独立菜单；未路由文件可能是子组件或兼容实现。",
+          "空typeFiles表示未登记独立类型文件，不表示没有局部类型。",
+          "相关测试只登记位置，本次未运行。"
+        ]
+      },
+      "target": {
+        "status": "not-implemented",
+        "apiModule": "code/frontend/src/api/dataCollection.ts"
+      },
+      "sharedDependencies": [
+        "transport",
+        "identity",
+        "routing",
+        "data",
+        "ui",
+        "audit"
+      ]
+    }
+  ],
+  "unassignedViews": [
+    {
+      "file": "code/frontend/src/views/admin/practice/Index.vue",
+      "status": "needs-consumer-review",
+      "note": "当前路由未直接指向此文件；未完成全局消费者审计，不作为删除依据。"
+    },
+    {
+      "file": "code/frontend/src/views/admin/school/index.vue",
+      "status": "needs-consumer-review",
+      "note": "当前路由未直接指向此文件；未完成全局消费者审计，不作为删除依据。"
+    },
+    {
+      "file": "code/frontend/src/views/admin/sync/Detail.vue",
+      "status": "needs-consumer-review",
+      "note": "当前路由未直接指向此文件；未完成全局消费者审计，不作为删除依据。"
+    },
+    {
+      "file": "code/frontend/src/views/admin/sync/index.vue",
+      "status": "needs-consumer-review",
+      "note": "当前路由未直接指向此文件；未完成全局消费者审计，不作为删除依据。"
+    }
+  ],
+  "sharedViewFiles": [
+    "code/frontend/src/views/admin/Layout.vue"
+  ],
+  "supplementaryRouters": [
+    {
+      "file": "code/backend/api/routers/ai.py",
+      "prefix": "/api/admin/ai",
+      "status": "shared-capability",
+      "note": "通过共享能力被多个模块使用。"
+    },
+    {
+      "file": "code/backend/api/routers/meta.py",
+      "prefix": "/api/admin/meta",
+      "status": "shared-capability",
+      "note": "通过共享能力被多个模块使用。"
+    },
+    {
+      "file": "code/backend/api/routers/reports.py",
+      "prefix": "/api/admin",
+      "status": "needs-consumer-review",
+      "note": "旧报表接口仍注册，和九张基础报表不是同一入口。"
+    },
+    {
+      "file": "code/backend/api/routers/v2.py",
+      "prefix": "/api/v2",
+      "status": "shared-capability",
+      "note": "通过共享能力被多个模块使用。"
+    }
+  ],
+  "coverage": {
+    "vueViewFiles": 65,
+    "frontendRouteRecords": 65,
+    "routerObjects": 20,
+    "testFilesAvailable": 56,
+    "notes": "覆盖views目录、现有路由声明及APIRouter容器；不是全量API端点或组件依赖图。"
+  }
+}
