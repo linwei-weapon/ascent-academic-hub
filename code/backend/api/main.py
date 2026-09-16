@@ -21,6 +21,8 @@ from .routers import (auth, dashboard, alert, alert_monitor, alert_trajectory, c
                       students, admin_rbac, meta, teacher, ai, ai_decision,
                       system_management, data_collection, basic_reports)
 from .routers import v2
+from .routers import expert_team
+from .routers import expert_research
 
 app = FastAPI(title="高校学业BI · 平台管理端 API", version="0.3.0")
 
@@ -37,6 +39,8 @@ access_logger = logging.getLogger("uvicorn.error")
 
 def _sensitive_read_event(method: str, path: str) -> tuple[str, str, str] | None:
     """把高价值读取和AI运行写入业务审计，不记录查询参数和敏感正文。"""
+    if path.startswith(("/api/admin/expert-team/", "/api/admin/expert-research/")) and method in {"GET", "POST", "PUT"}:
+        return "expert_team." + {"GET":"read", "POST":"run", "PUT":"save"}[method], "expert_team", path
     if method == "GET" and path.startswith("/api/admin/student/"):
         return "data.student.detail.read", "student", path.rsplit("/", 1)[-1]
     if method == "GET" and path == "/api/admin/students/list":
@@ -164,6 +168,24 @@ app.include_router(admin_rbac.router)
 app.include_router(meta.router)
 app.include_router(ai.router)
 app.include_router(ai_decision.router)
+app.include_router(expert_team.router)
+app.include_router(expert_research.router)
+
+
+@app.on_event("startup")
+def start_expert_research_runtime():
+    from ..expert_research import store, runtime
+    if store.path().is_file():
+        try:
+            runtime.start()
+        except Exception:
+            access_logger.exception('expert_research_runtime_unavailable')
+
+
+@app.on_event("shutdown")
+def stop_expert_research_runtime():
+    from ..expert_research import runtime
+    runtime.stop()
 app.include_router(system_management.router)
 app.include_router(data_collection.router)  # M4：数据采集监控
 app.include_router(teacher.router)  # V1.1新增：任课教师视图

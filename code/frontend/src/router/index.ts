@@ -89,6 +89,7 @@ export const router = createRouter({
         // 专家问策（R4）：专家库 + 三栏纯对话页
         { path: 'reports/advice', component: () => import('@/views/admin/reports/advice/index.vue') },
         { path: 'reports/advice/:skillId', component: () => import('@/views/admin/reports/advice/Chat.vue') },
+        { path: 'reports/expert-team', component: () => import('@/views/admin/reports/expert-team/index.vue') },
         // 旧「管理要情」「决策研判」已废弃，统一收口到 Skill 链路决策简报
         { path: 'reports/management-briefing', redirect: '/admin/reports/decision' },
         { path: 'reports/decision-simulation', redirect: '/admin/reports/decision' },
