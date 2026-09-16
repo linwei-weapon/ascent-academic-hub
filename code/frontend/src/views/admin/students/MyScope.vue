@@ -142,7 +142,7 @@ const evidenceContext = computed(() => {
   const row = selectedStudent.value
   const reasons = []
   if (row.failCount > 0) reasons.push(`本学期有${row.failCount}门未通过课程`)
-  if (row.openAlerts > 0) reasons.push(`有${row.openAlerts}件未解除预警`)
+  if (row.openAlerts > 0) reasons.push(`有${row.openAlerts}条未解除预警`)
   if (row.creditRatio != null && row.creditRatio < 60) reasons.push('学分完成率低于60%')
   if (!reasons.length) reasons.push('当前管理范围内主动核查')
   return {
