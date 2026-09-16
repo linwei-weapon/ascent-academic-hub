@@ -60,7 +60,7 @@
           </el-popconfirm>
         </div>
       </el-header>
-      <el-main>
+      <el-main :class="{ 'expert-main': route.path === '/admin/reports/expert-team' }">
         <router-view :key="refreshKey" />
         <div v-if="!footerHiddenPaths.has(route.path)" class="data-source-footer">
           数据来源：教务系统 · 本系统仅做数据展示，不做数据干预
@@ -80,6 +80,7 @@ import {
 import { menuKeyOfPath } from '@/utils/menu'
 
 const footerHiddenPaths = new Set([
+  '/admin/reports/expert-team',
   '/admin/basic-reports/major-makeup-comparison',
   '/admin/basic-reports/major-gender-failure',
   '/admin/basic-reports/class-failure-count',
@@ -209,6 +210,8 @@ function navigateMenu(path: string) {
 .el-main {
   background: var(--sa-bg);
 }
+.el-main.expert-main { display:flex; flex-direction:column; overflow:hidden; min-height:0; }
+.el-main.expert-main :deep(.research-workspace) { flex:1; height:100%; min-height:0; }
 .data-source-footer {
   margin-top: 24px; padding-top: 12px; border-top: 1px solid var(--sa-border);
   font-size: 10px; color: var(--sa-faint); text-align: center;
