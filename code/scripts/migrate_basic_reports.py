@@ -77,7 +77,7 @@ def migrate(conn: sqlite3.Connection) -> dict:
            "支撑固定格式基础统计、核查和导出", "confirmed" if rule["provenance"] != "unavailable" else "pending_confirmation",
            "implemented" if rule["provenance"] != "unavailable" else "source_unavailable",
            rule["source"], "授权学生/学生-课程/组织汇总", "查询时", RULE_VERSION,
-           rule["provenance"], "docs/0728基础报表需求.md", json.dumps(pages, ensure_ascii=False)))
+           rule["provenance"], "文档/4-需求文档/4.8-基础报表/0728基础报表需求.md", json.dumps(pages, ensure_ascii=False)))
         for page in pages:
             report = next(item for item in REPORTS.values() if item.menu_path == page)
             conn.execute("""INSERT INTO sys_metric_page_binding(

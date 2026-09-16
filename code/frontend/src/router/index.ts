@@ -1,125 +1,42 @@
+// 全应用路由入口：代码按业务归属组织，URL 与后端菜单授权保持原契约。
 import type { App } from 'vue'
 import { createRouter, createWebHashHistory } from 'vue-router'
 import { getToken } from '@/utils/http'
 import { authStore, fetchMe } from '@/store/auth'
 import { homePathForUser, menuKeyOfPath } from '@/utils/menu'
+import { systemRoutes } from './modules/system'
+import { basicReportRoutes } from './modules/basicReports'
+import { teachingAnalysisRoutes } from './modules/teachingAnalysis'
+import { aiDecisionRoutes, aiEvidenceRoutes } from './modules/aiDecision'
 
-const AdminLayout = () => import('@/views/admin/Layout.vue')
+const AppLayout = () => import('@/layouts/AppLayout.vue')
 
 export const router = createRouter({
   history: createWebHashHistory(),
+  // 后退时恢复浏览位置，其余导航回到页面顶部。
   scrollBehavior(_to, _from, savedPosition) {
     return savedPosition || { top: 0 }
   },
   routes: [
     { path: '/login', component: () => import('@/views/Login.vue') },
-    // 查证窗口（R2）：独立只读证据页，不挂 Layout，专供新开浏览器窗口
-    { path: '/admin/verify/signal/:signalId', component: () => import('@/views/admin/verify/SignalEvidence.vue') },
-    // 明细清单页：数据要素数字直达业务明细，同样独立只读、新开标签页
-    { path: '/admin/verify/signal/:signalId/detail', component: () => import('@/views/admin/verify/SignalDetail.vue') },
+    ...aiEvidenceRoutes,
     {
-      path: '/admin', component: AdminLayout,
+      path: '/admin', component: AppLayout,
       children: [
-        // ====== 数据大屏（五级） ======
         { path: '', redirect: '/admin/dashboard' },
-        { path: 'dashboard', component: () => import('@/views/admin/dashboard/index.vue') },
-        { path: 'college/:id', component: () => import('@/views/admin/dashboard/Detail.vue') },
-        { path: 'major/:id', component: () => import('@/views/admin/dashboard/MajorDetail.vue') },
-        { path: 'course/:id', component: () => import('@/views/admin/dashboard/CourseDetail.vue') },
-        { path: 'course/:id/students', component: () => import('@/views/admin/students/List.vue'), meta: { courseProfile: true } },
-        { path: 'student/:id', component: () => import('@/views/admin/student/Detail.vue') },
+        // 教学管理分析
+        ...teachingAnalysisRoutes,
+        // AI 管理决策
+        ...aiDecisionRoutes,
 
-        // ====== 预警查看 ======
-        { path: 'alert', component: () => import('@/views/admin/alert/Workspace.vue') },
-        { path: 'alert/monitor', redirect: '/admin/alert?tab=monitor' },
-        { path: 'alert/rules', redirect: '/admin/alert?tab=rules' },
-        { path: 'alert/discovery', redirect: '/admin/alert?tab=rules' },
+        // 基础报表
+        ...basicReportRoutes,
 
-        // ====== 教学运行分析 ======
-        { path: 'operation/courses', component: () => import('@/views/admin/operation/Index.vue') },
-        { path: 'operation/classroom', component: () => import('@/views/admin/operation/Index.vue') },
-        { path: 'operation/schedule-changes', component: () => import('@/views/admin/operation/Index.vue') },
-        { path: 'operation/teacher-load', component: () => import('@/views/admin/operation/Index.vue') },
-        { path: 'operation/schedule-analysis', component: () => import('@/views/admin/operation/Index.vue') },
-        { path: 'operation/course-quality', component: () => import('@/views/admin/operation/Index.vue') },
+        // 系统管理
+        ...systemRoutes,
 
-        // ====== 培养质量分析 ======
-        { path: 'curriculum', component: () => import('@/views/admin/curriculum/index.vue') },
-        { path: 'curriculum/progress', redirect: '/admin/curriculum?tab=progress' },
-        { path: 'curriculum/course-objectives/:id', redirect: '/admin/curriculum' },
-        { path: 'curriculum/graduate-requirements/:id', redirect: '/admin/curriculum' },
-
-        // ====== 师资保障分析（旧团队/教师链接统一恢复为主页面抽屉） ======
-        { path: 'faculty', component: () => import('@/views/admin/faculty/Index.vue') },
-        { path: 'faculty/team', redirect: to => ({
-          path: '/admin/faculty',
-          query: {
-            semester: to.query.semester,
-            course: to.query.courseId,
-            courseName: to.query.courseName,
-          },
-        }) },
-        { path: 'faculty/:id', redirect: to => ({
-          path: '/admin/faculty',
-          query: {
-            semester: to.query.semester,
-            teacher: String(to.params.id),
-          },
-        }) },
-
-        // ====== 学生成长与学业分析（同一路由按当前工作身份加载对应工作区） ======
-        { path: 'students/analysis', component: () => import('@/views/admin/students/Workspace.vue') },
-        // 旧「我的班级/学生」地址仅保留书签兼容，不再作为独立产品入口。
-        { path: 'students/my', redirect: to => ({
-          path: '/admin/students/analysis',
-          query: to.query,
-          hash: to.hash,
-        }) },
-        { path: 'students/list', component: () => import('@/views/admin/students/List.vue') },
-
-        // ====== AI管理决策（旧事实专题保留兼容重定向） ======
-        { path: 'reports', redirect: '/admin/reports/decision' },
-        { path: 'reports/early-setback', redirect: '/admin/alert?tab=early-risk' },
-        { path: 'reports/graduation-readiness', redirect: '/admin/curriculum?tab=graduation-readiness' },
-        { path: 'reports/course-quality', redirect: '/admin/operation/course-quality' },
-        { path: 'reports/faculty-resource-risk', redirect: '/admin/faculty' },
-        { path: 'reports/schedule-strategy', redirect: '/admin/operation/schedule-analysis' },
-        { path: 'reports/decision', component: () => import('@/views/admin/reports/decision/index.vue') },
-        { path: 'reports/decision/skills/:skillId', component: () => import('@/views/admin/reports/decision/workspaces/SkillWorkspace.vue') },
-        // 专家问策（R4）：专家库 + 三栏纯对话页
-        { path: 'reports/advice', component: () => import('@/views/admin/reports/advice/index.vue') },
-        { path: 'reports/advice/:skillId', component: () => import('@/views/admin/reports/advice/Chat.vue') },
-        // 旧「管理要情」「决策研判」已废弃，统一收口到 Skill 链路决策简报
-        { path: 'reports/management-briefing', redirect: '/admin/reports/decision' },
-        { path: 'reports/decision-simulation', redirect: '/admin/reports/decision' },
-
-        // ====== 基础报表（九张固定口径只读报表） ======
-        { path: 'basic-reports/failure-overview', component: () => import('@/views/admin/basic-reports/BasicReportPage.vue') },
-        { path: 'basic-reports/major-makeup-comparison', component: () => import('@/views/admin/basic-reports/BasicReportPage.vue') },
-        { path: 'basic-reports/major-gender-failure', component: () => import('@/views/admin/basic-reports/BasicReportPage.vue') },
-        { path: 'basic-reports/class-failure-count', component: () => import('@/views/admin/basic-reports/BasicReportPage.vue') },
-        { path: 'basic-reports/class-score-distribution', component: () => import('@/views/admin/basic-reports/BasicReportPage.vue') },
-        { path: 'basic-reports/course-makeup-comparison', component: () => import('@/views/admin/basic-reports/BasicReportPage.vue') },
-        { path: 'basic-reports/cet4-pass', component: () => import('@/views/admin/basic-reports/BasicReportPage.vue') },
-        { path: 'basic-reports/focus-students', component: () => import('@/views/admin/basic-reports/BasicReportPage.vue') },
-        { path: 'basic-reports/academic-warning-roster', component: () => import('@/views/admin/basic-reports/BasicReportPage.vue') },
-
-        // ====== 系统管理（账号 / 菜单 / 角色） ======
-        { path: 'system/accounts', component: () => import('@/views/admin/system/Accounts.vue') },
-        { path: 'system/menus', component: () => import('@/views/admin/system/Menus.vue') },
-        { path: 'system/roles', component: () => import('@/views/admin/system/Roles.vue') },
-        { path: 'system/permissions', component: () => import('@/views/admin/system/Permissions.vue') },
-        { path: 'system/audit', component: () => import('@/views/admin/system/Audit.vue') },
-        { path: 'system/kpis', component: () => import('@/views/admin/system/Kpis.vue') },
-        { path: 'system/schemes', component: () => import('@/views/admin/system/Schemes.vue') },
-        // 旧“决策配置”已并入分析方案管理，保留书签兼容。
-        { path: 'system/decision-config', redirect: '/admin/system/schemes' },
-        // M4：数据采集监控（批次台账 / ETL运行历史 / 手动触发 / 采集频率）
-        { path: 'system/data-collection', component: () => import('@/views/admin/system/DataCollection.vue') },
-
-        // ====== 系统设置 ======
-        { path: 'settings', component: () => import('@/views/admin/system/Parameters.vue') },
-        { path: 'forbidden', component: () => import('@/views/admin/Forbidden.vue') },
+        // 无权限
+        { path: 'forbidden', component: () => import('@/views/Forbidden.vue') },
       ]
     },
     { path: '/', redirect: '/admin/dashboard' },
@@ -139,6 +56,7 @@ router.onError((error) => {
   location.reload()
 })
 
+// 依据现有菜单授权判断路由准入，保留学生详情和查证窗口的共享入口。
 function isAllowed(path: string): boolean {
   const has = (p: string) => authStore.menus.some(m => m.path === p)
   // 学生详情可由「预警查看」或「学生学业分析」进入
@@ -205,5 +123,6 @@ router.beforeEach(async (to) => {
   return true
 })
 
+// 在应用启动时注册路由，使用统一的登录恢复和权限守卫。
 export function initRouter(app: App<Element>): void { app.use(router) }
 export const HOME_PAGE_PATH = '/admin/dashboard'

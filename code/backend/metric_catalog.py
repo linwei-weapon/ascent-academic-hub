@@ -231,7 +231,7 @@ TECHNICAL_ONLY_METRICS = (
 
 
 def default_confirmation_doc() -> Path:
-    return Path(__file__).resolve().parents[2] / "docs" / (
+    return Path(__file__).resolve().parents[2] / "文档" / "4-需求文档" / "公共需求" / (
         "本科教学分析与学业决策支持平台需求调研及指标口径确认书V2.md"
     )
 
