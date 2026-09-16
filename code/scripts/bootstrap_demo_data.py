@@ -251,6 +251,9 @@ def _create_v1(students: list[dict], attempts: list[dict]) -> None:
 def _create_cet4_sources(students: list[dict]) -> None:
     config.TS_DIR.mkdir(parents=True, exist_ok=True)
     organization_names = dict(ORGANIZATIONS)
+    required_roster_columns = {
+        "student_id", "college", "major", "grade_year", "class_name", "status",
+    }
     regular = [row for row in students if row["entry_grade"] == 2022]
     pass_groups = {
         "2024-2025-1": regular[0::10],
@@ -261,7 +264,22 @@ def _create_cet4_sources(students: list[dict]) -> None:
     for semester in SEMESTERS:
         path = config.TS_DIR / f"{semester}.db"
         if path.exists():
-            path.unlink()
+            existing = sqlite3.connect(str(path))
+            try:
+                columns = {
+                    row[1] for row in existing.execute("PRAGMA table_info(students)")
+                }
+            finally:
+                existing.close()
+            if required_roster_columns.issubset(columns):
+                # Source databases are user data.  A demo rebuild may replace
+                # analytics databases, but must never delete a valid teaching
+                # source merely because ``--force`` was supplied.
+                continue
+            raise SystemExit(
+                f"检测到已有学期源库且 students 表不完整，拒绝覆盖：{path}；"
+                "请先备份并人工确认该文件是否可删除后再生成演示源库"
+            )
         conn = sqlite3.connect(str(path))
         conn.execute("CREATE TABLE external_exams(student_id TEXT,exam_type TEXT,is_passed INTEGER)")
         conn.execute("""

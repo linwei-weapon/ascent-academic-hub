@@ -250,6 +250,11 @@ class StudentWorkspaceContractTest(unittest.TestCase):
             )
 
         self.assertIn("为什么现在看", drawer)
+        self.assertIn('label="当前有效预警" :value="`${activeAlerts.length}条`"', drawer)
+        self.assertNotIn('label="当前有效预警" :value="`${activeAlerts.length}件`"', drawer)
+        my_scope = self.read("frontend/src/views/teaching-analysis/students/MyScope.vue")
+        self.assertIn('`有${row.openAlerts}条未解除预警`', my_scope)
+        self.assertNotIn('`有${row.openAlerts}件未解除预警`', my_scope)
         self.assertIn("当前未解决", drawer)
         self.assertIn("重复未解决", drawer)
         self.assertIn("历史已解决", drawer)

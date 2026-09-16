@@ -42,7 +42,7 @@
             hint="历史曾未通过且最新有效修读结果仍未通过" :tone="currentFailures.length ? 'danger' : 'teal'" />
           <KpiCard label="重复未解决课程" :value="`${repeatedFailures.length}门`"
             hint="同一课程至少两次未通过且最新有效结果仍未通过" :tone="repeatedFailures.length ? 'danger' : 'teal'" />
-          <KpiCard label="当前有效预警" :value="`${activeAlerts.length}件`"
+          <KpiCard label="当前有效预警" :value="`${activeAlerts.length}条`"
             hint="当前仍有效的规则命中；核查状态与风险状态分别记录" :tone="activeAlerts.length ? 'amber' : 'teal'" />
         </div>
 
