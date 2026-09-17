@@ -970,7 +970,34 @@
         "ui",
         "audit",
         "ai"
-      ]
+      ],
+      "expertTeamIntegration": {
+        "date": "2026-09-17",
+        "sourceCommits": [
+          "88ffa59",
+          "f0bebae"
+        ],
+        "viewDirectory": "code/frontend/src/views/ai-decision/expert-team",
+        "routeFile": "code/frontend/src/router/modules/aiDecision.ts",
+        "route": "/admin/reports/expert-team",
+        "apiFiles": [
+          "code/frontend/src/api/aiDecision/expertTeam.ts",
+          "code/frontend/src/api/aiDecision/expertResearch.ts"
+        ],
+        "typeFiles": [
+          "code/frontend/src/types/expertTeam.ts",
+          "code/frontend/src/types/expertResearch.ts"
+        ],
+        "backendFiles": [
+          "code/backend/api/routers/expert_team.py",
+          "code/backend/api/routers/expert_research.py"
+        ],
+        "documents": [
+          "文档/4-需求文档/4.7-AI管理决策/expert-design-v3-20260916/README.md",
+          "文档/文档管理/新增-教学分析与AI决策新旧地址对照表-20260915.md"
+        ],
+        "dataMigration": "本次仅代码接入，未执行真实数据库或权限迁移。"
+      }
     },
     {
       "id": "basic-reports",
