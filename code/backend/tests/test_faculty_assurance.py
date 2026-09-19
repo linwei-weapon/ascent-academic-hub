@@ -3,6 +3,7 @@ import unittest
 from datetime import date
 
 from backend.api.routers.faculty import (
+    _analysis_cache,
     _age_threshold_sides,
     _continuous_single_teacher_ids,
     _faculty_analysis,
@@ -373,6 +374,7 @@ class FacultyAssuranceRuleTest(unittest.TestCase):
 
 class FacultyAssuranceIntegrationTest(unittest.TestCase):
     def setUp(self):
+        _analysis_cache.clear()
         self.conn = make_conn()
         self.v2_conn = make_v2_conn()
 
@@ -657,8 +659,28 @@ class FacultyAssuranceIntegrationTest(unittest.TestCase):
         )["data"]
         self.assertEqual("TB", senior["items"][0]["staff_id"])
         self.assertEqual("副教授", senior["items"][0]["title"])
+        self.assertEqual("博士研究生", senior["items"][0]["education"])
         self.assertGreater(senior["items"][0]["lesson_count"], 0)
         self.assertTrue(senior["breakdown"])
+        self.assertEqual(["学院B"], senior["college_options"])
+
+        senior_by_staff_id = management_kpi_details(
+            "senior_title_teaching_rate", semester="2025-2026-2", keyword="TB",
+            user=school_user(), conn=self.conn, v2_conn=self.v2_conn,
+        )["data"]
+        self.assertEqual(["TB"], [item["staff_id"] for item in senior_by_staff_id["items"]])
+
+        senior_by_name = management_kpi_details(
+            "senior_title_teaching_rate", semester="2025-2026-2", keyword="外院",
+            user=school_user(), conn=self.conn, v2_conn=self.v2_conn,
+        )["data"]
+        self.assertEqual(["TB"], [item["staff_id"] for item in senior_by_name["items"]])
+
+        senior_by_college = management_kpi_details(
+            "senior_title_teaching_rate", semester="2025-2026-2", department="学院B",
+            user=school_user(), conn=self.conn, v2_conn=self.v2_conn,
+        )["data"]
+        self.assertEqual(["TB"], [item["staff_id"] for item in senior_by_college["items"]])
 
         young = management_kpi_details(
             "young_teacher_teaching_rate", semester="2025-2026-2",
@@ -701,6 +723,39 @@ class FacultyAssuranceIntegrationTest(unittest.TestCase):
         kpis = {item["key"]: item for item in payload["kpis"]}
         self.assertEqual("3 / — 人", kpis["teaching_staff_coverage"]["value"])
         self.assertIsNone(kpis["teaching_staff_coverage"]["denominator"])
+
+    def test_senior_teacher_list_uses_the_same_real_title_for_selection_and_display(self):
+        self.conn.execute(
+            "UPDATE dim_teacher SET title='讲师',source='sim' WHERE teacher_id='T1'"
+        )
+        self.conn.execute(
+            "UPDATE dim_staff_employment_snapshot SET title='教授' WHERE staff_id='T1'"
+        )
+        self.conn.execute(
+            "UPDATE dim_teacher SET title='教授',source='sim' WHERE teacher_id='TB'"
+        )
+        self.conn.execute(
+            "UPDATE dim_staff_employment_snapshot SET title='讲师' WHERE staff_id='TB'"
+        )
+        self.conn.execute(
+            "UPDATE dim_teacher SET title='教授',source='sim' WHERE teacher_id='T2'"
+        )
+        self.conn.execute(
+            "UPDATE dim_staff_employment_snapshot SET title=NULL WHERE staff_id='T2'"
+        )
+
+        details = management_kpi_details(
+            "senior_title_teaching_rate", semester="2025-2026-2",
+            user=school_user(), conn=self.conn, v2_conn=self.v2_conn,
+        )["data"]
+
+        self.assertEqual(["T1"], [item["staff_id"] for item in details["items"]])
+        self.assertEqual("教授", details["items"][0]["title"])
+        self.assertEqual(1, details["summary"]["senior_teacher_count"])
+        t2_gap = next(
+            item for item in details["evidence_gaps"] if item["staff_id"] == "T2"
+        )
+        self.assertIsNone(t2_gap["title"])
 
     def test_staff_list_counts_tasks_without_lesson_id_and_uses_real_staff_fallback(self):
         self.conn.execute("DROP TABLE dim_staff_employment_snapshot")

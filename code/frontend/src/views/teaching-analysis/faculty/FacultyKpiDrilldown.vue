@@ -12,9 +12,9 @@
       <div class="kpi-drawer-heading">
         <div>
           <h2>{{ drawerTitle }}</h2>
-          <p>{{ semester }}学期 · {{ data.college || '全校' }}<template v-if="!isSimpleList"> · 指标下钻</template></p>
+          <p>{{ semester }}学期 · {{ data.college || '全校' }}<template v-if="!hideMetricSummary"> · 指标下钻</template></p>
         </div>
-        <el-tag v-if="!isSimpleList" :type="statusType" effect="plain">{{ statusLabel }}</el-tag>
+        <el-tag v-if="!hideMetricSummary" :type="statusType" effect="plain">{{ statusLabel }}</el-tag>
       </div>
     </template>
 
@@ -33,7 +33,7 @@
       </el-result>
       <template v-else-if="data.metric">
         <el-alert
-          v-if="!isSimpleList && data.metric.status !== 'ready'"
+          v-if="!hideMetricSummary && data.metric.status !== 'ready'"
           class="readiness-alert"
           type="warning"
           :closable="false"
@@ -42,7 +42,7 @@
           :description="data.metric.sub"
         />
 
-        <section v-if="!isSimpleList" class="metric-overview">
+        <section v-if="!hideMetricSummary" class="metric-overview">
           <KpiCard
             :label="data.metric.label"
             :value="data.metric.value"
@@ -60,7 +60,7 @@
 
         <section v-if="!isSimpleList && data.breakdown?.length" class="breakdown-section">
           <div class="section-title">
-            <div><h3>结构分布</h3><p>用于解释总体值，不用于学院或教师绩效排名。</p></div>
+            <div><h3>结构分布</h3><p v-if="!isSeniorTeacherList">用于解释总体值，不用于学院或教师绩效排名。</p></div>
           </div>
           <div class="breakdown-grid">
             <div v-for="item in data.breakdown" :key="item.college_id || item.label || item.college_name" class="breakdown-item">
@@ -101,9 +101,9 @@
           <div class="detail-toolbar" :class="{ 'list-only-toolbar': isSimpleList }">
             <div v-if="!isSimpleList">
               <h3>{{ detailTitle }}</h3>
-              <p>{{ detailDescription }}</p>
+              <p v-if="!isSeniorTeacherList">{{ detailDescription }}</p>
             </div>
-            <div class="detail-search" :class="{ 'staff-list-search': isSimpleList }">
+            <div class="detail-search" :class="{ 'staff-list-search': isSimpleList || isSeniorTeacherList }">
               <el-select
                 v-if="isTeachingStaffList || isContinuousTeacherList"
                 v-model="department"
@@ -114,6 +114,21 @@
               >
                 <el-option
                   v-for="item in data.department_options || []"
+                  :key="item"
+                  :label="item"
+                  :value="item"
+                />
+              </el-select>
+              <el-select
+                v-if="isSeniorTeacherList"
+                v-model="department"
+                clearable
+                placeholder="全部学院"
+                class="department-select"
+                @change="search"
+              >
+                <el-option
+                  v-for="item in data.college_options || []"
                   :key="item"
                   :label="item"
                   :value="item"
@@ -150,7 +165,7 @@
             :columns="columns"
             :data="data.items || []"
             :storage-key="`faculty:kpi:${metricKey}`"
-            :config-version="isTeachingStaffList ? 3 : ((isStructureCourseList || isContinuousTeacherList) ? 2 : 1)"
+            :config-version="isTeachingStaffList ? 3 : ((isStructureCourseList || isContinuousTeacherList || isSeniorTeacherList) ? 2 : 1)"
             :max-business-columns="isStructureCourseList ? 9 : (isContinuousTeacherList ? 10 : 8)"
             :loading="loading"
             :pagination="true"
@@ -224,9 +239,11 @@ const metricLabel = computed(() => metricNames[props.metricKey] || '师资保障
 const isTeachingStaffList = computed(() => props.metricKey === 'teaching_staff_coverage')
 const isStructureCourseList = computed(() => props.metricKey === 'team_structure_exception')
 const isContinuousTeacherList = computed(() => props.metricKey === 'continuous_single_teacher')
+const isSeniorTeacherList = computed(() => props.metricKey === 'senior_title_teaching_rate')
 const isSimpleList = computed(() => (
   isTeachingStaffList.value || isStructureCourseList.value || isContinuousTeacherList.value
 ))
+const hideMetricSummary = computed(() => isSimpleList.value || isSeniorTeacherList.value)
 const loading = ref(false)
 const error = ref('')
 const keyword = ref('')
@@ -248,6 +265,8 @@ const searchPlaceholder = computed(() => isTeachingStaffList.value
     ? '搜索课程号或课程名称'
     : isContinuousTeacherList.value
       ? '搜索工号、姓名或课程名称'
+      : isSeniorTeacherList.value
+        ? '搜索工号或姓名'
       : '搜索教师、课程或学院')
 let requestSerial = 0
 
@@ -298,6 +317,17 @@ const columns = computed<AppTableColumn[]>(() => {
     { key: 'enrolled', label: '本期学生人次', minWidth: 105, align: 'center', region: 'business' },
     action,
   ]
+  if (props.metricKey === 'senior_title_teaching_rate') return [
+    { key: 'staff_id', label: '工号', minWidth: 120, fixed: 'left', required: true, region: 'identity' },
+    { key: 'display_name', label: '姓名', minWidth: 110, fixed: 'left', required: true, region: 'identity' },
+    { key: 'dept', label: '学院', minWidth: 150, required: true, region: 'business' },
+    { key: 'title', label: '职称', minWidth: 100, region: 'business' },
+    { key: 'education', label: '学历', minWidth: 110, region: 'business' },
+    { key: 'course_count', label: '授课课程数', minWidth: 105, align: 'center', region: 'business' },
+    { key: 'lesson_count', label: '教学班数', minWidth: 90, align: 'center', region: 'business' },
+    { key: 'course_names', label: '授课课程', minWidth: 220, tooltip: true, region: 'business' },
+    action,
+  ]
   if (props.metricKey === 'young_teacher_teaching_rate') return [
     { key: 'display_name', label: '教师', minWidth: 110, fixed: 'left', required: true, region: 'identity' },
     { key: 'age_band', label: '年龄段', minWidth: 105, required: true, region: 'business' },
@@ -335,7 +365,7 @@ const detailTitle = computed(() => props.metricKey === 'team_structure_exception
     : props.metricKey === 'young_teacher_teaching_rate'
       ? '35岁以下实际授课教师'
       : props.metricKey === 'senior_title_teaching_rate'
-        ? '教授、副教授实际授课教师'
+        ? '教授、副教授实际授课情况'
         : '实际授课教师')
 const detailDescription = computed(() => props.metricKey.includes('teacher') || props.metricKey.includes('coverage') || props.metricKey.includes('rate')
   ? '仅展示当前授权范围内与本科教学有关的必要证据，不作个人绩效排名。'
@@ -357,7 +387,7 @@ async function load(force = false) {
     })
     if (props.collegeId) query.set('college', props.collegeId)
     if (keyword.value.trim()) query.set('keyword', keyword.value.trim())
-    if ((isTeachingStaffList.value || isContinuousTeacherList.value) && department.value) query.set('department', department.value)
+    if ((isTeachingStaffList.value || isContinuousTeacherList.value || isSeniorTeacherList.value) && department.value) query.set('department', department.value)
     if (isStructureCourseList.value && openingCollege.value) query.set('opening_college', openingCollege.value)
     const result = await getFacultyKpiDetails<any>(props.metricKey, query)
     if (serial !== requestSerial) return

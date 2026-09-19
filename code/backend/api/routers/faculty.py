@@ -25,7 +25,7 @@ CUR = CURRENT_SEMESTER
 # 本科教学学院（排除研究生院/本科生院等非授课建制）
 _NON_TEACHING_COLLEGE = ("本科生院", "研究生院")
 FACULTY_RULE_VERSION = "FACULTY-ASSURANCE-2026.09.3"
-FACULTY_KPI_RULE_VERSION = "FACULTY-KPI-2026.09.10"
+FACULTY_KPI_RULE_VERSION = "FACULTY-KPI-2026.09.11"
 _IMPORTANT_COURSE_KEYWORDS = (
     "必修", "主干", "核心", "基础", "思想", "政治", "形势与政策",
     "体育", "数学", "英语",
@@ -347,6 +347,38 @@ def _real_teacher_value(teacher: dict, field: str) -> Optional[object]:
     if str(teacher.get("source") or "").strip().lower() != "real":
         return None
     return teacher.get(field)
+
+
+def _real_personnel_attributes(conn: sqlite3.Connection,
+                               v2_conn: Optional[sqlite3.Connection],
+                               semester: str, teacher_ids: set[str],
+                               teacher_meta: dict[str, dict]) -> dict[str, dict]:
+    """按真实人员快照、正式人员主数据、真实教师维表依次解析人员属性。"""
+    personnel = _personnel_snapshot(conn, semester)
+    snapshot_by_id = {
+        str(row["staff_id"]): row for row in personnel["rows"]
+    } if personnel["ready"] else {}
+    staff_attributes = _active_staff_attributes(v2_conn, teacher_ids)
+    resolved: dict[str, dict] = {}
+    for teacher_id in teacher_ids:
+        snapshot = snapshot_by_id.get(teacher_id, {})
+        staff = staff_attributes.get(teacher_id, {})
+        teacher = teacher_meta.get(teacher_id, {})
+        resolved[teacher_id] = {
+            "dept": (
+                snapshot.get("dept") or staff.get("dept")
+                or _real_teacher_value(teacher, "dept")
+            ),
+            "title": (
+                snapshot.get("title") or staff.get("title")
+                or _real_teacher_value(teacher, "title")
+            ),
+            "education": snapshot.get("education") or staff.get("education"),
+            "staff_category": (
+                snapshot.get("staff_category") or staff.get("staff_type")
+            ),
+        }
+    return resolved
 
 
 def _resolved_department(*values: object) -> str:
@@ -1056,13 +1088,16 @@ def _management_kpis(conn: sqlite3.Connection, semester: str,
         for teacher_id in row.get("continuous_teacher_ids") or []
     }
 
+    personnel_attributes = _real_personnel_attributes(
+        conn, v2_conn, semester, scope_active_ids, teacher_meta,
+    )
     known_title_ids = {
         teacher_id for teacher_id in scope_active_ids
-        if str(teacher_meta.get(teacher_id, {}).get("title") or "").strip()
+        if str(personnel_attributes.get(teacher_id, {}).get("title") or "").strip()
     }
     senior_ids = {
         teacher_id for teacher_id in known_title_ids
-        if normalize_title(teacher_meta.get(teacher_id, {}).get("title")) in ("教授", "副教授")
+        if normalize_title(personnel_attributes[teacher_id].get("title")) in ("教授", "副教授")
     }
     title_coverage = _rate(len(known_title_ids), len(scope_active_ids))
     senior_rate = _rate(len(senior_ids), len(scope_active_ids))
@@ -1406,21 +1441,40 @@ def management_kpi_details(metric_key: str, college: Optional[str] = None,
         summary.update({"teacher_count": len(teacher_ids), "course_count": len(continuous_rows)})
 
     elif metric_key == "senior_title_teaching_rate":
+        personnel_attributes = _real_personnel_attributes(
+            conn, v2_conn, sem, scope_active_ids, teacher_meta,
+        )
         known_ids = {
             teacher_id for teacher_id in scope_active_ids
-            if str(teacher_meta.get(teacher_id, {}).get("title") or "").strip()
+            if str(personnel_attributes.get(teacher_id, {}).get("title") or "").strip()
         }
         senior_ids = {
             teacher_id for teacher_id in known_ids
-            if normalize_title(teacher_meta.get(teacher_id, {}).get("title")) in ("教授", "副教授")
+            if normalize_title(personnel_attributes[teacher_id].get("title")) in ("教授", "副教授")
         }
         rows = _teacher_display_rows(senior_ids, analysis, teacher_stats)
+        scope_stats = analysis.get("teacher_scope_stats") or {}
+        for detail in rows:
+            teacher_id = str(detail["staff_id"])
+            attributes = personnel_attributes.get(teacher_id, {})
+            scope_colleges = scope_stats.get(teacher_id, {}).get("college_names") or []
+            detail["dept"] = _resolved_department(
+                attributes.get("dept"), scope_colleges[0] if scope_colleges else None,
+            )
+            detail["title"] = attributes.get("title")
+            detail["education"] = attributes.get("education")
         missing_title_ids = scope_active_ids - known_ids
         evidence_gaps = _teacher_display_rows(missing_title_ids, analysis, teacher_stats)
         for item in evidence_gaps:
+            teacher_id = str(item["staff_id"])
+            attributes = personnel_attributes.get(teacher_id, {})
+            scope_colleges = scope_stats.get(teacher_id, {}).get("college_names") or []
+            item["dept"] = _resolved_department(
+                attributes.get("dept"), scope_colleges[0] if scope_colleges else None,
+            )
+            item["title"] = attributes.get("title")
             item["gap_reason"] = "职称字段缺失"
         college_buckets: dict[str, dict[str, set[str]]] = {}
-        scope_stats = analysis.get("teacher_scope_stats") or {}
         for teacher_id in scope_active_ids:
             college_names = scope_stats.get(teacher_id, {}).get("college_names") or ["待映射组织"]
             for name in college_names:
@@ -1575,6 +1629,28 @@ def management_kpi_details(metric_key: str, college: Optional[str] = None,
             str(row.get("dept") or ""),
             str(row.get("display_name") or ""),
             str(row.get("course_id") or ""),
+        ))
+    elif metric_key == "senior_title_teaching_rate":
+        college_options = sorted({
+            str(row.get("dept") or "").strip()
+            for row in rows if str(row.get("dept") or "").strip()
+        })
+        selected_college = (department or "").strip()
+        if selected_college:
+            rows = [
+                row for row in rows
+                if str(row.get("dept") or "").strip() == selected_college
+            ]
+        if needle:
+            rows = [
+                row for row in rows
+                if needle in str(row.get("staff_id") or "").lower()
+                or needle in str(row.get("display_name") or "").lower()
+            ]
+        rows.sort(key=lambda row: (
+            str(row.get("dept") or ""),
+            str(row.get("display_name") or ""),
+            str(row.get("staff_id") or ""),
         ))
     elif needle:
         rows = [

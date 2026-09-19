@@ -181,10 +181,10 @@ IMPLEMENTED_METRICS = {
     "F-09": {
         "technical_kpi_id": "senior_title_teaching_rate",
         "status": "published",
-        "data_source": "fact_lesson / dim_teacher",
+        "data_source": "fact_lesson / dim_teacher / dim_staff_employment_snapshot / dim_staff / data_quality_issue",
         "grain": "教师×学期×授权范围",
         "update_cycle": "教学任务和教师职称同步后",
-        "version": "3.0",
+        "version": "3.1",
         "pages": [("/admin/faculty", "高职称教师授课占比（教授、副教授）")],
     },
     "F-10": {
