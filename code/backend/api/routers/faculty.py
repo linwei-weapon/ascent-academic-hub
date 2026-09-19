@@ -728,6 +728,10 @@ def _faculty_analysis(conn: sqlite3.Connection, semester: str,
         )
         bucket["structure_review_courses"] += int(row["structure_review"])
         bucket["data_candidate_courses"] += int(row["review_type"] == "data_candidate")
+    for bucket in colleges_map.values():
+        bucket["course_total"] = (
+            bucket["evaluable_courses"] + bucket["data_candidate_courses"]
+        )
     college_rows = sorted(
         colleges_map.values(),
         key=lambda row: (
@@ -989,6 +993,7 @@ def management_overview(college: Optional[str] = None, semester: Optional[str] =
         "kpis": kpis,
         "rule_version": FACULTY_RULE_VERSION,
         "definition": {
+            "course_total": "学院可评估课程数与数据候选课程数之和。",
             "evaluable_courses": "通过数据质量门禁，且具有课程责任组织、有效教学任务和可识别实际授课教师的去重课程数。",
             "priority_review_courses": "重点保障课程中，同时命中规模条件与高影响单点、连续单点或当期任务高度集中规则的课程数；单教师事实不会单独触发。",
             "continuous_single_courses": "重点保障课程最近3次实际开课均为单教师承担，且至少2次为同一教师，同时达到4个教学班或100人次规模的课程数。",

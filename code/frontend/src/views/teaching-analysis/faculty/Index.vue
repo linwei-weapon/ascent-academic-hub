@@ -49,7 +49,7 @@
         <section class="sa-card college-card" v-loading="refreshing">
           <div class="section-head">
             <div>
-              <h3>学院师资保障概览</h3>
+              <h3>学院授课师资保障概览</h3>
             </div>
             <el-input v-model="collegeKeyword" clearable placeholder="搜索学院" class="college-search" />
           </div>
@@ -58,7 +58,7 @@
             :data="filteredColleges"
             storage-key="faculty:college-assurance"
             :max-business-columns="6"
-            config-version="2"
+            config-version="3"
             stripe
 
             row-class-name="college-row"
@@ -530,6 +530,7 @@ const courseAttentionReasons = (row: any): string[] =>
 
 const collegeColumns: AppTableColumn[] = [
   { key: 'college_name', label: '学院', minWidth: 180, fixed: 'left', required: true, region: 'identity' },
+  { key: 'course_total', label: '课程总数', minWidth: 95, align: 'center', required: true, region: 'business' },
   { key: 'evaluable_courses', label: '可评估课程', minWidth: 105, align: 'center', required: true, region: 'business' },
   { key: 'priority_review_courses', label: '优先核查', minWidth: 100, align: 'center', required: true, region: 'business' },
   { key: 'continuous_single_courses', label: '连续单点', minWidth: 95, align: 'center', region: 'business' },

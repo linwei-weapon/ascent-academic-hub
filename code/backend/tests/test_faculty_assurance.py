@@ -310,6 +310,17 @@ class FacultyAssuranceIntegrationTest(unittest.TestCase):
         self.assertEqual("33.3%", kpis["young_teacher_teaching_rate"]["value"])
         self.assertTrue(all(item["hint"] and item["drilldown"] for item in kpis.values()))
 
+    def test_college_course_total_is_evaluable_plus_data_candidates(self):
+        payload = management_overview(
+            semester="2025-2026-2", user=school_user(), conn=self.conn,
+        )["data"]
+        college = next(item for item in payload["colleges"] if item["college_id"] == "C1")
+
+        self.assertEqual(
+            college["evaluable_courses"] + college["data_candidate_courses"],
+            college["course_total"],
+        )
+
     def test_kpi_details_reuse_course_and_teacher_evidence(self):
         structure = management_kpi_details(
             "team_structure_exception", semester="2025-2026-2",
