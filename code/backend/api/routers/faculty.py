@@ -25,7 +25,7 @@ CUR = CURRENT_SEMESTER
 # 本科教学学院（排除研究生院/本科生院等非授课建制）
 _NON_TEACHING_COLLEGE = ("本科生院", "研究生院")
 FACULTY_RULE_VERSION = "FACULTY-ASSURANCE-2026.09.3"
-FACULTY_KPI_RULE_VERSION = "FACULTY-KPI-2026.09.12"
+FACULTY_KPI_RULE_VERSION = "FACULTY-KPI-2026.09.13"
 _IMPORTANT_COURSE_KEYWORDS = (
     "必修", "主干", "核心", "基础", "思想", "政治", "形势与政策",
     "体育", "数学", "英语",
@@ -1103,33 +1103,43 @@ def _management_kpis(conn: sqlite3.Connection, semester: str,
     senior_rate = _rate(len(senior_ids), len(scope_active_ids))
     senior_ready = bool(known_title_ids) and (title_coverage or 0) >= 90
 
-    if snapshot["ready"]:
+    age_snapshot = _personnel_snapshot(conn, semester)
+    teaching_teacher_total = len(scope_active_ids) if scope_active_ids else None
+    if age_snapshot["ready"] and teaching_teacher_total is not None:
         teaching_staff_rows = [
-            row for row in snapshot["rows"]
-            if str(row["staff_id"]) in personnel_teaching_ids
+            row for row in age_snapshot["rows"]
+            if str(row["staff_id"]) in scope_active_ids
         ]
         age_known_rows = [
             row for row in teaching_staff_rows
             if row.get("is_under_35") in (0, 1)
         ]
         young_rows = [row for row in age_known_rows if int(row["is_under_35"]) == 1]
-        age_coverage = _rate(len(age_known_rows), len(teaching_staff_rows))
-        young_rate = _rate(len(young_rows), len(teaching_staff_rows))
-        young_ready = bool(age_known_rows) and (age_coverage or 0) >= 90
-        young_status = "ready" if young_ready else "insufficient"
-        young_value = f"{len(young_rows)} 人" if young_ready else "—"
-        young_sub = (
-            f"授课教师总数：{len(teaching_staff_rows)} 人"
-            if teaching_staff_rows else "授课教师总数：—"
-        )
+        age_coverage = _rate(len(age_known_rows), teaching_teacher_total)
+        if age_known_rows:
+            young_numerator: Optional[int] = len(young_rows)
+            young_rate = round(
+                young_numerator * 100 / teaching_teacher_total, 2
+            )
+            young_status = "ready" if len(age_known_rows) == teaching_teacher_total else "partial"
+            young_value = f"{young_rate:.2f}%"
+            young_sub = f"{young_numerator}/{teaching_teacher_total}人"
+        else:
+            young_numerator = None
+            young_rate = None
+            young_status = "unavailable"
+            young_value = "-"
+            young_sub = f"-/{teaching_teacher_total}人"
     else:
         age_known_rows = []
         young_rows = []
+        young_numerator = None
         age_coverage = None
         young_rate = None
         young_status = "unavailable"
-        young_value = "—"
-        young_sub = f"授课教师总数：{len(scope_active_ids)} 人" if scope_active_ids else "授课教师总数：—"
+        young_value = "-"
+        denominator_text = str(teaching_teacher_total) if teaching_teacher_total is not None else "-"
+        young_sub = f"-/{denominator_text}人"
 
     raw_cards = [
         ("teaching_staff_coverage", staff_value, staff_sub, staff_status,
@@ -1144,13 +1154,7 @@ def _management_kpis(conn: sqlite3.Connection, semester: str,
          "ready" if senior_ready else "insufficient", len(senior_ids), len(scope_active_ids),
          senior_rate if senior_ready else None, title_coverage),
         ("young_teacher_teaching_rate", young_value, young_sub, young_status,
-         len(young_rows) if young_status == "ready" else None,
-         (
-             len(teaching_staff_rows) if snapshot["ready"] and teaching_staff_rows
-             else len(scope_active_ids) if not snapshot["ready"] and scope_active_ids
-             else None
-         ),
-         young_rate if young_status == "ready" else None, age_coverage),
+         young_numerator, teaching_teacher_total, young_rate, age_coverage),
     ]
     cards = []
     for key, value, sub, status, numerator, denominator, rate, coverage in raw_cards:
@@ -1505,10 +1509,11 @@ def management_kpi_details(metric_key: str, college: Optional[str] = None,
         })
 
     elif metric_key == "young_teacher_teaching_rate":
-        if snapshot["ready"]:
-            teaching_ids = {str(row["staff_id"]) for row in snapshot["rows"]} & set(teacher_stats)
+        age_snapshot = _personnel_snapshot(conn, sem)
+        if age_snapshot["ready"]:
+            teaching_ids = scope_active_ids
             young_snapshot = [
-                row for row in snapshot["rows"]
+                row for row in age_snapshot["rows"]
                 if str(row["staff_id"]) in teaching_ids and row.get("is_under_35") == 1
             ]
             base_rows = {
@@ -1527,43 +1532,43 @@ def management_kpi_details(metric_key: str, college: Optional[str] = None,
                     "age_band": staff.get("age_band") or "35岁以下",
                 })
                 rows.append(detail)
-            missing_age_rows = [
-                row for row in snapshot["rows"]
-                if str(row["staff_id"]) in teaching_ids and row.get("is_under_35") not in (0, 1)
-            ]
-            missing_age_ids = {str(row["staff_id"]) for row in missing_age_rows}
+            age_known_ids = {
+                str(row["staff_id"]) for row in age_snapshot["rows"]
+                if str(row["staff_id"]) in teaching_ids
+                and row.get("is_under_35") in (0, 1)
+            }
+            missing_age_ids = teaching_ids - age_known_ids
             evidence_gaps = _teacher_display_rows(missing_age_ids, analysis, teacher_stats)
             for item in evidence_gaps:
                 item["gap_reason"] = "年龄段/35岁以下标识缺失"
-            college_names = {
-                row["college_id"]: row["name"]
-                for row in dbm.query(conn, "SELECT college_id,name FROM dim_college")
-            }
+            scope_stats = analysis.get("teacher_scope_stats") or {}
             age_buckets: dict[str, dict[str, set[str]]] = {}
-            for staff in snapshot["rows"]:
-                staff_id = str(staff["staff_id"])
-                if staff_id not in teaching_ids:
-                    continue
-                name = college_names.get(staff.get("college_id")) or staff.get("dept") or "待映射组织"
-                bucket = age_buckets.setdefault(name, {
-                    "teacher_ids": set(), "known_ids": set(), "young_ids": set(),
-                })
-                bucket["teacher_ids"].add(staff_id)
-                if staff.get("is_under_35") in (0, 1):
-                    bucket["known_ids"].add(staff_id)
-                if staff.get("is_under_35") == 1:
-                    bucket["young_ids"].add(staff_id)
+            young_ids = {str(row["staff_id"]) for row in young_snapshot}
+            for staff_id in teaching_ids:
+                college_names = (
+                    scope_stats.get(staff_id, {}).get("college_names")
+                    or ["待映射组织"]
+                )
+                for name in college_names:
+                    bucket = age_buckets.setdefault(name, {
+                        "teacher_ids": set(), "known_ids": set(), "young_ids": set(),
+                    })
+                    bucket["teacher_ids"].add(staff_id)
+                    if staff_id in age_known_ids:
+                        bucket["known_ids"].add(staff_id)
+                    if staff_id in young_ids:
+                        bucket["young_ids"].add(staff_id)
             breakdown = [{
                 "college_name": name,
                 "teacher_count": len(bucket["teacher_ids"]),
                 "known_count": len(bucket["known_ids"]),
                 "count": len(bucket["young_ids"]),
-                "rate": _rate(len(bucket["young_ids"]), len(bucket["known_ids"])),
+                "rate": _rate(len(bucket["young_ids"]), len(bucket["teacher_ids"])),
                 "coverage": _rate(len(bucket["known_ids"]), len(bucket["teacher_ids"])),
             } for name, bucket in sorted(age_buckets.items())]
             source_note = "真实教学任务 + 人事系统提供的受控年龄段/35岁以下标识"
         else:
-            source_note = snapshot["reason"] + "；未读取模拟年龄画像"
+            source_note = age_snapshot["reason"] + "；未读取模拟年龄画像"
         summary["young_teacher_count"] = len(rows)
 
     department_options: list[str] = []

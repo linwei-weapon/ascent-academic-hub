@@ -483,9 +483,9 @@ class FacultyAssuranceIntegrationTest(unittest.TestCase):
             kpis["senior_title_teaching_rate"]["hint"],
         )
         self.assertEqual(3, kpis["senior_title_teaching_rate"]["denominator"])
-        self.assertEqual("1 人", kpis["young_teacher_teaching_rate"]["value"])
+        self.assertEqual("33.33%", kpis["young_teacher_teaching_rate"]["value"])
         self.assertEqual(
-            "授课教师总数：3 人",
+            "1/3人",
             kpis["young_teacher_teaching_rate"]["sub"],
         )
         self.assertEqual(1, kpis["young_teacher_teaching_rate"]["numerator"])
@@ -555,6 +555,14 @@ class FacultyAssuranceIntegrationTest(unittest.TestCase):
         self.assertEqual(3, coverage["numerator"])
         self.assertEqual(66.7, coverage["rate"])
         self.assertEqual("本科教学参与率 66.7%", coverage["sub"])
+        young = next(
+            item for item in overview["kpis"]
+            if item["key"] == "young_teacher_teaching_rate"
+        )
+        self.assertEqual("33.33%", young["value"])
+        self.assertEqual("1/3人", young["sub"])
+        self.assertEqual(1, young["numerator"])
+        self.assertEqual(3, young["denominator"])
 
         payload = management_kpi_details(
             "teaching_staff_coverage", college="C1", semester="2025-2026-2",
@@ -701,9 +709,9 @@ class FacultyAssuranceIntegrationTest(unittest.TestCase):
         self.assertEqual(4, kpis["teaching_staff_coverage"]["denominator"])
         self.assertEqual("", kpis["teaching_staff_coverage"]["sub"])
         self.assertEqual("unavailable", kpis["young_teacher_teaching_rate"]["status"])
-        self.assertEqual("—", kpis["young_teacher_teaching_rate"]["value"])
+        self.assertEqual("-", kpis["young_teacher_teaching_rate"]["value"])
         self.assertEqual(
-            "授课教师总数：3 人",
+            "-/3人",
             kpis["young_teacher_teaching_rate"]["sub"],
         )
         self.assertIsNone(kpis["young_teacher_teaching_rate"]["numerator"])
@@ -723,6 +731,46 @@ class FacultyAssuranceIntegrationTest(unittest.TestCase):
         kpis = {item["key"]: item for item in payload["kpis"]}
         self.assertEqual("3 / — 人", kpis["teaching_staff_coverage"]["value"])
         self.assertIsNone(kpis["teaching_staff_coverage"]["denominator"])
+
+    def test_young_teacher_rate_keeps_all_authorized_teachers_in_partial_denominator(self):
+        self.conn.execute(
+            """UPDATE dim_staff_employment_snapshot
+               SET birth_date=NULL,age_band=NULL,is_under_35=NULL
+               WHERE semester_id='2025-2026-2' AND staff_id='T2'"""
+        )
+        self.conn.execute(
+            """DELETE FROM dim_staff_employment_snapshot
+               WHERE semester_id='2025-2026-2' AND staff_id='TB'"""
+        )
+
+        payload = management_overview(
+            semester="2025-2026-2", user=school_user(), conn=self.conn,
+            v2_conn=self.v2_conn,
+        )["data"]
+        young = next(
+            item for item in payload["kpis"]
+            if item["key"] == "young_teacher_teaching_rate"
+        )
+        self.assertEqual("partial", young["status"])
+        self.assertEqual("33.33%", young["value"])
+        self.assertEqual("1/3人", young["sub"])
+        self.assertEqual(1, young["numerator"])
+        self.assertEqual(3, young["denominator"])
+        self.assertEqual(33.3, young["coverage"])
+
+        details = management_kpi_details(
+            "young_teacher_teaching_rate", semester="2025-2026-2",
+            user=school_user(), conn=self.conn, v2_conn=self.v2_conn,
+        )["data"]
+        college = next(
+            row for row in details["breakdown"]
+            if row["college_name"] == "学院A"
+        )
+        self.assertEqual(3, college["teacher_count"])
+        self.assertEqual(1, college["known_count"])
+        self.assertEqual(1, college["count"])
+        self.assertEqual(33.3, college["rate"])
+        self.assertEqual(33.3, college["coverage"])
 
     def test_senior_teacher_list_uses_the_same_real_title_for_selection_and_display(self):
         self.conn.execute(

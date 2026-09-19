@@ -218,9 +218,9 @@ IMPLEMENTED_METRICS = {
         "technical_kpi_id": "young_teacher_teaching_rate",
         "status": "published",
         "data_source": "fact_lesson / dim_staff_employment_snapshot / data_quality_issue",
-        "grain": "教师×学期×人员组织",
+        "grain": "教师×学期×授权教学范围",
         "update_cycle": "教学任务和真实人员快照同步后",
-        "version": "3.0",
+        "version": "3.1",
         "pages": [("/admin/faculty", "青年教师授课占比（35岁以下）")],
     },
 }
