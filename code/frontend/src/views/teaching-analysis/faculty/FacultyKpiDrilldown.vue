@@ -11,10 +11,10 @@
     <template #header>
       <div class="kpi-drawer-heading">
         <div>
-          <h2>{{ data.metric?.label || metricLabel }}</h2>
-          <p>{{ semester }}学期 · {{ data.college || '全校' }} · 指标下钻</p>
+          <h2>{{ drawerTitle }}</h2>
+          <p>{{ semester }}学期 · {{ data.college || '全校' }}<template v-if="!isTeachingStaffList"> · 指标下钻</template></p>
         </div>
-        <el-tag :type="statusType" effect="plain">{{ statusLabel }}</el-tag>
+        <el-tag v-if="!isTeachingStaffList" :type="statusType" effect="plain">{{ statusLabel }}</el-tag>
       </div>
     </template>
 
@@ -33,7 +33,7 @@
       </el-result>
       <template v-else-if="data.metric">
         <el-alert
-          v-if="data.metric.status !== 'ready'"
+          v-if="!isTeachingStaffList && data.metric.status !== 'ready'"
           class="readiness-alert"
           type="warning"
           :closable="false"
@@ -42,7 +42,7 @@
           :description="data.metric.sub"
         />
 
-        <section class="metric-overview">
+        <section v-if="!isTeachingStaffList" class="metric-overview">
           <KpiCard
             :label="data.metric.label"
             :value="data.metric.value"
@@ -58,7 +58,7 @@
           </div>
         </section>
 
-        <section v-if="data.breakdown?.length" class="breakdown-section">
+        <section v-if="!isTeachingStaffList && data.breakdown?.length" class="breakdown-section">
           <div class="section-title">
             <div><h3>结构分布</h3><p>用于解释总体值，不用于学院或教师绩效排名。</p></div>
           </div>
@@ -75,7 +75,7 @@
           </div>
         </section>
 
-        <section v-if="data.evidence_gaps?.length" class="detail-section evidence-gap-section">
+        <section v-if="!isTeachingStaffList && data.evidence_gaps?.length" class="detail-section evidence-gap-section">
           <div class="section-title">
             <div><h3>数据治理清单</h3><p>这些实际授课教师因关键字段缺失未进入正式比例，请先补齐来源数据。</p></div>
           </div>
@@ -98,16 +98,32 @@
         </section>
 
         <section class="detail-section">
-          <div class="detail-toolbar">
-            <div>
+          <div class="detail-toolbar" :class="{ 'list-only-toolbar': isTeachingStaffList }">
+            <div v-if="!isTeachingStaffList">
               <h3>{{ detailTitle }}</h3>
               <p>{{ detailDescription }}</p>
             </div>
-            <div class="detail-search">
+            <div class="detail-search" :class="{ 'staff-list-search': isTeachingStaffList }">
+              <el-select
+                v-if="isTeachingStaffList"
+                v-model="department"
+                clearable
+                placeholder="全部部门"
+                class="department-select"
+                @change="search"
+              >
+                <el-option
+                  v-for="item in data.department_options || []"
+                  :key="item"
+                  :label="item"
+                  :value="item"
+                />
+              </el-select>
               <el-input
                 v-model="keyword"
+                class="keyword-input"
                 clearable
-                placeholder="搜索教师、课程或学院"
+                :placeholder="isTeachingStaffList ? '搜索姓名、工号或授课课程名称' : '搜索教师、课程或学院'"
                 @keyup.enter="search"
                 @clear="search"
               />
@@ -119,7 +135,7 @@
             :columns="columns"
             :data="data.items || []"
             :storage-key="`faculty:kpi:${metricKey}`"
-            :config-version="1"
+            :config-version="isTeachingStaffList ? 2 : 1"
             :max-business-columns="8"
             :loading="loading"
             :pagination="true"
@@ -134,6 +150,7 @@
             @page-size-change="changePageSize"
           >
             <template #col-display_name="{ row }"><b>{{ row.display_name }}</b></template>
+            <template #col-education="{ row }">{{ row.education || '—' }}</template>
             <template #col-course_name="{ row }"><span class="course-name">{{ row.course_name }}</span></template>
             <template #col-title="{ row }">{{ row.title || '待补充' }}</template>
             <template #col-dept="{ row }">{{ row.dept || '待映射' }}</template>
@@ -187,12 +204,17 @@ const metricNames: Record<string, string> = {
 }
 
 const metricLabel = computed(() => metricNames[props.metricKey] || '师资保障指标')
+const isTeachingStaffList = computed(() => props.metricKey === 'teaching_staff_coverage')
 const loading = ref(false)
 const error = ref('')
 const keyword = ref('')
+const department = ref('')
 const page = ref(1)
 const pageSize = ref(20)
 const data = reactive<any>({})
+const drawerTitle = computed(() => isTeachingStaffList.value
+  ? '授课教师名单'
+  : (data.metric?.label || metricLabel.value))
 let requestSerial = 0
 
 const statusLabel = computed(() => ({
@@ -205,6 +227,18 @@ const statusType = computed(() => data.metric?.status === 'ready' ? 'success' : 
 
 const columns = computed<AppTableColumn[]>(() => {
   const action: AppTableColumn = { key: 'actions', label: '操作', width: 150, fixed: 'right', required: true, region: 'action' }
+  if (props.metricKey === 'teaching_staff_coverage') return [
+    { key: 'staff_id', label: '工号', minWidth: 120, fixed: 'left', required: true, region: 'identity' },
+    { key: 'display_name', label: '姓名', minWidth: 110, fixed: 'left', required: true, region: 'identity' },
+    { key: 'dept', label: '部门', minWidth: 150, required: true, region: 'business' },
+    { key: 'title', label: '职称', minWidth: 100, region: 'business' },
+    { key: 'education', label: '学历', minWidth: 100, region: 'business' },
+    { key: 'staff_category', label: '人员类别', minWidth: 105, region: 'business' },
+    { key: 'course_count', label: '授课课程数', minWidth: 105, align: 'center', region: 'business' },
+    { key: 'lesson_count', label: '教学班', minWidth: 85, align: 'center', region: 'business' },
+    { key: 'course_names', label: '授课课程', minWidth: 220, tooltip: true, region: 'business' },
+    action,
+  ]
   if (props.metricKey === 'team_structure_exception') return [
     { key: 'course_name', label: '课程', minWidth: 180, fixed: 'left', required: true, region: 'identity' },
     { key: 'college_name', label: '责任学院', minWidth: 150, required: true, region: 'business' },
@@ -241,9 +275,6 @@ const columns = computed<AppTableColumn[]>(() => {
     { key: 'display_name', label: '教师', minWidth: 110, fixed: 'left', required: true, region: 'identity' },
     { key: 'dept', label: '人事归属', minWidth: 150, required: true, region: 'business' },
     { key: 'title', label: '职称', minWidth: 100, region: 'business' },
-    ...(props.metricKey === 'teaching_staff_coverage'
-      ? [{ key: 'staff_category', label: '人员类别', minWidth: 105, region: 'business' as const }]
-      : []),
     { key: 'course_count', label: '授课课程', minWidth: 95, align: 'center', region: 'business' },
     { key: 'lesson_count', label: '教学班', minWidth: 85, align: 'center', region: 'business' },
     { key: 'course_names', label: '课程证据', minWidth: 220, tooltip: true, region: 'business' },
@@ -289,6 +320,7 @@ async function load(force = false) {
     })
     if (props.collegeId) query.set('college', props.collegeId)
     if (keyword.value.trim()) query.set('keyword', keyword.value.trim())
+    if (isTeachingStaffList.value && department.value) query.set('department', department.value)
     const result = await getFacultyKpiDetails<any>(props.metricKey, query)
     if (serial !== requestSerial) return
     Object.keys(data).forEach(key => delete data[key])
@@ -323,6 +355,7 @@ watch(
     const contextChanged = !previous || previous.slice(1).some((value, index) => value !== [props.metricKey, props.semester, props.collegeId][index])
     if (contextChanged) {
       keyword.value = ''
+      department.value = ''
       page.value = 1
       Object.keys(data).forEach(key => delete data[key])
     }
@@ -403,11 +436,15 @@ watch(
   grid-template-columns: minmax(220px,320px) auto;
   gap: 8px;
 }
+.list-only-toolbar { justify-content: flex-end; }
+.staff-list-search { grid-template-columns: 180px minmax(260px,360px) auto; }
+.department-select,.keyword-input { min-width: 0; }
 .course-name { color: #4338ca; font-weight: 600; }
 .inline-error { margin-top: 12px; }
 @media (max-width:1100px) {
   .metric-overview { grid-template-columns: 1fr; }
   .breakdown-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
   .detail-toolbar { flex-direction: column; }
+  .staff-list-search { width: 100%; grid-template-columns: 1fr; }
 }
 </style>

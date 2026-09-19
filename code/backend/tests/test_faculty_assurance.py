@@ -409,6 +409,39 @@ class FacultyAssuranceIntegrationTest(unittest.TestCase):
         )
 
     def test_kpi_details_reuse_course_and_teacher_evidence(self):
+        teaching = management_kpi_details(
+            "teaching_staff_coverage", semester="2025-2026-2",
+            user=school_user(), conn=self.conn, v2_conn=self.v2_conn,
+        )["data"]
+        self.assertEqual(["T1", "TB", "T2"], [item["staff_id"] for item in teaching["items"]])
+        self.assertEqual(["学院A", "学院B"], teaching["department_options"])
+        self.assertIn("education", teaching["items"][0])
+        self.assertIsNone(teaching["items"][0]["education"])
+
+        by_staff_id = management_kpi_details(
+            "teaching_staff_coverage", semester="2025-2026-2", keyword="T2",
+            user=school_user(), conn=self.conn, v2_conn=self.v2_conn,
+        )["data"]
+        self.assertEqual(["T2"], [item["staff_id"] for item in by_staff_id["items"]])
+
+        by_name = management_kpi_details(
+            "teaching_staff_coverage", semester="2025-2026-2", keyword="教师2",
+            user=school_user(), conn=self.conn, v2_conn=self.v2_conn,
+        )["data"]
+        self.assertEqual(["T2"], [item["staff_id"] for item in by_name["items"]])
+
+        by_course = management_kpi_details(
+            "teaching_staff_coverage", semester="2025-2026-2", keyword="团队结构课程",
+            user=school_user(), conn=self.conn, v2_conn=self.v2_conn,
+        )["data"]
+        self.assertEqual({"T1", "T2"}, {item["staff_id"] for item in by_course["items"]})
+
+        by_department = management_kpi_details(
+            "teaching_staff_coverage", semester="2025-2026-2", department="学院A",
+            user=school_user(), conn=self.conn, v2_conn=self.v2_conn,
+        )["data"]
+        self.assertEqual({"T1", "T2"}, {item["staff_id"] for item in by_department["items"]})
+
         structure = management_kpi_details(
             "team_structure_exception", semester="2025-2026-2",
             user=school_user(), conn=self.conn, v2_conn=self.v2_conn,
@@ -459,6 +492,12 @@ class FacultyAssuranceIntegrationTest(unittest.TestCase):
         )
         self.assertIsNone(kpis["young_teacher_teaching_rate"]["numerator"])
         self.assertEqual(3, kpis["young_teacher_teaching_rate"]["denominator"])
+
+        details = management_kpi_details(
+            "teaching_staff_coverage", semester="2025-2026-2",
+            user=school_user(), conn=self.conn, v2_conn=self.v2_conn,
+        )["data"]
+        self.assertGreater(details["items"][0]["lesson_count"], 0)
 
         self.v2_conn.execute("DELETE FROM dim_staff")
         payload = management_overview(

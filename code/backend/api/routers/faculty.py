@@ -1083,10 +1083,11 @@ def _teacher_display_rows(teacher_ids: set[str], analysis: dict,
             "staff_id": teacher_id,
             "display_name": teacher.get("name") or teacher_id,
             "title": teacher.get("title"),
+            "education": teacher.get("education"),
             "dept": teacher.get("dept"),
             "course_count": len(course_ids),
             "lesson_count": len(lesson_ids),
-            "course_names": "、".join(sorted(course_names)[:5]),
+            "course_names": "、".join(sorted(course_names)),
             "evidence_course_id": evidence_course_id,
         })
     return rows
@@ -1135,6 +1136,7 @@ def management_overview(college: Optional[str] = None, semester: Optional[str] =
 @router.get("/management-kpis/{metric_key}/details")
 def management_kpi_details(metric_key: str, college: Optional[str] = None,
                            semester: Optional[str] = None, keyword: Optional[str] = None,
+                           department: Optional[str] = None,
                            page: int = 1, page_size: int = 20,
                            user: dict = Depends(get_current_user),
                            conn: sqlite3.Connection = Depends(get_db),
@@ -1208,7 +1210,7 @@ def management_kpi_details(metric_key: str, college: Optional[str] = None,
             breakdown = sorted(buckets.values(), key=lambda row: (-row["teaching_teacher_count"], row["college_name"]))
             source_note = "真实教学任务 + dim_staff_employment_snapshot真实在岗人员快照"
         else:
-            rows = _teacher_display_rows(scope_active_ids, analysis, {})
+            rows = _teacher_display_rows(scope_active_ids, analysis, teacher_stats)
             source_note = (
                 "真实教学任务 + dim_staff正式在职教师主数据；"
                 f"{snapshot['reason']}，不计算人员口径参与率"
@@ -1370,8 +1372,30 @@ def management_kpi_details(metric_key: str, college: Optional[str] = None,
             source_note = snapshot["reason"] + "；未读取模拟年龄画像"
         summary["young_teacher_count"] = len(rows)
 
+    department_options: list[str] = []
     needle = (keyword or "").strip().lower()
-    if needle:
+    if metric_key == "teaching_staff_coverage":
+        department_options = sorted({
+            str(row.get("dept") or "").strip()
+            for row in rows if str(row.get("dept") or "").strip()
+        })
+        selected_department = (department or "").strip()
+        if selected_department:
+            rows = [row for row in rows if str(row.get("dept") or "").strip() == selected_department]
+        if needle:
+            rows = [
+                row for row in rows
+                if needle in str(row.get("display_name") or "").lower()
+                or needle in str(row.get("staff_id") or "").lower()
+                or needle in str(row.get("course_names") or "").lower()
+            ]
+        rows.sort(key=lambda row: (
+            -int(row.get("lesson_count") or 0),
+            -int(row.get("course_count") or 0),
+            str(row.get("display_name") or ""),
+            str(row.get("staff_id") or ""),
+        ))
+    elif needle:
         rows = [
             row for row in rows
             if any(needle in str(value).lower() for value in row.values()
@@ -1387,6 +1411,7 @@ def management_kpi_details(metric_key: str, college: Optional[str] = None,
         "summary": summary,
         "breakdown": breakdown,
         "items": paged_rows,
+        "department_options": department_options,
         "evidence_gaps": evidence_gaps,
         "total": total,
         "page": page,
