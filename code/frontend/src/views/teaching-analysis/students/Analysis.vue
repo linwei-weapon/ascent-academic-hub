@@ -395,7 +395,7 @@ function percentText(value: number | null | undefined) { return value == null ? 
 const metricHintDetails: Record<string, { indicator: string; formula: string; description: string; conditions?: string[] }> = {
   improved: {
     indicator: 'GPA明显上升且挂科未增加，或挂科减少且GPA未明显下降学生数',
-    formula: '明确改善学生数 ÷ 两个学期均有有效成绩证据的学生数 × 100%',
+    formula: '明确改善学生数 ÷ 两个学期均有有效成绩证据的学生数（可比较学生） × 100%',
     description: '学生在两个学期都有有效成绩记录，并且满足以下任一情况，即认定为“明确改善”：',
     conditions: [
       'GPA 明显上升，且未通过课程数量没有增加；',
@@ -404,7 +404,7 @@ const metricHintDetails: Record<string, { indicator: string; formula: string; de
   },
   declined: {
     indicator: 'GPA明显下降且挂科未减少，或挂科增加且GPA未明显上升学生数',
-    formula: '明确恶化学生数 ÷ 两个学期均有有效成绩证据的学生数 × 100%',
+    formula: '明确恶化学生数 ÷ 两个学期均有有效成绩证据的学生数（可比较学生） × 100%',
     description: '学生在两个学期都有有效成绩记录，并且满足以下任一情况，即认定为“明确恶化”：',
     conditions: [
       'GPA 明显下降，且未通过课程数量没有减少；',
@@ -413,17 +413,17 @@ const metricHintDetails: Record<string, { indicator: string; formula: string; de
   },
   continuous: {
     indicator: '两个参与学期均在籍，且两个参与学期均至少有1门未通过课程的学生去重数',
-    formula: '连续受挫学生数 ÷ 两个学期均有有效成绩证据的学生 × 100%',
-    description: '学生在起始学期和目标学期均至少有1门未通过课程，即认定为“连续受挫”。分母是两个学期均有有效成绩证据的学生',
+    formula: '连续受挫学生数 ÷ 两个学期均有有效成绩证据的学生数（可比较学生） × 100%',
+    description: '学生在起始学期和目标学期均至少有1门未通过课程，即认定为“连续受挫”。分母是两个学期均有有效成绩证据的学生数（可比较学生）',
   },
   first_setback: {
     indicator: '当前两个低年级群体在目标学期首次出现可观测未通过记录的学生去重数。',
-    formula: '低年级首次受挫学生数 ÷ 两个参与学期至少一个学期在籍的学生去重总数 × 100%',
-    description: '学生属于当前范围最新两个年级，在目标学期至少有1门未通过课程，并且起始学期之前没有可观测的未通过课程记录，即纳入“低年级首次受挫”。分母为两个参与学期至少一个学期在籍的学生去重总数',
+    formula: '低年级首次受挫学生数 ÷ 两个参与学期均在籍的学生交集去重数 × 100%',
+    description: '学生属于当前范围最新两个年级，在目标学期至少有1门未通过课程，并且起始学期之前没有可观测的未通过课程记录，即纳入“低年级首次受挫”。分母为两个参与学期均在籍的学生交集去重数',
   },
   repeated_unresolved: {
     indicator: '同一课程至少两次未通过且最新有效结果仍未通过的学生去重数。',
-    formula: '重复未解决学生数 ÷ 两个参与学期在籍学生并集去重数 × 100%',
+    formula: '重复未解决学生数 ÷ 两个学期均有有效成绩证据的学生数（可比较学生） × 100%',
     description: '同一学生只要存在至少1门课程“至少两次未通过，并且最新有效修读结果仍未通过”，即计入重复未解决学生；每名学生只计算一次',
   },
 }

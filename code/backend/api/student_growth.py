@@ -449,12 +449,13 @@ def build_growth_snapshot(
             "amber",
         ),
         _metric(
-            "first_setback", "低年级首次受挫", first_setback, total,
+            "first_setback", "低年级首次受挫", first_setback, comparable,
             "当前两个低年级群体在目标学期首次出现可观测未通过记录。",
             "danger",
         ),
         _metric(
-            "repeated_unresolved", "重复未解决", repeated, total,
+            "repeated_unresolved", "重复未解决", repeated,
+            grade_evidence_comparable,
             "同一课程至少两次未通过且最新有效结果仍未通过",
             "danger",
         ),

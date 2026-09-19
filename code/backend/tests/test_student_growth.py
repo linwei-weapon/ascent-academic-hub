@@ -146,8 +146,11 @@ class StudentGrowthTest(unittest.TestCase):
         self.assertEqual(1, metrics["declined"]["count"])
         self.assertEqual(1, metrics["continuous"]["count"])
         self.assertEqual(1, metrics["first_setback"]["count"])
+        self.assertEqual(2, metrics["first_setback"]["denominator"])
+        self.assertEqual(50.0, metrics["first_setback"]["rate"])
         self.assertEqual(1, metrics["repeated_unresolved"]["count"])
-        self.assertEqual(3, metrics["repeated_unresolved"]["denominator"])
+        self.assertEqual(2, metrics["repeated_unresolved"]["denominator"])
+        self.assertEqual(50.0, metrics["repeated_unresolved"]["rate"])
         self.assertEqual(
             "同一课程至少两次未通过且最新有效结果仍未通过",
             metrics["repeated_unresolved"]["meaning"],
