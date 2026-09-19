@@ -35,6 +35,7 @@ PYTHONIOENCODING=utf-8 python -X utf8 scripts/migrate_permission_context.py
 PYTHONIOENCODING=utf-8 python -X utf8 scripts/migrate_staff_relationships.py
 PYTHONIOENCODING=utf-8 python -X utf8 scripts/migrate_etl_run.py
 PYTHONIOENCODING=utf-8 python -X utf8 scripts/migrate_system_management.py
+PYTHONIOENCODING=utf-8 python -X utf8 scripts/migrate_faculty_personnel_snapshot.py
 PYTHONIOENCODING=utf-8 python -X utf8 scripts/migrate_student_growth_indexes.py
 PYTHONIOENCODING=utf-8 python -X utf8 scripts/migrate_basic_reports.py
 

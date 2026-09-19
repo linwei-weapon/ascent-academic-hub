@@ -3,8 +3,11 @@ import unittest
 
 from backend.api.routers.faculty import (
     _faculty_analysis,
+    _matches_structure_review,
     _priority_classification,
     management_course,
+    management_kpi_details,
+    management_overview,
     management_teacher,
 )
 
@@ -23,6 +26,21 @@ def make_conn() -> sqlite3.Connection:
             dept TEXT,
             title TEXT,
             source TEXT DEFAULT 'real'
+        );
+        CREATE TABLE dim_staff_employment_snapshot(
+            semester_id TEXT NOT NULL,
+            staff_id TEXT NOT NULL,
+            college_id TEXT,
+            dept TEXT,
+            staff_category TEXT,
+            employment_status TEXT NOT NULL,
+            title TEXT,
+            age_band TEXT,
+            is_under_35 INTEGER,
+            source TEXT NOT NULL DEFAULT 'real',
+            source_batch_id TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY(semester_id,staff_id)
         );
         CREATE TABLE dim_course(
             course_id TEXT PRIMARY KEY,
@@ -73,6 +91,24 @@ def make_conn() -> sqlite3.Connection:
             ("T2", "教师2", "学院A", "讲师"),
             ("TB", "外院教师", "学院B", "副教授"),
             ("TA", "异常教师", "学院A", "教授"),
+        ],
+    )
+    conn.executemany(
+        """INSERT INTO dim_staff_employment_snapshot(
+            semester_id,staff_id,college_id,dept,staff_category,employment_status,
+            title,age_band,is_under_35,source,source_batch_id,updated_at
+        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+        [
+            ("2025-2026-2", "T1", "C1", "学院A", "专任教师", "在岗",
+             "讲师", "35岁以下", 1, "real", "B1", "2026-02-01"),
+            ("2025-2026-2", "T2", "C1", "学院A", "专任教师", "在岗",
+             "讲师", "35-44岁", 0, "real", "B1", "2026-02-01"),
+            ("2025-2026-2", "TB", "C2", "学院B", "专任教师", "在岗",
+             "副教授", "45-54岁", 0, "real", "B1", "2026-02-01"),
+            ("2025-2026-2", "T3", "C2", "学院B", "行政人员", "在岗",
+             None, "35-44岁", 0, "real", "B1", "2026-02-01"),
+            ("2025-2026-2", "TA", "C1", "学院A", "专任教师", "在岗",
+             "教授", "55岁及以上", 0, "real", "B1", "2026-02-01"),
         ],
     )
     conn.executemany(
@@ -138,6 +174,16 @@ def college_user(college_id: str) -> dict:
     }
 
 
+def school_user() -> dict:
+    return {
+        "role_id": "dean",
+        "permission_context": {
+            "authorized": True,
+            "detailScope": {"type": "all", "sourceScopeIds": []},
+        },
+    }
+
+
 class FacultyAssuranceRuleTest(unittest.TestCase):
     def test_single_teacher_fact_does_not_alone_trigger_review(self):
         row = {
@@ -175,6 +221,25 @@ class FacultyAssuranceRuleTest(unittest.TestCase):
         self.assertEqual("data_candidate", review_type)
         self.assertIn("4条异常任务被排除", reasons)
 
+    def test_structure_rule_can_overlap_priority_classification(self):
+        row = {
+            "evaluable": True,
+            "important_course": True,
+            "lesson_count": 8,
+            "enrolled": 240,
+            "teacher_count": 2,
+            "continuous_single": False,
+            "high_concentration": True,
+            "max_lesson_share": 90,
+            "max_enrolled_share": 92,
+            "data_candidate": False,
+            "title_completeness_rate": 100,
+            "senior_title_teachers": 0,
+        }
+        review_type, _, _ = _priority_classification(row)
+        self.assertEqual("priority_review", review_type)
+        self.assertTrue(_matches_structure_review(row))
+
 
 class FacultyAssuranceIntegrationTest(unittest.TestCase):
     def setUp(self):
@@ -211,12 +276,99 @@ class FacultyAssuranceIntegrationTest(unittest.TestCase):
         self.assertNotIn("scoreTrend", teacher)
         self.assertNotIn("education", teacher)
         self.assertTrue(all("passRate" not in row for row in teacher["teachingHistory"]))
+        self.assertEqual({"C_CROSS"}, {row["id"] for row in teacher["currentCourses"]})
+        self.assertEqual({"C_CROSS"}, {row["courseId"] for row in teacher["teachingHistory"]})
 
     def test_other_college_cannot_open_course_team(self):
         with self.assertRaises(Exception) as caught:
             management_course(
                 "C_CROSS", semester="2025-2026-2",
                 user=college_user("C2"), conn=self.conn,
+            )
+        self.assertEqual(403, getattr(caught.exception, "status_code", None))
+
+    def test_management_overview_exposes_five_drillable_kpis(self):
+        payload = management_overview(
+            semester="2025-2026-2", user=school_user(), conn=self.conn,
+        )["data"]
+        kpis = {item["key"]: item for item in payload["kpis"]}
+
+        self.assertEqual(
+            {
+                "teaching_staff_coverage",
+                "team_structure_exception",
+                "continuous_single_teacher",
+                "senior_title_teaching_rate",
+                "young_teacher_teaching_rate",
+            },
+            set(kpis),
+        )
+        self.assertEqual("3 / 5 人", kpis["teaching_staff_coverage"]["value"])
+        self.assertEqual(1, kpis["team_structure_exception"]["numerator"])
+        self.assertEqual(1, kpis["continuous_single_teacher"]["numerator"])
+        self.assertEqual("33.3%", kpis["senior_title_teaching_rate"]["value"])
+        self.assertEqual("33.3%", kpis["young_teacher_teaching_rate"]["value"])
+        self.assertTrue(all(item["hint"] and item["drilldown"] for item in kpis.values()))
+
+    def test_kpi_details_reuse_course_and_teacher_evidence(self):
+        structure = management_kpi_details(
+            "team_structure_exception", semester="2025-2026-2",
+            user=school_user(), conn=self.conn,
+        )["data"]
+        self.assertEqual(1, structure["total"])
+        self.assertEqual("C_TEAM", structure["items"][0]["course_id"])
+
+        continuous = management_kpi_details(
+            "continuous_single_teacher", semester="2025-2026-2",
+            user=school_user(), conn=self.conn,
+        )["data"]
+        self.assertEqual(1, continuous["summary"]["teacher_count"])
+        self.assertEqual("T1", continuous["items"][0]["staff_id"])
+        self.assertEqual("C_PRIORITY", continuous["items"][0]["course_id"])
+
+        senior = management_kpi_details(
+            "senior_title_teaching_rate", semester="2025-2026-2",
+            user=school_user(), conn=self.conn,
+        )["data"]
+        self.assertEqual("TB", senior["items"][0]["staff_id"])
+        self.assertEqual("副教授", senior["items"][0]["title"])
+        self.assertGreater(senior["items"][0]["lesson_count"], 0)
+        self.assertTrue(senior["breakdown"])
+
+        young = management_kpi_details(
+            "young_teacher_teaching_rate", semester="2025-2026-2",
+            user=school_user(), conn=self.conn,
+        )["data"]
+        self.assertEqual("T1", young["items"][0]["staff_id"])
+        self.assertEqual("35岁以下", young["items"][0]["age_band"])
+
+    def test_personnel_metrics_disclose_missing_real_snapshot(self):
+        self.conn.execute("DROP TABLE dim_staff_employment_snapshot")
+        payload = management_overview(
+            semester="2025-2026-2", user=school_user(), conn=self.conn,
+        )["data"]
+        kpis = {item["key"]: item for item in payload["kpis"]}
+        self.assertEqual("partial", kpis["teaching_staff_coverage"]["status"])
+        self.assertIn("—", kpis["teaching_staff_coverage"]["value"])
+        self.assertEqual("unavailable", kpis["young_teacher_teaching_rate"]["status"])
+        self.assertEqual("—", kpis["young_teacher_teaching_rate"]["value"])
+
+    def test_personnel_snapshot_requires_trace_fields(self):
+        self.conn.execute(
+            "UPDATE dim_staff_employment_snapshot SET source_batch_id='' WHERE staff_id='T1'"
+        )
+        payload = management_overview(
+            semester="2025-2026-2", user=school_user(), conn=self.conn,
+        )["data"]
+        kpis = {item["key"]: item for item in payload["kpis"]}
+        self.assertEqual("partial", kpis["teaching_staff_coverage"]["status"])
+        self.assertIn("缺少来源批次或更新时间", kpis["teaching_staff_coverage"]["sub"])
+
+    def test_kpi_details_reject_other_college_scope(self):
+        with self.assertRaises(Exception) as caught:
+            management_kpi_details(
+                "teaching_staff_coverage", college="C2", semester="2025-2026-2",
+                user=college_user("C1"), conn=self.conn,
             )
         self.assertEqual(403, getattr(caught.exception, "status_code", None))
 

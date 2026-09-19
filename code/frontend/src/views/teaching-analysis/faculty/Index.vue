@@ -11,20 +11,11 @@
       </el-select>
     </div>
 
-    <el-alert
-      type="warning"
-      :closable="false"
-      show-icon
-      title="本页核查课程师资供给与团队连续性，不评价教师个人"
-      :description="definition.boundary"
-    />
-
     <el-skeleton v-if="pageLoading && !hasData" :rows="9" animated class="page-skeleton">
       <template #template>
         <div class="skeleton-kpis">
           <el-skeleton-item v-for="i in 5" :key="i" variant="rect" class="skeleton-kpi" />
         </div>
-        <el-skeleton-item variant="rect" class="skeleton-summary" />
         <el-skeleton-item variant="rect" class="skeleton-table" />
       </template>
     </el-skeleton>
@@ -39,66 +30,26 @@
     </el-result>
 
     <template v-else>
-      <div class="kpi-filter-row" :class="{ 'is-refreshing': refreshing }">
-        <button
-          v-for="item in managementKpis"
+      <div class="management-kpi-row" :class="{ 'is-refreshing': refreshing }">
+        <KpiCard
+          v-for="item in data.kpis || []"
           :key="item.key"
-          type="button"
-          class="kpi-filter"
-          :class="{ active: activeReviewType === item.filter }"
-          :aria-pressed="activeReviewType === item.filter"
-          @click="toggleReviewFilter(item.filter)"
-        >
-          <KpiCard v-bind="item.card" />
-        </button>
+          :label="item.label"
+          :value="item.value"
+          :sub="item.sub"
+          :hint="item.hint"
+          :tone="item.tone"
+          interactive
+          action-text="查看下钻"
+          @drilldown="openKpiDrilldown(item.key)"
+        />
       </div>
-
-      <div class="management-summary">
-        <span class="summary-mark">本期管理要点</span>
-        <span>{{ data.management_statement || '正在形成本期师资保障管理结论。' }}</span>
-        <el-button v-if="activeReviewType" link type="primary" @click="clearReviewFilter">
-          恢复全部课程
-        </el-button>
-      </div>
-
-      <div v-if="activeReviewType" class="active-filter">
-        <span>当前筛选：{{ reviewTypeLabel(activeReviewType) }}</span>
-        <el-button link type="primary" @click="clearReviewFilter">清除筛选</el-button>
-      </div>
-
-      <section class="sa-card evidence-card">
-        <div class="section-head">
-          <div>
-            <h3>本期证据就绪情况</h3>
-          </div>
-          <el-button link type="primary" @click="evidenceDrawer = true">查看口径边界</el-button>
-        </div>
-        <div class="evidence-strip">
-          <button
-            v-for="item in data.evidence_readiness"
-            :key="item.key"
-            type="button"
-            class="evidence-item"
-            @click="evidenceDrawer = true"
-          >
-            <span class="evidence-dot" :class="item.status" />
-            <span><b>{{ item.label }}</b><small>{{ item.value }}</small></span>
-          </button>
-        </div>
-        <div v-if="data.quality_gate?.excluded_lesson_count" class="quality-gate">
-          已从正式指标排除
-          <b>{{ data.quality_gate.excluded_lesson_count }}</b> 条异常教师任务，
-          影响 <b>{{ data.quality_gate.affected_course_count }}</b> 门课程；
-          相关课程仅进入数据核验，不形成正式保障结论。
-        </div>
-      </section>
 
       <div v-if="isSchoolScope" class="overview-grid">
         <section class="sa-card college-card" v-loading="refreshing">
           <div class="section-head">
             <div>
               <h3>学院师资保障概览</h3>
-              <p>按课程责任学院汇总；点击学院进入本期课程核查队列。</p>
             </div>
             <el-input v-model="collegeKeyword" clearable placeholder="搜索学院" class="college-search" />
           </div>
@@ -455,23 +406,15 @@
       </div>
     </el-drawer>
 
-    <el-drawer v-model="evidenceDrawer" title="师资保障指标口径与证据边界" size="620px">
-      <div class="evidence-detail">
-        <el-alert type="warning" :closable="false" show-icon title="证据不足时不输出正式结论" :description="definition.boundary" />
-        <section v-for="item in data.evidence_readiness" :key="item.key">
-          <div><span class="evidence-dot" :class="item.status" /><b>{{ item.label }}</b><em>{{ item.value }}</em></div>
-          <p>{{ item.note }}</p>
-        </section>
-        <section class="definition-list">
-          <h3>五个顶层指标</h3>
-          <p><b>可评估课程：</b>{{ definition.evaluable_courses }}</p>
-          <p><b>优先核查课程：</b>{{ definition.priority_review_courses }}</p>
-          <p><b>连续单点课程：</b>{{ definition.continuous_single_courses }}</p>
-          <p><b>结构待核实课程：</b>{{ definition.structure_review_courses }}</p>
-          <p><b>数据候选课程：</b>{{ definition.data_candidate_courses }}</p>
-        </section>
-      </div>
-    </el-drawer>
+    <FacultyKpiDrilldown
+      :model-value="kpiDrawer.visible"
+      :metric-key="kpiDrawer.metricKey"
+      :semester="semester"
+      :college-id="isSchoolScope ? undefined : data.college_id"
+      @update:model-value="setKpiDrawerVisible"
+      @open-course="openCourseFromKpi"
+      @open-teacher="openTeacherFromKpi"
+    />
   </div>
 </template>
 
@@ -486,6 +429,7 @@ import { ElMessage } from 'element-plus'
 import { getFilterMeta, type SemesterOpt } from '@/api/shared/filterMeta'
 import KpiCard from '@/components/KpiCard.vue'
 import AppTable from '@/components/AppTable.vue'
+import FacultyKpiDrilldown from './FacultyKpiDrilldown.vue'
 import type { AppTableColumn } from '@/types/table'
 import { useBusinessPageTitle } from '@/utils/businessPage'
 
@@ -503,9 +447,7 @@ const drawerLoading = ref(false)
 const drawerError = ref('')
 const drawerVisible = ref(false)
 const drawerMode = ref<DrawerMode>('queue')
-const evidenceDrawer = ref(false)
 const collegeKeyword = ref('')
-const activeReviewType = ref('')
 const selectedCollege = ref<{ id: string; name: string } | null>(null)
 const selectedCourse = ref<{ id: string; name: string } | null>(null)
 const courseDetail = ref<any>(null)
@@ -521,8 +463,9 @@ const data = reactive<any>({
   risk_courses: [],
   evidence_readiness: [],
   quality_gate: {},
+  kpis: [],
 })
-const definition = reactive<any>({})
+const kpiDrawer = reactive({ visible: false, metricKey: '' })
 const teacherDrawer = reactive<any>({
   visible: false,
   loading: false,
@@ -545,13 +488,9 @@ const drawerTitle = computed(() => drawerMode.value === 'course'
 const drawerSubtitle = computed(() => `${semester.value}学期 · 所有筛选和核查均在当前工作区完成`)
 const focusCourses = computed(() => {
   const rows = data.risk_courses || []
-  return (activeReviewType.value
-    ? rows.filter((row: any) => activeReviewType.value === 'continuous_single'
-      ? row.continuous_single
-      : row.review_type === activeReviewType.value)
-    : rows.filter((row: any) => isSchoolScope.value
-      ? row.review_type === 'priority_review'
-      : row.review_type !== 'general_observation')
+  return rows.filter((row: any) => isSchoolScope.value
+    ? row.review_type === 'priority_review'
+    : row.review_type !== 'general_observation'
   ).slice(0, isSchoolScope.value ? 8 : 12)
 })
 const filteredColleges = computed(() => {
@@ -572,72 +511,10 @@ const reviewTypeOptions = [
   { value: 'data_candidate', label: '数据候选' },
   { value: 'general_observation', label: '一般观察' },
 ]
-const reviewTypeLabel = (value: string) =>
-  reviewTypeOptions.find(item => item.value === value)?.label || '全部课程'
 const reviewTagType = (value: string) =>
   value === 'priority_review' ? 'danger'
     : value === 'structure_review' ? 'warning'
       : value === 'data_candidate' ? 'info' : 'success'
-const fmt = (value: any, suffix = '') =>
-  value === null || value === undefined ? '—' : `${value}${suffix}`
-
-const managementKpis = computed(() => [
-  {
-    key: 'evaluable',
-    filter: '',
-    card: {
-      label: '可评估课程',
-      value: fmt(data.summary.evaluable_courses, ' 门'),
-      sub: `本期共 ${data.summary.courses || 0} 门开课课程`,
-      hint: definition.evaluable_courses || '',
-      tone: 'primary' as const,
-    },
-  },
-  {
-    key: 'priority',
-    filter: 'priority_review',
-    card: {
-      label: '优先核查课程',
-      value: fmt(data.summary.priority_review_courses, ' 门'),
-      sub: '点击筛选本期优先事项',
-      hint: definition.priority_review_courses || '',
-      tone: 'danger' as const,
-    },
-  },
-  {
-    key: 'continuous',
-    filter: 'continuous_single',
-    card: {
-      label: '连续单点课程',
-      value: fmt(data.summary.continuous_single_courses, ' 门'),
-      sub: '最近3次实际开课证据',
-      hint: definition.continuous_single_courses || '',
-      tone: 'amber' as const,
-    },
-  },
-  {
-    key: 'structure',
-    filter: 'structure_review',
-    card: {
-      label: '结构待核实课程',
-      value: fmt(data.summary.structure_review_courses, ' 门'),
-      sub: '职称证据达到判断门槛',
-      hint: definition.structure_review_courses || '',
-      tone: 'teal' as const,
-    },
-  },
-  {
-    key: 'data',
-    filter: 'data_candidate',
-    card: {
-      label: '数据候选课程',
-      value: fmt(data.summary.data_candidate_courses, ' 门'),
-      sub: '先核实数据，不形成结论',
-      hint: definition.data_candidate_courses || '',
-      tone: 'plain' as const,
-    },
-  },
-])
 
 const collegeColumns: AppTableColumn[] = [
   { key: 'college_name', label: '学院', minWidth: 180, fixed: 'left', required: true, region: 'identity' },
@@ -722,8 +599,6 @@ async function loadOverview() {
   try {
     const result = await facultyApi.getFacultyOverview<any>(semester.value)
     Object.assign(data, result)
-    Object.keys(definition).forEach(key => delete definition[key])
-    Object.assign(definition, result.definition || {})
   } catch (error: any) {
     pageError.value = error?.message || '请求失败'
   } finally {
@@ -732,17 +607,42 @@ async function loadOverview() {
   }
 }
 
-function toggleReviewFilter(filter: string) {
-  if (!filter) {
-    clearReviewFilter()
-    return
-  }
-  activeReviewType.value = activeReviewType.value === filter ? '' : filter
-  void syncUrl({ review: activeReviewType.value || undefined })
+const kpiKeys = new Set([
+  'teaching_staff_coverage',
+  'team_structure_exception',
+  'continuous_single_teacher',
+  'senior_title_teaching_rate',
+  'young_teacher_teaching_rate',
+])
+
+function openKpiDrilldown(metricKey: string) {
+  if (!kpiKeys.has(metricKey)) return
+  kpiDrawer.metricKey = metricKey
+  kpiDrawer.visible = true
+  drawerVisible.value = false
+  void syncUrl({
+    drill: metricKey,
+    college: undefined,
+    course: undefined,
+    teacher: undefined,
+    teacherCourse: undefined,
+    review: undefined,
+  })
 }
-function clearReviewFilter() {
-  activeReviewType.value = ''
-  void syncUrl({ review: undefined })
+
+function setKpiDrawerVisible(visible: boolean) {
+  kpiDrawer.visible = visible
+  if (!visible) void syncUrl({ drill: undefined })
+}
+
+function openCourseFromKpi(row: any) {
+  kpiDrawer.visible = false
+  void openCourse(row, true)
+}
+
+function openTeacherFromKpi(row: any) {
+  kpiDrawer.visible = false
+  void openTeacher(row)
 }
 
 function queueCacheKey(collegeId?: string) {
@@ -796,9 +696,9 @@ async function openCollegeQueue(row: any) {
   drawerMode.value = 'queue'
   drawerVisible.value = true
   queuePage.value = 1
-  queueReviewType.value = activeReviewType.value
+  queueReviewType.value = ''
   courseDetail.value = null
-  await syncUrl({ college: row.college_id, course: undefined, teacher: undefined })
+  await syncUrl({ college: row.college_id, course: undefined, teacher: undefined, teacherCourse: undefined })
   await loadQueue()
 }
 
@@ -809,9 +709,9 @@ async function openAllCourses() {
   drawerMode.value = 'queue'
   drawerVisible.value = true
   queuePage.value = 1
-  queueReviewType.value = activeReviewType.value
+  queueReviewType.value = ''
   courseDetail.value = null
-  await syncUrl({ college: selectedCollege.value?.id, course: undefined, teacher: undefined })
+  await syncUrl({ college: selectedCollege.value?.id, course: undefined, teacher: undefined, teacherCourse: undefined })
   await loadQueue()
 }
 
@@ -844,6 +744,8 @@ async function openCourse(row: any, fromOverview = false) {
     college: selectedCollege.value?.id,
     course: row.course_id,
     teacher: undefined,
+    teacherCourse: undefined,
+    drill: undefined,
   })
   if (courseCache.has(key)) {
     courseDetail.value = courseCache.get(key)
@@ -877,7 +779,7 @@ async function backToQueue() {
   drawerMode.value = 'queue'
   courseDetail.value = null
   selectedCourse.value = null
-  await syncUrl({ course: undefined, teacher: undefined })
+  await syncUrl({ course: undefined, teacher: undefined, teacherCourse: undefined })
   if (!queueRows.value.length) await loadQueue()
 }
 
@@ -887,7 +789,7 @@ function afterDrawerClosed() {
   courseDetail.value = null
   selectedCollege.value = null
   drawerError.value = ''
-  void syncUrl({ college: undefined, course: undefined, teacher: undefined })
+  void syncUrl({ college: undefined, course: undefined, teacher: undefined, teacherCourse: undefined })
 }
 
 async function reloadQueue() {
@@ -908,6 +810,7 @@ async function changeQueuePageSize(value: number) {
 
 async function openTeacher(row: any) {
   const teacherId = row.staff_id
+  const courseContextId = row.evidence_course_id || row.course_id || selectedCourse.value?.id || ''
   teacherDrawer.visible = true
   teacherDrawer.loading = true
   teacherDrawer.data = {
@@ -916,10 +819,10 @@ async function openTeacher(row: any) {
     currentCourses: [],
     teachingHistory: [],
   }
-  await syncUrl({ teacher: teacherId })
+  await syncUrl({ teacher: teacherId, teacherCourse: courseContextId || undefined, drill: undefined })
   try {
     const query = new URLSearchParams({ semester: semester.value })
-    if (selectedCourse.value?.id) query.set('course_id', selectedCourse.value.id)
+    if (courseContextId) query.set('course_id', courseContextId)
     teacherDrawer.data = await facultyApi.getFacultyTeacher(teacherId, query)
   } catch (error: any) {
     ElMessage.error(error?.message || '教师教学经历加载失败')
@@ -929,7 +832,7 @@ async function openTeacher(row: any) {
 }
 
 function closeTeacherDrawer() {
-  void syncUrl({ teacher: undefined })
+  void syncUrl({ teacher: undefined, teacherCourse: undefined })
 }
 
 // 按原学期切换顺序清理并重新加载关联数据。
@@ -949,8 +852,9 @@ async function restoreRouteContext() {
   const collegeId = String(route.query.college || '')
   const courseId = String(route.query.course || '')
   const teacherId = String(route.query.teacher || '')
-  const review = String(route.query.review || '')
-  if (reviewTypeOptions.some(item => item.value === review)) activeReviewType.value = review
+  const teacherCourseId = String(route.query.teacherCourse || '')
+  const drill = String(route.query.drill || '')
+  if (route.query.review) await syncUrl({ review: undefined })
   if (collegeId) {
     const college = (data.colleges || []).find((row: any) => row.college_id === collegeId)
     selectedCollege.value = {
@@ -972,7 +876,15 @@ async function restoreRouteContext() {
     await loadQueue()
   }
   if (teacherId) {
-    await openTeacher({ staff_id: teacherId, display_name: teacherId })
+    await openTeacher({
+      staff_id: teacherId,
+      display_name: teacherId,
+      evidence_course_id: teacherCourseId || undefined,
+    })
+  }
+  if (!collegeId && !courseId && !teacherId && kpiKeys.has(drill)) {
+    kpiDrawer.metricKey = drill
+    kpiDrawer.visible = true
   }
 }
 
@@ -1028,89 +940,24 @@ const historyPagination = useTablePagination(() => teacherDrawer.data.teachingHi
   border-radius: 14px;
 }
 
-.skeleton-summary {
-  height: 54px;
-  margin: 14px 0;
-  border-radius: 12px;
-}
-
 .skeleton-table {
   height: 420px;
+  margin-top: 14px;
   border-radius: 14px;
 }
 
-.kpi-filter-row {
+.management-kpi-row {
   display: grid;
   grid-template-columns: repeat(5,minmax(0,1fr));
   gap: 12px;
   margin: 14px 0;
   transition: opacity .2s;
+  :deep(.sa-kpi) {
+    height: 100%;
+  }
   &.is-refreshing {
     opacity: .72;
   }
-}
-
-.kpi-filter {
-  padding: 0;
-  border: 0;
-  border-radius: 14px;
-  background: transparent;
-  text-align: left;
-  cursor: pointer;
-  :deep(.sa-kpi) {
-    height: 100%;
-    transition: border-color .2s,box-shadow .2s;
-  }
-  &:hover :deep(.sa-kpi), &.active :deep(.sa-kpi) {
-    border-color: #818cf8;
-    box-shadow: 0 0 0 2px rgba(99,102,241,.1);
-  }
-  &.active :deep(.sa-kpi) {
-    background: #f8faff;
-  }
-}
-
-.management-summary {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 12px;
-  padding: 13px 16px;
-  border: 1px solid #c7d2fe;
-  border-radius: 12px;
-  background: #eef2ff;
-  color: #475569;
-  font-size: 13px;
-  line-height: 1.6;
-  .el-button {
-    margin-left: auto;
-  }
-}
-
-.summary-mark {
-  flex: none;
-  padding: 4px 9px;
-  border-radius: 999px;
-  background: #4f46e5;
-  color: #fff;
-  font-size: 12px;
-}
-
-.active-filter {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: max-content;
-  margin: 0 0 12px;
-  padding: 6px 10px;
-  border-radius: 999px;
-  background: #f1f5f9;
-  color: #475569;
-  font-size: 12px;
-}
-
-.evidence-card {
-  margin-bottom: 14px;
 }
 
 .section-head {
@@ -1132,65 +979,6 @@ const historyPagination = useTablePagination(() => teacherDrawer.data.teachingHi
   }
 }
 
-.evidence-strip {
-  display: grid;
-  grid-template-columns: repeat(5,minmax(0,1fr));
-  gap: 9px;
-}
-
-.evidence-item {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  padding: 10px;
-  border: 1px solid #e2e8f0;
-  border-radius: 10px;
-  background: #fff;
-  text-align: left;
-  cursor: pointer;
-  &:hover {
-    border-color: #a5b4fc;
-  }
-  span:last-child {
-    display: flex;
-    min-width: 0;
-    flex-direction: column;
-    gap: 3px;
-  }
-  b {
-    overflow: hidden;
-    color: #334155;
-    font-size: 12px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  small {
-    color: #64748b;
-  }
-}
-
-.evidence-dot {
-  width: 9px;
-  height: 9px;
-  flex: none;
-  border-radius: 50%;
-  background: #94a3b8;
-  &.ready {
-    background: #10b981;
-  }
-  &.missing {
-    background: #cbd5e1;
-  }
-}
-
-.quality-gate {
-  margin-top: 10px;
-  padding: 8px 11px;
-  border-radius: 8px;
-  background: #fff7ed;
-  color: #9a3412;
-  font-size: 12px;
-}
 
 .overview-grid {
   display: grid;
@@ -1527,41 +1315,11 @@ const historyPagination = useTablePagination(() => teacherDrawer.data.teachingHi
   margin-top: 14px;
 }
 
-.evidence-detail {
-  &>section {
-    padding: 14px 0;
-    border-bottom: 1px solid #eef2f7;
-  }
-  section div {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-  section em {
-    margin-left: auto;
-    color: #64748b;
-    font-style: normal;
-  }
-  section p {
-    margin: 7px 0 0;
-    color: #64748b;
-    font-size: 12px;
-    line-height: 1.6;
-  }
-}
-
-.definition-list {
-  h3 {
-    margin: 0 0 10px;
-    color: #0f172a;
-    font-size: 16px;
-  }
-  p b {
-    color: #334155;
-  }
-}
-
 @media (max-width:1350px) {
+  .management-kpi-row {
+    grid-template-columns: repeat(3,minmax(0,1fr));
+  }
+
   .overview-grid {
     grid-template-columns: 1fr;
   }
@@ -1570,14 +1328,10 @@ const historyPagination = useTablePagination(() => teacherDrawer.data.teachingHi
     grid-template-columns: repeat(2,minmax(0,1fr));
   }
 
-  .evidence-strip {
-    grid-template-columns: repeat(3,minmax(0,1fr));
-  }
-
 }
 
 @media (max-width:1050px) {
-  .kpi-filter-row {
+  .management-kpi-row {
     grid-template-columns: repeat(2,minmax(0,1fr));
   }
 
@@ -1600,10 +1354,6 @@ const historyPagination = useTablePagination(() => teacherDrawer.data.teachingHi
 
   .queue-toolbar {
     grid-template-columns: 1fr 1fr;
-  }
-
-  .evidence-strip {
-    grid-template-columns: repeat(2,minmax(0,1fr));
   }
 
 }

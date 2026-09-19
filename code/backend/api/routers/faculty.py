@@ -5,7 +5,7 @@
 import sqlite3
 import threading
 import time
-from collections import defaultdict
+from collections import Counter, defaultdict
 from typing import Optional
 
 from fastapi import APIRouter, Depends
@@ -22,6 +22,7 @@ CUR = CURRENT_SEMESTER
 # 本科教学学院（排除研究生院/本科生院等非授课建制）
 _NON_TEACHING_COLLEGE = ("本科生院", "研究生院")
 FACULTY_RULE_VERSION = "FACULTY-ASSURANCE-2026.07.1"
+FACULTY_KPI_RULE_VERSION = "FACULTY-KPI-2026.09.1"
 _IMPORTANT_COURSE_KEYWORDS = (
     "必修", "主干", "核心", "基础", "思想", "政治", "形势与政策",
     "体育", "数学", "英语",
@@ -29,6 +30,64 @@ _IMPORTANT_COURSE_KEYWORDS = (
 _ANALYSIS_CACHE_TTL_SECONDS = 180
 _analysis_cache: dict[tuple[str, Optional[str]], tuple[float, dict]] = {}
 _analysis_cache_lock = threading.Lock()
+
+_KPI_DEFINITIONS = {
+    "teaching_staff_coverage": {
+        "label": "授课教师总数/教职工总数",
+        "tone": "primary",
+        "formula": "当前人员组织范围内承担有效本科教学任务的在岗教职工数÷同期在岗教职工总数。",
+        "hint": (
+            "授课教师总数：选定学期内，当前授权组织中至少承担1项有效本科教学任务的在岗教职工去重人数。"
+            "教职工总数：同期真实人员快照中处于有效在岗状态的教职工去重人数。异常教学任务不进入正式结果。"
+        ),
+        "boundary": "两项均按人员所属组织统计；真实人员快照未接入时仅披露课程责任范围内的实际授课教师数，不计算参与率。",
+    },
+    "team_structure_exception": {
+        "label": "团队结构异常课程数",
+        "tone": "amber",
+        "formula": (
+            "重点保障课程中，达到4个教学班或100人次、实际授课教师不少于2人、职称证据率不低于90%，"
+            "但实际授课团队未体现教授或副教授的去重课程数。"
+        ),
+        "hint": (
+            "通过数据质量门禁的重点保障课程中，达到规模条件、实际授课教师不少于2人、职称证据完整率不低于90%，"
+            "但实际授课团队未体现教授或副教授的课程数。仅表示团队结构需要核查，不评价教师个人能力或教学质量。"
+        ),
+        "boundary": "异常表示命中结构核查规则，不等于课程不合格，也不用于教师绩效评价。",
+    },
+    "continuous_single_teacher": {
+        "label": "连续单点授课教师数",
+        "tone": "danger",
+        "formula": (
+            "命中连续单点课程口径的课程中，同一教师在最近3次实际开课至少2次作为唯一授课教师，按教师工号去重。"
+        ),
+        "hint": (
+            "在连续单点课程中，对主要连续承担教师去重计数。连续单点课程指最近3次实际开课均为单教师承担，"
+            "且同一教师至少2次作为唯一实际授课教师，并满足重点课程及规模条件。最近3次是实际开课记录，不是连续自然学期。"
+        ),
+        "boundary": "只表示课程供给连续性需要核查，不表示教师本人存在风险。",
+    },
+    "senior_title_teaching_rate": {
+        "label": "高职称教师授课占比（教授、副教授）",
+        "tone": "teal",
+        "formula": "教授或副教授实际授课教师去重人数÷职称已知的实际授课教师去重人数×100%。",
+        "hint": (
+            "选定学期内，教授或副教授实际授课教师去重人数÷职称已知的实际授课教师去重人数×100%。"
+            "职称缺失人员不进入分母，同时披露职称完整率。该指标反映本科教学参与结构，不代表教师绩效或教学质量。"
+        ),
+        "boundary": "职称证据完整率低于90%时不输出正式比例；实际授课团队不等于学校正式任命的课程团队。",
+    },
+    "young_teacher_teaching_rate": {
+        "label": "青年教师授课占比（35岁以下）",
+        "tone": "primary",
+        "formula": "真实人员快照中35岁以下实际授课教师数÷年龄状态已知的实际授课教师数×100%。",
+        "hint": (
+            "选定学期统计时点，35岁以下实际授课教师去重人数÷年龄状态已知的实际授课教师去重人数×100%。"
+            "年龄采用人事系统提供的受控年龄段或合规计算结果，不展示出生日期。年龄证据不足时不输出正式比例。"
+        ),
+        "boundary": "不读取模拟教师画像，不向前端提供出生日期或精确年龄；年龄覆盖率低于90%时不输出正式比例。",
+    },
+}
 
 
 def _member_ids(row: dict) -> set[str]:
@@ -58,6 +117,123 @@ def _excluded_teacher_ids(conn: sqlite3.Connection, semester: str) -> set[str]:
               AND NULLIF(TRIM(entity_id),'') IS NOT NULL
         """, (semester,))
     }
+
+
+def _table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
+    return bool(dbm.scalar(
+        conn,
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+        (table_name,),
+    ))
+
+
+def _personnel_snapshot(conn: sqlite3.Connection, semester: str,
+                        college_id: Optional[str] = None) -> dict:
+    """读取真实在岗人员学期快照；缺表或缺批次时显式返回未就绪。"""
+    table_name = "dim_staff_employment_snapshot"
+    if not _table_exists(conn, table_name):
+        return {
+            "ready": False,
+            "rows": [],
+            "reason": "真实在岗教职工名册尚未接入",
+            "updated_at": None,
+        }
+    params: list = [semester]
+    college_filter = ""
+    if college_id:
+        college_filter = " AND college_id=?"
+        params.append(college_id)
+    rows = dbm.query(conn, f"""
+        SELECT semester_id,staff_id,college_id,dept,staff_category,
+               employment_status,title,age_band,is_under_35,source,
+               source_batch_id,updated_at
+        FROM {table_name}
+        WHERE semester_id=?{college_filter}
+          AND LOWER(TRIM(COALESCE(source,'real'))) NOT IN ('sim','synthetic','demo')
+          AND LOWER(TRIM(COALESCE(employment_status,''))) IN
+              ('在岗','active','employed','正常')
+        ORDER BY dept,staff_id
+    """, tuple(params))
+    if not rows:
+        return {
+            "ready": False,
+            "rows": [],
+            "reason": "当前学期和授权范围没有可用的真实在岗人员快照",
+            "updated_at": None,
+        }
+    untraceable_count = sum(
+        not str(row.get("source_batch_id") or "").strip()
+        or not str(row.get("updated_at") or "").strip()
+        for row in rows
+    )
+    if untraceable_count:
+        return {
+            "ready": False,
+            "rows": [],
+            "reason": f"真实在岗人员快照有{untraceable_count}条记录缺少来源批次或更新时间",
+            "updated_at": None,
+        }
+    updated_at = max(
+        (str(row.get("updated_at") or "") for row in rows),
+        default="",
+    ) or None
+    return {
+        "ready": True,
+        "rows": rows,
+        "reason": "",
+        "updated_at": updated_at,
+    }
+
+
+def _all_active_teacher_stats(conn: sqlite3.Connection, semester: str) -> dict[str, dict]:
+    """按教师归集当期有效教学关系，用于人员口径KPI及其下钻。"""
+    excluded_ids = _excluded_teacher_ids(conn, semester)
+    stats: dict[str, dict] = {}
+    lessons = dbm.query(conn, """
+        SELECT l.lesson_id,l.course_id,l.teacher_id,l.teacher_ids,
+               c.name course_name,c.dept course_dept
+        FROM fact_lesson l
+        LEFT JOIN dim_course c ON c.course_id=l.course_id
+        WHERE l.semester_id=?
+    """, (semester,))
+    for lesson in lessons:
+        primary_id = str(lesson.get("teacher_id") or "").strip()
+        if primary_id and primary_id in excluded_ids:
+            continue
+        for teacher_id in _member_ids(lesson) - excluded_ids:
+            bucket = stats.setdefault(teacher_id, {
+                "staff_id": teacher_id,
+                "course_ids": set(),
+                "course_names": set(),
+                "lesson_ids": set(),
+                "lesson_ids_by_course": defaultdict(set),
+                "course_departments": set(),
+            })
+            if lesson.get("course_id"):
+                bucket["course_ids"].add(str(lesson["course_id"]))
+            if lesson.get("course_name"):
+                bucket["course_names"].add(str(lesson["course_name"]))
+            if lesson.get("lesson_id"):
+                bucket["lesson_ids"].add(str(lesson["lesson_id"]))
+                if lesson.get("course_id"):
+                    bucket["lesson_ids_by_course"][str(lesson["course_id"])].add(
+                        str(lesson["lesson_id"])
+                    )
+            if lesson.get("course_dept"):
+                bucket["course_departments"].add(clean_dept(lesson["course_dept"]))
+    return stats
+
+
+def _rate(numerator: int, denominator: int) -> Optional[float]:
+    return round(numerator * 100 / denominator, 1) if denominator else None
+
+
+def _page_rows(rows: list[dict], page: int, page_size: int) -> tuple[list[dict], int, int, int]:
+    page = max(1, page)
+    page_size = min(100, max(10, page_size))
+    total = len(rows)
+    start = (page - 1) * page_size
+    return rows[start:start + page_size], total, page, page_size
 
 
 def _is_important_course(row: dict) -> bool:
@@ -96,13 +272,7 @@ def _priority_classification(row: dict) -> tuple[str, list[str], str]:
     )
     continuous_single = bool(row.get("continuous_single")) and important and scale_reached
     high_concentration = bool(row.get("high_concentration")) and important and scale_reached
-    structure_review = (
-        important
-        and int(row.get("teacher_count") or 0) >= 2
-        and float(row.get("title_completeness_rate") or 0) >= 90
-        and int(row.get("senior_title_teachers") or 0) == 0
-        and scale_reached
-    )
+    structure_review = _matches_structure_review(row)
 
     if high_impact_single:
         reasons.append(
@@ -135,6 +305,30 @@ def _priority_classification(row: dict) -> tuple[str, list[str], str]:
     if structure_review:
         return "structure_review", reasons, "结构核查"
     return "general_observation", [], "一般观察"
+
+
+def _matches_structure_review(row: dict) -> bool:
+    """结构异常是可并存规则，不依赖互斥的课程核查主分类。"""
+    scale_reached = int(row.get("lesson_count") or 0) >= 4 or int(row.get("enrolled") or 0) >= 100
+    return bool(
+        row.get("evaluable", True)
+        and row.get("important_course")
+        and int(row.get("teacher_count") or 0) >= 2
+        and float(row.get("title_completeness_rate") or 0) >= 90
+        and int(row.get("senior_title_teachers") or 0) == 0
+        and scale_reached
+    )
+
+
+def _matches_continuous_single_review(row: dict) -> bool:
+    """连续单点正式规则，首页、汇总与下钻共用。"""
+    scale_reached = int(row.get("lesson_count") or 0) >= 4 or int(row.get("enrolled") or 0) >= 100
+    return bool(
+        row.get("evaluable")
+        and row.get("continuous_single")
+        and row.get("important_course")
+        and scale_reached
+    )
 
 
 def _teaching_set(conn, sem) -> set:
@@ -314,8 +508,10 @@ def _faculty_analysis(conn: sqlite3.Connection, semester: str,
         history[course_id][sem].update(valid_members)
 
     rows = []
+    course_members: dict[str, set[str]] = {}
     for row in courses.values():
         members = row.pop("members")
+        course_members[row["course_id"]] = set(members)
         primary_lesson_counts = row.pop("primary_lesson_counts")
         primary_enrolled_counts = row.pop("primary_enrolled_counts")
         row["teacher_count"] = len(members)
@@ -349,13 +545,29 @@ def _faculty_analysis(conn: sqlite3.Connection, semester: str,
         ][:3]
         single_teachers = [next(iter(team)) for _, team in observed if len(team) == 1]
         row["continuity_observations"] = len(observed)
+        repeated_single_teachers = Counter(single_teachers)
         row["continuous_single"] = (
             len(observed) >= 3
             and len(single_teachers) == len(observed)
-            and max((single_teachers.count(member) for member in set(single_teachers)), default=0)
+            and max(repeated_single_teachers.values(), default=0)
             >= len(observed) - 1
         )
+        row["continuous_teacher_ids"] = sorted(
+            teacher_id for teacher_id, count in repeated_single_teachers.items()
+            if row["continuous_single"] and count >= len(observed) - 1
+        )
         row["continuity_semesters"] = [sem for sem, _ in observed]
+        row["continuity_evidence"] = [
+            {
+                "semester_id": sem,
+                "teacher_ids": sorted(team),
+                "teacher_names": [
+                    teacher_meta.get(teacher_id, {}).get("name") or teacher_id
+                    for teacher_id in sorted(team)
+                ],
+            }
+            for sem, team in observed
+        ]
         row["data_candidate_reasons"] = []
         if not row["college_id"]:
             row["data_candidate_reasons"].append("课程责任组织未能映射到教学学院")
@@ -407,6 +619,8 @@ def _faculty_analysis(conn: sqlite3.Connection, semester: str,
             and row["max_enrolled_share"] >= enrolled_cutoff
         )
         review_type, reasons, priority_label = _priority_classification(row)
+        row["structure_review"] = _matches_structure_review(row)
+        row["continuous_single_review"] = _matches_continuous_single_review(row)
         row["review_type"] = review_type
         row["attention_reasons"] = reasons
         row["priority"] = priority_label
@@ -433,14 +647,21 @@ def _faculty_analysis(conn: sqlite3.Connection, semester: str,
     evaluable_rows = [row for row in rows if row["evaluable"]]
     review_rows = [row for row in rows if row["review_type"] != "general_observation"]
     active_ids: set[str] = set()
-    for row in evaluable_rows:
-        # 重新从当期有效课表提取仅用于范围说明的实际教师数。
+    kpi_teacher_ids: set[str] = set()
+    teacher_scope_stats: dict[str, dict] = {}
+    for row in rows:
         course_id = row["course_id"]
-        for lesson in raw_lessons:
-            if str(lesson["course_id"]) == course_id:
-                primary_id = str(lesson.get("teacher_id") or "").strip()
-                if not primary_id or primary_id not in excluded_ids:
-                    active_ids.update(_member_ids(lesson) - excluded_ids)
+        for teacher_id in course_members.get(course_id, set()):
+            if row["evaluable"]:
+                active_ids.add(teacher_id)
+            if row["lesson_count"] > 0:
+                kpi_teacher_ids.add(teacher_id)
+            bucket = teacher_scope_stats.setdefault(teacher_id, {
+                "course_ids": set(), "course_names": set(), "college_names": set(),
+            })
+            bucket["course_ids"].add(course_id)
+            bucket["course_names"].add(row["course_name"])
+            bucket["college_names"].add(row["college_name"])
     title_known = sum(
         bool(str(teacher_meta.get(member, {}).get("title") or "").strip())
         for member in active_ids
@@ -458,13 +679,11 @@ def _faculty_analysis(conn: sqlite3.Connection, semester: str,
             row["review_type"] == "priority_review" for row in rows
         ),
         "continuous_single_courses": sum(
-            row["continuous_single"] and row["important_course"]
-            and (row["lesson_count"] >= 4 or row["enrolled"] >= 100)
-            and row["evaluable"]
+            row["continuous_single_review"]
             for row in rows
         ),
         "structure_review_courses": sum(
-            row["review_type"] == "structure_review" for row in rows
+            row["structure_review"] for row in rows
         ),
         "data_candidate_courses": sum(
             row["review_type"] == "data_candidate" for row in rows
@@ -505,11 +724,9 @@ def _faculty_analysis(conn: sqlite3.Connection, semester: str,
         bucket["evaluable_courses"] += int(row["evaluable"])
         bucket["priority_review_courses"] += int(row["review_type"] == "priority_review")
         bucket["continuous_single_courses"] += int(
-            row["continuous_single"] and row["important_course"]
-            and (row["lesson_count"] >= 4 or row["enrolled"] >= 100)
-            and row["evaluable"]
+            row["continuous_single_review"]
         )
-        bucket["structure_review_courses"] += int(row["review_type"] == "structure_review")
+        bucket["structure_review_courses"] += int(row["structure_review"])
         bucket["data_candidate_courses"] += int(row["review_type"] == "data_candidate")
     college_rows = sorted(
         colleges_map.values(),
@@ -562,6 +779,16 @@ def _faculty_analysis(conn: sqlite3.Connection, semester: str,
             "affected_course_count": len(excluded_course_ids),
             "rule": "分析期内已登记为高/严重且状态为待处理或核验中的教师任务异常",
         },
+        # 仅供同一服务内KPI与下钻复用，不直接暴露给总览响应。
+        "active_teacher_ids": sorted(active_ids),
+        "kpi_teacher_ids": sorted(kpi_teacher_ids),
+        "teacher_meta": teacher_meta,
+        "teacher_scope_stats": {
+            teacher_id: {
+                key: sorted(value) for key, value in stats.items()
+            }
+            for teacher_id, stats in teacher_scope_stats.items()
+        },
     }
 
 
@@ -584,6 +811,160 @@ def _cached_faculty_analysis(conn: sqlite3.Connection, semester: str,
     return result
 
 
+def _management_kpis(conn: sqlite3.Connection, semester: str,
+                     college_id: Optional[str], analysis: dict) -> list[dict]:
+    """构建首页5项正式KPI；数据未就绪时返回可解释的空值而不是0。"""
+    snapshot = _personnel_snapshot(conn, semester, college_id)
+    all_teacher_stats = _all_active_teacher_stats(conn, semester)
+    scope_active_ids = set(analysis.get("kpi_teacher_ids") or [])
+    teacher_meta = analysis.get("teacher_meta") or {}
+
+    if snapshot["ready"]:
+        staff_ids = {str(row["staff_id"]) for row in snapshot["rows"]}
+        personnel_teaching_ids = staff_ids & set(all_teacher_stats)
+        staff_numerator = len(personnel_teaching_ids)
+        staff_denominator = len(staff_ids)
+        staff_rate = _rate(staff_numerator, staff_denominator)
+        staff_value = f"{staff_numerator} / {staff_denominator} 人"
+        staff_sub = f"本科教学参与率 {staff_rate:g}%" if staff_rate is not None else "当前范围暂无在岗人员"
+        staff_status = "ready"
+    else:
+        personnel_teaching_ids = set()
+        staff_numerator = len(scope_active_ids)
+        staff_denominator = None
+        staff_rate = None
+        staff_value = f"{staff_numerator} / — 人"
+        staff_sub = snapshot["reason"]
+        staff_status = "partial"
+
+    structure_rows = [
+        row for row in analysis["courses"]
+        if row.get("structure_review")
+    ]
+    continuous_rows = [
+        row for row in analysis["courses"]
+        if row.get("continuous_single_review")
+    ]
+    continuous_teacher_ids = {
+        teacher_id
+        for row in continuous_rows
+        for teacher_id in row.get("continuous_teacher_ids") or []
+    }
+
+    known_title_ids = {
+        teacher_id for teacher_id in scope_active_ids
+        if str(teacher_meta.get(teacher_id, {}).get("title") or "").strip()
+    }
+    senior_ids = {
+        teacher_id for teacher_id in known_title_ids
+        if normalize_title(teacher_meta.get(teacher_id, {}).get("title")) in ("教授", "副教授")
+    }
+    title_coverage = _rate(len(known_title_ids), len(scope_active_ids))
+    senior_rate = _rate(len(senior_ids), len(known_title_ids))
+    senior_ready = bool(known_title_ids) and (title_coverage or 0) >= 90
+
+    if snapshot["ready"]:
+        teaching_staff_rows = [
+            row for row in snapshot["rows"]
+            if str(row["staff_id"]) in personnel_teaching_ids
+        ]
+        age_known_rows = [
+            row for row in teaching_staff_rows
+            if row.get("is_under_35") in (0, 1)
+        ]
+        young_rows = [row for row in age_known_rows if int(row["is_under_35"]) == 1]
+        age_coverage = _rate(len(age_known_rows), len(teaching_staff_rows))
+        young_rate = _rate(len(young_rows), len(age_known_rows))
+        young_ready = bool(age_known_rows) and (age_coverage or 0) >= 90
+        young_status = "ready" if young_ready else "insufficient"
+        young_value = f"{young_rate:g}%" if young_ready and young_rate is not None else "—"
+        young_sub = (
+            f"{len(young_rows)}/{len(age_known_rows)} 人 · 年龄覆盖率 {age_coverage:g}%"
+            if age_coverage is not None else "年龄证据不足"
+        )
+    else:
+        age_known_rows = []
+        young_rows = []
+        age_coverage = None
+        young_rate = None
+        young_status = "unavailable"
+        young_value = "—"
+        young_sub = snapshot["reason"]
+
+    raw_cards = [
+        ("teaching_staff_coverage", staff_value, staff_sub, staff_status,
+         staff_numerator, staff_denominator, staff_rate, None),
+        ("team_structure_exception", f"{len(structure_rows)} 门", "命中结构规则，待核查", "ready",
+         len(structure_rows), len(analysis["courses"]), None, None),
+        ("continuous_single_teacher", f"{len(continuous_teacher_ids)} 人",
+         f"涉及 {len(continuous_rows)} 门连续单点课程", "ready",
+         len(continuous_teacher_ids), len(continuous_rows), None, None),
+        ("senior_title_teaching_rate", f"{senior_rate:g}%" if senior_ready and senior_rate is not None else "—",
+         f"{len(senior_ids)}/{len(known_title_ids)} 人 · 职称完整率 {(title_coverage or 0):g}%",
+         "ready" if senior_ready else "insufficient", len(senior_ids), len(known_title_ids),
+         senior_rate if senior_ready else None, title_coverage),
+        ("young_teacher_teaching_rate", young_value, young_sub, young_status,
+         len(young_rows), len(age_known_rows) if snapshot["ready"] else None,
+         young_rate if young_status == "ready" else None, age_coverage),
+    ]
+    cards = []
+    for key, value, sub, status, numerator, denominator, rate, coverage in raw_cards:
+        definition = _KPI_DEFINITIONS[key]
+        cards.append({
+            "key": key,
+            "label": definition["label"],
+            "value": value,
+            "sub": sub,
+            "tone": definition["tone"],
+            "hint": definition["hint"],
+            "formula": definition["formula"],
+            "boundary": definition["boundary"],
+            "status": status,
+            "numerator": numerator,
+            "denominator": denominator,
+            "rate": rate,
+            "coverage": coverage,
+            "drilldown": True,
+            "rule_version": FACULTY_KPI_RULE_VERSION,
+        })
+    return cards
+
+
+def _teacher_display_rows(teacher_ids: set[str], analysis: dict,
+                          stats: dict[str, dict]) -> list[dict]:
+    meta = analysis.get("teacher_meta") or {}
+    scope_stats = analysis.get("teacher_scope_stats") or {}
+    rows = []
+    for teacher_id in sorted(teacher_ids):
+        teacher = meta.get(teacher_id, {})
+        teacher_stats = stats.get(teacher_id) or {}
+        scoped = scope_stats.get(teacher_id) or {}
+        scoped_course_ids = set(scoped.get("course_ids") or [])
+        scoped_course_names = set(scoped.get("course_names") or [])
+        course_ids = scoped_course_ids or set(teacher_stats.get("course_ids") or [])
+        course_names = scoped_course_names or set(teacher_stats.get("course_names") or [])
+        if scoped_course_ids:
+            lesson_ids = {
+                lesson_id
+                for course_id in scoped_course_ids
+                for lesson_id in teacher_stats.get("lesson_ids_by_course", {}).get(course_id, set())
+            }
+        else:
+            lesson_ids = teacher_stats.get("lesson_ids") or set()
+        evidence_course_id = sorted(scoped_course_ids or course_ids)[0] if (scoped_course_ids or course_ids) else None
+        rows.append({
+            "staff_id": teacher_id,
+            "display_name": teacher.get("name") or teacher_id,
+            "title": teacher.get("title"),
+            "dept": teacher.get("dept"),
+            "course_count": len(course_ids),
+            "lesson_count": len(lesson_ids),
+            "course_names": "、".join(sorted(course_names)[:5]),
+            "evidence_course_id": evidence_course_id,
+        })
+    return rows
+
+
 @router.get("/management-overview")
 def management_overview(college: Optional[str] = None, semester: Optional[str] = None,
                         user: dict = Depends(get_current_user),
@@ -592,6 +973,7 @@ def management_overview(college: Optional[str] = None, semester: Optional[str] =
     college_id, college_name = _resolve_faculty_college(user, conn, college)
     sem = semester or REAL
     analysis = _cached_faculty_analysis(conn, sem, college_name)
+    kpis = _management_kpis(conn, sem, college_id, analysis)
     return ok({
         "semester": sem,
         "college": college_name,
@@ -604,6 +986,7 @@ def management_overview(college: Optional[str] = None, semester: Optional[str] =
         "affected_college_count": analysis["affected_college_count"],
         "evidence_readiness": analysis["evidence_readiness"],
         "quality_gate": analysis["quality_gate"],
+        "kpis": kpis,
         "rule_version": FACULTY_RULE_VERSION,
         "definition": {
             "evaluable_courses": "通过数据质量门禁，且具有课程责任组织、有效教学任务和可识别实际授课教师的去重课程数。",
@@ -614,6 +997,261 @@ def management_overview(college: Optional[str] = None, semester: Optional[str] =
             "title_completeness": "实际授课教师中职称字段非空人数÷实际授课教师人数。",
             "boundary": "本页用于课程师资供给连续性与团队保障核查，不评价教师个人教学质量；教师负荷排名归属教学运行分析，未接入的年龄、临退休、正式团队和未来计划不形成正式结论。",
         },
+    })
+
+
+@router.get("/management-kpis/{metric_key}/details")
+def management_kpi_details(metric_key: str, college: Optional[str] = None,
+                           semester: Optional[str] = None, keyword: Optional[str] = None,
+                           page: int = 1, page_size: int = 20,
+                           user: dict = Depends(get_current_user),
+                           conn: sqlite3.Connection = Depends(get_db)):
+    """5项首页KPI的统一下钻；指标白名单、范围和明细均由服务端控制。"""
+    if metric_key not in _KPI_DEFINITIONS:
+        raise ApiError("未知的师资保障指标", code=404, status_code=404)
+    college_id, college_name = _resolve_faculty_college(user, conn, college)
+    sem = semester or REAL
+    analysis = _cached_faculty_analysis(conn, sem, college_name)
+    cards = {item["key"]: item for item in _management_kpis(conn, sem, college_id, analysis)}
+    card = cards[metric_key]
+    definition = _KPI_DEFINITIONS[metric_key]
+    teacher_stats = _all_active_teacher_stats(conn, sem)
+    teacher_meta = analysis.get("teacher_meta") or {}
+    scope_active_ids = set(analysis.get("kpi_teacher_ids") or [])
+    snapshot = _personnel_snapshot(conn, sem, college_id)
+    rows: list[dict] = []
+    breakdown: list[dict] = []
+    evidence_gaps: list[dict] = []
+    summary: dict = {
+        "numerator": card["numerator"],
+        "denominator": card["denominator"],
+        "rate": card["rate"],
+        "coverage": card["coverage"],
+    }
+    source_note = "真实教学任务、课程主数据、教师职称与已登记数据质量问题"
+
+    if metric_key == "teaching_staff_coverage":
+        if snapshot["ready"]:
+            staff_ids = {str(row["staff_id"]) for row in snapshot["rows"]}
+            teaching_ids = staff_ids & set(teacher_stats)
+            base_rows = {
+                item["staff_id"]: item
+                for item in _teacher_display_rows(teaching_ids, analysis, teacher_stats)
+            }
+            college_names = {
+                row["college_id"]: row["name"]
+                for row in dbm.query(conn, "SELECT college_id,name FROM dim_college")
+            }
+            buckets: dict[str, dict] = {}
+            for staff in snapshot["rows"]:
+                staff_id = str(staff["staff_id"])
+                bucket_key = str(staff.get("college_id") or staff.get("dept") or "待映射组织")
+                bucket = buckets.setdefault(bucket_key, {
+                    "college_id": staff.get("college_id"),
+                    "college_name": college_names.get(staff.get("college_id")) or staff.get("dept") or "待映射组织",
+                    "staff_count": 0,
+                    "teaching_teacher_count": 0,
+                })
+                bucket["staff_count"] += 1
+                bucket["teaching_teacher_count"] += int(staff_id in teaching_ids)
+                if staff_id in teaching_ids:
+                    detail = dict(base_rows.get(staff_id) or {"staff_id": staff_id, "display_name": staff_id})
+                    detail.update({
+                        "college_id": staff.get("college_id"),
+                        "dept": staff.get("dept") or detail.get("dept"),
+                        "staff_category": staff.get("staff_category"),
+                        "title": staff.get("title") or detail.get("title"),
+                        "employment_status": staff.get("employment_status"),
+                    })
+                    rows.append(detail)
+            for bucket in buckets.values():
+                bucket["rate"] = _rate(bucket["teaching_teacher_count"], bucket["staff_count"])
+            breakdown = sorted(buckets.values(), key=lambda row: (-row["teaching_teacher_count"], row["college_name"]))
+            source_note = "真实教学任务 + dim_staff_employment_snapshot真实在岗人员快照"
+        else:
+            rows = _teacher_display_rows(scope_active_ids, analysis, {})
+            source_note = f"仅有真实教学任务；{snapshot['reason']}，暂不形成教职工分母"
+        summary["teacher_count"] = len(rows)
+
+    elif metric_key == "team_structure_exception":
+        rows = [
+            {
+                "course_id": row["course_id"],
+                "course_name": row["course_name"],
+                "college_id": row["college_id"],
+                "college_name": row["college_name"],
+                "course_nature": row["course_nature"],
+                "lesson_count": row["lesson_count"],
+                "enrolled": row["enrolled"],
+                "teacher_count": row["teacher_count"],
+                "senior_title_teachers": row["senior_title_teachers"],
+                "title_completeness_rate": row["title_completeness_rate"],
+                "reason": (row.get("attention_reasons") or ["命中团队结构核查规则"])[0],
+            }
+            for row in analysis["courses"] if row.get("structure_review")
+        ]
+        summary["course_count"] = len(rows)
+
+    elif metric_key == "continuous_single_teacher":
+        continuous_rows = [
+            row for row in analysis["courses"]
+            if row.get("continuous_single_review")
+        ]
+        teacher_ids: set[str] = set()
+        for course in continuous_rows:
+            for teacher_id in course.get("continuous_teacher_ids") or []:
+                teacher_ids.add(teacher_id)
+                teacher = teacher_meta.get(teacher_id, {})
+                rows.append({
+                    "staff_id": teacher_id,
+                    "display_name": teacher.get("name") or teacher_id,
+                    "title": teacher.get("title"),
+                    "dept": teacher.get("dept"),
+                    "course_id": course["course_id"],
+                    "course_name": course["course_name"],
+                    "college_id": course["college_id"],
+                    "college_name": course["college_name"],
+                    "lesson_count": course["lesson_count"],
+                    "enrolled": course["enrolled"],
+                    "continuity_semesters": "、".join(course.get("continuity_semesters") or []),
+                    "continuity_evidence": course.get("continuity_evidence") or [],
+                    "continuity_evidence_text": "；".join(
+                        f"{item['semester_id']}：{'、'.join(item['teacher_names'])}"
+                        for item in course.get("continuity_evidence") or []
+                    ),
+                })
+        rows.sort(key=lambda row: (row["display_name"], row["course_name"]))
+        summary.update({"teacher_count": len(teacher_ids), "course_count": len(continuous_rows)})
+
+    elif metric_key == "senior_title_teaching_rate":
+        known_ids = {
+            teacher_id for teacher_id in scope_active_ids
+            if str(teacher_meta.get(teacher_id, {}).get("title") or "").strip()
+        }
+        senior_ids = {
+            teacher_id for teacher_id in known_ids
+            if normalize_title(teacher_meta.get(teacher_id, {}).get("title")) in ("教授", "副教授")
+        }
+        rows = _teacher_display_rows(senior_ids, analysis, teacher_stats)
+        missing_title_ids = scope_active_ids - known_ids
+        evidence_gaps = _teacher_display_rows(missing_title_ids, analysis, teacher_stats)
+        for item in evidence_gaps:
+            item["gap_reason"] = "职称字段缺失"
+        college_buckets: dict[str, dict[str, set[str]]] = {}
+        scope_stats = analysis.get("teacher_scope_stats") or {}
+        for teacher_id in scope_active_ids:
+            college_names = scope_stats.get(teacher_id, {}).get("college_names") or ["待映射组织"]
+            for name in college_names:
+                bucket = college_buckets.setdefault(name, {
+                    "teacher_ids": set(), "known_ids": set(), "senior_ids": set(),
+                })
+                bucket["teacher_ids"].add(teacher_id)
+                if teacher_id in known_ids:
+                    bucket["known_ids"].add(teacher_id)
+                if teacher_id in senior_ids:
+                    bucket["senior_ids"].add(teacher_id)
+        breakdown = [{
+            "college_name": name,
+            "teacher_count": len(bucket["teacher_ids"]),
+            "known_count": len(bucket["known_ids"]),
+            "count": len(bucket["senior_ids"]),
+            "rate": _rate(len(bucket["senior_ids"]), len(bucket["known_ids"])),
+            "coverage": _rate(len(bucket["known_ids"]), len(bucket["teacher_ids"])),
+        } for name, bucket in sorted(college_buckets.items())]
+        summary.update({
+            "teacher_count": len(scope_active_ids),
+            "known_title_count": len(known_ids),
+            "senior_teacher_count": len(senior_ids),
+        })
+
+    elif metric_key == "young_teacher_teaching_rate":
+        if snapshot["ready"]:
+            teaching_ids = {str(row["staff_id"]) for row in snapshot["rows"]} & set(teacher_stats)
+            young_snapshot = [
+                row for row in snapshot["rows"]
+                if str(row["staff_id"]) in teaching_ids and row.get("is_under_35") == 1
+            ]
+            base_rows = {
+                item["staff_id"]: item
+                for item in _teacher_display_rows(
+                    {str(row["staff_id"]) for row in young_snapshot}, analysis, teacher_stats,
+                )
+            }
+            for staff in young_snapshot:
+                staff_id = str(staff["staff_id"])
+                detail = dict(base_rows.get(staff_id) or {"staff_id": staff_id, "display_name": staff_id})
+                detail.update({
+                    "college_id": staff.get("college_id"),
+                    "dept": staff.get("dept") or detail.get("dept"),
+                    "title": staff.get("title") or detail.get("title"),
+                    "age_band": staff.get("age_band") or "35岁以下",
+                })
+                rows.append(detail)
+            missing_age_rows = [
+                row for row in snapshot["rows"]
+                if str(row["staff_id"]) in teaching_ids and row.get("is_under_35") not in (0, 1)
+            ]
+            missing_age_ids = {str(row["staff_id"]) for row in missing_age_rows}
+            evidence_gaps = _teacher_display_rows(missing_age_ids, analysis, teacher_stats)
+            for item in evidence_gaps:
+                item["gap_reason"] = "年龄段/35岁以下标识缺失"
+            college_names = {
+                row["college_id"]: row["name"]
+                for row in dbm.query(conn, "SELECT college_id,name FROM dim_college")
+            }
+            age_buckets: dict[str, dict[str, set[str]]] = {}
+            for staff in snapshot["rows"]:
+                staff_id = str(staff["staff_id"])
+                if staff_id not in teaching_ids:
+                    continue
+                name = college_names.get(staff.get("college_id")) or staff.get("dept") or "待映射组织"
+                bucket = age_buckets.setdefault(name, {
+                    "teacher_ids": set(), "known_ids": set(), "young_ids": set(),
+                })
+                bucket["teacher_ids"].add(staff_id)
+                if staff.get("is_under_35") in (0, 1):
+                    bucket["known_ids"].add(staff_id)
+                if staff.get("is_under_35") == 1:
+                    bucket["young_ids"].add(staff_id)
+            breakdown = [{
+                "college_name": name,
+                "teacher_count": len(bucket["teacher_ids"]),
+                "known_count": len(bucket["known_ids"]),
+                "count": len(bucket["young_ids"]),
+                "rate": _rate(len(bucket["young_ids"]), len(bucket["known_ids"])),
+                "coverage": _rate(len(bucket["known_ids"]), len(bucket["teacher_ids"])),
+            } for name, bucket in sorted(age_buckets.items())]
+            source_note = "真实教学任务 + 人事系统提供的受控年龄段/35岁以下标识"
+        else:
+            source_note = snapshot["reason"] + "；未读取模拟年龄画像"
+        summary["young_teacher_count"] = len(rows)
+
+    needle = (keyword or "").strip().lower()
+    if needle:
+        rows = [
+            row for row in rows
+            if any(needle in str(value).lower() for value in row.values()
+                   if not isinstance(value, (dict, list, tuple, set)))
+        ]
+    paged_rows, total, page, page_size = _page_rows(rows, page, page_size)
+    return ok({
+        "metric": card,
+        "semester": sem,
+        "college": college_name,
+        "college_id": college_id,
+        "scope_mode": "college" if college_name else "school",
+        "summary": summary,
+        "breakdown": breakdown,
+        "items": paged_rows,
+        "evidence_gaps": evidence_gaps,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "formula": definition["formula"],
+        "boundary": definition["boundary"],
+        "source_note": source_note,
+        "rule_version": FACULTY_KPI_RULE_VERSION,
+        "updated_at": snapshot.get("updated_at"),
     })
 
 
@@ -628,11 +1266,9 @@ def management_courses(college: Optional[str] = None, semester: Optional[str] = 
     analysis = _cached_faculty_analysis(conn, semester or REAL, college_name)
     rows = analysis["courses"]
     if review_type == "continuous_single":
-        rows = [
-            row for row in rows
-            if row["continuous_single"] and row["important_course"]
-            and (row["lesson_count"] >= 4 or row["enrolled"] >= 100)
-        ]
+        rows = [row for row in rows if row.get("continuous_single_review")]
+    elif review_type == "structure_review":
+        rows = [row for row in rows if row.get("structure_review")]
     elif review_type:
         rows = [row for row in rows if row["review_type"] == review_type]
     if keyword and keyword.strip():
@@ -1015,6 +1651,10 @@ def management_teacher(teacher_id: str, semester: Optional[str] = None,
             )
         if not teacher_allowed and not course_allowed:
             raise ApiError("无权限查看该教师教学经历", code=403, status_code=403)
+        # 外院教师仅因本院课程关系被放行时，返回内容严格限定为该授权课程。
+        authorized_course_id = course_id if course_allowed and not teacher_allowed else None
+    else:
+        authorized_course_id = None
 
     current_issue = dbm.query_one(conn, """
         SELECT issue_id,status,detail,recommendation,affected_rows
@@ -1024,16 +1664,20 @@ def management_teacher(teacher_id: str, semester: Optional[str] = None,
           AND status IN ('open','reviewing')
         ORDER BY severity DESC LIMIT 1
     """, (teacher_id, sem))
-    current_lessons = dbm.query(conn, """
+    current_course_filter = " AND l.course_id=?" if authorized_course_id else ""
+    current_params: list = [teacher_id, sem, teacher_id, f"%{teacher_id}%"]
+    if authorized_course_id:
+        current_params.append(authorized_course_id)
+    current_lessons = dbm.query(conn, f"""
         SELECT l.lesson_id,l.course_id,c.name course_name,c.dept course_dept,
                l.class_names,l.enrolled,l.total_hours,
                CASE WHEN l.teacher_id=? THEN '主讲' ELSE '联合授课' END team_role
         FROM fact_lesson l
         LEFT JOIN dim_course c ON c.course_id=l.course_id
         WHERE l.semester_id=?
-          AND (l.teacher_id=? OR l.teacher_ids LIKE ?)
+          AND (l.teacher_id=? OR l.teacher_ids LIKE ?){current_course_filter}
         ORDER BY c.name,l.lesson_id
-    """, (teacher_id, sem, teacher_id, f"%{teacher_id}%"))
+    """, tuple(current_params))
     current_course_count = len({
         row["course_id"] for row in current_lessons if row.get("course_id")
     })
@@ -1049,7 +1693,11 @@ def management_teacher(teacher_id: str, semester: Optional[str] = None,
         "teamRole": row["team_role"],
     } for row in current_lessons[:100]]
 
-    history = dbm.query(conn, """
+    history_course_filter = " AND l.course_id=?" if authorized_course_id else ""
+    history_params: list = [teacher_id, teacher_id, f"%{teacher_id}%"]
+    if authorized_course_id:
+        history_params.append(authorized_course_id)
+    history = dbm.query(conn, f"""
         SELECT l.semester_id semester,l.course_id,c.name course_name,c.dept course_dept,
                COUNT(DISTINCT l.lesson_id) lesson_count,
                SUM(COALESCE(l.enrolled,0)) enrolled,
@@ -1057,11 +1705,11 @@ def management_teacher(teacher_id: str, semester: Optional[str] = None,
                MAX(CASE WHEN l.teacher_id=? THEN 1 ELSE 0 END) is_primary
         FROM fact_lesson l
         LEFT JOIN dim_course c ON c.course_id=l.course_id
-        WHERE l.teacher_id=? OR l.teacher_ids LIKE ?
+        WHERE (l.teacher_id=? OR l.teacher_ids LIKE ?){history_course_filter}
         GROUP BY l.semester_id,l.course_id,c.name,c.dept
         ORDER BY l.semester_id DESC,c.name
         LIMIT 40
-    """, (teacher_id, teacher_id, f"%{teacher_id}%"))
+    """, tuple(history_params))
     teaching_history = [{
         "semester": row["semester"],
         "courseId": row["course_id"],

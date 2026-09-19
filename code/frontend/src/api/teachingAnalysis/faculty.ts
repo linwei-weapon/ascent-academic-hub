@@ -17,6 +17,11 @@ export function getFacultyOverview<T = any>(semester: string | number | boolean)
   return http.get<T>(`/admin/faculty/management-overview?semester=${encodeURIComponent(semester)}`)
 }
 
+// 读取首页KPI统一下钻，指标键由服务端白名单校验。
+export function getFacultyKpiDetails<T = any>(metricKey: UrlValue, query: UrlValue): Promise<T> {
+  return http.get<T>(`/admin/faculty/management-kpis/${encodeURIComponent(String(metricKey))}/details?${query}`)
+}
+
 // 读取课程师资列表，保留原字段和响应约定。
 export function getFacultyCourses<T = any>(query: UrlValue): Promise<T> {
   return http.get<T>(`/admin/faculty/management-courses?${query}`)

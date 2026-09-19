@@ -37,6 +37,7 @@ python -X utf8 scripts\migrate_permission_context.py
 python -X utf8 scripts\migrate_staff_relationships.py
 python -X utf8 scripts\migrate_etl_run.py
 python -X utf8 scripts\migrate_system_management.py
+python -X utf8 scripts\migrate_faculty_personnel_snapshot.py
 python -X utf8 scripts\migrate_student_growth_indexes.py
 python -X utf8 scripts\migrate_basic_reports.py
 

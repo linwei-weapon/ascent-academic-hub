@@ -57,6 +57,27 @@ CREATE TABLE dim_teacher (
     source       TEXT NOT NULL DEFAULT 'real'
 );
 
+-- 真实人事系统按学期提供的在岗教职工快照。允许空表：未接入时前端必须显示“待接入”，
+-- 不得回退到 fact_teacher_profile 的模拟年龄或把 dim_teacher 当作完整教职工名册。
+DROP TABLE IF EXISTS dim_staff_employment_snapshot;
+CREATE TABLE dim_staff_employment_snapshot (
+    semester_id      TEXT NOT NULL,
+    staff_id         TEXT NOT NULL,
+    college_id       TEXT,
+    dept             TEXT,
+    staff_category   TEXT,
+    employment_status TEXT NOT NULL,
+    title            TEXT,
+    age_band         TEXT,
+    is_under_35      INTEGER CHECK (is_under_35 IN (0,1) OR is_under_35 IS NULL),
+    source           TEXT NOT NULL DEFAULT 'real',
+    source_batch_id  TEXT NOT NULL CHECK (TRIM(source_batch_id) <> ''),
+    updated_at       TEXT NOT NULL CHECK (TRIM(updated_at) <> ''),
+    PRIMARY KEY (semester_id, staff_id)
+);
+CREATE INDEX idx_staff_snapshot_scope
+ON dim_staff_employment_snapshot(semester_id,college_id,employment_status);
+
 DROP TABLE IF EXISTS dim_semester;
 CREATE TABLE dim_semester (
     semester_id  TEXT PRIMARY KEY,   -- 如"2025-2026-2"
