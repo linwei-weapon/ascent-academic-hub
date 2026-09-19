@@ -1,10 +1,12 @@
 import sqlite3
 import unittest
+from datetime import date
 
 from backend.api.routers.faculty import (
     _faculty_analysis,
     _matches_structure_review,
     _priority_classification,
+    _under_35_flag,
     management_course,
     management_kpi_details,
     management_overview,
@@ -35,6 +37,7 @@ def make_conn() -> sqlite3.Connection:
             staff_category TEXT,
             employment_status TEXT NOT NULL,
             title TEXT,
+            birth_date TEXT,
             age_band TEXT,
             is_under_35 INTEGER,
             source TEXT NOT NULL DEFAULT 'real',
@@ -96,19 +99,19 @@ def make_conn() -> sqlite3.Connection:
     conn.executemany(
         """INSERT INTO dim_staff_employment_snapshot(
             semester_id,staff_id,college_id,dept,staff_category,employment_status,
-            title,age_band,is_under_35,source,source_batch_id,updated_at
-        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+            title,birth_date,age_band,is_under_35,source,source_batch_id,updated_at
+        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         [
             ("2025-2026-2", "T1", "C1", "学院A", "专任教师", "在岗",
-             "讲师", "35岁以下", 1, "real", "B1", "2026-02-01"),
+             "讲师", "2000-01-01", "35岁以下", 0, "real", "B1", "2026-02-01"),
             ("2025-2026-2", "T2", "C1", "学院A", "专任教师", "在岗",
-             "讲师", "35-44岁", 0, "real", "B1", "2026-02-01"),
+             "讲师", "1980-01-01", "35-44岁", 0, "real", "B1", "2026-02-01"),
             ("2025-2026-2", "TB", "C2", "学院B", "专任教师", "在岗",
-             "副教授", "45-54岁", 0, "real", "B1", "2026-02-01"),
+             "副教授", "1975-01-01", "45-54岁", 0, "real", "B1", "2026-02-01"),
             ("2025-2026-2", "T3", "C2", "学院B", "行政人员", "在岗",
-             None, "35-44岁", 0, "real", "B1", "2026-02-01"),
+             None, "1985-01-01", "35-44岁", 0, "real", "B1", "2026-02-01"),
             ("2025-2026-2", "TA", "C1", "学院A", "专任教师", "在岗",
-             "教授", "55岁及以上", 0, "real", "B1", "2026-02-01"),
+             "教授", "1960-01-01", "55岁及以上", 0, "real", "B1", "2026-02-01"),
         ],
     )
     conn.executemany(
@@ -187,6 +190,22 @@ def school_user() -> dict:
 
 
 class FacultyAssuranceRuleTest(unittest.TestCase):
+    def test_birth_date_precedes_under_35_snapshot_flag(self):
+        self.assertEqual(
+            1,
+            _under_35_flag(
+                {"birth_date": "2000-09-20", "is_under_35": 0},
+                today=date(2035, 9, 19),
+            ),
+        )
+        self.assertEqual(
+            0,
+            _under_35_flag(
+                {"birth_date": "2000-09-19", "is_under_35": 1},
+                today=date(2035, 9, 19),
+            ),
+        )
+
     def test_single_teacher_fact_does_not_alone_trigger_review(self):
         row = {
             "important_course": True,
@@ -329,7 +348,12 @@ class FacultyAssuranceIntegrationTest(unittest.TestCase):
             kpis["senior_title_teaching_rate"]["hint"],
         )
         self.assertEqual(3, kpis["senior_title_teaching_rate"]["denominator"])
-        self.assertEqual("33.3%", kpis["young_teacher_teaching_rate"]["value"])
+        self.assertEqual("1 人", kpis["young_teacher_teaching_rate"]["value"])
+        self.assertEqual(
+            "授课教师总数：3 人",
+            kpis["young_teacher_teaching_rate"]["sub"],
+        )
+        self.assertEqual(1, kpis["young_teacher_teaching_rate"]["numerator"])
         self.assertEqual(
             "青年教师授课占比=35岁以下青年教师授课去重人数÷授课教师总数×100%",
             kpis["young_teacher_teaching_rate"]["hint"],
@@ -392,9 +416,11 @@ class FacultyAssuranceIntegrationTest(unittest.TestCase):
         self.assertEqual("unavailable", kpis["young_teacher_teaching_rate"]["status"])
         self.assertEqual("—", kpis["young_teacher_teaching_rate"]["value"])
         self.assertEqual(
-            "青年教师数/授课教师总数",
+            "授课教师总数：3 人",
             kpis["young_teacher_teaching_rate"]["sub"],
         )
+        self.assertIsNone(kpis["young_teacher_teaching_rate"]["numerator"])
+        self.assertEqual(3, kpis["young_teacher_teaching_rate"]["denominator"])
 
     def test_personnel_snapshot_requires_trace_fields(self):
         self.conn.execute(

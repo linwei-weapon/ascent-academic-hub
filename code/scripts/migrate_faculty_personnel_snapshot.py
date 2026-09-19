@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS dim_staff_employment_snapshot (
     staff_category    TEXT,
     employment_status TEXT NOT NULL,
     title             TEXT,
+    birth_date        TEXT,
     age_band          TEXT,
     is_under_35       INTEGER CHECK (is_under_35 IN (0,1) OR is_under_35 IS NULL),
     source            TEXT NOT NULL DEFAULT 'real',
@@ -57,6 +58,13 @@ def migrate(db_path: Path | None = None) -> dict:
     conn = sqlite3.connect(path)
     try:
         conn.executescript(DDL)
+        columns = [row[1] for row in conn.execute(
+            "PRAGMA table_info(dim_staff_employment_snapshot)"
+        )]
+        if "birth_date" not in columns:
+            conn.execute(
+                "ALTER TABLE dim_staff_employment_snapshot ADD COLUMN birth_date TEXT"
+            )
         conn.commit()
         columns = [row[1] for row in conn.execute(
             "PRAGMA table_info(dim_staff_employment_snapshot)"

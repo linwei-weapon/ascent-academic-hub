@@ -6,6 +6,7 @@ import sqlite3
 import threading
 import time
 from collections import Counter, defaultdict
+from datetime import date
 from typing import Optional
 
 from fastapi import APIRouter, Depends
@@ -22,7 +23,7 @@ CUR = CURRENT_SEMESTER
 # 本科教学学院（排除研究生院/本科生院等非授课建制）
 _NON_TEACHING_COLLEGE = ("本科生院", "研究生院")
 FACULTY_RULE_VERSION = "FACULTY-ASSURANCE-2026.09.2"
-FACULTY_KPI_RULE_VERSION = "FACULTY-KPI-2026.09.4"
+FACULTY_KPI_RULE_VERSION = "FACULTY-KPI-2026.09.5"
 _IMPORTANT_COURSE_KEYWORDS = (
     "必修", "主干", "核心", "基础", "思想", "政治", "形势与政策",
     "体育", "数学", "英语",
@@ -122,6 +123,23 @@ def _table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
     ))
 
 
+def _under_35_flag(row: dict, today: Optional[date] = None) -> Optional[int]:
+    """优先按出生日期和当前日期计算年龄；缺失时兼容受控青年标识。"""
+    raw_birth_date = str(row.get("birth_date") or "").strip()
+    if raw_birth_date:
+        try:
+            born = date.fromisoformat(raw_birth_date[:10])
+            current = today or date.today()
+            age = current.year - born.year - (
+                (current.month, current.day) < (born.month, born.day)
+            )
+            return int(age < 35)
+        except ValueError:
+            pass
+    flag = row.get("is_under_35")
+    return int(flag) if flag in (0, 1) else None
+
+
 def _personnel_snapshot(conn: sqlite3.Connection, semester: str,
                         college_id: Optional[str] = None) -> dict:
     """读取真实在岗人员学期快照；缺表或缺批次时显式返回未就绪。"""
@@ -138,9 +156,14 @@ def _personnel_snapshot(conn: sqlite3.Connection, semester: str,
     if college_id:
         college_filter = " AND college_id=?"
         params.append(college_id)
+    columns = {
+        str(row["name"])
+        for row in dbm.query(conn, f"PRAGMA table_info({table_name})")
+    }
+    birth_date_select = "birth_date" if "birth_date" in columns else "NULL AS birth_date"
     rows = dbm.query(conn, f"""
         SELECT semester_id,staff_id,college_id,dept,staff_category,
-               employment_status,title,age_band,is_under_35,source,
+               employment_status,title,{birth_date_select},age_band,is_under_35,source,
                source_batch_id,updated_at
         FROM {table_name}
         WHERE semester_id=?{college_filter}
@@ -172,6 +195,8 @@ def _personnel_snapshot(conn: sqlite3.Connection, semester: str,
         (str(row.get("updated_at") or "") for row in rows),
         default="",
     ) or None
+    for row in rows:
+        row["is_under_35"] = _under_35_flag(row)
     return {
         "ready": True,
         "rows": rows,
@@ -917,10 +942,10 @@ def _management_kpis(conn: sqlite3.Connection, semester: str,
         young_rate = _rate(len(young_rows), len(teaching_staff_rows))
         young_ready = bool(age_known_rows) and (age_coverage or 0) >= 90
         young_status = "ready" if young_ready else "insufficient"
-        young_value = f"{young_rate:g}%" if young_ready and young_rate is not None else "—"
+        young_value = f"{len(young_rows)} 人" if young_ready else "—"
         young_sub = (
-            f"{len(young_rows)}/{len(teaching_staff_rows)} 人 · 年龄覆盖率 {age_coverage:g}%"
-            if age_coverage is not None else "年龄证据不足"
+            f"授课教师总数：{len(teaching_staff_rows)} 人"
+            if teaching_staff_rows else "授课教师总数：—"
         )
     else:
         age_known_rows = []
@@ -929,7 +954,7 @@ def _management_kpis(conn: sqlite3.Connection, semester: str,
         young_rate = None
         young_status = "unavailable"
         young_value = "—"
-        young_sub = "青年教师数/授课教师总数"
+        young_sub = f"授课教师总数：{len(scope_active_ids)} 人" if scope_active_ids else "授课教师总数：—"
 
     raw_cards = [
         ("teaching_staff_coverage", staff_value, staff_sub, staff_status,
@@ -944,7 +969,12 @@ def _management_kpis(conn: sqlite3.Connection, semester: str,
          "ready" if senior_ready else "insufficient", len(senior_ids), len(scope_active_ids),
          senior_rate if senior_ready else None, title_coverage),
         ("young_teacher_teaching_rate", young_value, young_sub, young_status,
-         len(young_rows), len(teaching_staff_rows) if snapshot["ready"] else None,
+         len(young_rows) if young_status == "ready" else None,
+         (
+             len(teaching_staff_rows) if snapshot["ready"] and teaching_staff_rows
+             else len(scope_active_ids) if not snapshot["ready"] and scope_active_ids
+             else None
+         ),
          young_rate if young_status == "ready" else None, age_coverage),
     ]
     cards = []
