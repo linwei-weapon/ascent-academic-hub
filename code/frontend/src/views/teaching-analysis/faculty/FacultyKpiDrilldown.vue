@@ -180,7 +180,7 @@ const emit = defineEmits<{
 
 const metricNames: Record<string, string> = {
   teaching_staff_coverage: '授课教师总数/教职工总数',
-  team_structure_exception: '团队结构异常课程数',
+  team_structure_exception: '教师结构异常课程数',
   continuous_single_teacher: '连续单点授课教师数',
   senior_title_teaching_rate: '高职称教师授课占比（教授、副教授）',
   young_teacher_teaching_rate: '青年教师授课占比（35岁以下）',

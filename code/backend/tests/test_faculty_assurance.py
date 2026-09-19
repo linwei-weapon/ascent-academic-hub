@@ -141,7 +141,9 @@ def make_conn() -> sqlite3.Connection:
 
     add_lessons("C_NORMAL", "2025-2026-2", "T1", 1, 20)
     for semester in ("2024-2025-2", "2025-2026-1", "2025-2026-2"):
-        add_lessons("C_PRIORITY", semester, "T1", 4, 30)
+        # 最近3次中允许1次联合授课；同一教师至少2次唯一授课即可命中。
+        teacher_ids = "T1;T2" if semester == "2024-2025-2" else ""
+        add_lessons("C_PRIORITY", semester, "T1", 4, 30, teacher_ids)
     add_lessons("C_ANOM", "2025-2026-2", "TA", 4, 40)
     add_lessons("C_CROSS", "2025-2026-2", "TB", 4, 30)
     add_lessons("C_TEAM", "2025-2026-2", "T1", 2, 30, "T1;T2")
@@ -235,6 +237,7 @@ class FacultyAssuranceRuleTest(unittest.TestCase):
             "data_candidate": False,
             "title_completeness_rate": 100,
             "senior_title_teachers": 0,
+            "junior_title_only": True,
         }
         review_type, _, _ = _priority_classification(row)
         self.assertEqual("priority_review", review_type)
@@ -252,7 +255,8 @@ class FacultyAssuranceIntegrationTest(unittest.TestCase):
         analysis = _faculty_analysis(self.conn, "2025-2026-2")
         courses = {row["course_id"]: row for row in analysis["courses"]}
 
-        self.assertEqual("general_observation", courses["C_NORMAL"]["review_type"])
+        self.assertEqual("structure_review", courses["C_NORMAL"]["review_type"])
+        self.assertTrue(courses["C_NORMAL"]["junior_title_only"])
         self.assertEqual("priority_review", courses["C_PRIORITY"]["review_type"])
         self.assertTrue(courses["C_PRIORITY"]["continuous_single"])
         self.assertEqual("data_candidate", courses["C_ANOM"]["review_type"])
@@ -304,8 +308,21 @@ class FacultyAssuranceIntegrationTest(unittest.TestCase):
             set(kpis),
         )
         self.assertEqual("3 / 5 人", kpis["teaching_staff_coverage"]["value"])
-        self.assertEqual(1, kpis["team_structure_exception"]["numerator"])
+        self.assertEqual(
+            "1.授课教师总数：与当前学期 教学任务 里涉及的所有教师去重数\n"
+            "2.教职工总数：当前学期 在职的教师数",
+            kpis["teaching_staff_coverage"]["hint"],
+        )
+        self.assertEqual(4, kpis["team_structure_exception"]["numerator"])
+        self.assertEqual("教师结构异常课程数", kpis["team_structure_exception"]["label"])
+        self.assertEqual("", kpis["team_structure_exception"]["sub"])
+        self.assertIn("职称仅包含助教或讲师", kpis["team_structure_exception"]["hint"])
         self.assertEqual(1, kpis["continuous_single_teacher"]["numerator"])
+        self.assertEqual(
+            "1. 同一教师在最近3次实际开课至少2次作为唯一授课教师（同一门课程），"
+            "按教师工号去重（最近3次是实际开课记录，不是连续自然学期）",
+            kpis["continuous_single_teacher"]["hint"],
+        )
         self.assertEqual("33.3%", kpis["senior_title_teaching_rate"]["value"])
         self.assertEqual("33.3%", kpis["young_teacher_teaching_rate"]["value"])
         self.assertTrue(all(item["hint"] and item["drilldown"] for item in kpis.values()))
@@ -326,8 +343,8 @@ class FacultyAssuranceIntegrationTest(unittest.TestCase):
             "team_structure_exception", semester="2025-2026-2",
             user=school_user(), conn=self.conn,
         )["data"]
-        self.assertEqual(1, structure["total"])
-        self.assertEqual("C_TEAM", structure["items"][0]["course_id"])
+        self.assertEqual(4, structure["total"])
+        self.assertIn("C_TEAM", {item["course_id"] for item in structure["items"]})
 
         continuous = management_kpi_details(
             "continuous_single_teacher", semester="2025-2026-2",
@@ -361,8 +378,13 @@ class FacultyAssuranceIntegrationTest(unittest.TestCase):
         kpis = {item["key"]: item for item in payload["kpis"]}
         self.assertEqual("partial", kpis["teaching_staff_coverage"]["status"])
         self.assertIn("—", kpis["teaching_staff_coverage"]["value"])
+        self.assertEqual("", kpis["teaching_staff_coverage"]["sub"])
         self.assertEqual("unavailable", kpis["young_teacher_teaching_rate"]["status"])
         self.assertEqual("—", kpis["young_teacher_teaching_rate"]["value"])
+        self.assertEqual(
+            "青年教师数/授课教师总数",
+            kpis["young_teacher_teaching_rate"]["sub"],
+        )
 
     def test_personnel_snapshot_requires_trace_fields(self):
         self.conn.execute(

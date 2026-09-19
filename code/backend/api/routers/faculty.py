@@ -21,8 +21,8 @@ REAL = LATEST_REAL_SEMESTER
 CUR = CURRENT_SEMESTER
 # 本科教学学院（排除研究生院/本科生院等非授课建制）
 _NON_TEACHING_COLLEGE = ("本科生院", "研究生院")
-FACULTY_RULE_VERSION = "FACULTY-ASSURANCE-2026.07.1"
-FACULTY_KPI_RULE_VERSION = "FACULTY-KPI-2026.09.1"
+FACULTY_RULE_VERSION = "FACULTY-ASSURANCE-2026.09.2"
+FACULTY_KPI_RULE_VERSION = "FACULTY-KPI-2026.09.2"
 _IMPORTANT_COURSE_KEYWORDS = (
     "必修", "主干", "核心", "基础", "思想", "政治", "形势与政策",
     "体育", "数学", "英语",
@@ -37,23 +37,24 @@ _KPI_DEFINITIONS = {
         "tone": "primary",
         "formula": "当前人员组织范围内承担有效本科教学任务的在岗教职工数÷同期在岗教职工总数。",
         "hint": (
-            "授课教师总数：选定学期内，当前授权组织中至少承担1项有效本科教学任务的在岗教职工去重人数。"
-            "教职工总数：同期真实人员快照中处于有效在岗状态的教职工去重人数。异常教学任务不进入正式结果。"
+            "1.授课教师总数：与当前学期 教学任务 里涉及的所有教师去重数\n"
+            "2.教职工总数：当前学期 在职的教师数"
         ),
         "boundary": "两项均按人员所属组织统计；真实人员快照未接入时仅披露课程责任范围内的实际授课教师数，不计算参与率。",
     },
     "team_structure_exception": {
-        "label": "团队结构异常课程数",
+        "label": "教师结构异常课程数",
         "tone": "amber",
         "formula": (
-            "重点保障课程中，达到4个教学班或100人次、实际授课教师不少于2人、职称证据率不低于90%，"
-            "但实际授课团队未体现教授或副教授的去重课程数。"
+            "命中连续单点、授课教师年龄同处55岁阈值一侧，或授课教师职称仅包含助教或讲师的去重课程数。"
         ),
         "hint": (
-            "通过数据质量门禁的重点保障课程中，达到规模条件、实际授课教师不少于2人、职称证据完整率不低于90%，"
-            "但实际授课团队未体现教授或副教授的课程数。仅表示团队结构需要核查，不评价教师个人能力或教学质量。"
+            "1.同一教师在最近3次实际开课至少2次作为唯一授课教师（同一门课程）"
+            "（最近3次是实际开课记录，不是连续自然学期）\n"
+            "2.授课老师的年龄全部大于等于55岁的，或者全部小于等于55岁 的课程\n"
+            "3.授课教师中，职称仅包含助教或讲师的 课程"
         ),
-        "boundary": "异常表示命中结构核查规则，不等于课程不合格，也不用于教师绩效评价。",
+        "boundary": "年龄或职称证据不完整时不触发对应结构规则；异常不等于课程不合格，也不用于教师绩效评价。",
     },
     "continuous_single_teacher": {
         "label": "连续单点授课教师数",
@@ -62,8 +63,8 @@ _KPI_DEFINITIONS = {
             "命中连续单点课程口径的课程中，同一教师在最近3次实际开课至少2次作为唯一授课教师，按教师工号去重。"
         ),
         "hint": (
-            "在连续单点课程中，对主要连续承担教师去重计数。连续单点课程指最近3次实际开课均为单教师承担，"
-            "且同一教师至少2次作为唯一实际授课教师，并满足重点课程及规模条件。最近3次是实际开课记录，不是连续自然学期。"
+            "1. 同一教师在最近3次实际开课至少2次作为唯一授课教师（同一门课程），"
+            "按教师工号去重（最近3次是实际开课记录，不是连续自然学期）"
         ),
         "boundary": "只表示课程供给连续性需要核查，不表示教师本人存在风险。",
     },
@@ -289,10 +290,12 @@ def _priority_classification(row: dict) -> tuple[str, list[str], str]:
             f"覆盖人次占比{row.get('max_enrolled_share', 0):g}%，均达到可比组P90"
         )
     if structure_review:
-        reasons.append(
-            f"团队职称证据率{row.get('title_completeness_rate', 0):g}%，"
-            "但当前实际授课团队未体现高级职称教师"
-        )
+        if row.get("continuous_single"):
+            reasons.append("同一教师在最近3次实际开课中至少2次作为唯一授课教师")
+        if row.get("age_structure_exception"):
+            reasons.append("授课教师年龄全部处于55岁及以上或55岁及以下")
+        if row.get("junior_title_only"):
+            reasons.append("授课教师职称仅包含助教或讲师")
     if data_candidate:
         reasons.extend(row.get("data_candidate_reasons") or [])
 
@@ -309,26 +312,37 @@ def _priority_classification(row: dict) -> tuple[str, list[str], str]:
 
 def _matches_structure_review(row: dict) -> bool:
     """结构异常是可并存规则，不依赖互斥的课程核查主分类。"""
-    scale_reached = int(row.get("lesson_count") or 0) >= 4 or int(row.get("enrolled") or 0) >= 100
     return bool(
         row.get("evaluable", True)
-        and row.get("important_course")
-        and int(row.get("teacher_count") or 0) >= 2
-        and float(row.get("title_completeness_rate") or 0) >= 90
-        and int(row.get("senior_title_teachers") or 0) == 0
-        and scale_reached
+        and (
+            row.get("continuous_single")
+            or row.get("age_structure_exception")
+            or row.get("junior_title_only")
+        )
     )
 
 
 def _matches_continuous_single_review(row: dict) -> bool:
     """连续单点正式规则，首页、汇总与下钻共用。"""
-    scale_reached = int(row.get("lesson_count") or 0) >= 4 or int(row.get("enrolled") or 0) >= 100
     return bool(
         row.get("evaluable")
         and row.get("continuous_single")
-        and row.get("important_course")
-        and scale_reached
     )
+
+
+def _age_threshold_side(age_band: object) -> Optional[str]:
+    """把受控年龄段归入55岁阈值两侧；未知值不参与结构判断。"""
+    value = str(age_band or "").strip().replace(" ", "")
+    if not value:
+        return None
+    if value in {"55岁及以上", "55及以上", "≥55岁", "55岁以上", "55+"}:
+        return "gte_55"
+    if value in {
+        "35岁以下", "35岁及以下", "35-44岁", "36-45岁", "45-54岁",
+        "46-55岁", "55岁及以下", "≤55岁",
+    }:
+        return "lte_55"
+    return None
 
 
 def _teaching_set(conn, sem) -> set:
@@ -424,6 +438,11 @@ def _faculty_analysis(conn: sqlite3.Connection, semester: str,
         str(row["teacher_id"]): row
         for row in dbm.query(conn, "SELECT teacher_id,name,title,dept,source FROM dim_teacher")
     }
+    personnel_snapshot = _personnel_snapshot(conn, semester)
+    age_band_by_teacher = {
+        str(row["staff_id"]): row.get("age_band")
+        for row in personnel_snapshot["rows"]
+    } if personnel_snapshot["ready"] else {}
     excluded_ids = _excluded_teacher_ids(conn, semester)
     raw_lessons = dbm.query(conn, f"""
         SELECT l.lesson_id,l.semester_id,l.course_id,l.teacher_id,l.teacher_ids,
@@ -528,6 +547,25 @@ def _faculty_analysis(conn: sqlite3.Connection, semester: str,
             round(row["known_title_teachers"] * 100 / row["teacher_count"], 1)
             if row["teacher_count"] else 0
         )
+        title_set = {
+            normalize_title(teacher_meta.get(member, {}).get("title"))
+            for member in members
+            if str(teacher_meta.get(member, {}).get("title") or "").strip()
+        }
+        row["junior_title_only"] = bool(
+            members
+            and row["known_title_teachers"] == row["teacher_count"]
+            and title_set.issubset({"助教", "讲师"})
+        )
+        age_sides = [
+            _age_threshold_side(age_band_by_teacher.get(member))
+            for member in members
+        ]
+        row["age_structure_exception"] = bool(
+            members
+            and all(age_sides)
+            and len(set(age_sides)) == 1
+        )
         row["max_lesson_share"] = (
             round(max(primary_lesson_counts.values(), default=0) * 100 / row["lesson_count"], 1)
             if row["lesson_count"] else 0
@@ -548,13 +586,11 @@ def _faculty_analysis(conn: sqlite3.Connection, semester: str,
         repeated_single_teachers = Counter(single_teachers)
         row["continuous_single"] = (
             len(observed) >= 3
-            and len(single_teachers) == len(observed)
-            and max(repeated_single_teachers.values(), default=0)
-            >= len(observed) - 1
+            and max(repeated_single_teachers.values(), default=0) >= 2
         )
         row["continuous_teacher_ids"] = sorted(
             teacher_id for teacher_id, count in repeated_single_teachers.items()
-            if row["continuous_single"] and count >= len(observed) - 1
+            if row["continuous_single"] and count >= 2
         )
         row["continuity_semesters"] = [sem for sem, _ in observed]
         row["continuity_evidence"] = [
@@ -838,7 +874,13 @@ def _management_kpis(conn: sqlite3.Connection, semester: str,
         staff_denominator = None
         staff_rate = None
         staff_value = f"{staff_numerator} / — 人"
-        staff_sub = snapshot["reason"]
+        staff_sub = (
+            "" if snapshot["reason"] in {
+                "当前学期和授权范围没有可用的真实在岗人员快照",
+                "真实在岗教职工名册尚未接入",
+            }
+            else snapshot["reason"]
+        )
         staff_status = "partial"
 
     structure_rows = [
@@ -893,12 +935,12 @@ def _management_kpis(conn: sqlite3.Connection, semester: str,
         young_rate = None
         young_status = "unavailable"
         young_value = "—"
-        young_sub = snapshot["reason"]
+        young_sub = "青年教师数/授课教师总数"
 
     raw_cards = [
         ("teaching_staff_coverage", staff_value, staff_sub, staff_status,
          staff_numerator, staff_denominator, staff_rate, None),
-        ("team_structure_exception", f"{len(structure_rows)} 门", "命中结构规则，待核查", "ready",
+        ("team_structure_exception", f"{len(structure_rows)} 门", "", "ready",
          len(structure_rows), len(analysis["courses"]), None, None),
         ("continuous_single_teacher", f"{len(continuous_teacher_ids)} 人",
          f"涉及 {len(continuous_rows)} 门连续单点课程", "ready",
@@ -996,8 +1038,8 @@ def management_overview(college: Optional[str] = None, semester: Optional[str] =
             "course_total": "学院可评估课程数与数据候选课程数之和。",
             "evaluable_courses": "通过数据质量门禁，且具有课程责任组织、有效教学任务和可识别实际授课教师的去重课程数。",
             "priority_review_courses": "重点保障课程中，同时命中规模条件与高影响单点、连续单点或当期任务高度集中规则的课程数；单教师事实不会单独触发。",
-            "continuous_single_courses": "重点保障课程最近3次实际开课均为单教师承担，且至少2次为同一教师，同时达到4个教学班或100人次规模的课程数。",
-            "structure_review_courses": "重点保障课程实际团队不少于2人、职称证据率不低于90%、达到规模条件且未体现高级职称教师的课程数。",
+            "continuous_single_courses": "同一教师在同一门课程最近3次实际开课中至少2次作为唯一授课教师的课程数。",
+            "structure_review_courses": "命中连续单点、授课教师年龄同处55岁阈值一侧，或授课教师职称仅包含助教或讲师的课程数。",
             "data_candidate_courses": "因课程组织、授课教师、职称或异常任务证据不足，暂不形成正式保障判断的课程数。",
             "title_completeness": "实际授课教师中职称字段非空人数÷实际授课教师人数。",
             "boundary": "本页用于课程师资供给连续性与团队保障核查，不评价教师个人教学质量；教师负荷排名归属教学运行分析，未接入的年龄、临退休、正式团队和未来计划不形成正式结论。",

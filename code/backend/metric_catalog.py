@@ -190,11 +190,11 @@ IMPLEMENTED_METRICS = {
     "F-10": {
         "technical_kpi_id": "team_structure_exception_course_count",
         "status": "published",
-        "data_source": "fact_lesson / dim_course / dim_teacher / data_quality_issue",
+        "data_source": "fact_lesson / dim_course / dim_teacher / dim_staff_employment_snapshot / data_quality_issue",
         "grain": "课程×学期×责任学院",
-        "update_cycle": "教学任务和教师职称同步后",
+        "update_cycle": "教学任务、教师年龄和职称同步后",
         "version": "3.0",
-        "pages": [("/admin/faculty", "团队结构异常课程数")],
+        "pages": [("/admin/faculty", "教师结构异常课程数")],
     },
     "F-17": {
         "technical_kpi_id": "teaching_staff_coverage",
