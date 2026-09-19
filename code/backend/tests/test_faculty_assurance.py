@@ -748,6 +748,18 @@ class FacultyAssuranceIntegrationTest(unittest.TestCase):
         )["data"]
         self.assertGreater(details["items"][0]["lesson_count"], 0)
 
+        young_details = management_kpi_details(
+            "young_teacher_teaching_rate", semester="2025-2026-2",
+            user=school_user(), conn=self.conn, v2_conn=self.v2_conn,
+        )["data"]
+        self.assertEqual(1, len(young_details["breakdown"]))
+        self.assertEqual("学院A", young_details["breakdown"][0]["college_name"])
+        self.assertEqual(3, young_details["breakdown"][0]["teacher_count"])
+        self.assertEqual(0, young_details["breakdown"][0]["known_count"])
+        self.assertIsNone(young_details["breakdown"][0]["count"])
+        self.assertIsNone(young_details["breakdown"][0]["rate"])
+        self.assertEqual(0.0, young_details["breakdown"][0]["coverage"])
+
         self.v2_conn.execute("DELETE FROM dim_staff")
         payload = management_overview(
             semester="2025-2026-2", user=school_user(), conn=self.conn,

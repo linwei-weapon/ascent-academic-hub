@@ -25,7 +25,7 @@ CUR = CURRENT_SEMESTER
 # 本科教学学院（排除研究生院/本科生院等非授课建制）
 _NON_TEACHING_COLLEGE = ("本科生院", "研究生院")
 FACULTY_RULE_VERSION = "FACULTY-ASSURANCE-2026.09.3"
-FACULTY_KPI_RULE_VERSION = "FACULTY-KPI-2026.09.14"
+FACULTY_KPI_RULE_VERSION = "FACULTY-KPI-2026.09.15"
 _IMPORTANT_COURSE_KEYWORDS = (
     "必修", "主干", "核心", "基础", "思想", "政治", "形势与政策",
     "体育", "数学", "英语",
@@ -1510,12 +1510,14 @@ def management_kpi_details(metric_key: str, college: Optional[str] = None,
 
     elif metric_key == "young_teacher_teaching_rate":
         age_snapshot = _personnel_snapshot(conn, sem)
+        teaching_ids = scope_active_ids
+        scope_stats = analysis.get("teacher_scope_stats") or {}
+        age_known_ids: set[str] = set()
+        young_ids: set[str] = set()
         if age_snapshot["ready"]:
-            teaching_ids = scope_active_ids
             personnel_attributes = _real_personnel_attributes(
                 conn, v2_conn, sem, teaching_ids, teacher_meta,
             )
-            scope_stats = analysis.get("teacher_scope_stats") or {}
             young_snapshot = [
                 row for row in age_snapshot["rows"]
                 if str(row["staff_id"]) in teaching_ids and row.get("is_under_35") == 1
@@ -1551,37 +1553,42 @@ def management_kpi_details(metric_key: str, college: Optional[str] = None,
             evidence_gaps = _teacher_display_rows(missing_age_ids, analysis, teacher_stats)
             for item in evidence_gaps:
                 item["gap_reason"] = "年龄段/35岁以下标识缺失"
-            age_buckets: dict[str, dict[str, set[str]]] = {}
             young_ids = {str(row["staff_id"]) for row in young_snapshot}
-            for staff_id in teaching_ids:
-                college_names = (
-                    scope_stats.get(staff_id, {}).get("college_names")
-                    or ["待映射组织"]
-                )
-                for name in college_names:
-                    bucket = age_buckets.setdefault(name, {
-                        "teacher_ids": set(), "known_ids": set(), "young_ids": set(),
-                    })
-                    bucket["teacher_ids"].add(staff_id)
-                    if staff_id in age_known_ids:
-                        bucket["known_ids"].add(staff_id)
-                    if staff_id in young_ids:
-                        bucket["young_ids"].add(staff_id)
-            breakdown = [{
-                "college_name": name,
-                "teacher_count": len(bucket["teacher_ids"]),
-                "known_count": len(bucket["known_ids"]),
-                "count": len(bucket["young_ids"]),
-                "rate": _rate(len(bucket["young_ids"]), len(bucket["teacher_ids"])),
-                "coverage": _rate(len(bucket["known_ids"]), len(bucket["teacher_ids"])),
-            } for name, bucket in sorted(age_buckets.items())]
-            breakdown.sort(key=lambda row: (
-                -float(row.get("rate") or 0),
-                str(row.get("college_name") or ""),
-            ))
             source_note = "真实教学任务 + 人事系统提供的受控年龄段/35岁以下标识"
         else:
             source_note = age_snapshot["reason"] + "；未读取模拟年龄画像"
+
+        age_buckets: dict[str, dict[str, set[str]]] = {}
+        for staff_id in teaching_ids:
+            college_names = (
+                scope_stats.get(staff_id, {}).get("college_names")
+                or ["待映射组织"]
+            )
+            for name in college_names:
+                bucket = age_buckets.setdefault(name, {
+                    "teacher_ids": set(), "known_ids": set(), "young_ids": set(),
+                })
+                bucket["teacher_ids"].add(staff_id)
+                if staff_id in age_known_ids:
+                    bucket["known_ids"].add(staff_id)
+                if staff_id in young_ids:
+                    bucket["young_ids"].add(staff_id)
+        breakdown = [{
+            "college_name": name,
+            "teacher_count": len(bucket["teacher_ids"]),
+            "known_count": len(bucket["known_ids"]),
+            "count": len(bucket["young_ids"]) if bucket["known_ids"] else None,
+            "rate": (
+                _rate(len(bucket["young_ids"]), len(bucket["teacher_ids"]))
+                if bucket["known_ids"] else None
+            ),
+            "coverage": _rate(len(bucket["known_ids"]), len(bucket["teacher_ids"])),
+        } for name, bucket in sorted(age_buckets.items())]
+        breakdown.sort(key=lambda row: (
+            row.get("rate") is None,
+            -float(row.get("rate") or 0),
+            str(row.get("college_name") or ""),
+        ))
         summary["young_teacher_count"] = len(rows)
 
     department_options: list[str] = []

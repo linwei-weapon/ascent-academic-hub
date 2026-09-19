@@ -58,7 +58,7 @@
           </div>
         </section>
 
-        <section v-if="!isSimpleList && data.breakdown?.length" class="breakdown-section">
+        <section v-if="!isSimpleList && (isTeacherRateList || data.breakdown?.length)" class="breakdown-section">
           <div class="section-title">
             <div><h3>{{ breakdownTitle }}</h3><p v-if="!isTeacherRateList">用于解释总体值，不用于学院或教师绩效排名。</p></div>
           </div>
@@ -72,8 +72,9 @@
             :pagination="false"
             empty-text="当前没有学院分布数据"
           >
-            <template #col-rate="{ row }">{{ row.rate ?? 0 }}%</template>
-            <template #col-coverage="{ row }">{{ row.coverage ?? 0 }}%</template>
+            <template #col-count="{ row }">{{ row.count ?? '—' }}</template>
+            <template #col-rate="{ row }">{{ row.rate === null || row.rate === undefined ? '—' : `${row.rate}%` }}</template>
+            <template #col-coverage="{ row }">{{ row.coverage === null || row.coverage === undefined ? '—' : `${row.coverage}%` }}</template>
           </AppTable>
           <div v-else class="breakdown-grid">
             <div v-for="item in data.breakdown" :key="item.college_id || item.label || item.college_name" class="breakdown-item">

@@ -220,7 +220,7 @@ IMPLEMENTED_METRICS = {
         "data_source": "fact_lesson / dim_staff_employment_snapshot / data_quality_issue",
         "grain": "教师×学期×授权教学范围",
         "update_cycle": "教学任务和真实人员快照同步后",
-        "version": "3.2",
+        "version": "3.3",
         "pages": [("/admin/faculty", "青年教师授课占比（35岁以下）")],
     },
 }
