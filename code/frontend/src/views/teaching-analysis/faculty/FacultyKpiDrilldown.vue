@@ -60,13 +60,13 @@
 
         <section v-if="!isSimpleList && data.breakdown?.length" class="breakdown-section">
           <div class="section-title">
-            <div><h3>{{ isSeniorTeacherList ? '各学院高职称教师分布' : '结构分布' }}</h3><p v-if="!isSeniorTeacherList">用于解释总体值，不用于学院或教师绩效排名。</p></div>
+            <div><h3>{{ breakdownTitle }}</h3><p v-if="!isTeacherRateList">用于解释总体值，不用于学院或教师绩效排名。</p></div>
           </div>
           <AppTable
-            v-if="isSeniorTeacherList"
-            :columns="seniorBreakdownColumns"
+            v-if="isTeacherRateList"
+            :columns="teacherRateBreakdownColumns"
             :data="data.breakdown"
-            storage-key="faculty:kpi:senior-title:college-breakdown"
+            :storage-key="`faculty:kpi:${metricKey}:college-breakdown`"
             :config-version="1"
             :max-business-columns="5"
             :pagination="false"
@@ -114,9 +114,9 @@
           <div class="detail-toolbar" :class="{ 'list-only-toolbar': isSimpleList }">
             <div v-if="!isSimpleList">
               <h3>{{ detailTitle }}</h3>
-              <p v-if="!isSeniorTeacherList">{{ detailDescription }}</p>
+              <p v-if="!isTeacherRateList">{{ detailDescription }}</p>
             </div>
-            <div class="detail-search" :class="{ 'staff-list-search': isSimpleList || isSeniorTeacherList }">
+            <div class="detail-search" :class="{ 'staff-list-search': isSimpleList || isTeacherRateList }">
               <el-select
                 v-if="isTeachingStaffList || isContinuousTeacherList"
                 v-model="department"
@@ -133,7 +133,7 @@
                 />
               </el-select>
               <el-select
-                v-if="isSeniorTeacherList"
+                v-if="isTeacherRateList"
                 v-model="department"
                 clearable
                 placeholder="全部学院"
@@ -178,8 +178,8 @@
             :columns="columns"
             :data="data.items || []"
             :storage-key="`faculty:kpi:${metricKey}`"
-            :config-version="isTeachingStaffList ? 3 : ((isStructureCourseList || isContinuousTeacherList || isSeniorTeacherList) ? 2 : 1)"
-            :max-business-columns="isStructureCourseList ? 9 : (isContinuousTeacherList ? 10 : 8)"
+            :config-version="isTeachingStaffList ? 3 : ((isStructureCourseList || isContinuousTeacherList || isTeacherRateList) ? 2 : 1)"
+            :max-business-columns="isStructureCourseList ? 9 : (isContinuousTeacherList ? 10 : (isYoungTeacherList ? 9 : 8))"
             :loading="loading"
             :pagination="true"
             :page="page"
@@ -253,10 +253,12 @@ const isTeachingStaffList = computed(() => props.metricKey === 'teaching_staff_c
 const isStructureCourseList = computed(() => props.metricKey === 'team_structure_exception')
 const isContinuousTeacherList = computed(() => props.metricKey === 'continuous_single_teacher')
 const isSeniorTeacherList = computed(() => props.metricKey === 'senior_title_teaching_rate')
+const isYoungTeacherList = computed(() => props.metricKey === 'young_teacher_teaching_rate')
+const isTeacherRateList = computed(() => isSeniorTeacherList.value || isYoungTeacherList.value)
 const isSimpleList = computed(() => (
   isTeachingStaffList.value || isStructureCourseList.value || isContinuousTeacherList.value
 ))
-const hideMetricSummary = computed(() => isSimpleList.value || isSeniorTeacherList.value)
+const hideMetricSummary = computed(() => isSimpleList.value || isTeacherRateList.value)
 const loading = ref(false)
 const error = ref('')
 const keyword = ref('')
@@ -273,6 +275,8 @@ const drawerTitle = computed(() => isTeachingStaffList.value
       ? '连续单点授课教师'
       : isSeniorTeacherList.value
         ? '高职称教师授课情况'
+      : isYoungTeacherList.value
+        ? '青年教师授课情况'
       : (data.metric?.label || metricLabel.value))
 const searchPlaceholder = computed(() => isTeachingStaffList.value
   ? '搜索姓名、工号或授课课程名称'
@@ -281,6 +285,8 @@ const searchPlaceholder = computed(() => isTeachingStaffList.value
     : isContinuousTeacherList.value
       ? '搜索工号、姓名或课程名称'
       : isSeniorTeacherList.value
+        ? '搜索工号或姓名'
+      : isYoungTeacherList.value
         ? '搜索工号或姓名'
       : '搜索教师、课程或学院')
 let requestSerial = 0
@@ -344,13 +350,15 @@ const columns = computed<AppTableColumn[]>(() => {
     action,
   ]
   if (props.metricKey === 'young_teacher_teaching_rate') return [
-    { key: 'display_name', label: '教师', minWidth: 110, fixed: 'left', required: true, region: 'identity' },
-    { key: 'age_band', label: '年龄段', minWidth: 105, required: true, region: 'business' },
+    { key: 'staff_id', label: '工号', minWidth: 120, fixed: 'left', required: true, region: 'identity' },
+    { key: 'display_name', label: '姓名', minWidth: 110, fixed: 'left', required: true, region: 'identity' },
+    { key: 'dept', label: '学院', minWidth: 150, required: true, region: 'business' },
     { key: 'title', label: '职称', minWidth: 100, region: 'business' },
-    { key: 'dept', label: '人事归属', minWidth: 150, region: 'business' },
-    { key: 'course_count', label: '授课课程', minWidth: 95, align: 'center', region: 'business' },
-    { key: 'lesson_count', label: '教学班', minWidth: 85, align: 'center', region: 'business' },
-    { key: 'course_names', label: '课程证据', minWidth: 220, tooltip: true, region: 'business' },
+    { key: 'education', label: '学历', minWidth: 110, region: 'business' },
+    { key: 'age_band', label: '年龄段', minWidth: 105, region: 'business' },
+    { key: 'course_count', label: '授课课程数', minWidth: 105, align: 'center', region: 'business' },
+    { key: 'lesson_count', label: '教学班数', minWidth: 90, align: 'center', region: 'business' },
+    { key: 'course_names', label: '授课课程', minWidth: 220, tooltip: true, region: 'business' },
     action,
   ]
   return [
@@ -373,20 +381,26 @@ const gapColumns: AppTableColumn[] = [
   { key: 'actions', label: '操作', width: 100, fixed: 'right', required: true, region: 'action' },
 ]
 
-const seniorBreakdownColumns: AppTableColumn[] = [
+const teacherRateBreakdownColumns = computed<AppTableColumn[]>(() => [
   { key: 'college_name', label: '学院', minWidth: 180, fixed: 'left', required: true, region: 'identity' },
-  { key: 'count', label: '高职称教师数', minWidth: 130, align: 'center', required: true, region: 'business' },
+  { key: 'count', label: isYoungTeacherList.value ? '青年教师数' : '高职称教师数', minWidth: 130, align: 'center', required: true, region: 'business' },
   { key: 'teacher_count', label: '授课教师数', minWidth: 120, align: 'center', required: true, region: 'business' },
   { key: 'rate', label: '占比', minWidth: 100, align: 'center', required: true, region: 'business' },
-  { key: 'coverage', label: '授课教师职称覆盖率', minWidth: 170, align: 'center', required: true, region: 'business' },
-]
+  { key: 'coverage', label: isYoungTeacherList.value ? '授课教师年龄覆盖率' : '授课教师职称覆盖率', minWidth: 170, align: 'center', required: true, region: 'business' },
+])
+
+const breakdownTitle = computed(() => isSeniorTeacherList.value
+  ? '各学院高职称教师分布'
+  : isYoungTeacherList.value
+    ? '各学院青年教师分布'
+    : '结构分布')
 
 const detailTitle = computed(() => props.metricKey === 'team_structure_exception'
   ? '命中结构核查规则的课程'
   : props.metricKey === 'continuous_single_teacher'
     ? '连续单点教师—课程证据'
     : props.metricKey === 'young_teacher_teaching_rate'
-      ? '35岁以下实际授课教师'
+      ? '35岁以下青年教师实际授课情况'
       : props.metricKey === 'senior_title_teaching_rate'
         ? '教授、副教授实际授课情况'
         : '实际授课教师')
@@ -410,7 +424,7 @@ async function load(force = false) {
     })
     if (props.collegeId) query.set('college', props.collegeId)
     if (keyword.value.trim()) query.set('keyword', keyword.value.trim())
-    if ((isTeachingStaffList.value || isContinuousTeacherList.value || isSeniorTeacherList.value) && department.value) query.set('department', department.value)
+    if ((isTeachingStaffList.value || isContinuousTeacherList.value || isTeacherRateList.value) && department.value) query.set('department', department.value)
     if (isStructureCourseList.value && openingCollege.value) query.set('opening_college', openingCollege.value)
     const result = await getFacultyKpiDetails<any>(props.metricKey, query)
     if (serial !== requestSerial) return

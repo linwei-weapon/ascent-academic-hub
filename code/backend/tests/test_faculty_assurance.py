@@ -696,6 +696,31 @@ class FacultyAssuranceIntegrationTest(unittest.TestCase):
         )["data"]
         self.assertEqual("T1", young["items"][0]["staff_id"])
         self.assertEqual("35岁以下", young["items"][0]["age_band"])
+        self.assertEqual("硕士研究生", young["items"][0]["education"])
+        self.assertEqual("学院A", young["items"][0]["dept"])
+        self.assertEqual(["学院A"], young["college_options"])
+        self.assertEqual("学院A", young["breakdown"][0]["college_name"])
+        self.assertEqual(1, young["breakdown"][0]["count"])
+        self.assertEqual(3, young["breakdown"][0]["teacher_count"])
+        self.assertEqual(33.3, young["breakdown"][0]["rate"])
+
+        young_by_staff_id = management_kpi_details(
+            "young_teacher_teaching_rate", semester="2025-2026-2", keyword="T1",
+            user=school_user(), conn=self.conn, v2_conn=self.v2_conn,
+        )["data"]
+        self.assertEqual(["T1"], [item["staff_id"] for item in young_by_staff_id["items"]])
+
+        young_by_name = management_kpi_details(
+            "young_teacher_teaching_rate", semester="2025-2026-2", keyword="教师1",
+            user=school_user(), conn=self.conn, v2_conn=self.v2_conn,
+        )["data"]
+        self.assertEqual(["T1"], [item["staff_id"] for item in young_by_name["items"]])
+
+        young_by_college = management_kpi_details(
+            "young_teacher_teaching_rate", semester="2025-2026-2", department="学院A",
+            user=school_user(), conn=self.conn, v2_conn=self.v2_conn,
+        )["data"]
+        self.assertEqual(["T1"], [item["staff_id"] for item in young_by_college["items"]])
 
     def test_personnel_metrics_disclose_missing_real_snapshot(self):
         self.conn.execute("DROP TABLE dim_staff_employment_snapshot")
@@ -771,6 +796,49 @@ class FacultyAssuranceIntegrationTest(unittest.TestCase):
         self.assertEqual(1, college["count"])
         self.assertEqual(33.3, college["rate"])
         self.assertEqual(33.3, college["coverage"])
+
+    def test_young_teacher_drilldown_uses_real_attributes_and_sorts_college_rates(self):
+        self.conn.execute(
+            "UPDATE dim_teacher SET dept='模拟学院',title='模拟职称',source='sim' WHERE teacher_id='T1'"
+        )
+        self.conn.execute(
+            """UPDATE dim_staff_employment_snapshot
+               SET dept=NULL,title=NULL
+               WHERE semester_id='2025-2026-2' AND staff_id='T1'"""
+        )
+        self.conn.execute(
+            """UPDATE dim_staff_employment_snapshot
+               SET birth_date='2000-01-01',age_band='35岁以下',is_under_35=1
+               WHERE semester_id='2025-2026-2' AND staff_id='T2'"""
+        )
+        self.conn.execute(
+            """INSERT INTO dim_course(
+                   course_id,name,category,course_nature,is_required,dept
+               ) VALUES('C_B','学院B青年课程','专业课','必修',1,'学院B')"""
+        )
+        self.conn.execute(
+            """INSERT INTO fact_lesson(
+                   lesson_id,semester_id,course_id,teacher_id,teacher_ids,
+                   capacity,enrolled,total_hours,class_names
+               ) VALUES('L_B','2025-2026-2','C_B','T2','',40,35,32,'学院B-1班')"""
+        )
+        _analysis_cache.clear()
+
+        details = management_kpi_details(
+            "young_teacher_teaching_rate", semester="2025-2026-2",
+            user=school_user(), conn=self.conn, v2_conn=self.v2_conn,
+        )["data"]
+        items = {item["staff_id"]: item for item in details["items"]}
+        self.assertEqual("学院A", items["T1"]["dept"])
+        self.assertIsNone(items["T1"]["title"])
+        self.assertEqual("硕士研究生", items["T1"]["education"])
+        self.assertEqual(["T1", "T2"], [item["staff_id"] for item in details["items"]])
+        self.assertEqual(
+            ["学院B", "学院A"],
+            [row["college_name"] for row in details["breakdown"]],
+        )
+        self.assertEqual(100.0, details["breakdown"][0]["rate"])
+        self.assertEqual(66.7, details["breakdown"][1]["rate"])
 
     def test_senior_teacher_list_uses_the_same_real_title_for_selection_and_display(self):
         self.conn.execute(
