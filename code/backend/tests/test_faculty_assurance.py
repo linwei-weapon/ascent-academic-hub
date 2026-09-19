@@ -541,6 +541,39 @@ class FacultyAssuranceIntegrationTest(unittest.TestCase):
         )["data"]
         self.assertEqual({"T1", "T2"}, {item["staff_id"] for item in by_department["items"]})
 
+    def test_teaching_staff_details_are_aggregated_only_within_authorized_course_scope(self):
+        overview = management_overview(
+            college="C1", semester="2025-2026-2", user=college_user("C1"),
+            conn=self.conn, v2_conn=self.v2_conn,
+        )["data"]
+        coverage = next(
+            item for item in overview["kpis"]
+            if item["key"] == "teaching_staff_coverage"
+        )
+        self.assertEqual(3, coverage["numerator"])
+        self.assertEqual(66.7, coverage["rate"])
+        self.assertEqual("本科教学参与率 66.7%", coverage["sub"])
+
+        payload = management_kpi_details(
+            "teaching_staff_coverage", college="C1", semester="2025-2026-2",
+            user=college_user("C1"), conn=self.conn, v2_conn=self.v2_conn,
+        )["data"]
+        items = {item["staff_id"]: item for item in payload["items"]}
+
+        # 外院教师承担本院课程时仍属于当前授权课程范围，不能被人员归属过滤掉。
+        self.assertEqual({"T1", "T2", "TB"}, set(items))
+        self.assertEqual(1, items["TB"]["course_count"])
+        self.assertEqual(4, items["TB"]["lesson_count"])
+        self.assertEqual("跨单位承担课程", items["TB"]["course_names"])
+
+        # 每名教师的课程、教学班和课程名称均只聚合当前授权学院内的教学任务。
+        self.assertEqual(3, items["T1"]["course_count"])
+        self.assertEqual(9, items["T1"]["lesson_count"])
+        self.assertEqual(
+            {"普通必修课", "重点必修课", "团队结构课程"},
+            set(items["T1"]["course_names"].split("、")),
+        )
+
         structure = management_kpi_details(
             "team_structure_exception", semester="2025-2026-2",
             user=school_user(), conn=self.conn, v2_conn=self.v2_conn,

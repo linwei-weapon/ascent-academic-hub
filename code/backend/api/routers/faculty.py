@@ -25,7 +25,7 @@ CUR = CURRENT_SEMESTER
 # 本科教学学院（排除研究生院/本科生院等非授课建制）
 _NON_TEACHING_COLLEGE = ("本科生院", "研究生院")
 FACULTY_RULE_VERSION = "FACULTY-ASSURANCE-2026.09.3"
-FACULTY_KPI_RULE_VERSION = "FACULTY-KPI-2026.09.9"
+FACULTY_KPI_RULE_VERSION = "FACULTY-KPI-2026.09.10"
 _IMPORTANT_COURSE_KEYWORDS = (
     "必修", "主干", "核心", "基础", "思想", "政治", "形势与政策",
     "体育", "数学", "英语",
@@ -1011,16 +1011,15 @@ def _management_kpis(conn: sqlite3.Connection, semester: str,
                      college_name: Optional[str] = None) -> list[dict]:
     """构建首页5项正式KPI；数据未就绪时返回可解释的空值而不是0。"""
     snapshot = _personnel_snapshot(conn, semester, college_id)
-    all_teacher_stats = _all_active_teacher_stats(conn, semester)
     scope_active_ids = set(analysis.get("kpi_teacher_ids") or [])
     teacher_meta = analysis.get("teacher_meta") or {}
 
     if snapshot["ready"]:
         staff_ids = {str(row["staff_id"]) for row in snapshot["rows"]}
-        personnel_teaching_ids = staff_ids & set(all_teacher_stats)
-        staff_numerator = len(personnel_teaching_ids)
+        personnel_teaching_ids = staff_ids & scope_active_ids
+        staff_numerator = len(scope_active_ids)
         staff_denominator = len(staff_ids)
-        staff_rate = _rate(staff_numerator, staff_denominator)
+        staff_rate = _rate(len(personnel_teaching_ids), staff_denominator)
         staff_value = f"{staff_numerator} / {staff_denominator} 人"
         staff_sub = f"本科教学参与率 {staff_rate:g}%" if staff_rate is not None else "当前范围暂无在岗人员"
         staff_status = "ready"
@@ -1150,25 +1149,20 @@ def _teacher_display_rows(teacher_ids: set[str], analysis: dict,
         teacher = meta.get(teacher_id, {})
         teacher_stats = stats.get(teacher_id) or {}
         scoped = scope_stats.get(teacher_id) or {}
-        scoped_course_ids = set(scoped.get("course_ids") or [])
-        scoped_course_names = set(scoped.get("course_names") or [])
-        course_ids = scoped_course_ids or set(teacher_stats.get("course_ids") or [])
-        course_names = scoped_course_names or set(teacher_stats.get("course_names") or [])
-        if scoped_course_ids:
-            lesson_count = sum(
-                len(teacher_stats.get("lesson_keys_by_course", {}).get(course_id, set()))
-                for course_id in scoped_course_ids
-            )
-        else:
-            lesson_count = len(teacher_stats.get("lesson_keys") or set())
-        course_departments = sorted(teacher_stats.get("course_departments") or [])
-        evidence_course_id = sorted(scoped_course_ids or course_ids)[0] if (scoped_course_ids or course_ids) else None
+        course_ids = set(scoped.get("course_ids") or [])
+        course_names = set(scoped.get("course_names") or [])
+        lesson_count = sum(
+            len(teacher_stats.get("lesson_keys_by_course", {}).get(course_id, set()))
+            for course_id in course_ids
+        )
+        scope_departments = sorted(scoped.get("college_names") or [])
+        evidence_course_id = sorted(course_ids)[0] if course_ids else None
         rows.append({
             "staff_id": teacher_id,
             "display_name": teacher.get("name") or teacher_id,
             "title": teacher.get("title"),
             "education": teacher.get("education"),
-            "dept": teacher.get("dept") or (course_departments[0] if course_departments else None),
+            "dept": teacher.get("dept") or (scope_departments[0] if scope_departments else None),
             "staff_category": teacher.get("staff_category"),
             "course_count": len(course_ids),
             "lesson_count": lesson_count,
@@ -1260,11 +1254,14 @@ def management_kpi_details(metric_key: str, college: Optional[str] = None,
 
     if metric_key == "teaching_staff_coverage":
         if snapshot["ready"]:
-            staff_ids = {str(row["staff_id"]) for row in snapshot["rows"]}
-            teaching_ids = staff_ids & set(teacher_stats)
+            teaching_ids = scope_active_ids
             base_rows = {
                 item["staff_id"]: item
                 for item in _teacher_display_rows(teaching_ids, analysis, teacher_stats)
+            }
+            rows = list(base_rows.values())
+            snapshot_by_id = {
+                str(row["staff_id"]): row for row in snapshot["rows"]
             }
             college_names = {
                 row["college_id"]: row["name"]
@@ -1282,17 +1279,16 @@ def management_kpi_details(metric_key: str, college: Optional[str] = None,
                 })
                 bucket["staff_count"] += 1
                 bucket["teaching_teacher_count"] += int(staff_id in teaching_ids)
-                if staff_id in teaching_ids:
-                    detail = dict(base_rows.get(staff_id) or {"staff_id": staff_id, "display_name": staff_id})
-                    detail.update({
-                        "college_id": staff.get("college_id"),
-                        "dept": staff.get("dept") or detail.get("dept"),
-                        "staff_category": staff.get("staff_category"),
-                        "title": staff.get("title") or detail.get("title"),
-                        "education": staff.get("education") or detail.get("education"),
-                        "employment_status": staff.get("employment_status"),
-                    })
-                    rows.append(detail)
+            for detail in rows:
+                staff = snapshot_by_id.get(str(detail["staff_id"]), {})
+                detail.update({
+                    "college_id": staff.get("college_id"),
+                    "dept": staff.get("dept") or detail.get("dept"),
+                    "staff_category": staff.get("staff_category"),
+                    "title": staff.get("title") or detail.get("title"),
+                    "education": staff.get("education") or detail.get("education"),
+                    "employment_status": staff.get("employment_status"),
+                })
             for bucket in buckets.values():
                 bucket["rate"] = _rate(bucket["teaching_teacher_count"], bucket["staff_count"])
             breakdown = sorted(buckets.values(), key=lambda row: (-row["teaching_teacher_count"], row["college_name"]))
