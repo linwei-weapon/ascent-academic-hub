@@ -22,7 +22,7 @@ CUR = CURRENT_SEMESTER
 # 本科教学学院（排除研究生院/本科生院等非授课建制）
 _NON_TEACHING_COLLEGE = ("本科生院", "研究生院")
 FACULTY_RULE_VERSION = "FACULTY-ASSURANCE-2026.09.2"
-FACULTY_KPI_RULE_VERSION = "FACULTY-KPI-2026.09.3"
+FACULTY_KPI_RULE_VERSION = "FACULTY-KPI-2026.09.4"
 _IMPORTANT_COURSE_KEYWORDS = (
     "必修", "主干", "核心", "基础", "思想", "政治", "形势与政策",
     "体育", "数学", "英语",
@@ -78,11 +78,8 @@ _KPI_DEFINITIONS = {
     "young_teacher_teaching_rate": {
         "label": "青年教师授课占比（35岁以下）",
         "tone": "primary",
-        "formula": "真实人员快照中35岁以下实际授课教师数÷年龄状态已知的实际授课教师数×100%。",
-        "hint": (
-            "选定学期统计时点，35岁以下实际授课教师去重人数÷年龄状态已知的实际授课教师去重人数×100%。"
-            "年龄采用人事系统提供的受控年龄段或合规计算结果，不展示出生日期。年龄证据不足时不输出正式比例。"
-        ),
+        "formula": "35岁以下青年教师授课去重人数÷授课教师总数×100%。",
+        "hint": "青年教师授课占比=35岁以下青年教师授课去重人数÷授课教师总数×100%",
         "boundary": "不读取模拟教师画像，不向前端提供出生日期或精确年龄；年龄覆盖率低于90%时不输出正式比例。",
     },
 }
@@ -917,12 +914,12 @@ def _management_kpis(conn: sqlite3.Connection, semester: str,
         ]
         young_rows = [row for row in age_known_rows if int(row["is_under_35"]) == 1]
         age_coverage = _rate(len(age_known_rows), len(teaching_staff_rows))
-        young_rate = _rate(len(young_rows), len(age_known_rows))
+        young_rate = _rate(len(young_rows), len(teaching_staff_rows))
         young_ready = bool(age_known_rows) and (age_coverage or 0) >= 90
         young_status = "ready" if young_ready else "insufficient"
         young_value = f"{young_rate:g}%" if young_ready and young_rate is not None else "—"
         young_sub = (
-            f"{len(young_rows)}/{len(age_known_rows)} 人 · 年龄覆盖率 {age_coverage:g}%"
+            f"{len(young_rows)}/{len(teaching_staff_rows)} 人 · 年龄覆盖率 {age_coverage:g}%"
             if age_coverage is not None else "年龄证据不足"
         )
     else:
@@ -947,7 +944,7 @@ def _management_kpis(conn: sqlite3.Connection, semester: str,
          "ready" if senior_ready else "insufficient", len(senior_ids), len(scope_active_ids),
          senior_rate if senior_ready else None, title_coverage),
         ("young_teacher_teaching_rate", young_value, young_sub, young_status,
-         len(young_rows), len(age_known_rows) if snapshot["ready"] else None,
+         len(young_rows), len(teaching_staff_rows) if snapshot["ready"] else None,
          young_rate if young_status == "ready" else None, age_coverage),
     ]
     cards = []

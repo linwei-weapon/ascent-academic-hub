@@ -330,6 +330,11 @@ class FacultyAssuranceIntegrationTest(unittest.TestCase):
         )
         self.assertEqual(3, kpis["senior_title_teaching_rate"]["denominator"])
         self.assertEqual("33.3%", kpis["young_teacher_teaching_rate"]["value"])
+        self.assertEqual(
+            "青年教师授课占比=35岁以下青年教师授课去重人数÷授课教师总数×100%",
+            kpis["young_teacher_teaching_rate"]["hint"],
+        )
+        self.assertEqual(3, kpis["young_teacher_teaching_rate"]["denominator"])
         self.assertTrue(all(item["hint"] and item["drilldown"] for item in kpis.values()))
 
     def test_college_course_total_is_evaluable_plus_data_candidates(self):
