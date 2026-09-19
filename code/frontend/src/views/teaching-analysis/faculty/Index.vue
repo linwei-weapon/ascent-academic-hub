@@ -343,7 +343,7 @@
 
     <el-drawer
       v-model="teacherDrawer.visible"
-      :title="`${teacherDrawer.data.name || '教师'} · 教学经历证据`"
+      :title="`${teacherDrawer.data.name || '教师'} · 教学经历`"
       size="760px"
       append-to-body
       :modal="false"
@@ -351,13 +351,6 @@
       @closed="closeTeacherDrawer"
     >
       <div v-loading="teacherDrawer.loading" class="teacher-drawer">
-        <el-alert
-          type="info"
-          :closable="false"
-          show-icon
-          title="只呈现课程保障所需的教学经历"
-          :description="teacherDrawer.data.boundary || '不展示平均成绩、通过率或模拟个人画像，不用于教师绩效评价。'"
-        />
         <el-alert
           v-if="teacherDrawer.data.dataQuality"
           class="teacher-quality-alert"
@@ -370,13 +363,13 @@
         <el-descriptions class="teacher-profile-summary" :column="2" border>
           <el-descriptions-item label="职工号">{{ teacherDrawer.data.code || '—' }}</el-descriptions-item>
           <el-descriptions-item label="职称">{{ teacherDrawer.data.title || '—' }}</el-descriptions-item>
-          <el-descriptions-item label="人事归属" :span="2">{{ teacherDrawer.data.deptName || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="部门" :span="2">{{ teacherDrawer.data.deptName || '—' }}</el-descriptions-item>
         </el-descriptions>
         <div class="sa-kpi-row teacher-profile-kpis">
           <KpiCard v-for="k in teacherDrawer.data.kpis || []" :key="k.label" :label="k.label" :value="k.value" :hint="k.formula" tone="primary" />
         </div>
         <section class="drawer-section">
-          <div class="section-head"><div><h3>本学期教学任务</h3><p>联合授课不拆分贡献比例，所列学时不等同于人事核定工作量。</p></div></div>
+          <div class="section-head"><div><h3>本学期教学任务</h3></div></div>
           <AppTable
             :columns="teacherCurrentColumns"
 
@@ -390,7 +383,7 @@
             empty-text="当前学期暂无教学任务" :show-density="true" :show-column-settings="true" :data="currentCoursesPagination.rows" :pagination="true" :page="currentCoursesPagination.page" :page-size="currentCoursesPagination.pageSize" :total="currentCoursesPagination.total" @page-change="currentCoursesPagination.changePage" @page-size-change="currentCoursesPagination.changePageSize"/>
         </section>
         <section class="drawer-section teacher-history">
-          <div class="section-head"><div><h3>近年授课经历</h3><p>用于判断课程经验与实际供给范围，不作教学质量排名。</p></div></div>
+          <div class="section-head"><div><h3>近年授课经历</h3></div></div>
           <AppTable
             :columns="teacherHistoryColumns"
 
