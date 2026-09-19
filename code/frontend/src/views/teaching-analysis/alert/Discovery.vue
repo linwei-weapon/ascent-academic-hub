@@ -75,7 +75,7 @@
           {{ rule.detail?.match_rate ?? '—' }}%（{{ rule.detail?.match_positive ?? '—' }}/{{ rule.detail?.match_total ?? '—' }}），
           全体基线 {{ rule.detail?.overall_rate ?? '—' }}%。算法 {{ rule.detail?.algorithm_version || '—' }}。
         </div>
-        <div class="actions">
+        <div class="actions sa-button-row">
           <el-button size="small" type="success" :disabled="!canReview" @click="review(rule,'approve')">采纳并创建变更草稿</el-button>
           <el-button size="small" type="danger" plain :disabled="!canReview" @click="review(rule,'reject')">拒绝建议</el-button>
         </div>
@@ -418,7 +418,7 @@ onBeforeUnmount(stopStatusPolling)
 .actions {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
+  gap: var(--sa-button-gap);
   margin-top: 12px;
 }
 

@@ -62,7 +62,7 @@
         </div>
         <p class="cc-consequence">暂不处理：{{ sig.consequence }}</p>
 
-        <div class="cc-foot">
+        <div class="cc-foot sa-button-row">
           <el-button link type="primary" size="small" @click="emit('evidence', sig)">完整证据</el-button>
           <el-button v-if="sig.evidence.verify_route" link size="small" @click="goVerify(sig)">核验路由</el-button>
         </div>
@@ -308,7 +308,7 @@ function goVerify(sig: DecisionSignal) {
 .cc-foot {
   display: flex;
   justify-content: flex-end;
-  gap: 4px;
+  gap: var(--sa-button-gap);
   border-top: 1px dashed #ebeef5;
   padding-top: 6px;
 }

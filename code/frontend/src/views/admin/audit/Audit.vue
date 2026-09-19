@@ -25,6 +25,7 @@
         :data="rows"
         :loading="loading"
       >
+        <template #col-created_at="{row}">{{ formatAuditTime(row.created_at) }}</template>
         <template #col-action="{row}"><div>{{ actionLabel(row.action) }}</div><div class="sub-cell">{{ row.action }}</div></template>
         <template #col-target="{row}">{{ row.target_type || '—' }} · {{ row.target_id || '—' }}</template>
         <template #col-result="{row}"><el-tag size="small" :type="row.result==='success'?'success':row.result==='failed'?'danger':'warning'">{{ row.result }}</el-tag></template>
@@ -65,6 +66,24 @@ const labels:Record<string,string> = {
 const actionLabel = (value:string) => labels[value] || value
 // 只序列化已有审计详情用于展示，不修改记录内容。
 const detailText = (detail:any) => detail && Object.keys(detail).length ? JSON.stringify(detail) : '—'
+
+const auditTimeFormatter = new Intl.DateTimeFormat('zh-CN', {
+  timeZone: 'Asia/Shanghai',
+  year: 'numeric', month: '2-digit', day: '2-digit',
+  hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+})
+// 按时间戳中的时区解析，再统一显示北京时间；不修改原始审计记录。
+function formatAuditTime(value?: string | null): string {
+  const text = value?.trim()
+  if (!text) return '—'
+  // 无时区的历史值保留原钟面时间，避免浏览器时区导致偏移。
+  if (!/(?:Z|[+-]\d{2}:?\d{2})$/i.test(text)) return text.replace('T', ' ')
+  const date = new Date(text)
+  if (Number.isNaN(date.getTime())) return text
+  const parts = Object.fromEntries(auditTimeFormatter.formatToParts(date).map(part => [part.type, part.value]))
+  return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`
+}
+
 // 按操作筛选读取服务端分页，同时同步数量和可选动作。
 async function load(target=1) {
   loading.value = true

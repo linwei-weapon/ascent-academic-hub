@@ -13,7 +13,7 @@
     </div>
 
     <!-- 筛选栏 -->
-    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+    <div class="sa-button-row" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
       <el-select v-model="fCollege" size="small" style="width:150px" clearable filterable placeholder="全部学院" @change="onCollege">
         <el-option v-for="c in colleges" :key="c.value" :label="c.label" :value="c.value" />
       </el-select>

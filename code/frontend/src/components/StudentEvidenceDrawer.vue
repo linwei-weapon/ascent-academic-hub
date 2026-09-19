@@ -166,7 +166,7 @@
           </el-tab-pane>
         </el-tabs>
 
-        <div class="drawer-actions">
+        <div class="drawer-actions sa-button-row">
           <el-button v-if="aiEligible" type="primary" plain @click="emit('ai', student)">按需查看AI管理研判</el-button>
           <el-button type="primary" @click="openFullProfile">打开完整学生档案</el-button>
         </div>
@@ -400,7 +400,7 @@ watch(
 .intervention-list > div { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 8px; }
 .intervention-list span { color: #64748b; font-size: 12px; }
 .intervention-list p { grid-column: 1 / -1; margin: 0; color: #475569; }
-.drawer-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.drawer-actions { display: flex; justify-content: flex-end; gap: var(--sa-button-gap); margin-top: 14px; }
 @media (max-width: 900px) {
   .evidence-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .change-grid, .curriculum-grid { grid-template-columns: 1fr; }

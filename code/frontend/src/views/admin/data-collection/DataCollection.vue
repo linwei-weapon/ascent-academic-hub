@@ -6,7 +6,7 @@
         <h2 class="sa-page-title">数据采集监控</h2>
         <p class="sa-page-sub">判断分析数据是否已接入、是否及时更新、哪些问题影响业务页面；源数据仍在学校业务系统核查修订。</p>
       </div>
-      <div class="head-actions">
+      <div class="head-actions sa-button-row">
         <el-button :loading="exporting" @click="exportChecklist">导出接入核验清单</el-button>
         <el-button v-if="overview.canTrigger" type="primary" plain @click="operationVisible=true">运维操作</el-button>
         <el-button :loading="refreshing" @click="reloadAll">刷新状态</el-button>
@@ -79,12 +79,12 @@
             >
               <!-- 筛选与提示复用工具栏左侧区域，右侧保留表格显示设置。 -->
               <template #toolbar>
-                <div class="filters">
-                  <el-select v-model="draftFilters.domain" clearable placeholder="全部数据域">
+                <div class="filters sa-button-row">
+                  <el-select size="small" v-model="draftFilters.domain" clearable placeholder="全部数据域">
                     <el-option v-for="item in overview.domains || []" :key="item.label"
                       :label="`${item.label}（${item.count}）`" :value="domainCode(item.label)" />
                   </el-select>
-                  <el-select v-model="draftFilters.status" clearable placeholder="全部状态">
+                  <el-select size="small" v-model="draftFilters.status" clearable placeholder="全部状态">
                     <el-option label="已接入" value="connected" />
                     <el-option label="尚未接入" value="missing" />
                     <el-option label="超过更新周期" value="overdue" />
@@ -92,10 +92,10 @@
                     <el-option label="正在更新" value="running" />
                     <el-option label="有待核验项" value="attention" />
                   </el-select>
-                  <el-input v-model="draftFilters.keyword" clearable
+                  <el-input size="small" v-model="draftFilters.keyword" clearable
                     placeholder="搜索数据源、来源系统或影响模块" @keyup.enter="applyFilters" />
-                  <el-button type="primary" @click="applyFilters">应用筛选</el-button>
-                  <el-button @click="resetFilters">重置</el-button>
+                  <el-button size="small" type="primary" @click="applyFilters">应用筛选</el-button>
+                  <el-button size="small" @click="resetFilters">重置</el-button>
                   <span v-if="filterDirty" class="filter-dirty">筛选条件尚未应用</span>
                 </div>
                 <div v-if="sourceLoading && sources.length" class="updating-bar">正在按新条件更新，当前结果暂时保留…</div>
@@ -124,6 +124,7 @@
 
         <el-tab-pane label="运行与异常" name="runs">
           <div class="sa-card table-card" v-loading="runLoading">
+            <el-alert class="table-note run-note" title="运行记录用于核查某次处理读了哪些批次、生成了多少结果以及哪些校验需要关注；不会在主表直接展示原始JSON。" type="info" :closable="false" show-icon />
             <AppTable
               show-density
               show-column-settings
@@ -144,18 +145,15 @@
               @page-change="loadRuns"
             >
               <template #toolbar>
-                <div class="run-toolbar">
-                  <div class="run-filters">
-                    <el-select v-model="runFilters.task" clearable placeholder="全部任务" @change="loadRuns(1)">
-                      <el-option v-for="task in overview.tasks || []" :key="task.task" :label="task.name" :value="task.task" />
-                    </el-select>
-                    <el-select v-model="runFilters.status" clearable placeholder="全部状态" @change="loadRuns(1)">
-                      <el-option label="成功" value="success" />
-                      <el-option label="失败" value="failed" />
-                      <el-option label="执行中" value="running" />
-                    </el-select>
-                  </div>
-                  <el-alert class="table-note" title="运行记录用于核查某次处理读了哪些批次、生成了多少结果以及哪些校验需要关注；不会在主表直接展示原始JSON。" type="info" :closable="false" show-icon />
+                <div class="run-filters">
+                  <el-select size="small" v-model="runFilters.task" clearable placeholder="全部任务" @change="loadRuns(1)">
+                    <el-option v-for="task in overview.tasks || []" :key="task.task" :label="task.name" :value="task.task" />
+                  </el-select>
+                  <el-select size="small" v-model="runFilters.status" clearable placeholder="全部状态" @change="loadRuns(1)">
+                    <el-option label="成功" value="success" />
+                    <el-option label="失败" value="failed" />
+                    <el-option label="执行中" value="running" />
+                  </el-select>
                 </div>
               </template>
               <template #col-task="{row}">
@@ -693,7 +691,7 @@ const runBatchTable = useTablePagination(() => runDetail.batches || [])
 
 .head-actions {
   display: flex;
-  gap: 8px;
+  gap: var(--sa-button-gap);
   flex-wrap: wrap;
   justify-content: flex-end;
 }
@@ -876,7 +874,7 @@ const runBatchTable = useTablePagination(() => runDetail.batches || [])
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: var(--sa-button-gap);
 
   .el-select,.el-input {
     max-width: 100%;
@@ -905,16 +903,8 @@ const runBatchTable = useTablePagination(() => runDetail.batches || [])
   }
 }
 
-.run-toolbar {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 10px;
-
-  .table-note {
-    flex: 1 1 320px;
-    min-width: 0;
-  }
+.run-note {
+  margin-bottom: 12px;
 }
 
 .table-note {

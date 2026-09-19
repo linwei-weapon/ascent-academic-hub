@@ -35,31 +35,16 @@
 
       <el-tabs v-model="activeTab" class="metric-tabs" @tab-change="onTabChange">
         <el-tab-pane label="指标目录" name="catalog">
-          <div class="filters sa-card">
-            <el-select v-model="filters.domain" clearable placeholder="全部业务域" @change="search">
-              <el-option v-for="item in summary.domains || []" :key="item.label"
-                :label="`${item.label}（${item.count}）`" :value="item.label" />
-            </el-select>
-            <el-select v-model="filters.definitionStatus" clearable placeholder="全部定义状态" @change="search">
-              <el-option label="已发布" value="published" />
-              <el-option label="待学校确认" value="pending_confirmation" />
-              <el-option label="范围背景" value="context" />
-              <el-option label="已停用" value="deprecated" />
-            </el-select>
-            <el-select v-model="filters.implementationStatus" clearable placeholder="全部实现状态" @change="search">
-              <el-option label="已实现并验证" value="verified" />
-              <el-option label="待建立实现证据" value="unverified" />
-              <el-option label="定义与实现不一致" value="mismatch" />
-              <el-option label="已退出页面" value="retired" />
-            </el-select>
-            <el-input v-model="filters.keyword" clearable placeholder="搜索指标名称、编号、公式或技术标识"
-              @keyup.enter="search" @clear="search" />
-            <el-button type="primary" @click="search">查询</el-button>
-            <el-button @click="resetFilters">重置</el-button>
-          </div>
+          <el-alert
+            class="catalog-hint"
+            title="候选指标表示尚待学校确认，不等于功能缺失。"
+            type="info"
+            :closable="false"
+            show-icon
+          />
 
           <div v-if="listLoading && rows.length" class="updating-bar">正在按新条件更新指标目录，当前结果暂时保留…</div>
-          <div class="sa-card table-card" v-loading="listLoading && !!rows.length"
+          <div class="sa-card table-card catalog-table" v-loading="listLoading && !!rows.length"
             element-loading-text="正在更新指标目录…">
             <AppTable
               show-density
@@ -80,14 +65,29 @@
               :loading="listLoading"
               @page-change="changePage"
             >
-              <!-- 口径说明放入表格上方工具栏，与右侧显示设置同排。 -->
               <template #toolbar>
-                <el-alert
-                  title="候选指标表示尚待学校确认，不等于功能缺失。"
-                  type="info"
-                  :closable="false"
-                  show-icon
-                />
+                <div class="filters sa-button-row">
+                  <el-select size="small" v-model="filters.domain" clearable placeholder="全部业务域" @change="search">
+                    <el-option v-for="item in summary.domains || []" :key="item.label"
+                      :label="`${item.label}（${item.count}）`" :value="item.label" />
+                  </el-select>
+                  <el-select size="small" v-model="filters.definitionStatus" clearable placeholder="全部定义状态" @change="search">
+                    <el-option label="已发布" value="published" />
+                    <el-option label="待学校确认" value="pending_confirmation" />
+                    <el-option label="范围背景" value="context" />
+                    <el-option label="已停用" value="deprecated" />
+                  </el-select>
+                  <el-select size="small" v-model="filters.implementationStatus" clearable placeholder="全部实现状态" @change="search">
+                    <el-option label="已实现并验证" value="verified" />
+                    <el-option label="待建立实现证据" value="unverified" />
+                    <el-option label="定义与实现不一致" value="mismatch" />
+                    <el-option label="已退出页面" value="retired" />
+                  </el-select>
+                  <el-input size="small" v-model="filters.keyword" clearable placeholder="搜索指标名称、编号、公式或技术标识"
+                    @keyup.enter="search" @clear="search" />
+                  <el-button size="small" type="primary" @click="search">查询</el-button>
+                  <el-button size="small" @click="resetFilters">重置</el-button>
+                </div>
               </template>
               <template #col-identity="{row}">
                 <div class="metric-identity"><b>{{ row.name }}</b><span>{{ row.metric_id }}</span></div>
@@ -516,12 +516,51 @@ const pageTable = useTablePagination(() => pageRows.value)
   margin-top: 8px;
 }
 
-.filters {
-  display: grid;
-  grid-template-columns: 180px 170px 190px minmax(240px,1fr) auto auto;
-  gap: 10px;
+.catalog-hint {
   margin-bottom: 12px;
-  padding: 12px;
+}
+
+.catalog-table {
+  :deep(.app-table__toolbar) {
+    flex-wrap: wrap;
+  }
+
+  :deep(.app-table__extra) {
+    flex: 0 1 auto;
+  }
+
+  :deep(.app-table__tools) {
+    margin-left: auto;
+  }
+}
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sa-button-gap);
+  align-items: center;
+
+  .el-input, .el-select {
+    flex: 0 0 auto;
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .el-select {
+    width: 140px;
+  }
+
+  .el-select:nth-child(3) {
+    width: 160px;
+  }
+
+  .el-input {
+    width: 260px;
+  }
+
+  .el-button + .el-button {
+    margin-left: 0;
+  }
 }
 
 .updating-bar {
@@ -701,10 +740,6 @@ const pageTable = useTablePagination(() => pageRows.value)
     grid-template-columns: repeat(3,minmax(0,1fr));
   }
 
-  .filters {
-    grid-template-columns: repeat(3,minmax(0,1fr));
-  }
-
   .governance-grid {
     grid-template-columns: 1fr;
   }
@@ -712,7 +747,7 @@ const pageTable = useTablePagination(() => pageRows.value)
 }
 
 @media (max-width:850px) {
-  .metric-kpis,.filters,.detail-grid {
+  .metric-kpis,.detail-grid {
     grid-template-columns: 1fr;
   }
 

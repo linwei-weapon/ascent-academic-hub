@@ -11,7 +11,7 @@
         <h2 class="sa-page-title">AI决策简报</h2>
         <p class="sa-page-sub">首屏只有判断：全部数字由 Skill 确定性代码产出；数据未变化时复用快照。</p>
       </div>
-      <div class="head-actions">
+      <div class="head-actions sa-button-row">
         <el-button type="success" plain @click="openChat()">决策追问</el-button>
         <el-button :loading="loading" @click="load(false)">刷新</el-button>
         <el-button type="primary" :loading="loading" @click="load(true)">重新生成</el-button>
@@ -257,7 +257,7 @@ onUnmounted(stopProgress)
 
 .head-actions {
   display: flex;
-  gap: 10px;
+  gap: var(--sa-button-gap);
   padding-top: 12px;
 }
 
@@ -477,8 +477,12 @@ onUnmounted(stopProgress)
 }
 
 @media (max-width: 1100px) {
-  .page-head, .head-actions {
+  .page-head {
     display: block;
+  }
+
+  .head-actions {
+    flex-wrap: wrap;
   }
 
 }

@@ -5,21 +5,21 @@
     <h2 class="sa-page-title">毕业准备与课程保障</h2>
     <p class="sa-page-sub">从已确认的培养要求问题出发，形成学生核查和下一周期课程保障准备清单。</p>
 
-    <div class="global-filters">
-      <el-select v-model="draftGlobal.grades" multiple collapse-tags collapse-tags-tooltip placeholder="年级" clearable @change="onGradesChanged">
+    <div class="global-filters sa-button-row">
+      <el-select size="small" v-model="draftGlobal.grades" multiple collapse-tags collapse-tags-tooltip placeholder="年级" clearable @change="onGradesChanged">
         <el-option v-for="x in filterOptions.grades" :key="x" :label="`${x}级`" :value="x" />
       </el-select>
-      <el-select v-model="draftGlobal.organizationId" placeholder="学院" clearable filterable @change="onCollegeChanged">
+      <el-select size="small" v-model="draftGlobal.organizationId" placeholder="学院" clearable filterable @change="onCollegeChanged">
         <el-option v-for="x in filterOptions.colleges" :key="x.value" :label="x.label" :value="x.value" />
       </el-select>
-      <el-select v-model="draftGlobal.majorCode" placeholder="专业" clearable filterable @change="onMajorChanged">
+      <el-select size="small" v-model="draftGlobal.majorCode" placeholder="专业" clearable filterable @change="onMajorChanged">
         <el-option v-for="x in availableMajors" :key="x.value" :label="x.label" :value="x.value" />
       </el-select>
-      <el-select v-model="draftGlobal.planId" placeholder="培养方案" clearable filterable class="plan-select">
+      <el-select size="small" v-model="draftGlobal.planId" placeholder="培养方案" clearable filterable class="plan-select">
         <el-option v-for="x in availablePlans" :key="x.value" :label="x.label" :value="x.value" />
       </el-select>
-      <el-button type="primary" :loading="initialLoading" @click="applyGlobalFilters">查询</el-button>
-      <el-button :disabled="initialLoading" @click="resetGlobalFilters">重置</el-button>
+      <el-button size="small" type="primary" :loading="initialLoading" @click="applyGlobalFilters">查询</el-button>
+      <el-button size="small" :disabled="initialLoading" @click="resetGlobalFilters">重置</el-button>
     </div>
     <div v-if="filterOptionsError&&!allFilterOptionsReady" class="filter-error">
       <span>{{filterOptionsError}}</span><el-button link type="primary" @click="loadFilterOptions">重试</el-button>
@@ -65,15 +65,15 @@
 
     <section ref="studentSection" class="sa-card student-section">
       <div class="sa-card-title">学生核查名单</div>
-      <div class="filters">
-        <el-select v-model="draftStatus" clearable placeholder="全部证据状态">
+      <div class="filters sa-button-row">
+        <el-select size="small" v-model="draftStatus" clearable placeholder="全部证据状态">
           <el-option label="高年级必修未通过" value="high_grade_action"/>
           <el-option label="全部年级必修未通过" value="action_required"/>
           <el-option label="过期漏修" value="verification_required"/>
           <el-option label="当前未发现到期问题" value="evidence_complete"/>
         </el-select>
-        <el-button type="primary" :loading="listLoading" @click="applyFilter">查询</el-button>
-        <el-button :disabled="listLoading||(!status&&!activeMajor)" @click="reset">重置</el-button>
+        <el-button size="small" type="primary" :loading="listLoading" @click="applyFilter">查询</el-button>
+        <el-button size="small" :disabled="listLoading||(!status&&!activeMajor)" @click="reset">重置</el-button>
         <span v-if="activeMajor" class="active-scope">当前专业：<el-tag closable @close="clearMajor">{{activeMajorName}}</el-tag></span>
       </div>
       <AppTable :columns="studentColumns" :data="data.students" storage-key="curriculum:graduation-students"
@@ -322,7 +322,7 @@ const coursePagination = useTablePagination(() => data.courses, 10)
 .global-filters {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: var(--sa-button-gap);
   align-items: center;
   margin: 14px 0;
   .el-select {
@@ -406,7 +406,7 @@ const coursePagination = useTablePagination(() => data.courses, 10)
 
 .filters {
   display: flex;
-  gap: 10px;
+  gap: var(--sa-button-gap);
   align-items: center;
   margin-bottom: 12px;
   .el-select {

@@ -5,7 +5,7 @@
       <div>
         <h2 class="sa-page-title">开课与排课结果统计</h2>
       </div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">
+      <div class="sa-button-row" style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">
         <el-select v-model="fCollege" size="small" style="width:160px" clearable placeholder="全部学院">
           <el-option v-for="c in colleges" :key="c.value" :label="c.label" :value="c.value" />
         </el-select>
@@ -52,9 +52,11 @@
     <div class="sa-card" style="margin-bottom:16px">
       <div class="sa-card-title">
         <span>开课保障关注 TOP10 <KpiLabel label="" formula="按大班额、单一教师多班覆盖和单班集中供给排序，不是课程质量排名" /></span>
-        <el-button size="small" type="primary" plain @click="openOfferingDrawer">查看全部 {{ data.totalCourses }} 门</el-button>
       </div>
       <AppTable :columns="offeringTopCols" :data="decisionOfferings.slice(0,10)" storage-key="operation:courses-top10"  stripe :show-density="true" :show-column-settings="true" :pagination="false">
+        <template #toolbar>
+          <el-button size="small" type="primary" plain @click="openOfferingDrawer">查看全部 {{ data.totalCourses }} 门</el-button>
+        </template>
         <template #col-attention="{row}"><el-tag size="small" :type="offeringAttentionLevel(row).type">{{ offeringAttentionLevel(row).label }}</el-tag></template>
         <template #col-reasons="{row}"><span v-if="row.attention.length">{{ row.attention.join('；') }}</span><span v-else class="sa-faint">规模较大，建议常规关注</span></template>
         <template #col-actions="{row}"><el-button link type="primary" @click.stop="openOfferingReview(row)">详情</el-button></template>
@@ -104,8 +106,8 @@
 
     <el-drawer v-model="offeringDrawer.visible" title="全部课程开课情况" size="980px">
       <div class="drawer-toolbar">
-        <el-input v-model="offeringDrawer.keyword" clearable placeholder="输入课程代码或名称" style="width:260px" @keyup.enter="searchOfferings" @clear="searchOfferings" />
-        <el-button type="primary" @click="searchOfferings">查询</el-button>
+        <el-input size="small" v-model="offeringDrawer.keyword" clearable placeholder="输入课程代码或名称" style="width:260px" @keyup.enter="searchOfferings" @clear="searchOfferings" />
+        <el-button size="small" type="primary" @click="searchOfferings">查询</el-button>
         <span>共 {{ offeringDrawer.total }} 门课程 · {{ offeringDrawer.semester }}</span>
       </div>
       <AppTable :columns="offeringAllCols" :data="offeringDrawer.items" storage-key="operation:courses-all"

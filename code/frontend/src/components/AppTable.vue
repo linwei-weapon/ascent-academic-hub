@@ -4,14 +4,14 @@
     <div v-if="showDensity || showColumnSettings || $slots.toolbar" class="app-table__toolbar">
       <div class="app-table__extra"><slot name="toolbar" /></div>
       <div v-if="showDensity || showColumnSettings" class="app-table__tools">
-        <el-radio-group v-if="showDensity" :model-value="density" size="small" aria-label="行密度" @change="changeDensity">
+        <el-radio-group v-if="showDensity" class="app-table__density" :model-value="density" size="small" aria-label="行密度" @change="changeDensity">
           <el-radio-button value="compact">紧凑</el-radio-button>
           <el-radio-button value="default">默认</el-radio-button>
           <el-radio-button value="loose">宽松</el-radio-button>
         </el-radio-group>
         <el-popover v-if="showColumnSettings" placement="bottom-end" trigger="click" :width="320">
           <template #reference>
-            <el-button size="small" :icon="Setting">列设置</el-button>
+            <el-button size="mini" :icon="Setting">列设置</el-button>
           </template>
           <div class="app-table__columns">
             <div class="app-table__columns-heading">
@@ -39,7 +39,7 @@
               >
                 {{ column.label }}<span v-if="column.required" class="app-table__required">（必选）</span>
               </el-checkbox>
-              <span v-if="columnRegion(column) === 'business'" class="app-table__moves">
+              <span v-if="columnRegion(column) === 'business'" class="app-table__moves sa-button-row">
                 <el-button
                   link size="small" :icon="ArrowUp"
                   :disabled="businessColumns[0]?.key === column.key"
@@ -304,6 +304,17 @@ function forwardRowClick(row: TableRow, column: TableColumnCtx<TableRow> | null,
     flex-wrap: wrap;
     justify-content: flex-end;
     gap: 8px;
+  }
+
+  // 密度切换与旁边 size="small" 的列设置按钮采用相同尺寸。
+  &__density :deep(.el-radio-button__inner) {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    height: var(--sa-button-height-mini);
+    padding: 0 14px;
+    font-size: 13px;
   }
 
   &__body {

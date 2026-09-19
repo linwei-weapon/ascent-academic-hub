@@ -29,7 +29,7 @@
       >
         <template #col-data_scope_type="{ row }">{{ scopeTypeLabel(row.data_scope_type) }}</template>
         <template #col-actions="{ row }">
-          <div class="role-table-card__actions">
+          <div class="role-table-card__actions sa-button-row">
             <el-button size="small" text type="primary" @click="openPermissionDrawer(row)">配置权限</el-button>
             <el-button size="small" text @click="previewRole(row)">权限预览</el-button>
             <el-button size="small" text @click="openRoleDialog(row)">编辑</el-button>

@@ -3,7 +3,7 @@
   <div>
     <el-breadcrumb separator="/" class="crumb"><el-breadcrumb-item to="/admin/faculty">本科教学师资保障分析</el-breadcrumb-item><el-breadcrumb-item>课程团队核查</el-breadcrumb-item></el-breadcrumb>
     <div class="head"><div><h2 class="sa-page-title">课程团队保障核查</h2><p class="sa-page-sub">核查课程的实际授课成员、教学规模、职称证据和接续保障，不评价教师个人能力。</p></div></div>
-    <div class="search sa-card"><el-input v-model="query" clearable placeholder="输入课程名称或代码" @keyup.enter="search"/><el-button type="primary" :loading="searching" @click="search">查询课程</el-button></div>
+    <div class="search sa-card"><el-input size="small" v-model="query" clearable placeholder="输入课程名称或代码" @keyup.enter="search"/><el-button size="small" type="primary" :loading="searching" @click="search">查询课程</el-button></div>
     <div v-if="results.length" class="results"><el-tag v-for="c in results" :key="c.id" effect="plain" @click="select(c)">{{c.name}}（{{c.code}}）</el-tag></div>
 
     <template v-if="course">

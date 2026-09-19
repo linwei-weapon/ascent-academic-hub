@@ -6,12 +6,12 @@
     title="课程结果加载失败" :description="loadError">
     <template #default><el-button link type="primary" @click="retryLoad">重新加载</el-button></template>
   </el-alert>
-  <div class="filters">
-    <el-select v-model="draftFrom" clearable placeholder="起始学期"><el-option v-for="s in semesterOptions" :key="s" :label="s" :value="s"/></el-select><span>至</span>
-    <el-select v-model="draftTo" clearable placeholder="结束学期"><el-option v-for="s in semesterOptions" :key="s" :label="s" :value="s"/></el-select>
-    <el-select v-model="draftGroup" clearable placeholder="全部课程类别" style="width:150px"><el-option v-for="g in COURSE_GROUPS" :key="g" :label="g" :value="g"/></el-select>
-    <el-button type="primary" :loading="loading" @click="apply">查询</el-button>
-    <el-button :disabled="loading" @click="reset">重置</el-button>
+  <div class="filters sa-button-row">
+    <el-select size="small" v-model="draftFrom" clearable placeholder="起始学期"><el-option v-for="s in semesterOptions" :key="s" :label="s" :value="s"/></el-select><span>至</span>
+    <el-select size="small" v-model="draftTo" clearable placeholder="结束学期"><el-option v-for="s in semesterOptions" :key="s" :label="s" :value="s"/></el-select>
+    <el-select size="small" v-model="draftGroup" clearable placeholder="全部课程类别" style="width:150px"><el-option v-for="g in COURSE_GROUPS" :key="g" :label="g" :value="g"/></el-select>
+    <el-button size="small" type="primary" :loading="loading" @click="apply">查询</el-button>
+    <el-button size="small" :disabled="loading" @click="reset">重置</el-button>
   </div>
   <el-skeleton v-if="!loadError" :loading="initialLoading" animated :rows="4"><div class="kpis"><div v-for="x in kpis" :key="x.label" class="kpi"><span>{{x.label}} <el-tooltip :content="x.help"><i>?</i></el-tooltip></span><b>{{x.value}}</b></div></div></el-skeleton>
 
@@ -178,7 +178,7 @@ onMounted(load);
 
 .filters {
   display: flex;
-  gap: 10px;
+  gap: var(--sa-button-gap);
   align-items: center;
   margin: 14px 0;
   .el-select {

@@ -29,22 +29,22 @@
           <el-button link type="primary" @click="load">重新加载</el-button>
         </template>
       </el-alert>
-      <div class="filters">
+      <div class="filters sa-button-row">
         <b>观察条件</b>
-        <el-select v-model="draft.college" clearable placeholder="学院" @change="handleCascadeChange('college')">
+        <el-select size="small" v-model="draft.college" clearable placeholder="学院" @change="handleCascadeChange('college')">
           <el-option v-for="item in options.college" :key="item.value" :label="item.label" :value="item.value" />
         </el-select>
-        <el-select v-model="draft.major" clearable placeholder="专业" @change="handleCascadeChange('major')">
+        <el-select size="small" v-model="draft.major" clearable placeholder="专业" @change="handleCascadeChange('major')">
           <el-option v-for="item in options.major" :key="item.value" :label="item.label" :value="item.value" />
         </el-select>
-        <el-select v-model="draft.grade" clearable placeholder="年级" @change="handleCascadeChange('grade')">
+        <el-select size="small" v-model="draft.grade" clearable placeholder="年级" @change="handleCascadeChange('grade')">
           <el-option v-for="item in options.grade" :key="item.value" :label="item.label" :value="item.value" />
         </el-select>
-        <el-select v-model="draft.classCode" clearable placeholder="班级" @change="handleCascadeChange('class')">
+        <el-select size="small" v-model="draft.classCode" clearable placeholder="班级" @change="handleCascadeChange('class')">
           <el-option v-for="item in options.class" :key="item.value" :label="item.label" :value="item.value" />
         </el-select>
-        <el-button type="primary" :loading="refreshing" @click="applyFilter">查询</el-button>
-        <el-button :disabled="refreshing" @click="reset">重置</el-button>
+        <el-button size="small" type="primary" :loading="refreshing" @click="applyFilter">查询</el-button>
+        <el-button size="small" :disabled="refreshing" @click="reset">重置</el-button>
       </div>
 
       <div v-if="refreshing" class="refresh-feedback">
@@ -139,18 +139,6 @@
             <h3>学生核查名单</h3>
             <p>共 {{ data.total || 0 }} 名学生；点击学生在抽屉中查看变化证据。</p>
           </div>
-          <div class="student-list-actions">
-            <el-input
-              v-model="studentKeywordDraft"
-              class="student-keyword"
-              clearable
-              :disabled="refreshing"
-              placeholder="请输入学号或姓名"
-              @keyup.enter="applyStudentKeyword"
-            />
-            <el-button type="primary" :loading="refreshing" @click="applyStudentKeyword">查询</el-button>
-            <el-button :disabled="refreshing" @click="resetStudentKeyword">重置</el-button>
-          </div>
         </div>
         <AppTable
           :columns="studentColumns"
@@ -164,6 +152,20 @@
           row-class-name="row-clickable"
           :empty-text="studentEmptyText"
           @row-click="showStudent" :show-density="true" :show-column-settings="true" :pagination="true" :page="page" :page-size="pageSize" :total="data.total" @page-change="page = $event; load()" @page-size-change="changePageSize" :page-sizes="[20, 50, 100]">
+          <template #toolbar>
+            <div class="student-list-actions sa-button-row">
+              <el-input size="small"
+                v-model="studentKeywordDraft"
+                class="student-keyword"
+                clearable
+                :disabled="refreshing"
+                placeholder="请输入学号或姓名"
+                @keyup.enter="applyStudentKeyword"
+              />
+              <el-button size="small" type="primary" :loading="refreshing" @click="applyStudentKeyword">查询</el-button>
+              <el-button size="small" :disabled="refreshing" @click="resetStudentKeyword">重置</el-button>
+            </div>
+          </template>
           <template #col-student="{ row }">
             <div class="student-cell">
               <button type="button" @click.stop="showStudent(row)">{{ row.display_name }}</button>
@@ -500,7 +502,7 @@ onMounted(async () => {
 .filters {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--sa-button-gap);
   margin: 12px 0;
   padding: 12px;
   border: 1px solid #e2e8f0;
@@ -633,23 +635,27 @@ onMounted(async () => {
 .student-list-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: var(--sa-button-gap);
 }
 
 .student-keyword {
   width: 240px;
+  max-width: 100%;
 }
 
 .student-cell {
   display: flex;
   flex-direction: column;
+  align-items: center;
+  text-align: center;
   button {
     padding: 0;
     border: 0;
     background: transparent;
     color: var(--sa-primary);
     cursor: pointer;
-    text-align: left;
+    text-align: center;
     font-size: 12px;
     font-weight: 650;
   }

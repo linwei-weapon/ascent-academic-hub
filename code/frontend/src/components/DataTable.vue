@@ -371,7 +371,7 @@ function resetPref(): void {
                 size="small"
                 @change="(v: string | number | boolean) => toggleCol(c.key, !!v)"
               >{{ c.label || c.key }}<span v-if="c.required" class="data-table__required">（必选）</span></el-checkbox>
-              <span v-if="columnRegion(c) === 'business'" class="data-table__col-moves">
+              <span v-if="columnRegion(c) === 'business'" class="data-table__col-moves sa-button-row">
                 <el-button link size="small" :icon="ArrowUp" :disabled="businessColumns[0]?.key === c.key" aria-label="上移" @click="moveCol(c.key, -1)" />
                 <el-button link size="small" :icon="ArrowDown" :disabled="businessColumns[businessColumns.length - 1]?.key === c.key" aria-label="下移" @click="moveCol(c.key, 1)" />
               </span>

@@ -19,7 +19,7 @@
             {{ row.studentId }} · {{ row.collegeName }} · {{ row.majorName }} · {{ row.className }}
           </div>
         </div>
-        <div class="review-head__actions">
+        <div class="review-head__actions sa-button-row">
           <el-button
             v-if="row.highestLevel === '严重'"
             type="primary"
@@ -461,7 +461,7 @@ watch(
 
 .review-head__actions {
   display: flex;
-  gap: 8px;
+  gap: var(--sa-button-gap);
 }
 
 .drawer-loading {

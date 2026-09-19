@@ -159,7 +159,7 @@
                   <b :style="{color:dr.riskRatio>=5?'#E11D48':'#D97706',fontSize:'15px'}">{{ dr.riskRatio }} 倍</b>
                 </div>
               </div>
-              <div class="disc-actions">
+              <div class="disc-actions sa-button-row">
                 <el-button size="small" type="success" @click="reviewRule(dr.id, 'approve')">采纳并创建变更草稿</el-button>
                 <el-button size="small" type="danger" plain @click="reviewRule(dr.id, 'reject')">拒绝</el-button>
               </div>
@@ -828,7 +828,7 @@ onMounted(async () => {
 
 .disc-actions {
   display: flex;
-  gap: 8px;
+  gap: var(--sa-button-gap);
   justify-content: flex-end;
 }
 

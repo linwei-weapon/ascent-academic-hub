@@ -7,23 +7,23 @@
       <span v-if="semester" class="scope-semester">统计学期：{{ semester }}</span>
       <small>{{ meta.currentSemester ? `当前预警周期：${meta.currentSemester}` : '按当前规则快照' }}</small>
     </div>
-    <div class="alert-filters">
-      <el-input v-model="draft.q" clearable placeholder="姓名或学号" style="width:170px" />
-      <el-select v-model="draft.classId" clearable placeholder="行政班" style="width:150px">
+    <div class="alert-filters sa-button-row">
+      <el-input size="small" v-model="draft.q" clearable placeholder="姓名或学号" style="width:170px" />
+      <el-select size="small" v-model="draft.classId" clearable placeholder="行政班" style="width:150px">
         <el-option v-for="item in options.organizations?.class || []" :key="item.value"
           :label="item.label" :value="item.value" />
       </el-select>
-      <el-select v-model="draft.level" clearable placeholder="风险等级" style="width:125px">
+      <el-select size="small" v-model="draft.level" clearable placeholder="风险等级" style="width:125px">
         <el-option v-for="item in options.levels || []" :key="item.value" :label="item.label" :value="item.value" />
       </el-select>
-      <el-select v-model="draft.type" clearable placeholder="预警类型" style="width:150px">
+      <el-select size="small" v-model="draft.type" clearable placeholder="预警类型" style="width:150px">
         <el-option v-for="item in options.types || []" :key="item.value" :label="item.value" :value="item.value" />
       </el-select>
-      <el-select v-model="draft.management" clearable placeholder="核查状态" style="width:135px">
+      <el-select size="small" v-model="draft.management" clearable placeholder="核查状态" style="width:135px">
         <el-option v-for="item in options.managementStates || []" :key="item.value" :label="item.label" :value="item.value" />
       </el-select>
-      <el-button type="primary" :loading="loading" @click="applyFilters">查询</el-button>
-      <el-button :disabled="loading" @click="resetFilters">重置</el-button>
+      <el-button size="small" type="primary" :loading="loading" @click="applyFilters">查询</el-button>
+      <el-button size="small" :disabled="loading" @click="resetFilters">重置</el-button>
     </div>
     <el-alert v-if="loadError" type="error" :closable="false" show-icon title="预警学生名单加载失败">
       <template #default>{{ loadError }} <el-button link type="primary" @click="loadRows">重新加载</el-button></template>
@@ -183,7 +183,7 @@ watch(() => [props.modelValue, props.majorId], ([open]) => {
 .scope-strip span,.scope-strip small { color:var(--sa-muted); font-size:12px; }
 .scope-strip .scope-semester { padding-left:10px; border-left:1px solid var(--sa-border); color:var(--sa-text); }
 .scope-strip small { margin-left:auto; }
-.alert-filters { display:flex; flex-wrap:wrap; gap:9px; margin:12px 0; }
+.alert-filters { display:flex; flex-wrap:wrap; gap:var(--sa-button-gap); margin:12px 0; }
 .dialog-loading { min-height:360px; }
 .refresh-note { padding:7px 10px; color:var(--sa-primary); font-size:12px; }
 .student-link { display:grid; gap:2px; padding:0; border:0; background:transparent; color:var(--sa-primary); text-align:left; cursor:pointer; }

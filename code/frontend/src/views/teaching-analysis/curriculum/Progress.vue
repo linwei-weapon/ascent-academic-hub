@@ -18,13 +18,13 @@
           stripe  v-loading="loading" element-loading-text="正在计算学生模块进度…" :show-density="true" :show-column-settings="true" :data="studentPagination.rows" :pagination="true" :page="studentPagination.page" :page-size="studentPagination.pageSize" :total="studentPagination.total" @page-change="studentPagination.changePage" @page-size-change="studentPagination.changePageSize">
           <template #toolbar>
             <div class="filters">
-              <el-input v-model="keyword" placeholder="搜索学号或姓名" clearable />
-              <el-select v-model="statusFilter" placeholder="全部状态" clearable>
+              <el-input size="small" v-model="keyword" placeholder="搜索学号或姓名" clearable />
+              <el-select size="small" v-model="statusFilter" placeholder="全部状态" clearable>
                 <el-option label="必修未通过" value="明确需处理" />
                 <el-option label="过期漏修" value="数据候选" />
                 <el-option label="当前未发现到期问题" value="当前未发现到期问题" />
               </el-select>
-              <el-button @click="exportCsv">导出</el-button>
+              <el-button size="small" @click="exportCsv">导出</el-button>
             </div>
           </template>
           <template #col-moduleProgress="{row}"><b class="tnum">{{row.completedModules}}</b><span class="sa-faint"> / {{row.assessableModules}} 个</span></template>

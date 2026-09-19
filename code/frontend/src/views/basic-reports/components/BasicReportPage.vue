@@ -15,31 +15,31 @@
     <el-card shadow="never" class="filter-card">
       <el-form :inline="true" label-position="top" class="report-filter">
         <el-form-item v-if="!isRpt01" label="学年学期" :required="isRequired('semesterId')">
-          <el-select v-model="draft.semesterId" clearable filterable placeholder="请选择学年学期" class="semester-control">
+          <el-select size="small" v-model="draft.semesterId" clearable filterable placeholder="请选择学年学期" class="semester-control">
             <el-option v-for="item in options.semesters" :key="item" :label="item" :value="item" />
           </el-select>
         </el-form-item>
         <el-form-item :label="usesGradeLabel ? '年级' : '入学年级'" :required="isRequired('entryGrade')">
-          <el-select v-model="draft.entryGrade" clearable :placeholder="usesGradeLabel ? '请选择年级' : '请选择入学年级'" class="grade-control">
+          <el-select size="small" v-model="draft.entryGrade" clearable :placeholder="usesGradeLabel ? '请选择年级' : '请选择入学年级'" class="grade-control">
             <el-option v-for="item in options.entryGrades" :key="item" :label="`${item}级`" :value="item" />
           </el-select>
         </el-form-item>
         <el-form-item v-if="!isRpt01 && !isRpt03" label="学院" :required="isRequired('organizationId')">
-          <el-select v-model="draft.organizationId" clearable filterable placeholder="请选择学院" class="organization-control">
+          <el-select size="small" v-model="draft.organizationId" clearable filterable placeholder="请选择学院" class="organization-control">
             <el-option v-for="item in organizationOptions" :key="item.value" :label="item.label" :value="item.value" />
           </el-select>
         </el-form-item>
         <el-form-item v-if="!isRpt01 && !isRpt02 && !isRpt03" label="专业" :required="isRequired('majorCode')">
-          <el-select v-model="draft.majorCode" clearable filterable placeholder="请选择专业" class="organization-control">
+          <el-select size="small" v-model="draft.majorCode" clearable filterable placeholder="请选择专业" class="organization-control">
             <el-option v-for="item in majorOptions" :key="item.value" :label="item.label" :value="item.value" />
           </el-select>
         </el-form-item>
         <el-form-item v-if="!isRpt01 && !isRpt02 && !isRpt03 && !isRpt04A && !isRpt05" label="班级" :required="isRequired('classCode')">
-          <el-select v-model="draft.classCode" clearable filterable placeholder="请选择班级" class="class-control">
+          <el-select size="small" v-model="draft.classCode" clearable filterable placeholder="请选择班级" class="class-control">
             <el-option v-for="item in classOptions" :key="item" :label="item" :value="item" />
           </el-select>
         </el-form-item>
-        <el-form-item label=" "><el-button type="primary" :loading="loading" @click="applyFilters">查询</el-button><el-button @click="resetFilters">重置</el-button></el-form-item>
+        <el-form-item label=" "><el-button size="small" type="primary" :loading="loading" @click="applyFilters">查询</el-button><el-button size="small" @click="resetFilters">重置</el-button></el-form-item>
       </el-form>
       <p class="filter-tip">带 <span>*</span> 的条件必须填写；必选条件未完整填写时不发起查询，结果区仅展示原始报表表头。</p>
     </el-card>

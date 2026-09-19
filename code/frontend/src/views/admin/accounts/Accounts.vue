@@ -10,7 +10,7 @@
         <h2 class="sa-page-title">账号管理</h2>
         <p class="sa-page-sub">管理平台访问账号、认证接入状态和权限准备度；人员与组织主数据仍由学校权威系统维护。</p>
       </div>
-      <div class="head-actions">
+      <div class="head-actions sa-button-row">
         <el-button @click="openReadiness">认证接入检查</el-button>
         <el-button type="primary" @click="openCreate">+ 新建本地账号</el-button>
       </div>
@@ -39,44 +39,6 @@
       </button>
     </div>
 
-    <div class="sa-card filter-card">
-      <div class="filter-head">
-        <b>查询账号</b>
-        <span>查询条件只影响下方列表，顶部卡片始终反映全部账号治理状态</span>
-      </div>
-      <div class="filter-row">
-        <el-input
-          v-model="draft.keyword"
-          clearable
-          placeholder="账号、姓名或教职工号"
-          class="account-search"
-          @keyup.enter="applyFilters"
-        />
-        <el-select v-model="draft.accountSource" clearable placeholder="全部账号来源" class="account-filter">
-          <el-option label="本地账号" value="local" />
-          <el-option label="学校同步" value="school_sync" />
-          <el-option label="服务账号" value="service" />
-        </el-select>
-        <el-select v-model="draft.roleId" clearable filterable placeholder="全部工作身份" class="account-role-filter">
-          <el-option v-for="role in roles" :key="role.role_id" :label="role.name" :value="role.role_id" />
-        </el-select>
-        <el-select v-model="draft.authStatus" clearable placeholder="全部认证状态" class="account-filter">
-          <el-option label="已映射" value="mapped" />
-          <el-option label="待映射" value="unmapped" />
-        </el-select>
-        <el-select v-model="draft.permissionStatus" clearable placeholder="全部权限状态" class="account-filter">
-          <el-option label="权限就绪" value="ready" />
-          <el-option label="需要处理" value="issue" />
-        </el-select>
-        <el-select v-model="draft.status" clearable placeholder="全部账号状态" class="account-status-filter">
-          <el-option label="已启用" value="active" />
-          <el-option label="已停用" value="disabled" />
-        </el-select>
-        <el-button type="primary" :loading="loading" @click="applyFilters">查询</el-button>
-        <el-button @click="resetFilters">重置</el-button>
-      </div>
-    </div>
-
     <el-alert v-if="loadError" class="load-error" type="error" :closable="false" show-icon>
       <template #title>账号列表加载失败，已保留当前查询条件</template>
       <template #default>
@@ -86,6 +48,11 @@
     </el-alert>
 
     <div class="sa-card account-table-card">
+      <div class="table-title">
+        <b>账号与接入状态</b>
+        <span>共 {{ pagination.total }} 个结果；点击蓝色姓名或账号查看详情</span>
+      </div>
+      <p class="account-filter-hint">筛选仅影响下方列表，顶部统计保持全量</p>
       <AppTable
         :columns="columns"
         :data="users"
@@ -104,11 +71,39 @@
         stripe
         row-key="user_id"
       >
-        <!-- 标题复用表格工具栏左侧插槽，与密度和列设置共用一行。 -->
         <template #toolbar>
-          <div class="table-title">
-            <b>账号与接入状态</b>
-            <span>共 {{ pagination.total }} 个结果；点击蓝色姓名或账号查看详情</span>
+          <div class="filter-row">
+            <el-input size="small"
+              v-model="draft.keyword"
+              clearable
+              placeholder="账号、姓名或教职工号"
+              class="account-search"
+              @keyup.enter="applyFilters"
+            />
+            <el-select size="small" v-model="draft.accountSource" clearable placeholder="全部账号来源" class="account-filter">
+              <el-option label="本地账号" value="local" />
+              <el-option label="学校同步" value="school_sync" />
+              <el-option label="服务账号" value="service" />
+            </el-select>
+            <el-select size="small" v-model="draft.roleId" clearable filterable placeholder="全部工作身份" class="account-role-filter">
+              <el-option v-for="role in roles" :key="role.role_id" :label="role.name" :value="role.role_id" />
+            </el-select>
+            <el-select size="small" v-model="draft.authStatus" clearable placeholder="全部认证状态" class="account-filter">
+              <el-option label="已映射" value="mapped" />
+              <el-option label="待映射" value="unmapped" />
+            </el-select>
+            <el-select size="small" v-model="draft.permissionStatus" clearable placeholder="全部权限状态" class="account-filter">
+              <el-option label="权限就绪" value="ready" />
+              <el-option label="需要处理" value="issue" />
+            </el-select>
+            <el-select size="small" v-model="draft.status" clearable placeholder="全部账号状态" class="account-status-filter">
+              <el-option label="已启用" value="active" />
+              <el-option label="已停用" value="disabled" />
+            </el-select>
+            <div class="account-filter-buttons sa-button-row">
+              <el-button size="small" type="primary" :loading="loading" @click="applyFilters">查询</el-button>
+              <el-button size="small" @click="resetFilters">重置</el-button>
+            </div>
           </div>
         </template>
         <template #col-user="{ row }">
@@ -750,7 +745,7 @@ const providerColumns: AppTableColumn[] = [
 
 .head-actions {
   display: flex;
-  gap: 8px;
+  gap: var(--sa-button-gap);
   flex-shrink: 0;
 }
 
@@ -801,27 +796,32 @@ const providerColumns: AppTableColumn[] = [
   }
 }
 
-.filter-card {
-  margin-bottom: 14px;
-}
-
-.filter-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 12px;
-
-  span {
-    color: var(--sa-faint);
-    font-size: 12px;
-  }
+.account-filter-hint {
+  margin: 8px 0 0;
+  color: var(--sa-faint);
+  font-size: 12px;
 }
 
 .filter-row {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: minmax(0, 1.5fr) repeat(5, minmax(0, 1fr)) auto;
+  gap: 10px;
+
+  .el-input, .el-select {
+    width: 100%;
+    min-width: 0;
+  }
+}
+
+.account-filter-buttons {
   display: flex;
   align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
+  gap: var(--sa-button-gap);
+
+  .el-button + .el-button {
+    margin-left: 0;
+  }
 }
 
 .load-error {
@@ -830,6 +830,46 @@ const providerColumns: AppTableColumn[] = [
 
 .account-table-card {
   padding: 16px;
+  container: account-table / inline-size;
+
+  // 查询按钮紧跟筛选项，表格设置独占下一行并右对齐。
+  :deep(.app-table__toolbar) {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 12px 20px;
+    margin-top: 16px;
+    margin-bottom: 16px;
+  }
+
+  :deep(.app-table__extra) {
+    display: contents;
+  }
+
+  :deep(.app-table__tools) {
+    grid-column: 1 / -1;
+  }
+}
+
+@container account-table (max-width: 1050px) {
+  .filter-row {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@container account-table (max-width: 760px) {
+  .account-table-card :deep(.app-table__toolbar) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .filter-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@container account-table (max-width: 420px) {
+  .filter-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .table-title {
@@ -1121,22 +1161,6 @@ const providerColumns: AppTableColumn[] = [
 }
 
 // 静态控件尺寸与局部布局由 class 管理，动态样式保留在原数据绑定中。
-.account-search {
-  width: 220px;
-}
-
-.account-filter {
-  width: 150px;
-}
-
-.account-role-filter {
-  width: 170px;
-}
-
-.account-status-filter {
-  width: 135px;
-}
-
 .account-form-control {
   width: 100%;
 }

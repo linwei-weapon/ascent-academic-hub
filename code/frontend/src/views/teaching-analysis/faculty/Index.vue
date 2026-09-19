@@ -6,7 +6,7 @@
         <h2 class="sa-page-title">{{ pageTitle }}</h2>
         <p v-if="pageSubtitle" class="sa-page-sub">{{ pageSubtitle }}</p>
       </div>
-      <el-select v-model="semester" class="semester" placeholder="选择学期" @change="changeSemester">
+      <el-select size="small" v-model="semester" class="semester" placeholder="选择学期" @change="changeSemester">
         <el-option v-for="s in semesters" :key="s.value" :label="s.label" :value="s.value" />
       </el-select>
     </div>
@@ -100,7 +100,6 @@
               <h3>学院师资保障概览</h3>
               <p>按课程责任学院汇总；点击学院进入本期课程核查队列。</p>
             </div>
-            <el-input v-model="collegeKeyword" clearable placeholder="搜索学院" class="college-search" />
           </div>
           <AppTable
             :columns="collegeColumns"
@@ -114,6 +113,9 @@
             @row-click="openCollegeQueue"
             @cell-mouse-enter="schedulePrefetch"
             @cell-mouse-leave="cancelPrefetch" :show-density="true" :show-column-settings="true" :pagination="false">
+            <template #toolbar>
+              <el-input size="small" v-model="collegeKeyword" clearable placeholder="搜索学院" class="college-search" />
+            </template>
             <template #col-college_name="{ row }"><span class="college-link">{{ row.college_name }}</span></template>
             <template #col-priority_review_courses="{ row }">
               <el-tag :type="row.priority_review_courses ? 'danger' : 'success'" effect="plain">
@@ -221,21 +223,6 @@
 
       <div class="drawer-body">
         <template v-if="drawerMode === 'queue'">
-          <div class="queue-toolbar">
-            <el-select v-model="queueReviewType" clearable placeholder="全部核查类型" @change="reloadQueue">
-              <el-option v-for="item in reviewTypeOptions" :key="item.value" :label="item.label" :value="item.value" />
-            </el-select>
-            <el-input
-              v-model="queueKeyword"
-              clearable
-              placeholder="搜索课程名称或代码"
-              @keyup.enter="reloadQueue"
-              @clear="reloadQueue"
-            />
-            <el-button type="primary" @click="reloadQueue">查询</el-button>
-            <el-button v-if="queueReviewType || queueKeyword" @click="resetQueueFilter">恢复全部</el-button>
-          </div>
-
           <div v-if="drawerLoading && !queueRows.length" class="drawer-skeleton">
             <el-skeleton :rows="8" animated />
             <p>正在汇总课程团队与跨学期开课证据…</p>
@@ -262,6 +249,22 @@
             empty-text="当前条件下没有课程"
 
             @row-click="row => openCourse(row)" :show-density="true" :show-column-settings="true" :pagination="true" :page="queuePage" :page-size="queuePageSize" :total="queueTotal" @page-change="queuePage = $event; loadQueue(true)" @page-size-change="changeQueuePageSize" :page-sizes="[10, 20, 50, 100]" :loading="drawerLoading">
+            <template #toolbar>
+              <div class="queue-toolbar sa-button-row">
+                <el-select size="small" v-model="queueReviewType" clearable placeholder="全部核查类型" @change="reloadQueue">
+                  <el-option v-for="item in reviewTypeOptions" :key="item.value" :label="item.label" :value="item.value" />
+                </el-select>
+                <el-input size="small"
+                  v-model="queueKeyword"
+                  clearable
+                  placeholder="搜索课程名称或代码"
+                  @keyup.enter="reloadQueue"
+                  @clear="reloadQueue"
+                />
+                <el-button size="small" type="primary" @click="reloadQueue">查询</el-button>
+                <el-button size="small" v-if="queueReviewType || queueKeyword" @click="resetQueueFilter">恢复全部</el-button>
+              </div>
+            </template>
             <template #col-course_name="{ row }">
               <span class="course-link">{{ row.course_name }}</span>
               <small class="course-code">{{ row.course_id }}</small>
@@ -1342,10 +1345,23 @@ const historyPagination = useTablePagination(() => teacherDrawer.data.teachingHi
 }
 
 .queue-toolbar {
-  display: grid;
-  grid-template-columns: 180px minmax(220px,360px) auto auto;
-  gap: 10px;
-  margin-bottom: 13px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sa-button-gap);
+
+  .el-select {
+    width: 180px;
+  }
+
+  .el-input {
+    width: 360px;
+  }
+
+  .el-select, .el-input, .el-button {
+    flex: 0 0 auto;
+    max-width: 100%;
+  }
 }
 
 .drawer-skeleton {
@@ -1596,10 +1612,6 @@ const historyPagination = useTablePagination(() => teacherDrawer.data.teachingHi
   .continuity-summary {
     align-items: flex-start;
     flex-direction: column;
-  }
-
-  .queue-toolbar {
-    grid-template-columns: 1fr 1fr;
   }
 
   .evidence-strip {

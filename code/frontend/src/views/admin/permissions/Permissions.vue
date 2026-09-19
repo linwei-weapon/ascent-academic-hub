@@ -8,7 +8,7 @@
           管理“账号—工作身份—人员—数据范围”，并核验用户实际可见的数据，不改变教务系统中的业务关系。
         </p>
       </div>
-      <div class="head-actions">
+      <div class="head-actions sa-button-row">
         <el-button v-if="returnPath" size="small" @click="router.push(returnPath)">
           返回账号管理
         </el-button>
@@ -46,7 +46,7 @@
     <el-tabs v-model="activeTab" class="permission-tabs">
       <el-tab-pane label="账号与数据范围" name="accounts">
         <div class="toolbar">
-          <el-input
+          <el-input size="small"
             v-model="keyword"
             clearable
             placeholder="搜索账号或姓名"
@@ -54,7 +54,7 @@
             @keyup.enter="loadUsers"
             @clear="loadUsers"
           />
-          <el-button type="primary" @click="loadUsers">查询</el-button>
+          <el-button size="small" type="primary" @click="loadUsers">查询</el-button>
         </div>
         <div class="sa-card table-card">
           <AppTable
@@ -122,14 +122,14 @@
           :title="`关系数据核验：临时人员标识 ${relationshipQuality.temporaryStaff} 个，已失效 ${relationshipQuality.expired} 条，重复组合 ${relationshipQuality.duplicateGroups} 组，缺来源 ${relationshipQuality.missingSource} 条。`"
         />
         <div class="toolbar">
-          <el-select v-model="relationType" clearable placeholder="全部关系类型" class="permission-relation-filter">
+          <el-select size="small" v-model="relationType" clearable placeholder="全部关系类型" class="permission-relation-filter">
             <el-option label="班主任" value="class_adviser" />
             <el-option label="学业导师" value="学业导师" />
             <el-option label="导师" value="导师" />
             <el-option label="辅导员" value="counselor" />
           </el-select>
-          <el-input v-model="relationKeyword" clearable placeholder="工号、学生或班级" class="permission-relation-search" />
-          <el-button type="primary" @click="loadRelationships(1)">查询</el-button>
+          <el-input size="small" v-model="relationKeyword" clearable placeholder="工号、学生或班级" class="permission-relation-search" />
+          <el-button size="small" type="primary" @click="loadRelationships(1)">查询</el-button>
         </div>
         <div class="sa-card table-card">
           <AppTable
@@ -629,7 +629,7 @@ const relationColumns: AppTableColumn[] = [
 
 .head-actions {
   display: flex;
-  gap: 8px;
+  gap: var(--sa-button-gap);
 }
 
 .scope-alert {

@@ -32,7 +32,7 @@
       <div class="monitor-context">
         <b>查询条件</b>
         <div class="filter-grid">
-          <el-select
+          <el-select size="small"
             v-model="draft.college"
             clearable
             placeholder="学院"
@@ -45,7 +45,7 @@
               :value="item.value"
             />
           </el-select>
-          <el-select
+          <el-select size="small"
             v-model="draft.major"
             clearable
             placeholder="专业"
@@ -58,7 +58,7 @@
               :value="item.value"
             />
           </el-select>
-          <el-select
+          <el-select size="small"
             v-model="draft.grade"
             clearable
             placeholder="年级"
@@ -71,7 +71,7 @@
               :value="item.value"
             />
           </el-select>
-          <el-select
+          <el-select size="small"
             v-model="draft.classId"
             clearable
             placeholder="行政班"
@@ -84,7 +84,7 @@
               :value="item.value"
             />
           </el-select>
-          <el-select v-model="draft.type" clearable placeholder="预警类型">
+          <el-select size="small" v-model="draft.type" clearable placeholder="预警类型">
             <el-option
               v-for="item in filterOptions.types || []"
               :key="item.value"
@@ -92,7 +92,7 @@
               :value="item.value"
             />
           </el-select>
-          <el-select v-model="draft.level" clearable placeholder="风险等级">
+          <el-select size="small" v-model="draft.level" clearable placeholder="风险等级">
             <el-option
               v-for="item in filterOptions.levels || []"
               :key="item.value"
@@ -100,11 +100,11 @@
               :value="item.value"
             />
           </el-select>
-          <div class="filter-actions">
-            <el-button type="primary" :loading="refreshing" @click="applyFilters">
+          <div class="filter-actions sa-button-row">
+            <el-button size="small" type="primary" :loading="refreshing" @click="applyFilters">
               查询
             </el-button>
-            <el-button @click="resetAnalysisFilters">重置</el-button>
+            <el-button size="small" @click="resetAnalysisFilters">重置</el-button>
           </div>
         </div>
       </div>
@@ -219,39 +219,6 @@
             <h3>当前预警学生</h3>
             <p>共 {{ pagination.total }} 名去重学生；多条规则命中在核查抽屉中查看。</p>
           </div>
-          <div class="list-head-actions">
-            <span v-if="listAppliedDescription" class="applied-summary">
-              名单筛选：{{ listAppliedDescription }}
-            </span>
-            <el-button :loading="exporting" @click="exportCurrentList">导出</el-button>
-          </div>
-        </div>
-
-        <div class="list-filter-bar">
-          <span class="list-filter-label">名单内筛选</span>
-          <el-input
-            v-model="listDraft.q"
-            clearable
-            placeholder="学生姓名或学号"
-            @keyup.enter="applyListFilters"
-          />
-          <el-select v-model="listDraft.management" clearable placeholder="核查状态">
-            <el-option
-              v-for="item in filterOptions.managementStates || []"
-              :key="item.value"
-              :label="item.label"
-              :value="item.value"
-            />
-          </el-select>
-          <el-checkbox
-            v-if="['class', 'staff_relation'].includes(meta.scope?.type)"
-            v-model="listDraft.mine"
-          >只看我的待办</el-checkbox>
-          <el-button type="primary" plain :loading="refreshing" @click="applyListFilters">
-            查询
-          </el-button>
-          <el-button @click="resetListFilters">重置</el-button>
-          <span class="list-filter-hint">不改变上方管理指标和组织图表</span>
         </div>
 
         <AppTable
@@ -266,6 +233,35 @@
           empty-text="当前条件下没有预警学生"
           row-class-name="row-clickable"
           @row-click="showStudent" :show-density="true" :show-column-settings="true" :pagination="true" :page="pagination.page" :page-size="pagination.pageSize" :total="pagination.total" @page-change="pagination.page = $event; loadStudentPage()" @page-size-change="changePageSize" :page-sizes="[10, 20, 50]">
+          <template #toolbar>
+            <div class="list-filter-bar sa-button-row">
+              <span class="list-filter-label">名单内筛选</span>
+              <el-input size="small"
+                v-model="listDraft.q"
+                clearable
+                placeholder="学生姓名或学号"
+                @keyup.enter="applyListFilters"
+              />
+              <el-select size="small" v-model="listDraft.management" clearable placeholder="核查状态">
+                <el-option
+                  v-for="item in filterOptions.managementStates || []"
+                  :key="item.value"
+                  :label="item.label"
+                  :value="item.value"
+                />
+              </el-select>
+              <el-checkbox
+                v-if="['class', 'staff_relation'].includes(meta.scope?.type)"
+                v-model="listDraft.mine"
+              >只看我的待办</el-checkbox>
+              <el-button size="small" type="primary" plain :loading="refreshing" @click="applyListFilters">
+                查询
+              </el-button>
+              <el-button size="small" @click="resetListFilters">重置</el-button>
+              <el-button size="small" :loading="exporting" @click="exportCurrentList">导出</el-button>
+              <span class="list-filter-hint">不改变上方管理指标和组织图表</span>
+            </div>
+          </template>
           <template #header-primaryReason>
             <KpiLabel
               label="主要触发证据"
@@ -398,17 +394,6 @@ const organizationOptions = computed(() => filterOptions.organizations || {})
 const hasAppliedFilters = computed(() =>
   Object.values(applied).some(Boolean) || Object.values(listApplied).some(Boolean),
 )
-const listAppliedDescription = computed(() => {
-  const labels: string[] = []
-  if (listApplied.q) labels.push(`学生=${listApplied.q}`)
-  if (listApplied.management) {
-    const label = filterOptions.managementStates?.find((item: any) =>
-      item.value === listApplied.management)?.label || listApplied.management
-    labels.push(`核查状态=${label}`)
-  }
-  if (listApplied.mine) labels.push('我的待办')
-  return labels.join('、')
-})
 
 const kpiCards = computed(() => {
   const cards: any[] = [
@@ -1216,34 +1201,18 @@ onMounted(async () => {
 
 .filter-actions {
   display: flex;
-  gap: 8px;
+  gap: var(--sa-button-gap);
   white-space: nowrap;
-}
-
-.applied-summary {
-  max-width: 50%;
-  overflow: hidden;
-  color: #4338ca;
-  font-size: 11px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.list-head-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
 }
 
 .list-filter-bar {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin: 2px 0 12px;
-  padding: 9px 10px;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  background: #f8fafc;
+  flex-wrap: wrap;
+  gap: var(--sa-button-gap);
+  .el-input, .el-select {
+    flex-shrink: 0;
+  }
   .el-input {
     width: 210px;
   }
@@ -1260,7 +1229,6 @@ onMounted(async () => {
 }
 
 .list-filter-hint {
-  margin-left: auto;
   color: #94a3b8;
   font-size: 11px;
 }
@@ -1372,7 +1340,7 @@ onMounted(async () => {
     flex-direction: column;
   }
 
-  .list-head-actions, .list-filter-bar {
+  .list-filter-bar {
     align-items: stretch;
     flex-direction: column;
     width: 100%;

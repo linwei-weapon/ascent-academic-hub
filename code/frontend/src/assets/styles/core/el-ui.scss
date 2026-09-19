@@ -14,6 +14,14 @@
 
   --el-component-size: var(--el-component-custom-height) !important;
 
+  // 按钮与搜索控件共用的高度，参照 QuizTestDemo。
+  --sa-button-height-large: 48px;
+  --sa-button-height-medium: 40px;
+  --sa-button-height-small: 32px;
+  --sa-button-height-mini: 28px;
+  --sa-button-min-width: 90px;
+  --sa-button-gap: 8px;
+
   // 边框、按钮圆角...
   --el-border-radius-base: calc(var(--custom-radius) / 3 + 2px) !important;
 
@@ -80,24 +88,107 @@ html.dark .el-card {
   transition: background-color 0s !important;
 }
 
-// -------------------------------- 修改 el-size=default 组件默认高度 start --------------------------------
-// 修改 el-button 高度
-.el-button--default {
-  height: var(--el-component-custom-height) !important;
-}
+// 沿用 el-button：large / default（中号）/ small，迷你档通过 class="el-button--mini" 使用。
+// 不用 .el-button--default 判断尺寸：Element Plus 的 type="default" 也生成这个类。
+.el-button {
+  --el-button-size: var(--sa-button-height-medium);
+  --sa-button-padding-x: 18px;
+  --sa-button-font-size: 14px;
+  --sa-button-current-min-width: var(--sa-button-min-width);
 
-// circle 按钮宽度优化
-.el-button--default.is-circle {
-  width: var(--el-component-custom-height) !important;
-}
+  &.el-button--large {
+    --el-button-size: var(--sa-button-height-large);
+    --sa-button-padding-x: 22px;
+    --sa-button-font-size: 16px;
+  }
 
-// 修改 el-select 高度
-.el-select--default {
-  .el-select__wrapper {
-    min-height: var(--el-component-custom-height) !important;
+  &.el-button--small {
+    --el-button-size: var(--sa-button-height-small);
+    --sa-button-padding-x: 14px;
+    --sa-button-font-size: 13px;
+    --sa-button-current-min-width: 0px;
+  }
+
+  &.el-button--mini {
+    --el-button-size: var(--sa-button-height-mini);
+    --sa-button-padding-x: 10px;
+    --sa-button-font-size: 12px;
+    --sa-button-current-min-width: 0px;
+  }
+
+  // 提高尺寸规则优先级，覆盖组件库的 small / large / round 等组合。
+  &.el-button {
+    height: var(--el-button-size);
+    min-width: var(--sa-button-current-min-width);
+    padding: 0 var(--sa-button-padding-x);
+    font-size: var(--sa-button-font-size);
+  }
+
+  &.is-text {
+    min-width: 0;
+    padding: 0 12px;
+  }
+
+  // 链接按钮按文字自然撑高，避免固定高度和最小宽度撑大表格操作列。
+  &.is-link,
+  &.el-button--text {
+    height: auto;
+    min-width: 0;
+    padding: 4px 0;
+  }
+
+  &.is-circle {
+    width: var(--el-button-size);
+    min-width: var(--el-button-size);
+    height: var(--el-button-size);
+    padding: 0;
   }
 }
 
+// 普通相邻按钮使用 8px 外边距；Flex / Grid 按钮行只使用容器 gap，避免叠加。
+.el-button + .el-button {
+  margin-left: var(--sa-button-gap);
+}
+
+.sa-button-row {
+  gap: var(--sa-button-gap);
+
+  > .el-button {
+    margin-left: 0;
+  }
+}
+
+// 搜索输入框与按钮同高；只调整单行输入框，不影响 textarea。
+.el-input {
+  --el-input-height: var(--sa-button-height-medium);
+
+  &.el-input--large {
+    --el-input-height: var(--sa-button-height-large);
+  }
+
+  &.el-input--small {
+    --el-input-height: var(--sa-button-height-small);
+  }
+}
+
+// 下拉筛选框使用最小高度，多选标签换行时仍可自然撑高。
+.el-select {
+  --sa-select-height: var(--sa-button-height-medium);
+
+  &.el-select--large {
+    --sa-select-height: var(--sa-button-height-large);
+  }
+
+  &.el-select--small {
+    --sa-select-height: var(--sa-button-height-small);
+  }
+
+  .el-select__wrapper {
+    min-height: var(--sa-select-height);
+  }
+}
+
+// -------------------------------- 修改 el-size=default 组件默认高度 start --------------------------------
 // 修改 el-checkbox-button 高度
 .el-checkbox-button--default .el-checkbox-button__inner,
 // 修改 el-radio-button 高度

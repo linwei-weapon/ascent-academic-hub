@@ -55,7 +55,7 @@
               </template>
             </el-input>
           </div>
-          <div class="starter-chips">
+          <div class="starter-chips sa-button-row">
             <el-button v-for="q in exampleChips" :key="q" round size="small" class="chip"
               @click="send(q)">{{ q }}</el-button>
           </div>
@@ -113,7 +113,7 @@
                 :title="r.headline" @click="openEvidenceWindow(r.signal_id)">[{{ r.n }}]</button>
             </div>
 
-            <div v-if="msg.suggested?.length && !msg.streaming" class="suggested">
+            <div v-if="msg.suggested?.length && !msg.streaming" class="suggested sa-button-row">
               <el-button v-for="q in msg.suggested" :key="q" round size="small" class="chip"
                 @click="onSuggested(msg, q)">{{ q }}</el-button>
             </div>
@@ -620,7 +620,7 @@ onMounted(init)
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
-  gap: 8px;
+  gap: var(--sa-button-gap);
   margin-top: 18px;
 }
 
@@ -792,7 +792,7 @@ onMounted(init)
 .suggested {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--sa-button-gap);
   margin-top: 10px;
 }
 

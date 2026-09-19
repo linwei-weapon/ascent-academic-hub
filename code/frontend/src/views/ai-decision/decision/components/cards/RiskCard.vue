@@ -24,7 +24,7 @@
       <span class="evidence" :title="evidenceTitle(signal)">
         {{ signal.entity.name }} · 置信{{ confidenceLabel(signal) }}
       </span>
-      <div class="ops">
+      <div class="ops sa-button-row">
         <el-button link type="primary" size="small" @click="emit('ask', signal)">问专家</el-button>
         <el-button link type="primary" size="small" @click="openVerify">查证·新标签</el-button>
         <el-button link size="small" @click="goWorkspace">专题</el-button>
@@ -160,6 +160,6 @@ function goWorkspace() {
 .ops {
   flex-shrink: 0;
   display: flex;
-  gap: 2px;
+  gap: var(--sa-button-gap);
 }
 </style>
