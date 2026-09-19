@@ -165,7 +165,6 @@
           </el-button>
           <div>
             <h2>{{ drawerTitle }}</h2>
-            <p>{{ drawerSubtitle }}</p>
           </div>
         </div>
       </template>
@@ -260,17 +259,8 @@
               <div class="suggested-check">
                 <b>建议核实事项</b>
                 <p>{{ courseDetail.review.suggested_check }}</p>
-                <small>规则版本：{{ courseDetail.review.rule_version }}</small>
               </div>
             </section>
-
-            <el-alert
-              type="info"
-              :closable="false"
-              show-icon
-              title="结论适用边界"
-              :description="courseDetail.boundary"
-            />
 
             <div class="sa-kpi-row drawer-kpis">
               <KpiCard label="实际授课教师" :value="`${courseDetail.summary.teacher_count} 人`" sub="主讲与联合教师去重" hint="来自当前学期有效教学任务，已排除登记异常任务" tone="primary" />
@@ -295,7 +285,7 @@
 
             <section class="drawer-section">
               <div class="section-head">
-                <div><h3>当前实际授课团队</h3><p>教师经历仅为课程保障核查提供证据，不展示成绩评价。</p></div>
+                <div><h3>当前实际授课团队</h3></div>
               </div>
               <AppTable
                 :columns="teamColumns"
@@ -330,12 +320,6 @@
               </el-collapse-item>
             </el-collapse>
 
-            <section class="source-section">
-              <b>数据来源</b>
-              <span v-for="source in courseDetail.sources" :key="source.table">
-                {{ source.name }}（{{ source.table }}，{{ source.time || '当前批次' }}）
-              </span>
-            </section>
           </template>
         </template>
       </div>
@@ -476,9 +460,8 @@ const pageSubtitle = computed(() => isSchoolScope.value
 // 由 CSS 随视口实时计算，窗口缩放时仍保持屏幕的 2/3 宽度。
 const drawerWidth = 'calc(100vw * 2 / 3)'
 const drawerTitle = computed(() => drawerMode.value === 'course'
-  ? `${selectedCourse.value?.name || '课程'} · 师资保障证据`
+  ? `${selectedCourse.value?.name || '课程'}详情`
   : `${selectedCollege.value?.name || (isSchoolScope.value ? '全校' : data.college || '本学院')} · 课程核查队列`)
-const drawerSubtitle = computed(() => `${semester.value}学期 · 所有筛选和核查均在当前工作区完成`)
 const focusCourses = computed(() => {
   const rows = data.risk_courses || []
   return rows.filter((row: any) => isSchoolScope.value
@@ -542,7 +525,7 @@ const teamColumns: AppTableColumn[] = [
   { key: 'enrolled', label: '学生人次', minWidth: 10, align: 'center', required: true, region: 'business' },
   { key: 'lesson_share', label: '教学班占比', minWidth: 11, align: 'center', region: 'business', formatter: row => `${row.lesson_share}%` },
   { key: 'title', label: '职称', minWidth: 11, region: 'business' },
-  { key: 'organization_id', label: '人事归属', minWidth: 16, region: 'business' },
+  { key: 'organization_id', label: '部门', minWidth: 16, region: 'business' },
   { key: 'staff_id', label: '教师代码', minWidth: 13, defaultVisible: false, region: 'business' },
   { key: 'actions', label: '操作', width: 95, fixed: 'right', required: true, region: 'action' },
 ]
@@ -1111,11 +1094,6 @@ const historyPagination = useTablePagination(() => teacherDrawer.data.teachingHi
     color: #0f172a;
     font-size: 20px;
   }
-  p {
-    margin: 5px 0 0;
-    color: #64748b;
-    font-size: 12px;
-  }
 }
 
 .drawer-body {
@@ -1208,9 +1186,6 @@ const historyPagination = useTablePagination(() => teacherDrawer.data.teachingHi
     font-size: 13px;
     line-height: 1.6;
   }
-  small {
-    color: #94a3b8;
-  }
 }
 
 .drawer-kpis {
@@ -1275,21 +1250,6 @@ const historyPagination = useTablePagination(() => teacherDrawer.data.teachingHi
 .collapse-title {
   color: #334155;
   font-weight: 600;
-}
-
-.source-section {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 14px;
-  margin-top: 12px;
-  padding: 10px 13px;
-  border-radius: 9px;
-  background: #f8fafc;
-  color: #64748b;
-  font-size: 11px;
-  b {
-    color: #334155;
-  }
 }
 
 .teacher-quality-alert {
