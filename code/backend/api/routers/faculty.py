@@ -22,7 +22,7 @@ CUR = CURRENT_SEMESTER
 # 本科教学学院（排除研究生院/本科生院等非授课建制）
 _NON_TEACHING_COLLEGE = ("本科生院", "研究生院")
 FACULTY_RULE_VERSION = "FACULTY-ASSURANCE-2026.09.2"
-FACULTY_KPI_RULE_VERSION = "FACULTY-KPI-2026.09.2"
+FACULTY_KPI_RULE_VERSION = "FACULTY-KPI-2026.09.3"
 _IMPORTANT_COURSE_KEYWORDS = (
     "必修", "主干", "核心", "基础", "思想", "政治", "形势与政策",
     "体育", "数学", "英语",
@@ -71,11 +71,8 @@ _KPI_DEFINITIONS = {
     "senior_title_teaching_rate": {
         "label": "高职称教师授课占比（教授、副教授）",
         "tone": "teal",
-        "formula": "教授或副教授实际授课教师去重人数÷职称已知的实际授课教师去重人数×100%。",
-        "hint": (
-            "选定学期内，教授或副教授实际授课教师去重人数÷职称已知的实际授课教师去重人数×100%。"
-            "职称缺失人员不进入分母，同时披露职称完整率。该指标反映本科教学参与结构，不代表教师绩效或教学质量。"
-        ),
+        "formula": "教授或副教授实际授课教师去重人数÷授课教师总数×100%。",
+        "hint": "高职称教师授课占比=教授或副教授实际授课教师去重人数÷授课教师总数×100%",
         "boundary": "职称证据完整率低于90%时不输出正式比例；实际授课团队不等于学校正式任命的课程团队。",
     },
     "young_teacher_teaching_rate": {
@@ -906,7 +903,7 @@ def _management_kpis(conn: sqlite3.Connection, semester: str,
         if normalize_title(teacher_meta.get(teacher_id, {}).get("title")) in ("教授", "副教授")
     }
     title_coverage = _rate(len(known_title_ids), len(scope_active_ids))
-    senior_rate = _rate(len(senior_ids), len(known_title_ids))
+    senior_rate = _rate(len(senior_ids), len(scope_active_ids))
     senior_ready = bool(known_title_ids) and (title_coverage or 0) >= 90
 
     if snapshot["ready"]:
@@ -946,8 +943,8 @@ def _management_kpis(conn: sqlite3.Connection, semester: str,
          f"涉及 {len(continuous_rows)} 门连续单点课程", "ready",
          len(continuous_teacher_ids), len(continuous_rows), None, None),
         ("senior_title_teaching_rate", f"{senior_rate:g}%" if senior_ready and senior_rate is not None else "—",
-         f"{len(senior_ids)}/{len(known_title_ids)} 人 · 职称完整率 {(title_coverage or 0):g}%",
-         "ready" if senior_ready else "insufficient", len(senior_ids), len(known_title_ids),
+         f"{len(senior_ids)}/{len(scope_active_ids)} 人 · 职称完整率 {(title_coverage or 0):g}%",
+         "ready" if senior_ready else "insufficient", len(senior_ids), len(scope_active_ids),
          senior_rate if senior_ready else None, title_coverage),
         ("young_teacher_teaching_rate", young_value, young_sub, young_status,
          len(young_rows), len(age_known_rows) if snapshot["ready"] else None,
