@@ -217,13 +217,24 @@
               <small class="course-code">{{ row.course_id }}</small>
             </template>
             <template #col-review_type="{ row }">
-              <el-tag :type="reviewTagType(row.review_type)" effect="plain">{{ row.priority }}</el-tag>
+              <div class="review-type-list">
+                <el-tag
+                  v-for="type in courseReviewTypes(row)"
+                  :key="type.key"
+                  :type="reviewTagType(type.key)"
+                  effect="plain"
+                >
+                  {{ type.label }}
+                </el-tag>
+              </div>
             </template>
             <template #col-attention_reasons="{ row }">
-              <span class="reason-cell">{{ row.attention_reasons?.[0] || '一般观察' }}</span>
+              <div class="reason-list">
+                <span v-for="reason in courseAttentionReasons(row)" :key="reason">{{ reason }}</span>
+              </div>
             </template>
             <template #col-actions="{ row }">
-              <el-button link type="primary" @click.stop="openCourse(row)">查看证据</el-button>
+              <el-button link type="primary" @click.stop="openCourse(row)">详情</el-button>
             </template>
           </AppTable>
           <div v-if="queueTotal" class="queue-pagination">
@@ -461,7 +472,7 @@ const pageSubtitle = computed(() => isSchoolScope.value
 const drawerWidth = 'calc(100vw * 2 / 3)'
 const drawerTitle = computed(() => drawerMode.value === 'course'
   ? `${selectedCourse.value?.name || '课程'}详情`
-  : `${selectedCollege.value?.name || (isSchoolScope.value ? '全校' : data.college || '本学院')} · 课程核查队列`)
+  : `${selectedCollege.value?.name || (isSchoolScope.value ? '全校' : data.college || '本学院')} · 课程师资情况`)
 const focusCourses = computed(() => {
   const rows = data.risk_courses || []
   return rows.filter((row: any) => isSchoolScope.value
@@ -480,17 +491,42 @@ const filteredColleges = computed(() => {
   return keyword ? rows.filter((row: any) => row.college_name.includes(keyword)) : rows
 })
 
-const reviewTypeOptions = [
-  { value: 'priority_review', label: '优先核查' },
-  { value: 'continuous_single', label: '连续单点' },
-  { value: 'structure_review', label: '结构核查' },
-  { value: 'data_candidate', label: '数据候选' },
-  { value: 'general_observation', label: '一般观察' },
-]
+const reviewTypeMeta = {
+  priority_review: { label: '优先核查', tagType: 'danger' },
+  continuous_single: { label: '连续单点', tagType: 'primary' },
+  structure_review: { label: '结构核查', tagType: 'warning' },
+  data_candidate: { label: '数据候选', tagType: 'info' },
+  general_observation: { label: '一般观察', tagType: 'success' },
+} as const
+type ReviewTypeKey = keyof typeof reviewTypeMeta
+
+const reviewTypeOptions = Object.entries(reviewTypeMeta).map(([value, meta]) => ({
+  value,
+  label: meta.label,
+}))
 const reviewTagType = (value: string) =>
-  value === 'priority_review' ? 'danger'
-    : value === 'structure_review' ? 'warning'
-      : value === 'data_candidate' ? 'info' : 'success'
+  reviewTypeMeta[value as ReviewTypeKey]?.tagType || 'success'
+
+const courseReviewTypes = (row: any) => {
+  const types: ReviewTypeKey[] = []
+  if (row.review_type === 'priority_review') {
+    types.push('priority_review')
+  }
+  if (row.continuous_single_review) {
+    types.push('continuous_single')
+  }
+  if (row.structure_review) {
+    types.push('structure_review')
+  }
+  if (row.review_type === 'data_candidate') {
+    types.push('data_candidate')
+  }
+  const matchedTypes = types.length ? types : ['general_observation' as const]
+  return matchedTypes.map(key => ({ key, label: reviewTypeMeta[key].label }))
+}
+
+const courseAttentionReasons = (row: any): string[] =>
+  row.attention_reasons?.length ? row.attention_reasons : ['一般观察']
 
 const collegeColumns: AppTableColumn[] = [
   { key: 'college_name', label: '学院', minWidth: 180, fixed: 'left', required: true, region: 'identity' },
@@ -508,11 +544,11 @@ const collegeColumns: AppTableColumn[] = [
 const courseQueueColumns: AppTableColumn[] = [
   { key: 'course_name', label: '课程', minWidth: 19, fixed: 'left', required: true, region: 'identity' },
   { key: 'course_nature', label: '性质', minWidth: 8, region: 'business' },
-  { key: 'review_type', label: '核查类型', width: 100, required: true, region: 'business' },
+  { key: 'review_type', label: '核查类型', minWidth: 18, required: true, region: 'business' },
   { key: 'lesson_count', label: '教学班', minWidth: 8, align: 'center', region: 'business' },
   { key: 'enrolled', label: '学生人次', minWidth: 9, align: 'center', required: true, region: 'business' },
   { key: 'teacher_count', label: '教师', minWidth: 7, align: 'center', region: 'business' },
-  { key: 'attention_reasons', label: '首要核查原因', minWidth: 28, tooltip: true, required: true, region: 'business' },
+  { key: 'attention_reasons', label: '核查原因', minWidth: 32, required: true, region: 'business' },
   { key: 'college_name', label: '责任学院', minWidth: 16, defaultVisible: false, region: 'business' },
   { key: 'continuity_observations', label: '历史观察次数', minWidth: 11, align: 'center', defaultVisible: false, region: 'business' },
   { key: 'title_completeness_rate', label: '职称证据率', minWidth: 11, align: 'center', defaultVisible: false, region: 'business', formatter: row => `${row.title_completeness_rate}%` },
@@ -1123,11 +1159,17 @@ const historyPagination = useTablePagination(() => teacherDrawer.data.teachingHi
   color: #94a3b8;
 }
 
-.reason-cell {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.review-type-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.reason-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  line-height: 1.5;
 }
 
 .queue-pagination {
