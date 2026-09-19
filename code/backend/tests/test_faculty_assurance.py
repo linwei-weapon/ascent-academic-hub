@@ -39,6 +39,7 @@ def make_conn() -> sqlite3.Connection:
             staff_category TEXT,
             employment_status TEXT NOT NULL,
             title TEXT,
+            education TEXT,
             birth_date TEXT,
             age_band TEXT,
             is_under_35 INTEGER,
@@ -101,19 +102,19 @@ def make_conn() -> sqlite3.Connection:
     conn.executemany(
         """INSERT INTO dim_staff_employment_snapshot(
             semester_id,staff_id,college_id,dept,staff_category,employment_status,
-            title,birth_date,age_band,is_under_35,source,source_batch_id,updated_at
-        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            title,education,birth_date,age_band,is_under_35,source,source_batch_id,updated_at
+        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         [
             ("2025-2026-2", "T1", "C1", "学院A", "专任教师", "在岗",
-             "讲师", "2000-01-01", "35岁以下", 0, "real", "B1", "2026-02-01"),
+             "讲师", "硕士研究生", "2000-01-01", "35岁以下", 0, "real", "B1", "2026-02-01"),
             ("2025-2026-2", "T2", "C1", "学院A", "专任教师", "在岗",
-             "讲师", "1980-01-01", "35-44岁", 0, "real", "B1", "2026-02-01"),
+             "讲师", None, "1980-01-01", "35-44岁", 0, "real", "B1", "2026-02-01"),
             ("2025-2026-2", "TB", "C2", "学院B", "专任教师", "在岗",
-             "副教授", "1975-01-01", "45-54岁", 0, "real", "B1", "2026-02-01"),
+             "副教授", "博士研究生", "1975-01-01", "45-54岁", 0, "real", "B1", "2026-02-01"),
             ("2025-2026-2", "T3", "C2", "学院B", "行政人员", "在岗",
-             None, "1985-01-01", "35-44岁", 0, "real", "B1", "2026-02-01"),
+             None, None, "1985-01-01", "35-44岁", 0, "real", "B1", "2026-02-01"),
             ("2025-2026-2", "TA", "C1", "学院A", "专任教师", "在岗",
-             "教授", "1960-01-01", "55岁及以上", 0, "real", "B1", "2026-02-01"),
+             "教授", "博士研究生", "1960-01-01", "55岁及以上", 0, "real", "B1", "2026-02-01"),
         ],
     )
     conn.executemany(
@@ -484,8 +485,9 @@ class FacultyAssuranceIntegrationTest(unittest.TestCase):
         )["data"]
         self.assertEqual(["T1", "TB", "T2"], [item["staff_id"] for item in teaching["items"]])
         self.assertEqual(["学院A", "学院B"], teaching["department_options"])
-        self.assertIn("education", teaching["items"][0])
-        self.assertIsNone(teaching["items"][0]["education"])
+        self.assertEqual("硕士研究生", teaching["items"][0]["education"])
+        self.assertEqual("专任教师", teaching["items"][0]["staff_category"])
+        self.assertTrue(all(item["lesson_count"] > 0 for item in teaching["items"]))
 
         by_staff_id = management_kpi_details(
             "teaching_staff_coverage", semester="2025-2026-2", keyword="T2",
@@ -576,6 +578,30 @@ class FacultyAssuranceIntegrationTest(unittest.TestCase):
         kpis = {item["key"]: item for item in payload["kpis"]}
         self.assertEqual("3 / — 人", kpis["teaching_staff_coverage"]["value"])
         self.assertIsNone(kpis["teaching_staff_coverage"]["denominator"])
+
+    def test_staff_list_counts_tasks_without_lesson_id_and_uses_real_staff_fallback(self):
+        self.conn.execute("DROP TABLE dim_staff_employment_snapshot")
+        self.conn.execute(
+            "UPDATE fact_lesson SET lesson_id=NULL "
+            "WHERE course_id='C_NORMAL' AND semester_id='2025-2026-2'"
+        )
+        self.conn.execute("UPDATE dim_teacher SET dept='旧部门' WHERE teacher_id='T1'")
+        self.v2_conn.execute(
+            "INSERT INTO dim_staff VALUES(?,?,?,?,?,?,?)",
+            ("T1", "教师1", "OA", "正式工作人员", "讲师", "在职", "real"),
+        )
+
+        details = management_kpi_details(
+            "teaching_staff_coverage", semester="2025-2026-2",
+            user=school_user(), conn=self.conn, v2_conn=self.v2_conn,
+        )["data"]
+        teacher = next(item for item in details["items"] if item["staff_id"] == "T1")
+
+        self.assertGreater(teacher["lesson_count"], 0)
+        self.assertEqual("学院A", teacher["dept"])
+        self.assertEqual("正式工作人员", teacher["staff_category"])
+        self.assertIsNone(teacher["education"])
+        self.assertIn("学院A", details["department_options"])
 
     def test_personnel_snapshot_requires_trace_fields(self):
         self.conn.execute(

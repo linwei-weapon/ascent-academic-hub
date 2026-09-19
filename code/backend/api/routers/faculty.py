@@ -25,7 +25,7 @@ CUR = CURRENT_SEMESTER
 # 本科教学学院（排除研究生院/本科生院等非授课建制）
 _NON_TEACHING_COLLEGE = ("本科生院", "研究生院")
 FACULTY_RULE_VERSION = "FACULTY-ASSURANCE-2026.09.3"
-FACULTY_KPI_RULE_VERSION = "FACULTY-KPI-2026.09.7"
+FACULTY_KPI_RULE_VERSION = "FACULTY-KPI-2026.09.8"
 _IMPORTANT_COURSE_KEYWORDS = (
     "必修", "主干", "核心", "基础", "思想", "政治", "形势与政策",
     "体育", "数学", "英语",
@@ -176,9 +176,11 @@ def _personnel_snapshot(conn: sqlite3.Connection, semester: str,
         for row in dbm.query(conn, f"PRAGMA table_info({table_name})")
     }
     birth_date_select = "birth_date" if "birth_date" in columns else "NULL AS birth_date"
+    education_select = "education" if "education" in columns else "NULL AS education"
     rows = dbm.query(conn, f"""
         SELECT semester_id,staff_id,college_id,dept,staff_category,
-               employment_status,title,{birth_date_select},age_band,is_under_35,source,
+               employment_status,title,{education_select},{birth_date_select},
+               age_band,is_under_35,source,
                source_batch_id,updated_at
         FROM {table_name}
         WHERE semester_id=?{college_filter}
@@ -266,6 +268,38 @@ def _current_active_staff_total(v2_conn: Optional[sqlite3.Connection],
     return int(total) if total else None
 
 
+def _active_staff_attributes(v2_conn: Optional[sqlite3.Connection],
+                             staff_ids: set[str]) -> dict[str, dict]:
+    """读取正式在职人员属性；学历字段未接入时保持为空。"""
+    if not v2_conn or not staff_ids or not _table_exists(v2_conn, "dim_staff"):
+        return {}
+    columns = {
+        str(row["name"])
+        for row in dbm.query(v2_conn, "PRAGMA table_info(dim_staff)")
+    }
+    education_select = "s.education" if "education" in columns else "NULL AS education"
+    organization_join = ""
+    department_select = "s.organization_id AS dept"
+    if _table_exists(v2_conn, "dim_organization"):
+        organization_join = (
+            "LEFT JOIN dim_organization o ON o.organization_id=s.organization_id"
+        )
+        department_select = "COALESCE(NULLIF(TRIM(o.name),''),s.organization_id) AS dept"
+    placeholders = ",".join("?" for _ in staff_ids)
+    rows = dbm.query(v2_conn, f"""
+        SELECT s.staff_id,s.staff_type,s.title,{education_select},{department_select}
+        FROM dim_staff s
+        {organization_join}
+        WHERE s.staff_id IN ({placeholders})
+          AND LOWER(TRIM(COALESCE(s.source,'')))='real'
+          AND LOWER(TRIM(COALESCE(s.staff_type,''))) NOT IN
+              ('mentor','class_adviser','lesson_teacher')
+          AND LOWER(TRIM(COALESCE(s.status,''))) IN
+              ('在职','在岗','employed','正常','active')
+    """, tuple(sorted(staff_ids)))
+    return {str(row["staff_id"]): row for row in rows}
+
+
 def _all_active_teacher_stats(conn: sqlite3.Connection, semester: str) -> dict[str, dict]:
     """按教师归集当期有效教学关系，用于人员口径KPI及其下钻。"""
     excluded_ids = _excluded_teacher_ids(conn, semester)
@@ -277,7 +311,7 @@ def _all_active_teacher_stats(conn: sqlite3.Connection, semester: str) -> dict[s
         LEFT JOIN dim_course c ON c.course_id=l.course_id
         WHERE l.semester_id=?
     """, (semester,))
-    for lesson in lessons:
+    for row_index, lesson in enumerate(lessons):
         primary_id = str(lesson.get("teacher_id") or "").strip()
         if primary_id and primary_id in excluded_ids:
             continue
@@ -286,20 +320,19 @@ def _all_active_teacher_stats(conn: sqlite3.Connection, semester: str) -> dict[s
                 "staff_id": teacher_id,
                 "course_ids": set(),
                 "course_names": set(),
-                "lesson_ids": set(),
-                "lesson_ids_by_course": defaultdict(set),
+                "lesson_keys": set(),
+                "lesson_keys_by_course": defaultdict(set),
                 "course_departments": set(),
             })
             if lesson.get("course_id"):
                 bucket["course_ids"].add(str(lesson["course_id"]))
             if lesson.get("course_name"):
                 bucket["course_names"].add(str(lesson["course_name"]))
-            if lesson.get("lesson_id"):
-                bucket["lesson_ids"].add(str(lesson["lesson_id"]))
-                if lesson.get("course_id"):
-                    bucket["lesson_ids_by_course"][str(lesson["course_id"])].add(
-                        str(lesson["lesson_id"])
-                    )
+            lesson_id = str(lesson.get("lesson_id") or "").strip()
+            lesson_key = lesson_id or f"__missing_lesson_id__{row_index}"
+            bucket["lesson_keys"].add(lesson_key)
+            if lesson.get("course_id"):
+                bucket["lesson_keys_by_course"][str(lesson["course_id"])].add(lesson_key)
             if lesson.get("course_dept"):
                 bucket["course_departments"].add(clean_dept(lesson["course_dept"]))
     return stats
@@ -1104,22 +1137,23 @@ def _teacher_display_rows(teacher_ids: set[str], analysis: dict,
         course_ids = scoped_course_ids or set(teacher_stats.get("course_ids") or [])
         course_names = scoped_course_names or set(teacher_stats.get("course_names") or [])
         if scoped_course_ids:
-            lesson_ids = {
-                lesson_id
+            lesson_count = sum(
+                len(teacher_stats.get("lesson_keys_by_course", {}).get(course_id, set()))
                 for course_id in scoped_course_ids
-                for lesson_id in teacher_stats.get("lesson_ids_by_course", {}).get(course_id, set())
-            }
+            )
         else:
-            lesson_ids = teacher_stats.get("lesson_ids") or set()
+            lesson_count = len(teacher_stats.get("lesson_keys") or set())
+        course_departments = sorted(teacher_stats.get("course_departments") or [])
         evidence_course_id = sorted(scoped_course_ids or course_ids)[0] if (scoped_course_ids or course_ids) else None
         rows.append({
             "staff_id": teacher_id,
             "display_name": teacher.get("name") or teacher_id,
             "title": teacher.get("title"),
             "education": teacher.get("education"),
-            "dept": teacher.get("dept"),
+            "dept": teacher.get("dept") or (course_departments[0] if course_departments else None),
+            "staff_category": teacher.get("staff_category"),
             "course_count": len(course_ids),
-            "lesson_count": len(lesson_ids),
+            "lesson_count": lesson_count,
             "course_names": "、".join(sorted(course_names)),
             "evidence_course_id": evidence_course_id,
         })
@@ -1235,6 +1269,7 @@ def management_kpi_details(metric_key: str, college: Optional[str] = None,
                         "dept": staff.get("dept") or detail.get("dept"),
                         "staff_category": staff.get("staff_category"),
                         "title": staff.get("title") or detail.get("title"),
+                        "education": staff.get("education") or detail.get("education"),
                         "employment_status": staff.get("employment_status"),
                     })
                     rows.append(detail)
@@ -1251,6 +1286,21 @@ def management_kpi_details(metric_key: str, college: Optional[str] = None,
                 else f"仅有真实教学任务；{snapshot['reason']}，暂不形成教职工分母"
             )
         summary["teacher_count"] = len(rows)
+
+        staff_attributes = _active_staff_attributes(
+            v2_conn, {str(row.get("staff_id")) for row in rows if row.get("staff_id")},
+        )
+        for detail in rows:
+            staff = staff_attributes.get(str(detail.get("staff_id")), {})
+            detail["dept"] = (
+                detail.get("dept") if snapshot["ready"]
+                else staff.get("dept") or detail.get("dept")
+            )
+            detail["staff_category"] = (
+                detail.get("staff_category") or staff.get("staff_type")
+            )
+            detail["education"] = detail.get("education") or staff.get("education")
+            detail["title"] = detail.get("title") or staff.get("title")
 
     elif metric_key == "team_structure_exception":
         rows = [

@@ -202,7 +202,7 @@ IMPLEMENTED_METRICS = {
         "data_source": "fact_lesson / dim_staff_employment_snapshot / dim_staff / data_quality_issue",
         "grain": "教师×学期×人员组织",
         "update_cycle": "教学任务、真实人员快照或正式教师主数据同步后",
-        "version": "3.1",
+        "version": "3.2",
         "pages": [("/admin/faculty", "授课教师总数/教职工总数")],
     },
     "F-18": {

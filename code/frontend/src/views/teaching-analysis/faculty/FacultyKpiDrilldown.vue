@@ -135,7 +135,7 @@
             :columns="columns"
             :data="data.items || []"
             :storage-key="`faculty:kpi:${metricKey}`"
-            :config-version="isTeachingStaffList ? 2 : 1"
+            :config-version="isTeachingStaffList ? 3 : 1"
             :max-business-columns="8"
             :loading="loading"
             :pagination="true"
@@ -151,6 +151,7 @@
           >
             <template #col-display_name="{ row }"><b>{{ row.display_name }}</b></template>
             <template #col-education="{ row }">{{ row.education || '—' }}</template>
+            <template #col-staff_category="{ row }">{{ row.staff_category || '—' }}</template>
             <template #col-course_name="{ row }"><span class="course-name">{{ row.course_name }}</span></template>
             <template #col-title="{ row }">{{ row.title || '待补充' }}</template>
             <template #col-dept="{ row }">{{ row.dept || '待映射' }}</template>
@@ -235,7 +236,7 @@ const columns = computed<AppTableColumn[]>(() => {
     { key: 'education', label: '学历', minWidth: 100, region: 'business' },
     { key: 'staff_category', label: '人员类别', minWidth: 105, region: 'business' },
     { key: 'course_count', label: '授课课程数', minWidth: 105, align: 'center', region: 'business' },
-    { key: 'lesson_count', label: '教学班', minWidth: 85, align: 'center', region: 'business' },
+    { key: 'lesson_count', label: '教学班数', minWidth: 85, align: 'center', region: 'business' },
     { key: 'course_names', label: '授课课程', minWidth: 220, tooltip: true, region: 'business' },
     action,
   ]
