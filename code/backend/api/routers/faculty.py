@@ -25,7 +25,7 @@ CUR = CURRENT_SEMESTER
 # 本科教学学院（排除研究生院/本科生院等非授课建制）
 _NON_TEACHING_COLLEGE = ("本科生院", "研究生院")
 FACULTY_RULE_VERSION = "FACULTY-ASSURANCE-2026.09.3"
-FACULTY_KPI_RULE_VERSION = "FACULTY-KPI-2026.09.11"
+FACULTY_KPI_RULE_VERSION = "FACULTY-KPI-2026.09.12"
 _IMPORTANT_COURSE_KEYWORDS = (
     "必修", "主干", "核心", "基础", "思想", "政治", "形势与政策",
     "体育", "数学", "英语",
@@ -1491,9 +1491,13 @@ def management_kpi_details(metric_key: str, college: Optional[str] = None,
             "teacher_count": len(bucket["teacher_ids"]),
             "known_count": len(bucket["known_ids"]),
             "count": len(bucket["senior_ids"]),
-            "rate": _rate(len(bucket["senior_ids"]), len(bucket["known_ids"])),
+            "rate": _rate(len(bucket["senior_ids"]), len(bucket["teacher_ids"])),
             "coverage": _rate(len(bucket["known_ids"]), len(bucket["teacher_ids"])),
         } for name, bucket in sorted(college_buckets.items())]
+        breakdown.sort(key=lambda row: (
+            -float(row.get("rate") or 0),
+            str(row.get("college_name") or ""),
+        ))
         summary.update({
             "teacher_count": len(scope_active_ids),
             "known_title_count": len(known_ids),

@@ -743,6 +743,9 @@ class FacultyAssuranceIntegrationTest(unittest.TestCase):
         self.conn.execute(
             "UPDATE dim_staff_employment_snapshot SET title=NULL WHERE staff_id='T2'"
         )
+        self.conn.execute(
+            "UPDATE dim_course SET dept='学院B' WHERE course_id='C_CROSS'"
+        )
 
         details = management_kpi_details(
             "senior_title_teaching_rate", semester="2025-2026-2",
@@ -752,6 +755,14 @@ class FacultyAssuranceIntegrationTest(unittest.TestCase):
         self.assertEqual(["T1"], [item["staff_id"] for item in details["items"]])
         self.assertEqual("教授", details["items"][0]["title"])
         self.assertEqual(1, details["summary"]["senior_teacher_count"])
+        self.assertEqual("学院A", details["breakdown"][0]["college_name"])
+        self.assertEqual(1, details["breakdown"][0]["count"])
+        self.assertEqual(2, details["breakdown"][0]["teacher_count"])
+        self.assertEqual(50.0, details["breakdown"][0]["rate"])
+        self.assertEqual(50.0, details["breakdown"][0]["coverage"])
+        self.assertEqual(["学院A", "学院B"], [
+            item["college_name"] for item in details["breakdown"]
+        ])
         t2_gap = next(
             item for item in details["evidence_gaps"] if item["staff_id"] == "T2"
         )

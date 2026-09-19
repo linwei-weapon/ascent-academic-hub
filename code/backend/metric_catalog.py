@@ -184,7 +184,7 @@ IMPLEMENTED_METRICS = {
         "data_source": "fact_lesson / dim_teacher / dim_staff_employment_snapshot / dim_staff / data_quality_issue",
         "grain": "教师×学期×授权范围",
         "update_cycle": "教学任务和教师职称同步后",
-        "version": "3.1",
+        "version": "3.2",
         "pages": [("/admin/faculty", "高职称教师授课占比（教授、副教授）")],
     },
     "F-10": {

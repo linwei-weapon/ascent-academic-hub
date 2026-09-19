@@ -60,9 +60,22 @@
 
         <section v-if="!isSimpleList && data.breakdown?.length" class="breakdown-section">
           <div class="section-title">
-            <div><h3>结构分布</h3><p v-if="!isSeniorTeacherList">用于解释总体值，不用于学院或教师绩效排名。</p></div>
+            <div><h3>{{ isSeniorTeacherList ? '各学院高职称教师分布' : '结构分布' }}</h3><p v-if="!isSeniorTeacherList">用于解释总体值，不用于学院或教师绩效排名。</p></div>
           </div>
-          <div class="breakdown-grid">
+          <AppTable
+            v-if="isSeniorTeacherList"
+            :columns="seniorBreakdownColumns"
+            :data="data.breakdown"
+            storage-key="faculty:kpi:senior-title:college-breakdown"
+            :config-version="1"
+            :max-business-columns="5"
+            :pagination="false"
+            empty-text="当前没有学院分布数据"
+          >
+            <template #col-rate="{ row }">{{ row.rate ?? 0 }}%</template>
+            <template #col-coverage="{ row }">{{ row.coverage ?? 0 }}%</template>
+          </AppTable>
+          <div v-else class="breakdown-grid">
             <div v-for="item in data.breakdown" :key="item.college_id || item.label || item.college_name" class="breakdown-item">
               <span>{{ item.college_name || item.label }}</span>
               <b v-if="item.staff_count !== undefined">{{ item.teaching_teacher_count }}/{{ item.staff_count }} 人</b>
@@ -258,6 +271,8 @@ const drawerTitle = computed(() => isTeachingStaffList.value
     ? '教师结构异常课程'
     : isContinuousTeacherList.value
       ? '连续单点授课教师'
+      : isSeniorTeacherList.value
+        ? '高职称教师授课情况'
       : (data.metric?.label || metricLabel.value))
 const searchPlaceholder = computed(() => isTeachingStaffList.value
   ? '搜索姓名、工号或授课课程名称'
@@ -356,6 +371,14 @@ const gapColumns: AppTableColumn[] = [
   { key: 'gap_reason', label: '待治理字段', minWidth: 190, required: true, region: 'business' },
   { key: 'course_names', label: '授课课程证据', minWidth: 220, tooltip: true, region: 'business' },
   { key: 'actions', label: '操作', width: 100, fixed: 'right', required: true, region: 'action' },
+]
+
+const seniorBreakdownColumns: AppTableColumn[] = [
+  { key: 'college_name', label: '学院', minWidth: 180, fixed: 'left', required: true, region: 'identity' },
+  { key: 'count', label: '高职称教师数', minWidth: 130, align: 'center', required: true, region: 'business' },
+  { key: 'teacher_count', label: '授课教师数', minWidth: 120, align: 'center', required: true, region: 'business' },
+  { key: 'rate', label: '占比', minWidth: 100, align: 'center', required: true, region: 'business' },
+  { key: 'coverage', label: '授课教师职称覆盖率', minWidth: 170, align: 'center', required: true, region: 'business' },
 ]
 
 const detailTitle = computed(() => props.metricKey === 'team_structure_exception'
