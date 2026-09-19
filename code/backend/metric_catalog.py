@@ -193,7 +193,7 @@ IMPLEMENTED_METRICS = {
         "data_source": "fact_lesson / dim_course / dim_teacher / dim_staff_employment_snapshot / data_quality_issue",
         "grain": "课程×学期×责任学院",
         "update_cycle": "教学任务、教师年龄和职称同步后",
-        "version": "3.0",
+        "version": "3.1",
         "pages": [("/admin/faculty", "教师结构异常课程数")],
     },
     "F-17": {
@@ -211,7 +211,7 @@ IMPLEMENTED_METRICS = {
         "data_source": "fact_lesson / dim_course / data_quality_issue",
         "grain": "教师×课程×最近3次实际开课",
         "update_cycle": "教学任务和数据质量状态同步后",
-        "version": "3.0",
+        "version": "3.1",
         "pages": [("/admin/faculty", "连续单点授课教师数")],
     },
     "F-19": {

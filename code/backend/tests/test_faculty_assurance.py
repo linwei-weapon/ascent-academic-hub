@@ -3,6 +3,8 @@ import unittest
 from datetime import date
 
 from backend.api.routers.faculty import (
+    _age_threshold_sides,
+    _continuous_single_teacher_ids,
     _faculty_analysis,
     _matches_structure_review,
     _priority_classification,
@@ -294,6 +296,66 @@ class FacultyAssuranceRuleTest(unittest.TestCase):
         self.assertEqual("priority_review", review_type)
         self.assertTrue(_matches_structure_review(row))
 
+    def test_structure_course_is_counted_once_when_multiple_rules_match(self):
+        rows = [
+            {
+                "evaluable": True,
+                "continuous_single": True,
+                "age_structure_exception": True,
+                "junior_title_only": True,
+            },
+            {
+                "evaluable": True,
+                "continuous_single": False,
+                "age_structure_exception": True,
+                "junior_title_only": False,
+            },
+            {
+                "evaluable": True,
+                "continuous_single": False,
+                "age_structure_exception": False,
+                "junior_title_only": False,
+            },
+        ]
+        self.assertEqual(2, sum(_matches_structure_review(row) for row in rows))
+
+    def test_each_structure_rule_can_independently_trigger_review(self):
+        for flag in (
+            "continuous_single", "age_structure_exception", "junior_title_only",
+        ):
+            row = {
+                "evaluable": True,
+                "continuous_single": False,
+                "age_structure_exception": False,
+                "junior_title_only": False,
+            }
+            row[flag] = True
+            with self.subTest(flag=flag):
+                self.assertTrue(_matches_structure_review(row))
+
+    def test_two_actual_offerings_are_enough_for_continuous_single_rule(self):
+        observed = [
+            ("2025-2026-2", {"T1"}),
+            ("2025-2026-1", {"T1"}),
+        ]
+        self.assertEqual(["T1"], _continuous_single_teacher_ids(observed))
+
+    def test_age_threshold_uses_birth_date_and_treats_age_55_as_both_sides(self):
+        today = date(2026, 9, 19)
+        age_54 = _age_threshold_sides(None, "1972-09-20", today=today)
+        age_55 = _age_threshold_sides(None, "1971-09-19", today=today)
+        age_56 = _age_threshold_sides(None, "1970-09-19", today=today)
+
+        self.assertEqual({"lte_55"}, age_54)
+        self.assertEqual({"gte_55", "lte_55"}, age_55)
+        self.assertEqual({"gte_55"}, age_56)
+        self.assertTrue(all("lte_55" in sides for sides in (age_54, age_55)))
+        self.assertTrue(all("gte_55" in sides for sides in (age_55, age_56)))
+        self.assertFalse(
+            all("lte_55" in sides for sides in (age_54, age_56))
+            or all("gte_55" in sides for sides in (age_54, age_56))
+        )
+
 
 class FacultyAssuranceIntegrationTest(unittest.TestCase):
     def setUp(self):
@@ -317,6 +379,13 @@ class FacultyAssuranceIntegrationTest(unittest.TestCase):
         self.assertEqual(4, analysis["quality_gate"]["excluded_lesson_count"])
         # 责任学院按课程所属组织，而不是外院教师的人事归属。
         self.assertEqual("学院A", courses["C_CROSS"]["college_name"])
+
+    def test_historical_analysis_does_not_use_future_offerings(self):
+        analysis = _faculty_analysis(self.conn, "2025-2026-1")
+        courses = {row["course_id"]: row for row in analysis["courses"]}
+
+        self.assertEqual(2, courses["C_PRIORITY"]["continuity_observations"])
+        self.assertFalse(courses["C_PRIORITY"]["continuous_single"])
 
     def test_college_can_review_external_teacher_for_its_own_course(self):
         user = college_user("C1")

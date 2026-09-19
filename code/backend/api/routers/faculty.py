@@ -24,8 +24,8 @@ REAL = LATEST_REAL_SEMESTER
 CUR = CURRENT_SEMESTER
 # 本科教学学院（排除研究生院/本科生院等非授课建制）
 _NON_TEACHING_COLLEGE = ("本科生院", "研究生院")
-FACULTY_RULE_VERSION = "FACULTY-ASSURANCE-2026.09.2"
-FACULTY_KPI_RULE_VERSION = "FACULTY-KPI-2026.09.6"
+FACULTY_RULE_VERSION = "FACULTY-ASSURANCE-2026.09.3"
+FACULTY_KPI_RULE_VERSION = "FACULTY-KPI-2026.09.7"
 _IMPORTANT_COURSE_KEYWORDS = (
     "必修", "主干", "核心", "基础", "思想", "政治", "形势与政策",
     "体育", "数学", "英语",
@@ -128,19 +128,29 @@ def _table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
     ))
 
 
+def _age_from_birth_date(raw_birth_date: object,
+                         today: Optional[date] = None) -> Optional[int]:
+    """按出生日期和指定日期计算周岁；非法或未来日期不形成年龄证据。"""
+    value = str(raw_birth_date or "").strip()
+    if not value:
+        return None
+    try:
+        born = date.fromisoformat(value[:10])
+    except ValueError:
+        return None
+    current = today or date.today()
+    if born > current:
+        return None
+    return current.year - born.year - (
+        (current.month, current.day) < (born.month, born.day)
+    )
+
+
 def _under_35_flag(row: dict, today: Optional[date] = None) -> Optional[int]:
     """优先按出生日期和当前日期计算年龄；缺失时兼容受控青年标识。"""
-    raw_birth_date = str(row.get("birth_date") or "").strip()
-    if raw_birth_date:
-        try:
-            born = date.fromisoformat(raw_birth_date[:10])
-            current = today or date.today()
-            age = current.year - born.year - (
-                (current.month, current.day) < (born.month, born.day)
-            )
-            return int(age < 35)
-        except ValueError:
-            pass
+    age = _age_from_birth_date(row.get("birth_date"), today=today)
+    if age is not None:
+        return int(age < 35)
     flag = row.get("is_under_35")
     return int(flag) if flag in (0, 1) else None
 
@@ -363,7 +373,7 @@ def _priority_classification(row: dict) -> tuple[str, list[str], str]:
         if row.get("continuous_single"):
             reasons.append("同一教师在最近3次实际开课中至少2次作为唯一授课教师")
         if row.get("age_structure_exception"):
-            reasons.append("授课教师年龄全部处于55岁及以上或55岁及以下")
+            reasons.append("授课教师年龄全部大于等于55岁或全部小于等于55岁")
         if row.get("junior_title_only"):
             reasons.append("授课教师职称仅包含助教或讲师")
     if data_candidate:
@@ -400,19 +410,40 @@ def _matches_continuous_single_review(row: dict) -> bool:
     )
 
 
-def _age_threshold_side(age_band: object) -> Optional[str]:
-    """把受控年龄段归入55岁阈值两侧；未知值不参与结构判断。"""
+def _age_threshold_sides(age_band: object, birth_date: object = None,
+                         today: Optional[date] = None) -> set[str]:
+    """返回年龄所属的55岁阈值集合；恰好55岁同时属于两侧。"""
+    age = _age_from_birth_date(birth_date, today=today)
+    if age is not None:
+        sides: set[str] = set()
+        if age >= 55:
+            sides.add("gte_55")
+        if age <= 55:
+            sides.add("lte_55")
+        return sides
     value = str(age_band or "").strip().replace(" ", "")
     if not value:
-        return None
+        return set()
+    if value in {"55岁", "55"}:
+        return {"gte_55", "lte_55"}
     if value in {"55岁及以上", "55及以上", "≥55岁", "55岁以上", "55+"}:
-        return "gte_55"
+        return {"gte_55"}
     if value in {
         "35岁以下", "35岁及以下", "35-44岁", "36-45岁", "45-54岁",
         "46-55岁", "55岁及以下", "≤55岁",
     }:
-        return "lte_55"
-    return None
+        return {"lte_55"}
+    return set()
+
+
+def _continuous_single_teacher_ids(observed: list[tuple[str, set[str]]]) -> list[str]:
+    """从最近最多3次实际开课中找出至少2次唯一授课的教师。"""
+    single_teachers = [next(iter(team)) for _, team in observed[:3] if len(team) == 1]
+    repeated = Counter(single_teachers)
+    return sorted(
+        teacher_id for teacher_id, count in repeated.items()
+        if count >= 2
+    )
 
 
 def _teaching_set(conn, sem) -> set:
@@ -509,8 +540,11 @@ def _faculty_analysis(conn: sqlite3.Connection, semester: str,
         for row in dbm.query(conn, "SELECT teacher_id,name,title,dept,source FROM dim_teacher")
     }
     personnel_snapshot = _personnel_snapshot(conn, semester)
-    age_band_by_teacher = {
-        str(row["staff_id"]): row.get("age_band")
+    age_evidence_by_teacher = {
+        str(row["staff_id"]): {
+            "birth_date": row.get("birth_date"),
+            "age_band": row.get("age_band"),
+        }
         for row in personnel_snapshot["rows"]
     } if personnel_snapshot["ready"] else {}
     excluded_ids = _excluded_teacher_ids(conn, semester)
@@ -581,8 +615,9 @@ def _faculty_analysis(conn: sqlite3.Connection, semester: str,
         SELECT course_id,semester_id,teacher_id,teacher_ids
         FROM fact_lesson
         WHERE NULLIF(TRIM(course_id),'') IS NOT NULL
+          AND semester_id<=?
         ORDER BY semester_id DESC
-    """):
+    """, (semester,)):
         course_id = str(lesson["course_id"])
         if course_id not in scoped_course_ids:
             continue
@@ -628,13 +663,19 @@ def _faculty_analysis(conn: sqlite3.Connection, semester: str,
             and title_set.issubset({"助教", "讲师"})
         )
         age_sides = [
-            _age_threshold_side(age_band_by_teacher.get(member))
+            _age_threshold_sides(
+                age_evidence_by_teacher.get(member, {}).get("age_band"),
+                age_evidence_by_teacher.get(member, {}).get("birth_date"),
+            )
             for member in members
         ]
         row["age_structure_exception"] = bool(
             members
             and all(age_sides)
-            and len(set(age_sides)) == 1
+            and (
+                all("gte_55" in sides for sides in age_sides)
+                or all("lte_55" in sides for sides in age_sides)
+            )
         )
         row["max_lesson_share"] = (
             round(max(primary_lesson_counts.values(), default=0) * 100 / row["lesson_count"], 1)
@@ -651,17 +692,9 @@ def _faculty_analysis(conn: sqlite3.Connection, semester: str,
                 history.get(row["course_id"], {}).items(), reverse=True
             ) if team
         ][:3]
-        single_teachers = [next(iter(team)) for _, team in observed if len(team) == 1]
         row["continuity_observations"] = len(observed)
-        repeated_single_teachers = Counter(single_teachers)
-        row["continuous_single"] = (
-            len(observed) >= 3
-            and max(repeated_single_teachers.values(), default=0) >= 2
-        )
-        row["continuous_teacher_ids"] = sorted(
-            teacher_id for teacher_id, count in repeated_single_teachers.items()
-            if row["continuous_single"] and count >= 2
-        )
+        row["continuous_teacher_ids"] = _continuous_single_teacher_ids(observed)
+        row["continuous_single"] = bool(row["continuous_teacher_ids"])
         row["continuity_semesters"] = [sem for sem, _ in observed]
         row["continuity_evidence"] = [
             {
