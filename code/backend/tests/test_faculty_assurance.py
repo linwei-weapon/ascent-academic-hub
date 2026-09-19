@@ -8,6 +8,8 @@ from backend.api.routers.faculty import (
     _faculty_analysis,
     _matches_structure_review,
     _priority_classification,
+    _real_teacher_value,
+    _resolved_department,
     _under_35_flag,
     management_course,
     management_kpi_details,
@@ -225,6 +227,17 @@ def school_user() -> dict:
 
 
 class FacultyAssuranceRuleTest(unittest.TestCase):
+    def test_non_real_teacher_fields_do_not_enter_personnel_evidence(self):
+        self.assertIsNone(
+            _real_teacher_value({"source": "sim", "dept": "模拟学院"}, "dept")
+        )
+        self.assertEqual(
+            "待映射部门",
+            _resolved_department(None, "", _real_teacher_value(
+                {"source": "demo", "dept": "演示学院"}, "dept",
+            )),
+        )
+
     def test_birth_date_precedes_under_35_snapshot_flag(self):
         self.assertEqual(
             1,
@@ -388,6 +401,21 @@ class FacultyAssuranceIntegrationTest(unittest.TestCase):
         self.assertEqual(2, courses["C_PRIORITY"]["continuity_observations"])
         self.assertFalse(courses["C_PRIORITY"]["continuous_single"])
 
+    def test_continuity_evidence_does_not_expose_non_real_teacher_name(self):
+        self.conn.execute(
+            "UPDATE dim_teacher SET name='模拟姓名',source='sim' WHERE teacher_id='T1'"
+        )
+        analysis = _faculty_analysis(self.conn, "2025-2026-2")
+        course = next(
+            row for row in analysis["courses"] if row["course_id"] == "C_PRIORITY"
+        )
+
+        unique_evidence = next(
+            row for row in course["continuity_evidence"]
+            if row["semester_id"] == "2025-2026-2"
+        )
+        self.assertEqual(["T1"], unique_evidence["teacher_names"])
+
     def test_college_can_review_external_teacher_for_its_own_course(self):
         user = college_user("C1")
         detail = management_course(
@@ -518,7 +546,40 @@ class FacultyAssuranceIntegrationTest(unittest.TestCase):
             user=school_user(), conn=self.conn, v2_conn=self.v2_conn,
         )["data"]
         self.assertEqual(4, structure["total"])
-        self.assertIn("C_TEAM", {item["course_id"] for item in structure["items"]})
+        self.assertEqual(["学院A"], structure["college_options"])
+        self.assertEqual(
+            ["C_CROSS", "C_PRIORITY", "C_TEAM", "C_NORMAL"],
+            [item["course_id"] for item in structure["items"]],
+        )
+        priority = next(item for item in structure["items"] if item["course_id"] == "C_PRIORITY")
+        self.assertEqual(
+            [
+                "同一教师在最近3次实际开课至少2次作为唯一授课教师",
+                "授课老师的年龄全部大于等于55岁，或者全部小于等于55岁",
+                "授课教师中，职称仅包含助教或讲师",
+            ],
+            priority["reasons"],
+        )
+        self.assertEqual("；".join(priority["reasons"]), priority["reason"])
+        self.assertNotIn("title_completeness_rate", priority)
+
+        structure_by_id = management_kpi_details(
+            "team_structure_exception", semester="2025-2026-2", keyword="C_TEAM",
+            user=school_user(), conn=self.conn, v2_conn=self.v2_conn,
+        )["data"]
+        self.assertEqual(["C_TEAM"], [item["course_id"] for item in structure_by_id["items"]])
+
+        structure_by_name = management_kpi_details(
+            "team_structure_exception", semester="2025-2026-2", keyword="跨单位",
+            user=school_user(), conn=self.conn, v2_conn=self.v2_conn,
+        )["data"]
+        self.assertEqual(["C_CROSS"], [item["course_id"] for item in structure_by_name["items"]])
+
+        structure_by_college = management_kpi_details(
+            "team_structure_exception", semester="2025-2026-2", opening_college="学院A",
+            user=school_user(), conn=self.conn, v2_conn=self.v2_conn,
+        )["data"]
+        self.assertEqual(4, structure_by_college["total"])
 
         continuous = management_kpi_details(
             "continuous_single_teacher", semester="2025-2026-2",
@@ -527,6 +588,35 @@ class FacultyAssuranceIntegrationTest(unittest.TestCase):
         self.assertEqual(1, continuous["summary"]["teacher_count"])
         self.assertEqual("T1", continuous["items"][0]["staff_id"])
         self.assertEqual("C_PRIORITY", continuous["items"][0]["course_id"])
+        self.assertEqual("学院A", continuous["items"][0]["dept"])
+        self.assertEqual("讲师", continuous["items"][0]["title"])
+        self.assertEqual("硕士研究生", continuous["items"][0]["education"])
+        self.assertEqual("专任教师", continuous["items"][0]["staff_category"])
+        self.assertEqual(["学院A"], continuous["department_options"])
+
+        continuous_by_id = management_kpi_details(
+            "continuous_single_teacher", semester="2025-2026-2", keyword="T1",
+            user=school_user(), conn=self.conn, v2_conn=self.v2_conn,
+        )["data"]
+        self.assertEqual(["T1"], [item["staff_id"] for item in continuous_by_id["items"]])
+
+        continuous_by_name = management_kpi_details(
+            "continuous_single_teacher", semester="2025-2026-2", keyword="教师1",
+            user=school_user(), conn=self.conn, v2_conn=self.v2_conn,
+        )["data"]
+        self.assertEqual(["T1"], [item["staff_id"] for item in continuous_by_name["items"]])
+
+        continuous_by_course = management_kpi_details(
+            "continuous_single_teacher", semester="2025-2026-2", keyword="重点必修课",
+            user=school_user(), conn=self.conn, v2_conn=self.v2_conn,
+        )["data"]
+        self.assertEqual(["C_PRIORITY"], [item["course_id"] for item in continuous_by_course["items"]])
+
+        continuous_by_department = management_kpi_details(
+            "continuous_single_teacher", semester="2025-2026-2", department="学院A",
+            user=school_user(), conn=self.conn, v2_conn=self.v2_conn,
+        )["data"]
+        self.assertEqual(1, continuous_by_department["total"])
 
         senior = management_kpi_details(
             "senior_title_teaching_rate", semester="2025-2026-2",

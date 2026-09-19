@@ -25,7 +25,7 @@ CUR = CURRENT_SEMESTER
 # 本科教学学院（排除研究生院/本科生院等非授课建制）
 _NON_TEACHING_COLLEGE = ("本科生院", "研究生院")
 FACULTY_RULE_VERSION = "FACULTY-ASSURANCE-2026.09.3"
-FACULTY_KPI_RULE_VERSION = "FACULTY-KPI-2026.09.8"
+FACULTY_KPI_RULE_VERSION = "FACULTY-KPI-2026.09.9"
 _IMPORTANT_COURSE_KEYWORDS = (
     "必修", "主干", "核心", "基础", "思想", "政治", "形势与政策",
     "体育", "数学", "英语",
@@ -340,6 +340,22 @@ def _all_active_teacher_stats(conn: sqlite3.Connection, semester: str) -> dict[s
 
 def _rate(numerator: int, denominator: int) -> Optional[float]:
     return round(numerator * 100 / denominator, 1) if denominator else None
+
+
+def _real_teacher_value(teacher: dict, field: str) -> Optional[object]:
+    """仅允许明确标记为真实来源的教师维表字段进入正式人员证据。"""
+    if str(teacher.get("source") or "").strip().lower() != "real":
+        return None
+    return teacher.get(field)
+
+
+def _resolved_department(*values: object) -> str:
+    """解析人员部门；真实字段均缺失时保留可筛选的治理占位。"""
+    for value in values:
+        department = str(value or "").strip()
+        if department:
+            return department
+    return "待映射部门"
 
 
 def _page_rows(rows: list[dict], page: int, page_size: int) -> tuple[list[dict], int, int, int]:
@@ -734,7 +750,9 @@ def _faculty_analysis(conn: sqlite3.Connection, semester: str,
                 "semester_id": sem,
                 "teacher_ids": sorted(team),
                 "teacher_names": [
-                    teacher_meta.get(teacher_id, {}).get("name") or teacher_id
+                    _real_teacher_value(
+                        teacher_meta.get(teacher_id, {}), "name",
+                    ) or teacher_id
                     for teacher_id in sorted(team)
                 ],
             }
@@ -1204,6 +1222,7 @@ def management_overview(college: Optional[str] = None, semester: Optional[str] =
 def management_kpi_details(metric_key: str, college: Optional[str] = None,
                            semester: Optional[str] = None, keyword: Optional[str] = None,
                            department: Optional[str] = None,
+                           opening_college: Optional[str] = None,
                            page: int = 1, page_size: int = 20,
                            user: dict = Depends(get_current_user),
                            conn: sqlite3.Connection = Depends(get_db),
@@ -1230,6 +1249,7 @@ def management_kpi_details(metric_key: str, college: Optional[str] = None,
     rows: list[dict] = []
     breakdown: list[dict] = []
     evidence_gaps: list[dict] = []
+    college_options: list[str] = []
     summary: dict = {
         "numerator": card["numerator"],
         "denominator": card["denominator"],
@@ -1314,11 +1334,27 @@ def management_kpi_details(metric_key: str, college: Optional[str] = None,
                 "enrolled": row["enrolled"],
                 "teacher_count": row["teacher_count"],
                 "senior_title_teachers": row["senior_title_teachers"],
-                "title_completeness_rate": row["title_completeness_rate"],
-                "reason": (row.get("attention_reasons") or ["命中团队结构核查规则"])[0],
+                "reasons": [
+                    reason for matched, reason in (
+                        (
+                            row.get("continuous_single"),
+                            "同一教师在最近3次实际开课至少2次作为唯一授课教师",
+                        ),
+                        (
+                            row.get("age_structure_exception"),
+                            "授课老师的年龄全部大于等于55岁，或者全部小于等于55岁",
+                        ),
+                        (
+                            row.get("junior_title_only"),
+                            "授课教师中，职称仅包含助教或讲师",
+                        ),
+                    ) if matched
+                ],
             }
             for row in analysis["courses"] if row.get("structure_review")
         ]
+        for row in rows:
+            row["reason"] = "；".join(row["reasons"])
         summary["course_count"] = len(rows)
 
     elif metric_key == "continuous_single_teacher":
@@ -1333,9 +1369,11 @@ def management_kpi_details(metric_key: str, college: Optional[str] = None,
                 teacher = teacher_meta.get(teacher_id, {})
                 rows.append({
                     "staff_id": teacher_id,
-                    "display_name": teacher.get("name") or teacher_id,
-                    "title": teacher.get("title"),
-                    "dept": teacher.get("dept"),
+                    "display_name": _real_teacher_value(teacher, "name") or teacher_id,
+                    "title": _real_teacher_value(teacher, "title"),
+                    "dept": _real_teacher_value(teacher, "dept"),
+                    "education": None,
+                    "staff_category": None,
                     "course_id": course["course_id"],
                     "course_name": course["course_name"],
                     "college_id": course["college_id"],
@@ -1349,7 +1387,26 @@ def management_kpi_details(metric_key: str, college: Optional[str] = None,
                         for item in course.get("continuity_evidence") or []
                     ),
                 })
-        rows.sort(key=lambda row: (row["display_name"], row["course_name"]))
+        personnel = _personnel_snapshot(conn, sem)
+        personnel_by_id = {
+            str(row["staff_id"]): row for row in personnel["rows"]
+        } if personnel["ready"] else {}
+        staff_attributes = _active_staff_attributes(v2_conn, teacher_ids)
+        for detail in rows:
+            teacher_id = str(detail["staff_id"])
+            staff = personnel_by_id.get(teacher_id, {})
+            fallback = staff_attributes.get(teacher_id, {})
+            detail["dept"] = _resolved_department(
+                staff.get("dept"), fallback.get("dept"), detail.get("dept"),
+            )
+            detail["title"] = (
+                staff.get("title") or fallback.get("title") or detail.get("title")
+            )
+            detail["education"] = staff.get("education") or fallback.get("education")
+            detail["staff_category"] = (
+                staff.get("staff_category") or fallback.get("staff_type")
+            )
+        source_note = "真实教学任务 + 课程主数据 + 真实人员快照或正式在职人员主数据"
         summary.update({"teacher_count": len(teacher_ids), "course_count": len(continuous_rows)})
 
     elif metric_key == "senior_title_teaching_rate":
@@ -1478,6 +1535,51 @@ def management_kpi_details(metric_key: str, college: Optional[str] = None,
             str(row.get("display_name") or ""),
             str(row.get("staff_id") or ""),
         ))
+    elif metric_key == "team_structure_exception":
+        college_options = sorted({
+            str(row.get("college_name") or "").strip()
+            for row in rows if str(row.get("college_name") or "").strip()
+        })
+        selected_college = (opening_college or "").strip()
+        if selected_college:
+            rows = [
+                row for row in rows
+                if str(row.get("college_name") or "").strip() == selected_college
+            ]
+        if needle:
+            rows = [
+                row for row in rows
+                if needle in str(row.get("course_id") or "").lower()
+                or needle in str(row.get("course_name") or "").lower()
+            ]
+        rows.sort(key=lambda row: (
+            -int(row.get("lesson_count") or 0),
+            str(row.get("course_id") or ""),
+        ))
+    elif metric_key == "continuous_single_teacher":
+        department_options = sorted({
+            str(row.get("dept") or "").strip()
+            for row in rows if str(row.get("dept") or "").strip()
+        })
+        selected_department = (department or "").strip()
+        if selected_department:
+            rows = [
+                row for row in rows
+                if str(row.get("dept") or "").strip() == selected_department
+            ]
+        if needle:
+            rows = [
+                row for row in rows
+                if needle in str(row.get("staff_id") or "").lower()
+                or needle in str(row.get("display_name") or "").lower()
+                or needle in str(row.get("course_name") or "").lower()
+            ]
+        rows.sort(key=lambda row: (
+            -int(row.get("lesson_count") or 0),
+            str(row.get("dept") or ""),
+            str(row.get("display_name") or ""),
+            str(row.get("course_id") or ""),
+        ))
     elif needle:
         rows = [
             row for row in rows
@@ -1495,6 +1597,7 @@ def management_kpi_details(metric_key: str, college: Optional[str] = None,
         "breakdown": breakdown,
         "items": paged_rows,
         "department_options": department_options,
+        "college_options": college_options,
         "evidence_gaps": evidence_gaps,
         "total": total,
         "page": page,
