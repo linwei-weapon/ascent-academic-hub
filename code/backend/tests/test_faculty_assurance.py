@@ -166,6 +166,38 @@ def make_conn() -> sqlite3.Connection:
     return conn
 
 
+def make_v2_conn() -> sqlite3.Connection:
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.executescript("""
+        CREATE TABLE dim_organization(
+            organization_id TEXT PRIMARY KEY,
+            name TEXT
+        );
+        CREATE TABLE dim_staff(
+            staff_id TEXT PRIMARY KEY,
+            display_name TEXT,
+            organization_id TEXT,
+            staff_type TEXT,
+            title TEXT,
+            status TEXT,
+            source TEXT
+        );
+        INSERT INTO dim_organization VALUES ('OA','学院A');
+        INSERT INTO dim_organization VALUES ('OB','学院B');
+        INSERT INTO dim_staff VALUES
+            ('S1','在职教师1','OA','正式工作人员',NULL,'在职','real'),
+            ('S2','在职教师2','OA','自筹经费聘用人员',NULL,'在职','real'),
+            ('S3','在职教师3','OB','正式工作人员',NULL,'在职','real'),
+            ('S4','在职教师4','OB','正式工作人员',NULL,'在职','real'),
+            ('S5','导师关系补录','学院A','mentor',NULL,'active','real'),
+            ('S6','教学关系补录','学院A','lesson_teacher',NULL,'active','real_partial'),
+            ('S7','离职教师','OA','正式工作人员',NULL,'不在职','real'),
+            ('S8','在职状态导师占位','学院A','mentor',NULL,'在职','real');
+    """)
+    return conn
+
+
 def college_user(college_id: str) -> dict:
     return {
         "role_id": "college_dean",
@@ -266,9 +298,11 @@ class FacultyAssuranceRuleTest(unittest.TestCase):
 class FacultyAssuranceIntegrationTest(unittest.TestCase):
     def setUp(self):
         self.conn = make_conn()
+        self.v2_conn = make_v2_conn()
 
     def tearDown(self):
         self.conn.close()
+        self.v2_conn.close()
 
     def test_anomaly_gate_continuity_and_course_responsibility(self):
         analysis = _faculty_analysis(self.conn, "2025-2026-2")
@@ -313,6 +347,7 @@ class FacultyAssuranceIntegrationTest(unittest.TestCase):
     def test_management_overview_exposes_five_drillable_kpis(self):
         payload = management_overview(
             semester="2025-2026-2", user=school_user(), conn=self.conn,
+            v2_conn=self.v2_conn,
         )["data"]
         kpis = {item["key"]: item for item in payload["kpis"]}
 
@@ -364,6 +399,7 @@ class FacultyAssuranceIntegrationTest(unittest.TestCase):
     def test_college_course_total_is_evaluable_plus_data_candidates(self):
         payload = management_overview(
             semester="2025-2026-2", user=school_user(), conn=self.conn,
+            v2_conn=self.v2_conn,
         )["data"]
         college = next(item for item in payload["colleges"] if item["college_id"] == "C1")
 
@@ -375,14 +411,14 @@ class FacultyAssuranceIntegrationTest(unittest.TestCase):
     def test_kpi_details_reuse_course_and_teacher_evidence(self):
         structure = management_kpi_details(
             "team_structure_exception", semester="2025-2026-2",
-            user=school_user(), conn=self.conn,
+            user=school_user(), conn=self.conn, v2_conn=self.v2_conn,
         )["data"]
         self.assertEqual(4, structure["total"])
         self.assertIn("C_TEAM", {item["course_id"] for item in structure["items"]})
 
         continuous = management_kpi_details(
             "continuous_single_teacher", semester="2025-2026-2",
-            user=school_user(), conn=self.conn,
+            user=school_user(), conn=self.conn, v2_conn=self.v2_conn,
         )["data"]
         self.assertEqual(1, continuous["summary"]["teacher_count"])
         self.assertEqual("T1", continuous["items"][0]["staff_id"])
@@ -390,7 +426,7 @@ class FacultyAssuranceIntegrationTest(unittest.TestCase):
 
         senior = management_kpi_details(
             "senior_title_teaching_rate", semester="2025-2026-2",
-            user=school_user(), conn=self.conn,
+            user=school_user(), conn=self.conn, v2_conn=self.v2_conn,
         )["data"]
         self.assertEqual("TB", senior["items"][0]["staff_id"])
         self.assertEqual("副教授", senior["items"][0]["title"])
@@ -399,7 +435,7 @@ class FacultyAssuranceIntegrationTest(unittest.TestCase):
 
         young = management_kpi_details(
             "young_teacher_teaching_rate", semester="2025-2026-2",
-            user=school_user(), conn=self.conn,
+            user=school_user(), conn=self.conn, v2_conn=self.v2_conn,
         )["data"]
         self.assertEqual("T1", young["items"][0]["staff_id"])
         self.assertEqual("35岁以下", young["items"][0]["age_band"])
@@ -408,10 +444,12 @@ class FacultyAssuranceIntegrationTest(unittest.TestCase):
         self.conn.execute("DROP TABLE dim_staff_employment_snapshot")
         payload = management_overview(
             semester="2025-2026-2", user=school_user(), conn=self.conn,
+            v2_conn=self.v2_conn,
         )["data"]
         kpis = {item["key"]: item for item in payload["kpis"]}
         self.assertEqual("partial", kpis["teaching_staff_coverage"]["status"])
-        self.assertIn("—", kpis["teaching_staff_coverage"]["value"])
+        self.assertEqual("3 / 4 人", kpis["teaching_staff_coverage"]["value"])
+        self.assertEqual(4, kpis["teaching_staff_coverage"]["denominator"])
         self.assertEqual("", kpis["teaching_staff_coverage"]["sub"])
         self.assertEqual("unavailable", kpis["young_teacher_teaching_rate"]["status"])
         self.assertEqual("—", kpis["young_teacher_teaching_rate"]["value"])
@@ -422,12 +460,22 @@ class FacultyAssuranceIntegrationTest(unittest.TestCase):
         self.assertIsNone(kpis["young_teacher_teaching_rate"]["numerator"])
         self.assertEqual(3, kpis["young_teacher_teaching_rate"]["denominator"])
 
+        self.v2_conn.execute("DELETE FROM dim_staff")
+        payload = management_overview(
+            semester="2025-2026-2", user=school_user(), conn=self.conn,
+            v2_conn=self.v2_conn,
+        )["data"]
+        kpis = {item["key"]: item for item in payload["kpis"]}
+        self.assertEqual("3 / — 人", kpis["teaching_staff_coverage"]["value"])
+        self.assertIsNone(kpis["teaching_staff_coverage"]["denominator"])
+
     def test_personnel_snapshot_requires_trace_fields(self):
         self.conn.execute(
             "UPDATE dim_staff_employment_snapshot SET source_batch_id='' WHERE staff_id='T1'"
         )
         payload = management_overview(
             semester="2025-2026-2", user=school_user(), conn=self.conn,
+            v2_conn=self.v2_conn,
         )["data"]
         kpis = {item["key"]: item for item in payload["kpis"]}
         self.assertEqual("partial", kpis["teaching_staff_coverage"]["status"])
@@ -437,7 +485,7 @@ class FacultyAssuranceIntegrationTest(unittest.TestCase):
         with self.assertRaises(Exception) as caught:
             management_kpi_details(
                 "teaching_staff_coverage", college="C2", semester="2025-2026-2",
-                user=college_user("C1"), conn=self.conn,
+                user=college_user("C1"), conn=self.conn, v2_conn=self.v2_conn,
             )
         self.assertEqual(403, getattr(caught.exception, "status_code", None))
 

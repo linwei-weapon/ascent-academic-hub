@@ -12,7 +12,9 @@ from typing import Optional
 from fastapi import APIRouter, Depends
 
 from .. import db as dbm
-from ..deps import get_db, get_current_user, student_data_scope, college_data_scope
+from ..deps import (
+    get_db, get_v2_db, get_current_user, student_data_scope, college_data_scope,
+)
 from ..envelope import ok, ApiError
 from ..util import normalize_title, clean_dept
 from ..settings import LATEST_REAL_SEMESTER, CURRENT_SEMESTER
@@ -23,7 +25,7 @@ CUR = CURRENT_SEMESTER
 # 本科教学学院（排除研究生院/本科生院等非授课建制）
 _NON_TEACHING_COLLEGE = ("本科生院", "研究生院")
 FACULTY_RULE_VERSION = "FACULTY-ASSURANCE-2026.09.2"
-FACULTY_KPI_RULE_VERSION = "FACULTY-KPI-2026.09.5"
+FACULTY_KPI_RULE_VERSION = "FACULTY-KPI-2026.09.6"
 _IMPORTANT_COURSE_KEYWORDS = (
     "必修", "主干", "核心", "基础", "思想", "政治", "形势与政策",
     "体育", "数学", "英语",
@@ -36,12 +38,15 @@ _KPI_DEFINITIONS = {
     "teaching_staff_coverage": {
         "label": "授课教师总数/教职工总数",
         "tone": "primary",
-        "formula": "当前人员组织范围内承担有效本科教学任务的在岗教职工数÷同期在岗教职工总数。",
+        "formula": "当前学期教学任务涉及的授课教师去重人数，与同范围正式在职教师去重人数并列展示。",
         "hint": (
             "1.授课教师总数：与当前学期 教学任务 里涉及的所有教师去重数\n"
             "2.教职工总数：当前学期 在职的教师数"
         ),
-        "boundary": "两项均按人员所属组织统计；真实人员快照未接入时仅披露课程责任范围内的实际授课教师数，不计算参与率。",
+        "boundary": (
+            "教职工总数优先使用真实人员学期快照；当前学期快照未接入时后备读取正式在职教师主数据，"
+            "排除关系补录占位人员且不计算参与率；历史学期无快照时显示为‘—’。"
+        ),
     },
     "team_structure_exception": {
         "label": "教师结构异常课程数",
@@ -203,6 +208,52 @@ def _personnel_snapshot(conn: sqlite3.Connection, semester: str,
         "reason": "",
         "updated_at": updated_at,
     }
+
+
+def _current_active_staff_total(v2_conn: Optional[sqlite3.Connection],
+                                college_name: Optional[str] = None) -> Optional[int]:
+    """从正式教师主数据读取当前在职教师数；关系补录人员不进入分母。"""
+    if v2_conn is None or not _table_exists(v2_conn, "dim_staff"):
+        return None
+    columns = {
+        str(row["name"])
+        for row in dbm.query(v2_conn, "PRAGMA table_info(dim_staff)")
+    }
+    required = {"staff_id", "organization_id", "staff_type", "status", "source"}
+    if not required.issubset(columns):
+        return None
+
+    params: list = []
+    organization_filter = ""
+    if college_name:
+        organization_refs = {college_name}
+        if _table_exists(v2_conn, "dim_organization"):
+            organization_refs.update(
+                str(row["organization_id"])
+                for row in dbm.query(
+                    v2_conn,
+                    "SELECT organization_id FROM dim_organization WHERE name=?",
+                    (college_name,),
+                )
+                if row.get("organization_id") is not None
+            )
+        placeholders = ",".join("?" for _ in organization_refs)
+        organization_filter = f" AND organization_id IN ({placeholders})"
+        params.extend(sorted(organization_refs))
+
+    total = dbm.scalar(v2_conn, f"""
+        SELECT COUNT(DISTINCT staff_id)
+        FROM dim_staff
+        WHERE LOWER(TRIM(COALESCE(source,'')))='real'
+          AND LOWER(TRIM(COALESCE(staff_type,''))) NOT IN
+              ('mentor','class_adviser','lesson_teacher')
+          AND (
+              LOWER(TRIM(COALESCE(status,''))) IN ('在职','在岗','employed','正常')
+              OR LOWER(TRIM(COALESCE(status,'')))='active'
+          )
+          {organization_filter}
+    """, tuple(params))
+    return int(total) if total else None
 
 
 def _all_active_teacher_stats(conn: sqlite3.Connection, semester: str) -> dict[str, dict]:
@@ -871,7 +922,9 @@ def _cached_faculty_analysis(conn: sqlite3.Connection, semester: str,
 
 
 def _management_kpis(conn: sqlite3.Connection, semester: str,
-                     college_id: Optional[str], analysis: dict) -> list[dict]:
+                     college_id: Optional[str], analysis: dict,
+                     v2_conn: Optional[sqlite3.Connection] = None,
+                     college_name: Optional[str] = None) -> list[dict]:
     """构建首页5项正式KPI；数据未就绪时返回可解释的空值而不是0。"""
     snapshot = _personnel_snapshot(conn, semester, college_id)
     all_teacher_stats = _all_active_teacher_stats(conn, semester)
@@ -890,9 +943,13 @@ def _management_kpis(conn: sqlite3.Connection, semester: str,
     else:
         personnel_teaching_ids = set()
         staff_numerator = len(scope_active_ids)
-        staff_denominator = None
+        staff_denominator = (
+            _current_active_staff_total(v2_conn, college_name)
+            if semester == CURRENT_SEMESTER else None
+        )
         staff_rate = None
-        staff_value = f"{staff_numerator} / — 人"
+        denominator_text = str(staff_denominator) if staff_denominator is not None else "—"
+        staff_value = f"{staff_numerator} / {denominator_text} 人"
         staff_sub = (
             "" if snapshot["reason"] in {
                 "当前学期和授权范围没有可用的真实在岗人员快照",
@@ -1038,12 +1095,16 @@ def _teacher_display_rows(teacher_ids: set[str], analysis: dict,
 @router.get("/management-overview")
 def management_overview(college: Optional[str] = None, semester: Optional[str] = None,
                         user: dict = Depends(get_current_user),
-                        conn: sqlite3.Connection = Depends(get_db)):
+                        conn: sqlite3.Connection = Depends(get_db),
+                        v2_conn: sqlite3.Connection = Depends(get_v2_db)):
     """本科教学师资保障总览：课程保障优先级、证据状态与学院责任范围。"""
     college_id, college_name = _resolve_faculty_college(user, conn, college)
     sem = semester or REAL
     analysis = _cached_faculty_analysis(conn, sem, college_name)
-    kpis = _management_kpis(conn, sem, college_id, analysis)
+    kpis = _management_kpis(
+        conn, sem, college_id, analysis, v2_conn=v2_conn,
+        college_name=college_name,
+    )
     return ok({
         "semester": sem,
         "college": college_name,
@@ -1076,14 +1137,21 @@ def management_kpi_details(metric_key: str, college: Optional[str] = None,
                            semester: Optional[str] = None, keyword: Optional[str] = None,
                            page: int = 1, page_size: int = 20,
                            user: dict = Depends(get_current_user),
-                           conn: sqlite3.Connection = Depends(get_db)):
+                           conn: sqlite3.Connection = Depends(get_db),
+                           v2_conn: sqlite3.Connection = Depends(get_v2_db)):
     """5项首页KPI的统一下钻；指标白名单、范围和明细均由服务端控制。"""
     if metric_key not in _KPI_DEFINITIONS:
         raise ApiError("未知的师资保障指标", code=404, status_code=404)
     college_id, college_name = _resolve_faculty_college(user, conn, college)
     sem = semester or REAL
     analysis = _cached_faculty_analysis(conn, sem, college_name)
-    cards = {item["key"]: item for item in _management_kpis(conn, sem, college_id, analysis)}
+    cards = {
+        item["key"]: item
+        for item in _management_kpis(
+            conn, sem, college_id, analysis, v2_conn=v2_conn,
+            college_name=college_name,
+        )
+    }
     card = cards[metric_key]
     definition = _KPI_DEFINITIONS[metric_key]
     teacher_stats = _all_active_teacher_stats(conn, sem)
@@ -1141,7 +1209,12 @@ def management_kpi_details(metric_key: str, college: Optional[str] = None,
             source_note = "真实教学任务 + dim_staff_employment_snapshot真实在岗人员快照"
         else:
             rows = _teacher_display_rows(scope_active_ids, analysis, {})
-            source_note = f"仅有真实教学任务；{snapshot['reason']}，暂不形成教职工分母"
+            source_note = (
+                "真实教学任务 + dim_staff正式在职教师主数据；"
+                f"{snapshot['reason']}，不计算人员口径参与率"
+                if card["denominator"] is not None
+                else f"仅有真实教学任务；{snapshot['reason']}，暂不形成教职工分母"
+            )
         summary["teacher_count"] = len(rows)
 
     elif metric_key == "team_structure_exception":

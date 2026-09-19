@@ -199,10 +199,10 @@ IMPLEMENTED_METRICS = {
     "F-17": {
         "technical_kpi_id": "teaching_staff_coverage",
         "status": "published",
-        "data_source": "fact_lesson / dim_staff_employment_snapshot / data_quality_issue",
+        "data_source": "fact_lesson / dim_staff_employment_snapshot / dim_staff / data_quality_issue",
         "grain": "教师×学期×人员组织",
-        "update_cycle": "教学任务和真实人员快照同步后",
-        "version": "3.0",
+        "update_cycle": "教学任务、真实人员快照或正式教师主数据同步后",
+        "version": "3.1",
         "pages": [("/admin/faculty", "授课教师总数/教职工总数")],
     },
     "F-18": {
