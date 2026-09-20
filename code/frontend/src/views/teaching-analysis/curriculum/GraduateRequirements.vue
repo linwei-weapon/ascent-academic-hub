@@ -44,77 +44,6 @@
       </div>
     </template>
 
-    <template v-if="false">
-      <!-- 总达成度 -->
-      <div class="sa-kpi-row" style="margin-bottom:16px">
-        <KpiCard
-          label="毕业要求综合达成度"
-          :value="data.overallAchievement"
-          :sub="data.overallStatus"
-          :tone="data.overallAchievement >= 65 ? 'teal' : 'danger'"
-          hint="12 条毕业要求按学分加权平均"
-        />
-      </div>
-
-      <!-- 雷达图 -->
-      <el-row :gutter="16" style="margin-bottom:16px">
-        <el-col :span="10">
-          <div class="sa-card">
-            <div class="sa-card-title">毕业要求达成度雷达图</div>
-            <EChart v-if="data.requirements.length" :option="radarOption" :height="360" />
-          </div>
-        </el-col>
-        <el-col :span="14">
-          <div class="sa-card">
-            <div class="sa-card-title">达成度明细</div>
-            <AppTable :columns="requirementCols" :data="data.requirements" storage-key="curriculum:graduate-requirements"  max-height="360" :show-density="true" :show-column-settings="true" :pagination="false">
-              <template #col-achievement="{row}">
-                <div style="display:flex;align-items:center;gap:8px">
-                  <el-progress
-                    :percentage="Math.min(row.achievement, 100)"
-                    :stroke-width="8"
-                    :color="row.achievement >= 65 ? '#0D9488' : '#E11D48'"
-                    style="flex:1"
-                  />
-                  <span class="tnum" :style="{color: row.achievement >= 65 ? '#0D9488' : '#E11D48', fontWeight:700, minWidth:'40px', textAlign:'right'}">{{ row.achievement }}%</span>
-                </div>
-              </template>
-              <template #col-status="{row}">
-                <el-tag :type="row.status === '达标' ? 'success' : 'danger'" size="small">{{ row.status }}</el-tag>
-              </template>
-            </AppTable>
-          </div>
-        </el-col>
-      </el-row>
-
-      <!-- 支撑矩阵表 -->
-      <div class="sa-card">
-        <div class="sa-card-title">课程模块 → 毕业要求支撑矩阵 <span class="extra">数字为支撑权重（0-3）</span></div>
-        <div style="overflow-x:auto">
-          <table class="matrix-table">
-            <thead>
-              <tr>
-                <th class="matrix-hd module-col">课程模块</th>
-                <th v-for="(req, i) in reqNames" :key="i" class="matrix-hd req-col">{{ i + 1 }}</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="mod in planModules" :key="mod">
-                <td class="matrix-cell module-col">{{ mod }}</td>
-                <td v-for="(req, i) in reqNames" :key="i" class="matrix-cell req-col" :class="weightClass(getWeight(mod, i))">
-                  {{ getWeight(mod, i) || '' }}
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <div class="sa-faint" style="font-size:11px;margin-top:8px">
-          ※ 12 条毕业要求编号：1-工程知识 2-问题分析 3-设计/开发解决方案 4-研究 5-使用现代工具
-          6-工程与社会 7-环境和可持续发展 8-职业规范 9-个人和团队 10-沟通 11-项目管理 12-终身学习
-        </div>
-      </div>
-    </template>
-
     <div v-else class="sa-card" style="margin-top:14px">
       <el-empty :image-size="110" description="暂无毕业要求达成度数据" />
     </div>
@@ -127,18 +56,6 @@ import * as curriculumApi from '@/api/teachingAnalysis/curriculum'
 
 import { ref, reactive, computed, onMounted, watch } from 'vue'
 import KpiCard from '@/components/KpiCard.vue'
-import EChart from '@/components/EChart.vue'
-import AppTable from '@/components/AppTable.vue'
-import type { AppTableColumn } from '@/types/table'
-
-// 达成度明细表列定义（M6 DataTable；当前位于 v-if="false" 的停用模板中，保留迁移一致性）
-const requirementCols: AppTableColumn[] = [
-  { key: 'index', label: '#', minWidth: 44, align: 'center' },
-  { key: 'name', label: '毕业要求', minWidth: 160 },
-  { key: 'achievement', label: '达成度', minWidth: 200 },
-  { key: 'status', label: '状态', minWidth: 70, align: 'center' },
-]
-
 const props = defineProps<{ majorId?: string }>()
 const embedded = computed(() => !!props.majorId)
 
@@ -148,25 +65,10 @@ const majors = [
 ]
 const major = ref(props.majorId || 'me_safety')
 
-const reqNames = computed(() => data.requirementNames || [])
-const weightMatrix = computed<Record<string, number[]>>(() => data.supportMatrix || {})
-const planModules = computed(() => data.planModules || [])
-
-function getWeight(mod: string, idx: number): number {
-  return weightMatrix.value[mod]?.[idx] || 0
-}
-
-function weightClass(w: number): string {
-  if (w >= 3) return 'w-high'
-  if (w >= 2) return 'w-mid'
-  if (w >= 1) return 'w-low'
-  return 'w-none'
-}
-
-const data = reactive<{ requirements: any[]; overallAchievement: number; overallStatus: string;
-  indicatorCount:number; courseMappingCount:number; boundaryNote:string;
-  requirementNames: string[]; supportMatrix: Record<string, number[]>; planModules: string[] }>({
-  requirements: [], overallAchievement: 0, overallStatus: '', indicatorCount:0, courseMappingCount:0, boundaryNote:'', requirementNames: [], supportMatrix: {}, planModules: [],
+const data = reactive<{
+  requirements: any[]; indicatorCount: number; courseMappingCount: number; boundaryNote: string;
+}>({
+  requirements: [], indicatorCount: 0, courseMappingCount: 0, boundaryNote: '',
 })
 
 // 按当前页面上下文读取数据，沿用原加载状态和异常处理。
@@ -179,39 +81,6 @@ async function load() {
     data.requirements = []
   }
 }
-
-// 雷达图指标最大值100
-const radarOption = computed(() => {
-  const items = data.requirements || []
-  return {
-    radar: {
-      center: ['50%', '54%'],
-      radius: '64%',
-      indicator: items.map((r: any) => ({ name: r.index + '.' + r.name, max: 100 })),
-      axisName: { color: '#475569', fontSize: 11, borderRadius: 3, padding: [3, 5] as any },
-      splitArea: { areaStyle: { color: ['#fff', '#f8fafc'] } },
-      splitLine: { lineStyle: { color: '#E2E8F0' } },
-    },
-    series: [{
-      type: 'radar',
-      symbol: 'circle',
-      symbolSize: 5,
-      lineStyle: { width: 2, color: '#4F46E5' },
-      areaStyle: { color: 'rgba(79,70,229,0.12)' },
-      itemStyle: { color: '#4F46E5' },
-      data: [{
-        value: items.map((r: any) => r.achievement),
-        name: '达成度',
-      }],
-      markLine: {
-        silent: true, symbol: 'none',
-        data: [{ name: '达标线', value: 65 }],
-        lineStyle: { color: '#D97706', type: 'dashed' },
-        label: { formatter: '65%', color: '#D97706', fontSize: 10 },
-      },
-    }],
-  }
-})
 
 // 进入页面时执行原初始化流程，恢复路由条件与可用选项。
 onMounted(load)
@@ -226,59 +95,6 @@ watch(() => props.majorId, value => { if (value) { major.value = value; load() }
   justify-content: space-between;
   align-items: flex-start;
   margin-bottom: 14px;
-}
-
-.matrix-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 11px;
-}
-
-.matrix-hd {
-  padding: 6px 4px;
-  text-align: center;
-  color: #64748B;
-  font-weight: 600;
-  background: #f8fafc;
-  border: 1px solid #E2E8F0;
-}
-
-.matrix-cell {
-  padding: 4px;
-  text-align: center;
-  border: 1px solid #E2E8F0;
-  font-weight: 600;
-}
-
-.module-col {
-  min-width: 130px;
-  text-align: left;
-  padding-left: 8px;
-  color: #334155;
-}
-
-.req-col {
-  min-width: 28px;
-}
-
-.w-high {
-  background: #4F46E5;
-  color: #fff;
-}
-
-.w-mid {
-  background: #A5B4FC;
-  color: #1E293B;
-}
-
-.w-low {
-  background: #EEF2FF;
-  color: #475569;
-}
-
-.w-none {
-  background: #fff;
-  color: #CBD5E1;
 }
 
 .real-requirement {

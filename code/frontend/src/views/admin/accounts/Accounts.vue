@@ -164,7 +164,7 @@
             :type="row.status === 'active' && !row.archived_at ? 'success' : 'info'"
           >{{ row.archived_at ? '已归档' : row.status === 'active' ? '已启用' : '已停用' }}</el-tag>
         </template>
-        <template #col-last_login="{ row }">{{ formatTime(row.last_login_at) }}</template>
+        <template #col-last_login="{ row }">{{ formatDateTime(row.last_login_at, { precision: 'minute' }) }}</template>
         <template #col-staff_id="{ row }">{{ row.staff_id || '—' }}</template>
         <template #col-actions="{ row }">
           <div class="row-actions" @click.stop>
@@ -213,8 +213,8 @@
             <div><span>姓名</span><b>{{ detail.name || '未填写' }}</b></div>
             <div><span>账号来源</span><b>{{ sourceLabel(detail.account_source) }}</b></div>
             <div><span>账号状态</span><b>{{ detail.archived_at ? '已归档' : detail.status === 'active' ? '已启用' : '已停用' }}</b></div>
-            <div><span>最近登录</span><b>{{ formatTime(detail.lastLoginAt) }}</b></div>
-            <div><span>最近更新</span><b>{{ formatTime(detail.updated_at) }}</b></div>
+            <div><span>最近登录</span><b>{{ formatDateTime(detail.lastLoginAt, { precision: 'minute' }) }}</b></div>
+            <div><span>最近更新</span><b>{{ formatDateTime(detail.updated_at, { precision: 'minute' }) }}</b></div>
           </div>
 
           <section class="detail-section">
@@ -227,7 +227,7 @@
                 <div>
                   <b>{{ providerLabel(mapping.provider) }}</b>
                   <span>{{ mapping.subject_id }}</span>
-                  <small>来源：{{ mapping.source || '未知' }} · 更新：{{ formatTime(mapping.updated_at) }}</small>
+                  <small>来源：{{ mapping.source || '未知' }} · 更新：{{ formatDateTime(mapping.updated_at, { precision: 'minute' }) }}</small>
                 </div>
                 <div>
                   <el-tag size="small" effect="plain" :type="mapping.status === 'active' ? 'success' : 'info'">
@@ -270,7 +270,7 @@
               <el-timeline-item
                 v-for="audit in detail.auditTrail"
                 :key="audit.audit_id"
-                :timestamp="formatTime(audit.created_at)"
+                :timestamp="formatDateTime(audit.created_at, { precision: 'minute' })"
               >
                 {{ auditLabel(audit.action) }} · {{ audit.actor || '系统' }}
               </el-timeline-item>
@@ -385,7 +385,7 @@
               :data="readiness.providers || []"
             >
               <template #col-provider="{row}">{{ providerLabel(row.provider) }}</template>
-              <template #col-last_updated_at="{row}">{{ formatTime(row.last_updated_at) }}</template>
+              <template #col-last_updated_at="{row}">{{ formatDateTime(row.last_updated_at, { precision: 'minute' }) }}</template>
             </AppTable>
             <el-empty v-if="!readiness.providers?.length" :image-size="54" description="尚未接入认证来源" />
           </section>
@@ -396,6 +396,7 @@
 </template>
 
 <script setup lang="ts">
+import { formatDateTime } from '@/utils/dateTime'
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 import { ArrowDown, CircleCheckFilled, WarningFilled } from '@element-plus/icons-vue'
@@ -686,8 +687,6 @@ function sourceTag(value:string){return value==='school_sync'?'success':value===
 function providerLabel(value:string){return({unified_identity:'学校统一身份认证',wecom:'企业微信',school_app:'学校小程序/APP'} as AnyRow)[value]||value||'—'}
 // 按现有范围类型展示中文名称，未知枚举保留原兜底。
 function scopeTypeLabel(value:string){return({all:'全校业务数据',college:'学院范围',major:'专业范围',class:'行政班范围',teacher:'任课关系',staff_relation:'带班/带生关系'} as AnyRow)[value]||value||'未定义范围'}
-// 按现有格式展示接口时间，不改变时区或截取精度。
-function formatTime(value?:string){return value?String(value).replace('T',' ').slice(0,16):'—'}
 // 只展示当前有效的人员关联工号。
 function activeStaffIds(data:AnyRow){return(data.staffBindings||[]).filter((item:AnyRow)=>item.status==='active').map((item:AnyRow)=>item.staff_id)}
 // 将账号治理审计动作映射为已有可读文案。

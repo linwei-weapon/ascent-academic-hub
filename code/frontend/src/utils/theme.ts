@@ -46,7 +46,7 @@ export const STYLE_A = {
   faint: '#94A3B8', // slate-400 极弱
   border: '#EAEDF2', // 卡片描边
   appBg: '#F8FAFC', // 页面底
-  headFont: "'Plus Jakarta Sans','Noto Sans SC',system-ui,sans-serif",
+  headFont: 'var(--sa-font-body)',
 } as const
 
 export function applyStyleA(): void {

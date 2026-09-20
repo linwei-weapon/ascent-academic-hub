@@ -157,7 +157,7 @@ watch(pageSize, () => {
   loadPage(1)
 })
 
-// 学生明细表列定义（M6 DataTable）
+// 学生明细表列定义（AppTable）
 const baseStudentCols: AppTableColumn[] = [
   { key: 'sid', label: '学号', minWidth: 130, fixed: 'left', region: 'identity', required: true },
   { key: 'name', label: '姓名', minWidth: 100, fixed: 'left', region: 'identity', required: true },

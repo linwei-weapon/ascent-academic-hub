@@ -60,7 +60,7 @@
             <div v-if="student.alertHistory?.length" class="record-list">
               <div v-for="item in student.alertHistory.slice(0, 12)" :key="item.time + item.type">
                 <span>{{ item.type }}</span>
-                <b>{{ item.level }} · {{ formatDate(item.time) }}</b>
+                <b>{{ item.level }} · {{ formatDateTime(item.time, { precision: 'minute' }) }}</b>
               </div>
             </div>
             <el-empty v-else description="暂无历史预警记录" :image-size="70" />
@@ -76,6 +76,7 @@
 </template>
 
 <script setup lang="ts">
+import { formatDateTime } from '@/utils/dateTime'
 import * as alertApi from '@/api/teachingAnalysis/alert'
 
 import { computed, ref, watch } from 'vue'
@@ -154,9 +155,6 @@ function statusType(status: string) {
   return status === 'persistent' ? 'danger'
     : status === 'recovered' ? 'success'
       : status === 'recovering' ? 'warning' : 'info'
-}
-function formatDate(value: string) {
-  return value ? String(value).replace('T', ' ').slice(0, 16) : '—'
 }
 // 按当前页面上下文读取数据，沿用原加载状态和异常处理。
 async function load() {

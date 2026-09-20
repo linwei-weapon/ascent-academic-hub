@@ -294,7 +294,7 @@
               {{ row.managementLabel }}
             </el-tag>
           </template>
-          <template #col-latestAt="{ row }">{{ formatDate(row.latestAt) }}</template>
+          <template #col-latestAt="{ row }">{{ formatDateTime(row.latestAt, { precision: 'minute' }) }}</template>
           <template #col-action="{ row }">
             <el-button link type="primary" @click.stop="showStudent(row)">核查</el-button>
           </template>
@@ -330,6 +330,7 @@
 </template>
 
 <script setup lang="ts">
+import { formatDateTime } from '@/utils/dateTime'
 import * as alertApi from '@/api/teachingAnalysis/alert'
 
 import { computed, nextTick, onMounted, reactive, ref } from 'vue'
@@ -625,10 +626,6 @@ function managementType(state: string) {
   if (state === 'in_review') return 'warning'
   if (state === 'recorded') return 'success'
   return 'info'
-}
-function formatDate(value: string) {
-  if (!value) return '—'
-  return String(value).replace('T', ' ').slice(0, 16)
 }
 function organizationText(row: any) {
   if (meta.scope?.type === 'all') return row.collegeName

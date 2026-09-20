@@ -66,10 +66,10 @@ const loading = ref(false), initialLoading = ref(true), detailLoading = ref(fals
 const loadError = ref('');
 const draftFrom = ref(''), draftTo = ref(''), draftGroup = ref(''), from = ref(''), to = ref(''), group = ref('');
 const page = ref(1), pageSize = ref(50), selected = ref(''), requestId = ref(0);
-// M6：每页行数由 DataTable 偏好驱动，变化时回到第一页重新加载
+// 页长由页面持有；用户修改页长后回到第一页重新加载
 watch(pageSize, () => { page.value = 1; load(); });
 
-// 需要进一步核查的课程表列定义（M6 DataTable）
+// 需要进一步核查的课程表列定义（AppTable）
 const courseCols: AppTableColumn[] = [
   { key: 'course_name', label: '课程', minWidth: 170, required: true, region: 'identity', fixed: 'left' },
   { key: 'course_group', label: '课程类别', minWidth: 96 },

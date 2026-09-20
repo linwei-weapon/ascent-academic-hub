@@ -207,7 +207,7 @@ const decisionOfferings = computed(() => (data.focusCourses || [])
   .map((row:any,index:number) => ({ ...row, aiPriority:index < 3 })))
 const hasResults = computed(() => !!kpis.value.length || !!data.totalCourses)
 
-// 开课保障关注 TOP10 表列定义（M6 DataTable）
+// 开课保障关注 TOP10 表列定义（AppTable）
 const offeringTopCols: AppTableColumn[] = [
   { key: 'course_id', label: '课程代码', minWidth: 140, region:'identity', fixed:'left' },
   { key: 'course_name', label: '课程名称', minWidth: 190, required:true, region:'identity', fixed:'left' },

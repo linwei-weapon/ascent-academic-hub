@@ -97,7 +97,7 @@ import type { AppTableColumn } from '@/types/table'
 import { getScheduleChangesAIInsight, getScheduleTeacherAIInsight } from '@/api/teachingAnalysis/insights'
 const route = useRoute()
 
-// 按学院调停课率排名 / 教师调停课 TOP10 表列定义（M6 DataTable）
+// 按学院调停课率排名 / 教师调停课 TOP10 表列定义（AppTable）
 const deptRankCols: AppTableColumn[] = [
   { key: 'name', label: '学院', minWidth: 130, required:true, region:'identity', fixed:'left' },
   { key: 'totalLessons', label: '教学班数', minWidth: 84, align: 'center', required:true },

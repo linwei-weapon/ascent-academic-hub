@@ -15,7 +15,7 @@
 
     <div class="context-strip">
       <span><b>目录版本</b>{{ overview.catalogVersion || '—' }}</span>
-      <span><b>最近接入</b>{{ formatTime(overview.lastIngestedAt) }}</span>
+      <span><b>最近接入</b>{{ formatDateTime(overview.lastIngestedAt) }}</span>
       <span><b>治理边界</b>只监控接入与运行证据，不维护教务主数据</span>
     </div>
 
@@ -110,7 +110,7 @@
                 <el-tag size="small" effect="plain" :type="validationTag(row.validationStatus)">{{ row.validationStatusLabel }}</el-tag>
                 <small v-if="row.attentionCount" class="attention-count">{{ row.attentionCount }}项</small>
               </template>
-              <template #col-lastIngestedAt="{row}">{{ formatTime(row.lastIngestedAt) }}</template>
+              <template #col-lastIngestedAt="{row}">{{ formatDateTime(row.lastIngestedAt) }}</template>
               <template #col-sourceRows="{row}">{{ formatNumber(row.sourceRows) }}</template>
               <template #col-downstream="{row}">{{ (row.downstreamModules || []).join('、') }}</template>
               <template #col-action><el-button link type="primary">核查</el-button></template>
@@ -161,7 +161,7 @@
               </template>
               <template #col-sources="{row}">{{ row.sourceNames?.length ? row.sourceNames.join('、') : '尚未建立批次关联' }}</template>
               <template #col-status="{row}"><el-tag size="small" effect="plain" :type="runTag(row.status)">{{ runStatusLabel(row.status) }}</el-tag></template>
-              <template #col-started_at="{row}">{{ formatTime(row.started_at) }}</template>
+              <template #col-started_at="{row}">{{ formatDateTime(row.started_at) }}</template>
               <template #col-duration_ms="{row}">{{ formatDuration(row.duration_ms) }}</template>
               <template #col-rows_written="{row}">{{ formatNumber(row.rows_written) }}</template>
               <template #col-action><el-button link type="primary">详情</el-button></template>
@@ -210,7 +210,7 @@
         <div class="drawer-tags">
           <el-tag effect="plain" :type="accessTag(sourceDetail.source.accessStatus)">{{ sourceDetail.source.accessStatusLabel }}</el-tag>
           <el-tag effect="plain" :type="validationTag(sourceDetail.source.validationStatus)">{{ sourceDetail.source.validationStatusLabel }}</el-tag>
-          <span>最近接入 {{ formatTime(sourceDetail.source.lastIngestedAt) }}</span>
+          <span>最近接入 {{ formatDateTime(sourceDetail.source.lastIngestedAt) }}</span>
         </div>
         <el-tabs>
           <el-tab-pane label="当前状态">
@@ -241,7 +241,7 @@
               @page-change="batchTable.changePage"
               @page-size-change="batchTable.changePageSize"
             >
-              <template #col-ingested_at="{row}">{{ formatTime(row.ingested_at) }}</template>
+              <template #col-ingested_at="{row}">{{ formatDateTime(row.ingested_at) }}</template>
               <template #col-row_count="{row}">{{ formatNumber(row.row_count) }}</template>
               <template #col-accepted_count="{row}">{{ formatNumber(row.accepted_count) }}</template>
               <template #col-qualityLabel="{row}"><el-tag size="small" effect="plain" :type="row.quality_status==='warning'?'warning':'success'">{{ row.qualityLabel }}</el-tag></template>
@@ -282,7 +282,7 @@
             >
               <template #col-taskName="{row}">{{ row.taskName }}</template>
               <template #col-status="{row}"><el-tag size="small" effect="plain" :type="runTag(row.status)">{{ runStatusLabel(row.status) }}</el-tag></template>
-              <template #col-started_at="{row}">{{ formatTime(row.started_at) }}</template>
+              <template #col-started_at="{row}">{{ formatDateTime(row.started_at) }}</template>
               <template #col-duration_ms="{row}">{{ formatDuration(row.duration_ms) }}</template>
               <template #col-action><el-button link type="primary">详情</el-button></template>
             </AppTable>
@@ -296,7 +296,7 @@
       <template v-else-if="runDetail.run">
         <div class="drawer-tags">
           <el-tag effect="plain" :type="runTag(runDetail.run.status)">{{ runStatusLabel(runDetail.run.status) }}</el-tag>
-          <span>开始 {{ formatTime(runDetail.run.started_at) }}</span>
+          <span>开始 {{ formatDateTime(runDetail.run.started_at) }}</span>
           <span>耗时 {{ formatDuration(runDetail.run.duration_ms) }}</span>
         </div>
         <el-alert v-if="runDetail.run.errorSummary" :title="runDetail.run.errorSummary" type="error" :closable="false" show-icon />
@@ -326,7 +326,7 @@
               @page-change="runBatchTable.changePage"
               @page-size-change="runBatchTable.changePageSize"
             >
-              <template #col-ingested_at="{row}">{{ formatTime(row.ingested_at) }}</template>
+              <template #col-ingested_at="{row}">{{ formatDateTime(row.ingested_at) }}</template>
               <template #col-row_count="{row}">{{ formatNumber(row.row_count) }}</template>
               <template #col-accepted_count="{row}">{{ formatNumber(row.accepted_count) }}</template>
             </AppTable>
@@ -358,6 +358,7 @@
 </template>
 
 <script setup lang="ts">
+import { formatDateTime } from '@/utils/dateTime'
 import { useTablePagination } from '@/composables/useTablePagination'
 import AppTable from '@/components/AppTable.vue'
 import type { AppTableColumn } from '@/types/table'
@@ -486,12 +487,6 @@ const runDrawerTitle = computed(() => runDetail.run ? `运行详情 · ${runDeta
 // 将页面业务域选项映射为已有接口使用的编码。
 function domainCode(label:string) {
   return ({'基础主数据':'master','学籍与培养方案':'student','成绩与课程结果':'achievement','教学任务与师资':'teaching','教室占用':'resource'} as any)[label] || label
-}
-// 按现有格式展示接口时间，不改变时区或截取精度。
-function formatTime(value:any) {
-  if (!value) return '—'
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString('zh-CN',{hour12:false})
 }
 // 按既有显示规则格式化数量，不重算接口统计。
 function formatNumber(value:any) { return value == null ? '—' : Number(value).toLocaleString('zh-CN') }

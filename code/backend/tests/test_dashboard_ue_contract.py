@@ -90,15 +90,19 @@ class DashboardUeContractTest(unittest.TestCase):
         ):
             self.assertIn(marker, settings)
 
-    def test_data_table_supports_required_columns_limits_and_identity_scoping(self):
-        source = (FRONTEND / "components" / "DataTable.vue").read_text(encoding="utf-8")
+    def test_app_table_supports_required_columns_limits_and_identity_scoping(self):
+        source = (FRONTEND / "components" / "AppTable.vue").read_text(encoding="utf-8")
+        column_types = (FRONTEND / "types" / "table.ts").read_text(encoding="utf-8")
+        preferences = (FRONTEND / "utils" / "tablePreferences.ts").read_text(encoding="utf-8")
+        self.assertIn("required?: boolean", column_types)
+        self.assertIn("region?: TableColumnRegion", column_types)
+        self.assertIn("'identity' | 'business' | 'action'", column_types)
+        self.assertIn("activeIdentityId", preferences)
+        self.assertIn("tablePreferenceKey(props.storageKey, props.configVersion)", source)
         for marker in (
-            "required?: boolean",
-            "region?: 'identity' | 'business' | 'action'",
             "maxBusinessColumns?: number",
             "configVersion?: string | number",
-            "activeIdentityId",
-            ":draggable=\"columnRegion(c) === 'business'\"",
+            ":draggable=\"columnRegion(column) === 'business'\"",
             "为保证可读性，当前最多显示",
             "恢复默认",
         ):

@@ -173,7 +173,7 @@ function failRateSub(summary: any) {
     : '本学期暂无有效成绩，暂不可计算'
 }
 
-// 导师视图「我的学生」表列定义（M6 DataTable）
+// 导师视图「我的学生」表列定义（AppTable）
 const myStudentCols: AppTableColumn[] = [
   { key: 'name', label: '姓名', minWidth: 120 },
   { key: 'className', label: '行政班', minWidth: 150, tooltip: true },

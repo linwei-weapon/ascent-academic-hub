@@ -15,7 +15,6 @@ declare module 'vue' {
     AppPagination: typeof import('./../../components/AppPagination.vue')['default']
     AppTable: typeof import('./../../components/AppTable.vue')['default']
     BusinessPageContext: typeof import('./../../components/BusinessPageContext.vue')['default']
-    DataTable: typeof import('./../../components/DataTable.vue')['default']
     EChart: typeof import('./../../components/EChart.vue')['default']
     GradeCoursesDrawer: typeof import('./../../components/GradeCoursesDrawer.vue')['default']
     KpiCard: typeof import('./../../components/KpiCard.vue')['default']

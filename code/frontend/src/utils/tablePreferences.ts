@@ -2,7 +2,7 @@
 import { authStore } from '@/store/auth'
 import { isTableDensity, type TablePreferences } from '@/types/table'
 
-/** 与既有 DataTable 使用相同的身份解析顺序，兼容策略由接入页面选择存储标识和版本。 */
+/** 按用户、当前工作身份、表格标识和版本隔离显示偏好，保留既有存储键格式。 */
 export function tablePreferenceKey(storageKey: string, configVersion: string | number = 1): string {
   const user = authStore.user
   const identity = user?.activeIdentityId

@@ -42,6 +42,10 @@ function render() {
     animationEasing: 'cubicOut',
     animationDelay: (idx: number) => idx * 40,
     ...opt,
+    textStyle: {
+      fontFamily: getComputedStyle(document.body).fontFamily,
+      ...opt.textStyle,
+    },
   }, true)
 }
 

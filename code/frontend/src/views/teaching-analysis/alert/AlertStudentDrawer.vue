@@ -82,7 +82,7 @@
                 <p>{{ signal.reason }}</p>
                 <small>
                   规则 {{ signal.ruleId }} · 版本 {{ signal.ruleVersion || 'legacy' }}
-                  · 首次生成 {{ formatDate(signal.detectedAt) }}
+                  · 首次生成 {{ formatDateTime(signal.detectedAt, { precision: 'minute' }) }}
                 </small>
               </div>
             </div>
@@ -125,7 +125,7 @@
               <div v-if="student.alertHistory?.length" class="evidence-list">
                 <div v-for="item in student.alertHistory.slice(0, 10)" :key="item.time + item.type">
                   <span>{{ item.type }}</span>
-                  <b>{{ item.level }} · {{ formatDate(item.time) }}</b>
+                  <b>{{ item.level }} · {{ formatDateTime(item.time, { precision: 'minute' }) }}</b>
                 </div>
               </div>
               <el-empty v-else description="暂无历史预警" :image-size="60" />
@@ -207,7 +207,7 @@
               <div v-for="item in workflow.followups" :key="item.followup_id" class="followup-item">
                 <div>
                   <b>{{ item.operator }}</b>
-                  <span>{{ item.action_type }} · {{ formatDate(item.created_at) }}</span>
+                  <span>{{ item.action_type }} · {{ formatDateTime(item.created_at, { precision: 'minute' }) }}</span>
                 </div>
                 <p>{{ item.content }}</p>
               </div>
@@ -221,6 +221,7 @@
 </template>
 
 <script setup lang="ts">
+import { formatDateTime } from '@/utils/dateTime'
 import * as alertApi from '@/api/teachingAnalysis/alert'
 
 import { computed, ref, watch } from 'vue'
@@ -333,10 +334,6 @@ function levelType(level: string) {
 }
 function workflowLabel(status: string) {
   return workflowStatuses.find(item => item.value === status)?.label || status || '—'
-}
-function formatDate(value: string) {
-  if (!value) return '—'
-  return String(value).replace('T', ' ').slice(0, 16)
 }
 function openFullProfile() {
   if (!props.row?.studentId) return

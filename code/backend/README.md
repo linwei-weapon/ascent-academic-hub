@@ -1,7 +1,7 @@
 # 平台管理端 · 后端 API（阶段3）
 
 FastAPI + SQLite 分析库（`backend/db/analytics.sqlite`，分析查询只读、治理接口受控写入）。统一响应包络 `{code,msg,data}`，
-前端读 `d.data`，接口形状对齐 `平台管理端-0618/vite.config.ts` 的 mock，可零改动切换。
+前端通过统一 API 层读取响应数据。
 
 ## 启动
 
@@ -72,19 +72,9 @@ K004 挂科率，支持学院/专业/年级维度与学期筛选。缺少可靠�
 所有候选特征必须由通用规则引擎可执行；未知特征按失败关闭处理。采纳建议只创建禁用规则占位和
 规则变更草稿，之后必须完成影响试算、独立复核、发布配置和受控激活。
 
-## 前后端联调（切换 mock → 真实后端）
+## 前后端联调
 
-编辑 `平台管理端-0618/vite.config.ts`：
-
-1. 注释 `plugins` 中的 `mockPlugin()`。
-2. `server` 增加代理：
-
-```ts
-server: {
-  port: Number(VITE_PORT), host: true,
-  proxy: { '/api': { target: 'http://localhost:8000', changeOrigin: true } },
-}
-```
+前端开发代理配置见 [`../frontend/vite.config.ts`](../frontend/vite.config.ts)，`/api` 请求转发至 `http://127.0.0.1:8000`。
 
 先起后端（8000）再起前端（3006）。CORS 默认只允许本地 3006/3007 来源，可通过逗号分隔的
 `BI_CORS_ORIGINS` 配置部署白名单。生产环境设置 `BI_APP_ENV=production` 时必须同时配置独立
