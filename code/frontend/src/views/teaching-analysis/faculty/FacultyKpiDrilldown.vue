@@ -356,7 +356,7 @@ const columns = computed<AppTableColumn[]>(() => {
     { key: 'dept', label: '学院', minWidth: 150, required: true, region: 'business' },
     { key: 'title', label: '职称', minWidth: 100, region: 'business' },
     { key: 'education', label: '学历', minWidth: 110, region: 'business' },
-    { key: 'age_band', label: '年龄段', minWidth: 105, region: 'business' },
+    { key: 'age_band', label: '年龄', minWidth: 105, region: 'business' },
     { key: 'course_count', label: '授课课程数', minWidth: 105, align: 'center', region: 'business' },
     { key: 'lesson_count', label: '教学班数', minWidth: 90, align: 'center', region: 'business' },
     { key: 'course_names', label: '授课课程', minWidth: 220, tooltip: true, region: 'business' },
@@ -410,7 +410,9 @@ const detailDescription = computed(() => props.metricKey.includes('teacher') || 
   : '点击课程可继续查看实际授课团队、历史开课和规则证据。')
 const emptyText = computed(() => data.metric?.status === 'ready'
   ? '当前条件下没有明细'
-  : '真实数据尚未达到该指标的正式计算条件')
+  : isYoungTeacherList.value
+    ? 'No Data'
+    : '真实数据尚未达到该指标的正式计算条件')
 
 async function load(force = false) {
   if (!props.modelValue || !props.metricKey || !props.semester) return
