@@ -759,6 +759,7 @@ class FacultyAssuranceIntegrationTest(unittest.TestCase):
         self.assertIsNone(young_details["breakdown"][0]["count"])
         self.assertIsNone(young_details["breakdown"][0]["rate"])
         self.assertEqual(0.0, young_details["breakdown"][0]["coverage"])
+        self.assertEqual(["学院A"], young_details["college_options"])
 
         self.v2_conn.execute("DELETE FROM dim_staff")
         payload = management_overview(
@@ -851,6 +852,16 @@ class FacultyAssuranceIntegrationTest(unittest.TestCase):
         )
         self.assertEqual(100.0, details["breakdown"][0]["rate"])
         self.assertEqual(66.7, details["breakdown"][1]["rate"])
+        self.assertEqual(["学院A", "学院B"], details["college_options"])
+        self.assertTrue(
+            all("scope_college_names" not in item for item in details["items"])
+        )
+
+        college_b = management_kpi_details(
+            "young_teacher_teaching_rate", semester="2025-2026-2", department="学院B",
+            user=school_user(), conn=self.conn, v2_conn=self.v2_conn,
+        )["data"]
+        self.assertEqual(["T2"], [item["staff_id"] for item in college_b["items"]])
 
     def test_senior_teacher_list_uses_the_same_real_title_for_selection_and_display(self):
         self.conn.execute(

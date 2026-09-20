@@ -25,7 +25,7 @@ CUR = CURRENT_SEMESTER
 # 本科教学学院（排除研究生院/本科生院等非授课建制）
 _NON_TEACHING_COLLEGE = ("本科生院", "研究生院")
 FACULTY_RULE_VERSION = "FACULTY-ASSURANCE-2026.09.3"
-FACULTY_KPI_RULE_VERSION = "FACULTY-KPI-2026.09.15"
+FACULTY_KPI_RULE_VERSION = "FACULTY-KPI-2026.09.16"
 _IMPORTANT_COURSE_KEYWORDS = (
     "必修", "主干", "核心", "基础", "思想", "政治", "形势与政策",
     "体育", "数学", "英语",
@@ -1283,6 +1283,7 @@ def management_kpi_details(metric_key: str, college: Optional[str] = None,
     breakdown: list[dict] = []
     evidence_gaps: list[dict] = []
     college_options: list[str] = []
+    scope_colleges_by_teacher: dict[str, list[str]] = {}
     summary: dict = {
         "numerator": card["numerator"],
         "denominator": card["denominator"],
@@ -1512,6 +1513,13 @@ def management_kpi_details(metric_key: str, college: Optional[str] = None,
         age_snapshot = _personnel_snapshot(conn, sem)
         teaching_ids = scope_active_ids
         scope_stats = analysis.get("teacher_scope_stats") or {}
+        scope_colleges_by_teacher = {
+            staff_id: (
+                scope_stats.get(staff_id, {}).get("college_names")
+                or ["待映射组织"]
+            )
+            for staff_id in teaching_ids
+        }
         age_known_ids: set[str] = set()
         young_ids: set[str] = set()
         if age_snapshot["ready"]:
@@ -1532,7 +1540,7 @@ def management_kpi_details(metric_key: str, college: Optional[str] = None,
                 staff_id = str(staff["staff_id"])
                 detail = dict(base_rows.get(staff_id) or {"staff_id": staff_id, "display_name": staff_id})
                 attributes = personnel_attributes.get(staff_id, {})
-                scope_colleges = scope_stats.get(staff_id, {}).get("college_names") or []
+                scope_colleges = scope_colleges_by_teacher.get(staff_id) or []
                 detail.update({
                     "college_id": staff.get("college_id"),
                     "dept": _resolved_department(
@@ -1560,10 +1568,7 @@ def management_kpi_details(metric_key: str, college: Optional[str] = None,
 
         age_buckets: dict[str, dict[str, set[str]]] = {}
         for staff_id in teaching_ids:
-            college_names = (
-                scope_stats.get(staff_id, {}).get("college_names")
-                or ["待映射组织"]
-            )
+            college_names = scope_colleges_by_teacher.get(staff_id) or ["待映射组织"]
             for name in college_names:
                 bucket = age_buckets.setdefault(name, {
                     "teacher_ids": set(), "known_ids": set(), "young_ids": set(),
@@ -1683,14 +1688,16 @@ def management_kpi_details(metric_key: str, college: Optional[str] = None,
         ))
     elif metric_key == "young_teacher_teaching_rate":
         college_options = sorted({
-            str(row.get("dept") or "").strip()
-            for row in rows if str(row.get("dept") or "").strip()
+            str(row.get("college_name") or "").strip()
+            for row in breakdown if str(row.get("college_name") or "").strip()
         })
         selected_college = (department or "").strip()
         if selected_college:
             rows = [
                 row for row in rows
-                if str(row.get("dept") or "").strip() == selected_college
+                if selected_college in scope_colleges_by_teacher.get(
+                    str(row.get("staff_id") or ""), []
+                )
             ]
         if needle:
             rows = [
