@@ -76,6 +76,17 @@ def require_admin(user: dict = Depends(get_current_user)) -> dict:
     return user
 
 
+def require_metric_definition_reader(
+    user: dict = Depends(get_current_user),
+) -> dict:
+    """指标目录只读守卫；管理权限天然包含读取能力。"""
+    if not any(has_action(user, action) for action in (
+        "definition.read", "definition.manage", "system.manage",
+    )):
+        raise ApiError("无权限查询指标目录", code=403, status_code=403)
+    return user
+
+
 # ── 数据范围过滤 ──
 
 def _get_scope(conn: sqlite3.Connection, role_id: str) -> Optional[dict]:

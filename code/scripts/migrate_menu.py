@@ -23,6 +23,11 @@ STUDENT_WORKSPACE_ROLES = (
     "class_adviser", "mentor",
 )
 BASIC_REPORT_ROLES = STUDENT_WORKSPACE_ROLES
+METRIC_QUERY_ROLES = (
+    "school_leader", "dean", "dept_operation", "dept_research",
+    "dept_practice", "quality_office", "college_dean",
+    "college_secretary", "dept_director",
+)
 BASIC_REPORT_LEAVES = (
     "/admin/basic-reports/failure-overview",
     "/admin/basic-reports/major-makeup-comparison",
@@ -80,14 +85,16 @@ TARGET_MENUS = [
      "/admin/system/permissions", "Key", 404),
     ("/admin/system/kpis", "/admin/system", "指标与口径管理",
      "/admin/system/kpis", "DataAnalysis", 405),
+    ("/admin/system/metric-query", "/admin/system", "指标查询",
+     "/admin/system/metric-query", "Search", 406),
     ("/admin/system/schemes", "/admin/system", "分析方案管理",
-     "/admin/system/schemes", "Management", 406),
+     "/admin/system/schemes", "Management", 407),
     ("/admin/system/audit", "/admin/system", "审计日志",
-     "/admin/system/audit", "Document", 407),
+     "/admin/system/audit", "Document", 408),
     ("/admin/settings", "/admin/system", "系统参数",
-     "/admin/settings", "Setting", 408),
+     "/admin/settings", "Setting", 409),
     ("/admin/system/data-collection", "/admin/system", "数据采集监控",
-     "/admin/system/data-collection", "Monitor", 409),
+     "/admin/system/data-collection", "Monitor", 410),
 ]
 
 PARENT_IDS = {row[0] for row in TARGET_MENUS if row[1] is None}
@@ -181,10 +188,17 @@ def migrate(conn: sqlite3.Connection) -> None:
         for leaf_id in allowed:
             cur.execute("""INSERT OR IGNORE INTO sys_role_menu(role_id,menu_id)
                            VALUES(?,?)""", (role_id, leaf_id))
-    for leaf_id in SYSTEM_LEAF_IDS:
+    for role_id in METRIC_QUERY_ROLES:
+        cur.execute("""INSERT OR IGNORE INTO sys_role_menu(role_id,menu_id)
+                       VALUES(?, '/admin/system/metric-query')""", (role_id,))
+    for leaf_id in SYSTEM_LEAF_IDS - {"/admin/system/metric-query"}:
         cur.execute("""DELETE FROM sys_role_menu
                        WHERE menu_id=? AND role_id<>?""",
                     (leaf_id, ADMIN_ROLE))
+    placeholders = ",".join("?" * len(METRIC_QUERY_ROLES))
+    cur.execute(f"""DELETE FROM sys_role_menu
+                    WHERE menu_id='/admin/system/metric-query'
+                      AND role_id NOT IN ({placeholders})""", METRIC_QUERY_ROLES)
 
     # sys_role_menu 只保存目标叶子；移除父级、旧Tab和历史残留授权。
     for menu_id in PARENT_IDS | OBSOLETE:

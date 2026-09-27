@@ -69,9 +69,10 @@ MENUS = [
     ("/admin/system/menus", "菜单管理", "Menu", 303, "/admin/system"),
     ("/admin/system/permissions", "数据权限", "Key", 304, "/admin/system"),
     ("/admin/system/kpis", "指标与口径管理", "DataAnalysis", 305, "/admin/system"),
-    ("/admin/system/schemes", "分析方案管理", "Management", 306, "/admin/system"),
-    ("/admin/system/audit", "审计日志", "Document", 307, "/admin/system"),
-    ("/admin/settings", "系统参数", "Setting", 308, "/admin/system"),
+    ("/admin/system/metric-query", "指标查询", "Search", 306, "/admin/system"),
+    ("/admin/system/schemes", "分析方案管理", "Management", 307, "/admin/system"),
+    ("/admin/system/audit", "审计日志", "Document", 308, "/admin/system"),
+    ("/admin/settings", "系统参数", "Setting", 309, "/admin/system"),
 ]
 
 # ---- 角色→菜单可见性（优化后）----
@@ -121,6 +122,11 @@ ROLE_MENU = {
     "/admin/system/permissions": ["dean"],
     "/admin/system/audit":    ["dean"],
     "/admin/system/kpis":     ["dean"],
+    "/admin/system/metric-query": [
+        "school_leader", "dean", "dept_operation", "dept_research",
+        "dept_practice", "quality_office", "college_dean",
+        "college_secretary", "dept_director",
+    ],
     "/admin/system/schemes":  ["dean"],
     "/admin/settings": ["dean"],
 }
