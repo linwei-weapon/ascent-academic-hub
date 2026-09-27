@@ -294,7 +294,11 @@ const detailTitle = computed(() => detail.definition
 
 // 用当前已应用筛选和分页生成请求参数，保留原字段名。
 function queryString() {
-  const p = new URLSearchParams({page:String(page.value),page_size:String(pageSize.value)})
+  const p = new URLSearchParams({
+    page:String(page.value),
+    page_size:String(pageSize.value),
+    catalog_scope:'governance',
+  })
   if (filters.domain) p.set('domain', filters.domain)
   if (filters.definitionStatus) p.set('definition_status', filters.definitionStatus)
   if (filters.implementationStatus) p.set('implementation_status', filters.implementationStatus)
@@ -392,7 +396,7 @@ function sourceKindLabel(kind:string) {
 async function exportCatalog() {
   exporting.value = true
   try {
-    const p = new URLSearchParams()
+    const p = new URLSearchParams({catalog_scope:'governance'})
     if (filters.domain) p.set('domain', filters.domain)
     if (filters.definitionStatus) p.set('definition_status', filters.definitionStatus)
     if (filters.implementationStatus) p.set('implementation_status', filters.implementationStatus)

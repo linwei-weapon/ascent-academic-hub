@@ -23,7 +23,8 @@ from backend.api.routers.system_management import _ensure_system_tables
 from backend.api.security import verify_password
 from backend.etl import config
 from backend.etl.seed import DEMO_PASSWORD, hash_password
-from backend.metric_catalog import ensure_metric_catalog
+from backend.metric_catalog_v2 import migrate_metric_catalog_v2
+from backend.permission_catalog import ROLE_ACTIONS
 from backend.skills.config_store import ensure_tables as ensure_scheme_tables
 from scripts.migrate_menu import migrate as migrate_menu
 
@@ -53,7 +54,18 @@ def migrate(conn: sqlite3.Connection) -> dict:
     _ensure_tables(conn)
     ensure_scheme_tables(conn)
     _ensure_kpi_config(conn)
-    metric_count = ensure_metric_catalog(conn)
+    catalog_result = migrate_metric_catalog_v2(conn)
+    conn.execute("""CREATE TABLE IF NOT EXISTS sys_role_action (
+        role_id TEXT NOT NULL,
+        action_id TEXT NOT NULL,
+        PRIMARY KEY(role_id,action_id)
+    )""")
+    for role_id, actions in ROLE_ACTIONS.items():
+        for action_id in actions:
+            conn.execute(
+                "INSERT OR IGNORE INTO sys_role_action(role_id,action_id) VALUES(?,?)",
+                (role_id, action_id),
+            )
     _ensure_system_tables(conn)
     hardened_admin = harden_legacy_demo_admin(conn)
 
@@ -107,7 +119,9 @@ def migrate(conn: sqlite3.Connection) -> dict:
         "registeredKpis": conn.execute(
             "SELECT COUNT(*) FROM sys_kpi_config"
         ).fetchone()[0],
-        "metricDefinitions": metric_count,
+        "metricDefinitions": catalog_result["legacyMetricDefinitions"],
+        "metricCandidates": catalog_result["candidateMetrics"],
+        "formalMetrics": catalog_result["formalMetrics"],
         "hardenedLegacyAdmin": hardened_admin,
     }
 

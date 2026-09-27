@@ -21,6 +21,11 @@ export function getMetric<T = any>(metricId: string | number): Promise<T> {
   return http.get<T>(`/admin/settings/metric-catalog/${encodeURIComponent(metricId)}`)
 }
 
+// 读取指标依赖、反向影响、使用位置和规则信息；旧服务尚未提供时由调用页降级为空清单。
+export function getMetricImpact<T = any>(metricId: string | number): Promise<T> {
+  return http.getSilent<T>(`/admin/settings/metric-catalog/${encodeURIComponent(metricId)}/impact`)
+}
+
 // 按当前指标筛选取得 CSV 响应，沿用原 Bearer 与身份头及下载错误处理。
 export function exportMetricCatalog(query: URLSearchParams): Promise<Response> {
   const headers: Record<string, string> = { Authorization: `Bearer ${getToken()}` }

@@ -19,6 +19,9 @@ export const systemRoutes: RouteRecordRaw[] = [
       { path: 'audit', component: () => import('@/views/admin/audit/Audit.vue') },
       // 指标与口径管理
       { path: 'kpis', component: () => import('@/views/admin/kpis/Kpis.vue') },
+      // 指标查询（只读）及独立详情页
+      { path: 'metric-query', component: () => import('@/views/admin/metric-query/Index.vue') },
+      { path: 'metric-query/:id', component: () => import('@/views/admin/metric-query/Detail.vue') },
       // 分析方案管理
       { path: 'schemes', component: () => import('@/views/admin/schemes/Schemes.vue') },
       // 数据采集监控

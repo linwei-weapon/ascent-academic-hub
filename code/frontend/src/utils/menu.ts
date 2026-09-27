@@ -2,6 +2,8 @@ import type { AuthMenu, AuthUser } from '@/store/auth'
 
 /** 业务子路由映射到实际授予权限的叶子菜单。 */
 export function menuKeyOfPath(path: string, returnTo = ''): string {
+  // 指标详情沿用“指标查询”叶子菜单授权，不要求后端再下发一条动态详情菜单。
+  if (path.startsWith('/admin/system/metric-query/')) return '/admin/system/metric-query'
   if (path.startsWith('/admin/student/')) {
     const source = returnTo ? menuKeyOfPath(returnTo) : ''
     return source === '/admin/alert' ? source : '/admin/students/analysis'

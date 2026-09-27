@@ -36,10 +36,12 @@ PYTHONIOENCODING=utf-8 python -X utf8 -m uvicorn backend.api.main:app --reload -
 | GET | /api/admin/reports/custom?metrics=&dimension=&semester= | 自定义报表 | 真实学生/成绩/预警受控聚合 |
 | POST | /api/admin/settings/rules/discover | 运行规则自发现 | 真实数据历史关联候选，不直接生效 |
 | GET/PUT | /api/admin/settings/rules/discovered | 查询/采纳规则建议 | 采纳仅创建规则治理草稿 |
-| GET | /api/admin/settings/metric-catalog/summary | 指标目录治理摘要 | sys_metric_definition |
-| GET | /api/admin/settings/metric-catalog | 指标目录分页、筛选和导出 | sys_metric_definition |
-| GET | /api/admin/settings/metric-catalog/{metric_id} | 指标定义、实现与页面证据 | sys_metric_definition + sys_metric_page_binding |
-| GET | /api/admin/settings/metric-catalog/pages | 页面引用一致性核验 | sys_metric_page_binding |
+| GET | /api/admin/settings/metric-catalog/summary | 正式目录、Markdown候选和治理摘要 | sys_metric_registry + sys_metric_candidate |
+| GET | /api/admin/settings/metric-catalog | 按模块、标签、名称分页查询正式指标 | sys_metric_registry + sys_metric_version + sys_metric_usage |
+| GET | /api/admin/settings/metric-catalog/{metric_id} | 定义、上下游、规则、使用点、证据和问题 | sys_metric_* |
+| GET | /api/admin/settings/metric-catalog/{metric_id}/impact | 递归下游影响和受影响功能点 | sys_metric_dependency + sys_metric_usage |
+| GET | /api/admin/settings/metric-catalog/pages | 页面/模块引用汇总 | sys_metric_usage |
+| GET | /api/admin/settings/metric-catalog/export | 导出当前筛选下的完整正式指标目录 | sys_metric_* |
 | GET/PUT | /api/admin/settings/kpi-config | 旧 KPI 展示配置兼容接口 | sys_kpi_config |
 | GET | /api/admin/system/data-collection/overview | 数据接入可信度、优先事项与动作能力 | data_source_definition + data_batch |
 | GET | /api/admin/system/data-collection/sources | 数据源目录分页与组合筛选 | data_source_definition + data_batch |
@@ -67,6 +69,15 @@ PYTHONIOENCODING=utf-8 python -X utf8 -m uvicorn backend.api.main:app --reload -
 
 **自定义报表**：当前开放 K001 在籍学生数、K002 预警学生数、K003 GPA 均值、
 K004 挂科率，支持学院/专业/年级维度与学期筛选。缺少可靠来源的指标不生成替代值。
+
+**统一指标目录**：指标确认书只进入 `sys_metric_candidate` 候选区；“指标查询”仅展示由后端计算、
+规则或页面使用证据核验过的正式指标。部署时执行 `python -X utf8 code/scripts/migrate_metric_catalog_v2.py`，
+或使用已包含该步骤的系统管理总迁移。原“指标与口径管理”使用 `catalog_scope=governance` 查询正式指标
+与未关联候选的治理并集。V2.1 将每个正式指标和候选定义统一物化为 `specification`，分开保存指标定义、
+管理用途、统计对象/范围、计算类型、分子分母、去重、纳入排除、边界、空值、精度、统计时点、数据源和
+质量状态；人工复核补丁写入 `sys_metric_spec_override`，原始公式不被静默改写。普通 GET 请求只读，
+不在运行时解析文档或写目录。查询接口把后台结构化数据整理为“指标详细说明”和中文“计算公式”两项
+展示内容；页面不单独展示规格化口径区块，SQL 和英文实现表达也不进入计算公式。
 
 **规则自发现**：`association-v2` 仅使用真实成绩、真实学籍异动和当前严重预警做历史关联分析。
 所有候选特征必须由通用规则引擎可执行；未知特征按失败关闭处理。采纳建议只创建禁用规则占位和
