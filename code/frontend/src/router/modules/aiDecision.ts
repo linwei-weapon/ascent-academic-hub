@@ -14,6 +14,8 @@ export const aiDecisionRoutes: RouteRecordRaw[] = [
   { path: 'reports/advice', component: () => import('@/views/ai-decision/advice/index.vue') },
   // 专家对话
   { path: 'reports/advice/:skillId', component: () => import('@/views/ai-decision/advice/Chat.vue') },
+  // 专家团研究工作区：保留既有菜单 URL，由服务端校验身份与范围。
+  { path: 'reports/expert-team', component: () => import('@/views/ai-decision/expert-team/index.vue') },
   // 旧「管理要情」「决策研判」已废弃，统一收口到 Skill 链路决策简报
   // 旧管理要情入口
   { path: 'reports/management-briefing', redirect: '/admin/reports/decision' },

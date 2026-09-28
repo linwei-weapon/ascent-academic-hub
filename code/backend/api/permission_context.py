@@ -287,6 +287,22 @@ def has_action(user: dict, action_id: str) -> bool:
     return action_id in set(context.get("actionPermissions") or [])
 
 
+# New leadership workspace is intentionally narrower than existing AI capabilities.
+EXPERT_TEAM_ROLES = frozenset({"dean", "college_dean"})
+
+
+def require_expert_team_access(user: dict) -> dict:
+    context = user.get("permission_context") or {}
+    require_authorized_context(context)
+    if (context.get("activeRole") not in EXPERT_TEAM_ROLES
+            or not has_action(user, "expert_team.use")
+            or "/admin/reports/expert-team" not in (context.get("menuPermissions") or [])):
+        raise ApiError("专家团仅向获授权的教务处领导和二级学院院长开放", code=403, status_code=403)
+    if not context.get("activeIdentityId") or not context.get("scopeFingerprint"):
+        raise ApiError("当前工作身份或数据范围无效", code=403, status_code=403)
+    return user
+
+
 def v2_student_scope(context: dict, conn: sqlite3.Connection,
                      alias: str = "s") -> tuple[str, list]:
     """把统一权限上下文转换为V2学生查询范围。范围缺失时拒绝。"""
