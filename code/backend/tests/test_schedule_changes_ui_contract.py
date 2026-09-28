@@ -15,10 +15,11 @@ class ScheduleChangesUiContractTest(unittest.TestCase):
         self.assertIn('class="schedule-side-stack"', page)
         self.assertIn(".schedule-side-stack {", page)
 
-    def test_data_table_explicitly_forwards_row_click(self):
-        table = self.read("components/DataTable.vue")
-        self.assertIn("(e: 'row-click'", table)
+    def test_app_table_explicitly_forwards_row_click(self):
+        table = self.read("components/AppTable.vue")
+        self.assertIn("'row-click': [row: TableRow", table)
         self.assertIn('@row-click="forwardRowClick"', table)
+        self.assertIn("emit('row-click', row, column, event)", table)
 
     def test_teacher_row_opens_reason_drawer(self):
         page = self.read("views/teaching-analysis/operation/ScheduleChanges.vue")

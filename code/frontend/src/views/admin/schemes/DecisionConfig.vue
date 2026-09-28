@@ -122,8 +122,8 @@
         <el-table-column prop="change_reason" label="变更原因" min-width="150" show-overflow-tooltip />
         <el-table-column label="创建/发布" width="170">
           <template #default="{ row }">
-            <div class="ver-meta">{{ row.created_by }} · {{ shortTime(row.created_at) }}</div>
-            <div v-if="row.published_at" class="ver-meta">发布 {{ row.published_by }} · {{ shortTime(row.published_at) }}</div>
+            <div class="ver-meta">{{ row.created_by }} · {{ formatDateTime(row.created_at, { precision: 'minute', includeYear: false, fallback: '' }) }}</div>
+            <div v-if="row.published_at" class="ver-meta">发布 {{ row.published_by }} · {{ formatDateTime(row.published_at, { precision: 'minute', includeYear: false, fallback: '' }) }}</div>
           </template>
         </el-table-column>
         <el-table-column label="操作" width="90" fixed="right">
@@ -141,6 +141,7 @@
 </template>
 
 <script setup lang="ts">
+import { formatDateTime } from '@/utils/dateTime'
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { LlmConfigView, SkillConfigInfo, SkillConfigVersion, TagType } from '@/types/decision'
@@ -226,10 +227,6 @@ function statusLabel(status: string): string {
 // 按既有版本状态选择标签样式，不改变状态流转。
 function statusTag(status: string): TagType {
   return ({ draft: 'warning', published: 'success', retired: 'info' } as Record<string, TagType>)[status] || 'info'
-}
-// 将版本时间压缩为列表显示格式，保留原值的时间含义。
-function shortTime(value?: string | null): string {
-  return (value || '').replace('T', ' ').slice(5, 16)
 }
 
 // 读取旧配置组件需要的学校方案和模型配置。

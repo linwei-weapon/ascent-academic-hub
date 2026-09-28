@@ -6,7 +6,7 @@
         <h2 class="sa-page-title">数据采集监控</h2>
         <p class="sa-page-sub">判断分析数据是否已接入、是否及时更新、哪些问题影响业务页面；源数据仍在学校业务系统核查修订。</p>
       </div>
-      <div class="head-actions">
+      <div class="head-actions sa-button-row">
         <el-button :loading="exporting" @click="exportChecklist">导出接入核验清单</el-button>
         <el-button v-if="overview.canTrigger" type="primary" plain @click="operationVisible=true">运维操作</el-button>
         <el-button :loading="refreshing" @click="reloadAll">刷新状态</el-button>
@@ -15,7 +15,7 @@
 
     <div class="context-strip">
       <span><b>目录版本</b>{{ overview.catalogVersion || '—' }}</span>
-      <span><b>最近接入</b>{{ formatTime(overview.lastIngestedAt) }}</span>
+      <span><b>最近接入</b>{{ formatDateTime(overview.lastIngestedAt) }}</span>
       <span><b>治理边界</b>只监控接入与运行证据，不维护教务主数据</span>
     </div>
 
@@ -79,12 +79,12 @@
             >
               <!-- 筛选与提示复用工具栏左侧区域，右侧保留表格显示设置。 -->
               <template #toolbar>
-                <div class="filters">
-                  <el-select v-model="draftFilters.domain" clearable placeholder="全部数据域">
+                <div class="filters sa-button-row">
+                  <el-select size="small" v-model="draftFilters.domain" clearable placeholder="全部数据域">
                     <el-option v-for="item in overview.domains || []" :key="item.label"
                       :label="`${item.label}（${item.count}）`" :value="domainCode(item.label)" />
                   </el-select>
-                  <el-select v-model="draftFilters.status" clearable placeholder="全部状态">
+                  <el-select size="small" v-model="draftFilters.status" clearable placeholder="全部状态">
                     <el-option label="已接入" value="connected" />
                     <el-option label="尚未接入" value="missing" />
                     <el-option label="超过更新周期" value="overdue" />
@@ -92,10 +92,10 @@
                     <el-option label="正在更新" value="running" />
                     <el-option label="有待核验项" value="attention" />
                   </el-select>
-                  <el-input v-model="draftFilters.keyword" clearable
+                  <el-input size="small" v-model="draftFilters.keyword" clearable
                     placeholder="搜索数据源、来源系统或影响模块" @keyup.enter="applyFilters" />
-                  <el-button type="primary" @click="applyFilters">应用筛选</el-button>
-                  <el-button @click="resetFilters">重置</el-button>
+                  <el-button size="small" type="primary" @click="applyFilters">应用筛选</el-button>
+                  <el-button size="small" @click="resetFilters">重置</el-button>
                   <span v-if="filterDirty" class="filter-dirty">筛选条件尚未应用</span>
                 </div>
                 <div v-if="sourceLoading && sources.length" class="updating-bar">正在按新条件更新，当前结果暂时保留…</div>
@@ -110,7 +110,7 @@
                 <el-tag size="small" effect="plain" :type="validationTag(row.validationStatus)">{{ row.validationStatusLabel }}</el-tag>
                 <small v-if="row.attentionCount" class="attention-count">{{ row.attentionCount }}项</small>
               </template>
-              <template #col-lastIngestedAt="{row}">{{ formatTime(row.lastIngestedAt) }}</template>
+              <template #col-lastIngestedAt="{row}">{{ formatDateTime(row.lastIngestedAt) }}</template>
               <template #col-sourceRows="{row}">{{ formatNumber(row.sourceRows) }}</template>
               <template #col-downstream="{row}">{{ (row.downstreamModules || []).join('、') }}</template>
               <template #col-action><el-button link type="primary">核查</el-button></template>
@@ -124,6 +124,7 @@
 
         <el-tab-pane label="运行与异常" name="runs">
           <div class="sa-card table-card" v-loading="runLoading">
+            <el-alert class="table-note run-note" title="运行记录用于核查某次处理读了哪些批次、生成了多少结果以及哪些校验需要关注；不会在主表直接展示原始JSON。" type="info" :closable="false" show-icon />
             <AppTable
               show-density
               show-column-settings
@@ -144,18 +145,15 @@
               @page-change="loadRuns"
             >
               <template #toolbar>
-                <div class="run-toolbar">
-                  <div class="run-filters">
-                    <el-select v-model="runFilters.task" clearable placeholder="全部任务" @change="loadRuns(1)">
-                      <el-option v-for="task in overview.tasks || []" :key="task.task" :label="task.name" :value="task.task" />
-                    </el-select>
-                    <el-select v-model="runFilters.status" clearable placeholder="全部状态" @change="loadRuns(1)">
-                      <el-option label="成功" value="success" />
-                      <el-option label="失败" value="failed" />
-                      <el-option label="执行中" value="running" />
-                    </el-select>
-                  </div>
-                  <el-alert class="table-note" title="运行记录用于核查某次处理读了哪些批次、生成了多少结果以及哪些校验需要关注；不会在主表直接展示原始JSON。" type="info" :closable="false" show-icon />
+                <div class="run-filters">
+                  <el-select size="small" v-model="runFilters.task" clearable placeholder="全部任务" @change="loadRuns(1)">
+                    <el-option v-for="task in overview.tasks || []" :key="task.task" :label="task.name" :value="task.task" />
+                  </el-select>
+                  <el-select size="small" v-model="runFilters.status" clearable placeholder="全部状态" @change="loadRuns(1)">
+                    <el-option label="成功" value="success" />
+                    <el-option label="失败" value="failed" />
+                    <el-option label="执行中" value="running" />
+                  </el-select>
                 </div>
               </template>
               <template #col-task="{row}">
@@ -163,7 +161,7 @@
               </template>
               <template #col-sources="{row}">{{ row.sourceNames?.length ? row.sourceNames.join('、') : '尚未建立批次关联' }}</template>
               <template #col-status="{row}"><el-tag size="small" effect="plain" :type="runTag(row.status)">{{ runStatusLabel(row.status) }}</el-tag></template>
-              <template #col-started_at="{row}">{{ formatTime(row.started_at) }}</template>
+              <template #col-started_at="{row}">{{ formatDateTime(row.started_at) }}</template>
               <template #col-duration_ms="{row}">{{ formatDuration(row.duration_ms) }}</template>
               <template #col-rows_written="{row}">{{ formatNumber(row.rows_written) }}</template>
               <template #col-action><el-button link type="primary">详情</el-button></template>
@@ -212,7 +210,7 @@
         <div class="drawer-tags">
           <el-tag effect="plain" :type="accessTag(sourceDetail.source.accessStatus)">{{ sourceDetail.source.accessStatusLabel }}</el-tag>
           <el-tag effect="plain" :type="validationTag(sourceDetail.source.validationStatus)">{{ sourceDetail.source.validationStatusLabel }}</el-tag>
-          <span>最近接入 {{ formatTime(sourceDetail.source.lastIngestedAt) }}</span>
+          <span>最近接入 {{ formatDateTime(sourceDetail.source.lastIngestedAt) }}</span>
         </div>
         <el-tabs>
           <el-tab-pane label="当前状态">
@@ -243,7 +241,7 @@
               @page-change="batchTable.changePage"
               @page-size-change="batchTable.changePageSize"
             >
-              <template #col-ingested_at="{row}">{{ formatTime(row.ingested_at) }}</template>
+              <template #col-ingested_at="{row}">{{ formatDateTime(row.ingested_at) }}</template>
               <template #col-row_count="{row}">{{ formatNumber(row.row_count) }}</template>
               <template #col-accepted_count="{row}">{{ formatNumber(row.accepted_count) }}</template>
               <template #col-qualityLabel="{row}"><el-tag size="small" effect="plain" :type="row.quality_status==='warning'?'warning':'success'">{{ row.qualityLabel }}</el-tag></template>
@@ -284,7 +282,7 @@
             >
               <template #col-taskName="{row}">{{ row.taskName }}</template>
               <template #col-status="{row}"><el-tag size="small" effect="plain" :type="runTag(row.status)">{{ runStatusLabel(row.status) }}</el-tag></template>
-              <template #col-started_at="{row}">{{ formatTime(row.started_at) }}</template>
+              <template #col-started_at="{row}">{{ formatDateTime(row.started_at) }}</template>
               <template #col-duration_ms="{row}">{{ formatDuration(row.duration_ms) }}</template>
               <template #col-action><el-button link type="primary">详情</el-button></template>
             </AppTable>
@@ -298,7 +296,7 @@
       <template v-else-if="runDetail.run">
         <div class="drawer-tags">
           <el-tag effect="plain" :type="runTag(runDetail.run.status)">{{ runStatusLabel(runDetail.run.status) }}</el-tag>
-          <span>开始 {{ formatTime(runDetail.run.started_at) }}</span>
+          <span>开始 {{ formatDateTime(runDetail.run.started_at) }}</span>
           <span>耗时 {{ formatDuration(runDetail.run.duration_ms) }}</span>
         </div>
         <el-alert v-if="runDetail.run.errorSummary" :title="runDetail.run.errorSummary" type="error" :closable="false" show-icon />
@@ -328,7 +326,7 @@
               @page-change="runBatchTable.changePage"
               @page-size-change="runBatchTable.changePageSize"
             >
-              <template #col-ingested_at="{row}">{{ formatTime(row.ingested_at) }}</template>
+              <template #col-ingested_at="{row}">{{ formatDateTime(row.ingested_at) }}</template>
               <template #col-row_count="{row}">{{ formatNumber(row.row_count) }}</template>
               <template #col-accepted_count="{row}">{{ formatNumber(row.accepted_count) }}</template>
             </AppTable>
@@ -360,6 +358,7 @@
 </template>
 
 <script setup lang="ts">
+import { formatDateTime } from '@/utils/dateTime'
 import { useTablePagination } from '@/composables/useTablePagination'
 import AppTable from '@/components/AppTable.vue'
 import type { AppTableColumn } from '@/types/table'
@@ -488,12 +487,6 @@ const runDrawerTitle = computed(() => runDetail.run ? `运行详情 · ${runDeta
 // 将页面业务域选项映射为已有接口使用的编码。
 function domainCode(label:string) {
   return ({'基础主数据':'master','学籍与培养方案':'student','成绩与课程结果':'achievement','教学任务与师资':'teaching','教室占用':'resource'} as any)[label] || label
-}
-// 按现有格式展示接口时间，不改变时区或截取精度。
-function formatTime(value:any) {
-  if (!value) return '—'
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString('zh-CN',{hour12:false})
 }
 // 按既有显示规则格式化数量，不重算接口统计。
 function formatNumber(value:any) { return value == null ? '—' : Number(value).toLocaleString('zh-CN') }
@@ -693,7 +686,7 @@ const runBatchTable = useTablePagination(() => runDetail.batches || [])
 
 .head-actions {
   display: flex;
-  gap: 8px;
+  gap: var(--sa-button-gap);
   flex-wrap: wrap;
   justify-content: flex-end;
 }
@@ -876,7 +869,7 @@ const runBatchTable = useTablePagination(() => runDetail.batches || [])
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: var(--sa-button-gap);
 
   .el-select,.el-input {
     max-width: 100%;
@@ -905,16 +898,8 @@ const runBatchTable = useTablePagination(() => runDetail.batches || [])
   }
 }
 
-.run-toolbar {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 10px;
-
-  .table-note {
-    flex: 1 1 320px;
-    min-width: 0;
-  }
+.run-note {
+  margin-bottom: 12px;
 }
 
 .table-note {

@@ -23,7 +23,7 @@
           <div class="object-name">{{ view.targetName }}</div>
           <div class="object-meta">
             {{ view.targetMeta }}
-            <span v-if="view.generatedAt"> · 数据时点 {{ shortTime(view.generatedAt) }}</span>
+            <span v-if="view.generatedAt"> · 数据时点 {{ formatDateTime(view.generatedAt, { precision: 'minute' }) }}</span>
             <template v-if="hideTrace">
               <el-tooltip v-if="!hideTraceShortcut" placement="bottom" effect="dark">
                 <template #content>
@@ -147,7 +147,7 @@
             <el-descriptions :column="1" border size="small">
               <el-descriptions-item label="业务数据">{{ trace.businessDataSources || listText(trace.dataSources) }}</el-descriptions-item>
               <el-descriptions-item label="分析范围">{{ trace.scope || view.targetName }}</el-descriptions-item>
-              <el-descriptions-item label="规则与时点">{{ trace.ruleVersion || '—' }} · {{ shortTime(trace.asOfTime || view.generatedAt) }}</el-descriptions-item>
+              <el-descriptions-item label="规则与时点">{{ trace.ruleVersion || '—' }} · {{ formatDateTime(trace.asOfTime || view.generatedAt, { precision: 'minute' }) }}</el-descriptions-item>
               <el-descriptions-item label="生成方式">{{ trace.generationMethod || view.sourceLabel }}</el-descriptions-item>
               <el-descriptions-item label="计算逻辑">{{ trace.calculationLogic || '—' }}</el-descriptions-item>
               <el-descriptions-item label="命中规则">{{ listText(trace.rules) }}</el-descriptions-item>
@@ -166,6 +166,7 @@
 </template>
 
 <script setup lang="ts">
+import { formatDateTime } from '@/utils/dateTime'
 import { computed } from 'vue'
 import { authStore } from '@/store/auth'
 import { normalizeAIInsight } from '@/utils/aiInsight'
@@ -215,9 +216,6 @@ function listText(value: any) {
   return value || '—'
 }
 
-function shortTime(value?: string) {
-  return value ? String(value).replace('T', ' ').slice(0, 16) : '—'
-}
 
 function focusKey(item: any) {
   return item.student_id || item.course_id || item.id || `${item.name}-${item.type}`

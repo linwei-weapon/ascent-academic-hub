@@ -26,7 +26,7 @@
         <button v-for="s in sessions" :key="s.session_id" type="button" class="session-row"
           :class="{ active: s.session_id === currentSessionId }" @click="loadSession(s)">
           <span class="session-title">· {{ s.title || '未命名对话' }}</span>
-          <span class="session-time">{{ formatTime(s.updated_at) }}</span>
+          <span class="session-time">{{ formatDateTime(s.updated_at, { precision: 'minute', includeYear: false, fallback: '' }) }}</span>
         </button>
         <p v-if="!sessions.length" class="session-empty">暂无历史对话</p>
       </div>
@@ -55,7 +55,7 @@
               </template>
             </el-input>
           </div>
-          <div class="starter-chips">
+          <div class="starter-chips sa-button-row">
             <el-button v-for="q in exampleChips" :key="q" round size="small" class="chip"
               @click="send(q)">{{ q }}</el-button>
           </div>
@@ -113,7 +113,7 @@
                 :title="r.headline" @click="openEvidenceWindow(r.signal_id)">[{{ r.n }}]</button>
             </div>
 
-            <div v-if="msg.suggested?.length && !msg.streaming" class="suggested">
+            <div v-if="msg.suggested?.length && !msg.streaming" class="suggested sa-button-row">
               <el-button v-for="q in msg.suggested" :key="q" round size="small" class="chip"
                 @click="onSuggested(msg, q)">{{ q }}</el-button>
             </div>
@@ -185,6 +185,7 @@
 </template>
 
 <script setup lang="ts">
+import { formatDateTime } from '@/utils/dateTime'
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Promotion } from '@element-plus/icons-vue'
@@ -267,9 +268,6 @@ function statusTagType(status: string): TagType {
   return 'warning'
 }
 
-function formatTime(value: string): string {
-  return (value || '').replace('T', ' ').slice(5, 16) || ''
-}
 
 async function scrollBottom() {
   await nextTick()
@@ -620,7 +618,7 @@ onMounted(init)
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
-  gap: 8px;
+  gap: var(--sa-button-gap);
   margin-top: 18px;
 }
 
@@ -792,7 +790,7 @@ onMounted(init)
 .suggested {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--sa-button-gap);
   margin-top: 10px;
 }
 

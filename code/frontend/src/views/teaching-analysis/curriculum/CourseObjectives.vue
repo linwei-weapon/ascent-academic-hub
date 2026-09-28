@@ -80,7 +80,7 @@ import EChart from '@/components/EChart.vue'
 import AppTable from '@/components/AppTable.vue'
 import type { AppTableColumn } from '@/types/table'
 
-// 课程目标达成明细表列定义（M6 DataTable）
+// 课程目标达成明细表列定义（AppTable）
 const objectiveCols: AppTableColumn[] = [
   { key: 'objective', label: '课程目标（培养方案模块）', minWidth: 180 },
   { key: 'courseCount', label: '覆盖课程数', minWidth: 100, align: 'center' },

@@ -5,10 +5,10 @@
     <div class="scope-strip">
       <span>固定范围</span><b>{{ semester }} · {{ collegeName }} / {{ majorName }} / {{ grade }}级</b>
     </div>
-    <div class="course-filter">
-      <el-input v-model="draftKeyword" clearable placeholder="课程代码或名称" @keyup.enter="applyQuery" />
-      <el-button type="primary" :loading="loading" @click="applyQuery">查询</el-button>
-      <el-button :disabled="loading" @click="resetQuery">重置</el-button>
+    <div class="course-filter sa-button-row">
+      <el-input size="small" v-model="draftKeyword" clearable placeholder="课程代码或名称" @keyup.enter="applyQuery" />
+      <el-button size="small" type="primary" :loading="loading" @click="applyQuery">查询</el-button>
+      <el-button size="small" :disabled="loading" @click="resetQuery">重置</el-button>
     </div>
     <el-alert v-if="loadError" type="error" :closable="false" show-icon title="课程列表加载失败">
       <template #default>{{ loadError }} <el-button link type="primary" @click="loadRows">重新加载</el-button></template>
@@ -138,7 +138,7 @@ watch(() => [props.modelValue, props.majorId, props.grade, props.semester], ([op
 <style scoped>
 .scope-strip { display:flex; gap:10px; padding:10px 12px; border:1px solid var(--sa-border); border-radius:9px; background:var(--sa-bg); }
 .scope-strip span { color:var(--sa-muted); font-size:12px; }
-.course-filter { display:grid; grid-template-columns:minmax(180px,1fr) auto auto; gap:9px; margin:12px 0; }
+.course-filter { display:grid; grid-template-columns:minmax(180px,1fr) auto auto; gap:var(--sa-button-gap); margin:12px 0; }
 .drawer-loading { min-height:340px; }
 .refresh-note { padding:7px 10px; color:var(--sa-primary); font-size:12px; }
 .course-link { padding:0; border:0; background:transparent; color:var(--sa-primary); cursor:pointer; }

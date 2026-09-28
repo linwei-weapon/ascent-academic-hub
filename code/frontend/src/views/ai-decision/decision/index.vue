@@ -11,7 +11,7 @@
         <h2 class="sa-page-title">AI决策简报</h2>
         <p class="sa-page-sub">首屏只有判断：全部数字由 Skill 确定性代码产出；数据未变化时复用快照。</p>
       </div>
-      <div class="head-actions">
+      <div class="head-actions sa-button-row">
         <el-button type="success" plain @click="openChat()">决策追问</el-button>
         <el-button :loading="loading" @click="load(false)">刷新</el-button>
         <el-button type="primary" :loading="loading" @click="load(true)">重新生成</el-button>
@@ -38,7 +38,7 @@
       <p class="meta-line">
         {{ briefing.generation_method === 'llm_enhanced' ? 'LLM增强' : '规则生成' }}
         <template v-if="briefing.cache_hit"> · 快照复用</template>
-        · 生成于 {{ formatTime(briefing.generated_at) }} · 数据学期 {{ briefing.semester }}
+        · 生成于 {{ formatDateTime(briefing.generated_at, { precision: 'minute' }) }} · 数据学期 {{ briefing.semester }}
       </p>
 
       <!-- Top3：第 1 条展开，其余一行折叠；同信号单页只出现一次 -->
@@ -146,6 +146,7 @@
 </template>
 
 <script setup lang="ts">
+import { formatDateTime } from '@/utils/dateTime'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Loading, ArrowDown, ArrowUp } from '@element-plus/icons-vue'
@@ -222,9 +223,6 @@ function toggleSection(id: string) {
   openSection.value = openSection.value === id ? '' : id
 }
 
-function formatTime(value: string): string {
-  return (value || '').replace('T', ' ').slice(0, 16) || '—'
-}
 
 /** 卡片「问专家」：直达对应专家的问策对话页，并带入信号上下文自动发问 */
 function onCardAsk(signal: DecisionSignal) {
@@ -257,7 +255,7 @@ onUnmounted(stopProgress)
 
 .head-actions {
   display: flex;
-  gap: 10px;
+  gap: var(--sa-button-gap);
   padding-top: 12px;
 }
 
@@ -477,8 +475,12 @@ onUnmounted(stopProgress)
 }
 
 @media (max-width: 1100px) {
-  .page-head, .head-actions {
+  .page-head {
     display: block;
+  }
+
+  .head-actions {
+    flex-wrap: wrap;
   }
 
 }

@@ -17,11 +17,14 @@
   --sa-bg: #f8fafc; // 页面底
   --sa-row-hover: #f1f5f9;
   --sa-track: #eef2ff; // 进度条/柱底
-  --sa-font-head: 'Plus Jakarta Sans', 'Noto Sans SC', system-ui, sans-serif;
+  --sa-font-body: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+  --sa-font-head: var(--sa-font-body);
+  --el-font-family: var(--sa-font-body);
+  --font-sans: var(--sa-font-body);
 }
 
 body {
-  font-family: 'Noto Sans SC', system-ui, sans-serif;
+  font-family: var(--sa-font-body);
   color: var(--sa-text);
   background: var(--sa-bg);
 }

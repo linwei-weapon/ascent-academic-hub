@@ -6,7 +6,7 @@
         <h2 class="sa-page-title">分析方案管理</h2>
         <p class="sa-page-sub">把产品标准管理方法配置为学校方案，经过数据检查和影响预览后发布生效。</p>
       </div>
-      <div class="head-actions">
+      <div class="head-actions sa-button-row">
         <input ref="fileInput" class="hidden-file" type="file" accept=".json,application/json" @change="importPackage" />
         <el-button @click="fileInput?.click()">导入方案包</el-button>
         <el-button @click="$router.push('/admin/settings')">
@@ -64,7 +64,7 @@
                   </span>
                   <span>适用 {{ roleSummary(skill.active_scheme?.roleIds || data.roleIds) }}</span>
                 </div>
-                <div class="template-actions">
+                <div class="template-actions sa-button-row">
                   <el-button @click="openDetail(skill)">查看方案</el-button>
                   <el-button type="primary" @click="openEditor(skill)">
                     {{ skill.active_scheme ? '调整学校方案' : '配置学校方案' }}
@@ -105,7 +105,7 @@
                 </template>
                 <template #col-roleIds="{row}">{{ roleSummary(row.roleIds) }}</template>
                 <template #col-action="{row}">
-                  <div class="row-actions">
+                  <div class="row-actions sa-button-row">
                     <el-button link @click="openEditor(skillOf(row.skill_id), row)">编辑</el-button>
                     <el-button link type="warning" :loading="testingId===row.config_id" @click="testDraft(row)">检查</el-button>
                     <el-button link type="primary" :disabled="row.test_status!=='passed'" @click="publishDraft(row)">发布</el-button>
@@ -143,7 +143,7 @@
                 </template>
                 <template #col-roleIds="{row}">{{ roleSummary(row.roleIds) }}</template>
                 <template #col-action="{row}">
-                  <div class="row-actions">
+                  <div class="row-actions sa-button-row">
                     <el-button link @click="exportPackage(row)">导出</el-button>
                     <el-button v-if="row.status!=='draft'" link type="warning" @click="rollback(row)">基于此版本回滚</el-button>
                   </div>
@@ -563,7 +563,7 @@ const historyTable = useTablePagination(() => historyRows.value)
 
 .head-actions {
   display: flex;
-  gap: 8px;
+  gap: var(--sa-button-gap);
   flex-wrap: wrap;
   justify-content: flex-end;
 }
@@ -700,7 +700,7 @@ const historyTable = useTablePagination(() => historyRows.value)
 
 .template-actions {
   display: flex;
-  gap: 8px;
+  gap: var(--sa-button-gap);
   margin-top: 10px;
 }
 

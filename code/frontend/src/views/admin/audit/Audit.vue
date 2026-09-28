@@ -25,6 +25,7 @@
         :data="rows"
         :loading="loading"
       >
+        <template #col-created_at="{row}">{{ formatDateTime(row.created_at) }}</template>
         <template #col-action="{row}"><div>{{ actionLabel(row.action) }}</div><div class="sub-cell">{{ row.action }}</div></template>
         <template #col-target="{row}">{{ row.target_type || '—' }} · {{ row.target_id || '—' }}</template>
         <template #col-result="{row}"><el-tag size="small" :type="row.result==='success'?'success':row.result==='failed'?'danger':'warning'">{{ row.result }}</el-tag></template>
@@ -35,6 +36,7 @@
 </template>
 
 <script setup lang="ts">
+import { formatDateTime } from '@/utils/dateTime'
 import AppTable from '@/components/AppTable.vue'
 import type { AppTableColumn } from '@/types/table'
 import { onMounted, ref } from 'vue'
@@ -65,6 +67,7 @@ const labels:Record<string,string> = {
 const actionLabel = (value:string) => labels[value] || value
 // 只序列化已有审计详情用于展示，不修改记录内容。
 const detailText = (detail:any) => detail && Object.keys(detail).length ? JSON.stringify(detail) : '—'
+
 // 按操作筛选读取服务端分页，同时同步数量和可选动作。
 async function load(target=1) {
   loading.value = true

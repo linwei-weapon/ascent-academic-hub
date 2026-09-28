@@ -47,7 +47,7 @@
       <span class="evidence" :title="evidenceTitle(signal)">
         {{ signal.entity.name }} · 置信{{ confidenceLabel(signal) }} · {{ signal.evidence.freshness || signal.data_boundary }}
       </span>
-      <div class="ops">
+      <div class="ops sa-button-row">
         <el-button link type="primary" size="small"
           @click="emit('ask', signal)">问专家</el-button>
         <el-button link type="primary" size="small" @click="openVerify">查证·新标签</el-button>
@@ -262,7 +262,7 @@ async function copyChecklist() {
 .ops {
   flex-shrink: 0;
   display: flex;
-  gap: 2px;
+  gap: var(--sa-button-gap);
 }
 
 .compact {

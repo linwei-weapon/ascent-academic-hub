@@ -1,5 +1,5 @@
 <!--
-  Style A KPI 统计卡：白底 + 1px 描边 + 14 圆角 + 无阴影，数字用 Plus Jakarta + 等宽数字。
+  Style A KPI 统计卡：白底 + 1px 描边 + 14 圆角 + 无阴影，数字使用系统字体与等宽数字。
   tone 决定数值色：primary 靛蓝 / teal 青绿 / danger 玫红 / amber 琥珀 / plain 墨色。
   hint 存在时在标签后挂一个 ⓘ tooltip（指标口径说明）。
 -->
@@ -157,7 +157,7 @@ onBeforeUnmount(() => cancelAnimationFrame(raf))
   white-space: pre-line;
 }
 .sa-kpi__value {
-  font-family: 'Plus Jakarta Sans', 'Noto Sans SC', sans-serif;
+  font-family: var(--sa-font-head);
   font-size: 28px;
   font-weight: 700;
   line-height: 1.1;

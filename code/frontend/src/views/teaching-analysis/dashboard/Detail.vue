@@ -171,7 +171,7 @@ const historyMetricIds = [
 ];
 let requestSeq = 0;
 
-// 各专业数据表列定义（M6 DataTable；自定义渲染见模板 col-* / header-* 插槽）
+// 各专业数据表列定义（AppTable；自定义渲染见模板 col-* / header-* 插槽）
 const majorCols: AppTableColumn[] = [
   { key: 'priorityRank', label: '序', minWidth: 48, fixed: 'left', region: 'identity', required: true },
   { key: 'name', label: '专业', minWidth: 140, fixed: 'left', region: 'identity', required: true },

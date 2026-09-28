@@ -10,24 +10,24 @@
     </div>
 
     <div class="sa-card filter-card">
-      <div class="filter-row">
-        <el-select v-model="draft.fromSemester" style="width:166px" placeholder="起始学期">
+      <div class="filter-row sa-button-row">
+        <el-select size="small" v-model="draft.fromSemester" style="width:166px" placeholder="起始学期">
           <el-option v-for="s in semesterOptions" :key="s.value" :label="`起始：${s.label}`" :value="s.value" />
         </el-select>
-        <el-select v-model="draft.toSemester" style="width:166px" placeholder="目标学期">
+        <el-select size="small" v-model="draft.toSemester" style="width:166px" placeholder="目标学期">
           <el-option v-for="s in semesterOptions" :key="s.value" :label="`目标：${s.label}`" :value="s.value" />
         </el-select>
-        <el-select v-model="draft.college" style="width:170px" clearable filterable placeholder="全部学院" :disabled="scopeType === 'college' || scopeType === 'major'" @change="onCollege">
+        <el-select size="small" v-model="draft.college" style="width:170px" clearable filterable placeholder="全部学院" :disabled="scopeType === 'college' || scopeType === 'major'" @change="onCollege">
           <el-option v-for="c in colleges" :key="c.value" :label="c.label" :value="c.value" />
         </el-select>
-        <el-select v-model="draft.major" style="width:160px" clearable filterable placeholder="全部专业" :disabled="!draft.college || scopeType === 'major'" @change="onMajor">
+        <el-select size="small" v-model="draft.major" style="width:160px" clearable filterable placeholder="全部专业" :disabled="!draft.college || scopeType === 'major'" @change="onMajor">
           <el-option v-for="m in majorOptions" :key="m.value" :label="m.label" :value="m.value" />
         </el-select>
-        <el-select v-model="draft.classId" style="width:160px" clearable filterable placeholder="全部行政班" :disabled="!draft.major">
+        <el-select size="small" v-model="draft.classId" style="width:160px" clearable filterable placeholder="全部行政班" :disabled="!draft.major">
           <el-option v-for="c in classOptions" :key="c.value" :label="c.label" :value="c.value" />
         </el-select>
-        <el-button type="primary" :loading="refreshing" @click="queryScope">查询</el-button>
-        <el-button @click="resetScope">重置</el-button>
+        <el-button size="small" type="primary" :loading="refreshing" @click="queryScope">查询</el-button>
+        <el-button size="small" @click="resetScope">重置</el-button>
       </div>
       <el-alert
         v-if="draft.fromSemester && draft.toSemester && draft.fromSemester >= draft.toSemester"
@@ -142,10 +142,6 @@
             共 {{ list.total }} 人。默认排序：连续受挫且重复未解决 → 低年级首次受挫 → 明确恶化且未通过增加 → GPA明显下降 → 其他。
           </p>
         </div>
-        <div class="list-actions">
-          <el-input v-model="keyword" clearable placeholder="搜索学号/姓名" style="width:190px" @keyup.enter="loadList(1)" />
-          <el-button type="primary" plain @click="loadList(1)">查询</el-button>
-        </div>
       </div>
       <el-alert v-if="listError" class="list-rule" type="error" :closable="false" show-icon>
         <template #title>学生名单加载失败，概览和现有名单仍可查看</template>
@@ -162,6 +158,12 @@
         :config-version="2"
         v-loading="listLoading"
         stripe :show-density="true" :show-column-settings="true" :pagination="true" :page="page" :page-size="pageSize" :total="list.total" @page-change="page = $event; loadList()" @page-size-change="pageSize = $event" :loading="listLoading">
+        <template #toolbar>
+          <div class="list-actions">
+            <el-input size="small" v-model="keyword" clearable placeholder="搜索学号/姓名" style="width:190px" @keyup.enter="loadList(1)" />
+            <el-button size="small" type="primary" plain @click="loadList(1)">查询</el-button>
+          </div>
+        </template>
         <template #col-sid="{ row }"><span class="tnum">{{ row.sid }}</span></template>
         <template #col-name="{ row }"><el-button link type="primary" @click="openEvidence(row)">{{ row.name }}</el-button></template>
         <template #col-organization="{ row }">{{ row.major }} · {{ row.className }}</template>
@@ -713,7 +715,7 @@ onMounted(async () => {
 
 .filter-row {
   display: flex;
-  gap: 8px;
+  gap: var(--sa-button-gap);
   flex-wrap: wrap;
   align-items: center;
 }
@@ -923,9 +925,10 @@ onMounted(async () => {
 
 .list-actions {
   display: flex;
+  align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-  justify-content: flex-end;
+  justify-content: flex-start;
 }
 
 .list-rule {

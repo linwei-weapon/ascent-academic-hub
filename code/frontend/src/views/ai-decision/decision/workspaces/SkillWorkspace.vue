@@ -21,7 +21,7 @@
             {{ result.data_readiness?.ready ? '数据就绪' : '数据缺失' }}
           </el-tag>
           <el-tag size="small" type="info" effect="plain">配置 {{ result.config_version }}</el-tag>
-          <el-tag size="small" type="info" effect="plain">运行 {{ (result.run_at || '').slice(0, 16).replace('T', ' ') }}</el-tag>
+          <el-tag size="small" type="info" effect="plain">运行 {{ formatDateTime(result.run_at, { precision: 'minute' }) }}</el-tag>
           <el-button size="small" :loading="loading" @click="load">重新运行</el-button>
         </div>
       </div>
@@ -47,6 +47,7 @@
 </template>
 
 <script setup lang="ts">
+import { formatDateTime } from '@/utils/dateTime'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import type { DecisionSignal, SkillSection } from '@/types/decision'

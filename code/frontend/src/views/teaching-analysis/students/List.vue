@@ -13,7 +13,7 @@
     </div>
 
     <!-- 筛选栏 -->
-    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+    <div class="sa-button-row" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
       <el-select v-model="fCollege" size="small" style="width:150px" clearable filterable placeholder="全部学院" @change="onCollege">
         <el-option v-for="c in colleges" :key="c.value" :label="c.label" :value="c.value" />
       </el-select>
@@ -157,7 +157,7 @@ watch(pageSize, () => {
   loadPage(1)
 })
 
-// 学生明细表列定义（M6 DataTable）
+// 学生明细表列定义（AppTable）
 const baseStudentCols: AppTableColumn[] = [
   { key: 'sid', label: '学号', minWidth: 130, fixed: 'left', region: 'identity', required: true },
   { key: 'name', label: '姓名', minWidth: 100, fixed: 'left', region: 'identity', required: true },

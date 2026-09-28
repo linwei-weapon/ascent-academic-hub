@@ -17,23 +17,23 @@
       <p>{{ data.metric?.formula || metricConfig?.label || '按现有统一指标口径计算' }}</p>
     </div>
 
-    <div class="history-filters" aria-label="历史指标查询条件">
+    <div class="history-filters sa-button-row" aria-label="历史指标查询条件">
       <label>
         <span>起始学期</span>
-        <el-select v-model="draftStart" style="width: 190px">
+        <el-select size="small" v-model="draftStart" style="width: 190px">
           <el-option v-for="option in semesters" :key="option.value"
             :label="option.label" :value="option.value" />
         </el-select>
       </label>
       <label>
         <span>结束学期</span>
-        <el-select v-model="draftEnd" style="width: 190px">
+        <el-select size="small" v-model="draftEnd" style="width: 190px">
           <el-option v-for="option in semesters" :key="option.value"
             :label="option.label" :value="option.value" />
         </el-select>
       </label>
-      <el-button type="primary" :loading="refreshing" @click="applyQuery">查询</el-button>
-      <el-button :disabled="refreshing" @click="resetQuery">重置</el-button>
+      <el-button size="small" type="primary" :loading="refreshing" @click="applyQuery">查询</el-button>
+      <el-button size="small" :disabled="refreshing" @click="resetQuery">重置</el-button>
       <small v-if="filtersDirty">筛选条件尚未应用</small>
     </div>
 
@@ -360,7 +360,7 @@ const periodPagination = useTablePagination(() => tableRows.value, 10)
 .history-scope span { color: var(--sa-muted); font-size: 12px; }
 .history-scope b { color: var(--sa-text); }
 .history-scope p { margin: 0; color: var(--sa-muted); font-size: 12px; line-height: 1.6; }
-.history-filters { display: flex; align-items: end; flex-wrap: wrap; gap: 10px; margin: 14px 0; }
+.history-filters { display: flex; align-items: end; flex-wrap: wrap; gap: var(--sa-button-gap); margin: 14px 0; }
 .history-filters label { display: grid; gap: 5px; color: var(--sa-muted); font-size: 12px; }
 .history-filters small { color: var(--sa-amber); align-self: center; }
 .history-alert { margin-bottom: 12px; }

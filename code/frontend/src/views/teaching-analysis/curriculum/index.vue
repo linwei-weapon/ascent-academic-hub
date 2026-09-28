@@ -12,24 +12,24 @@
         <div class="overview-filter-area">
           <el-form inline class="overview-filters" @submit.prevent="queryOverview">
             <el-form-item label="年级" required>
-              <el-select v-model="overviewGrades" multiple collapse-tags collapse-tags-tooltip
+              <el-select size="small" v-model="overviewGrades" multiple collapse-tags collapse-tags-tooltip
                 placeholder="请选择年级" @change="onOverviewGradesChanged">
                 <el-option v-for="x in overviewGradeOptions" :key="x" :label="`${x}级`" :value="x" />
               </el-select>
             </el-form-item>
             <el-form-item label="学院">
-              <el-select v-model="overviewCollege" clearable filterable placeholder="全部学院" @change="onOverviewCollegeChanged">
+              <el-select size="small" v-model="overviewCollege" clearable filterable placeholder="全部学院" @change="onOverviewCollegeChanged">
                 <el-option v-for="x in overviewCollegeOptions" :key="x" :label="x" :value="x" />
               </el-select>
             </el-form-item>
             <el-form-item label="专业">
-              <el-select v-model="overviewMajor" clearable filterable placeholder="全部专业">
+              <el-select size="small" v-model="overviewMajor" clearable filterable placeholder="全部专业">
                 <el-option v-for="x in overviewMajorOptions" :key="x" :label="x" :value="x" />
               </el-select>
             </el-form-item>
             <el-form-item class="overview-filter-actions">
-              <el-button type="primary" :loading="overviewLoading" @click="queryOverview">查询</el-button>
-              <el-button @click="resetOverviewFilters">重置</el-button>
+              <el-button size="small" type="primary" :loading="overviewLoading" @click="queryOverview">查询</el-button>
+              <el-button size="small" @click="resetOverviewFilters">重置</el-button>
             </el-form-item>
           </el-form>
         </div>
@@ -147,21 +147,21 @@
       <el-tab-pane label="学生进度核查" name="progress">
         <div class="plan-filter-area">
           <div class="plan-filters">
-            <el-select v-model="grade" placeholder="年级" clearable @change="resetGrade">
+            <el-select size="small" v-model="grade" placeholder="年级" clearable @change="resetGrade">
               <el-option v-for="x in grades" :key="x" :label="`${x}级`" :value="x" />
             </el-select>
-            <el-select v-model="college" placeholder="学院" clearable filterable @change="resetCollege">
+            <el-select size="small" v-model="college" placeholder="学院" clearable filterable @change="resetCollege">
               <el-option v-for="x in colleges" :key="x" :label="x" :value="x" />
             </el-select>
-            <el-select v-model="major" placeholder="专业" clearable filterable @change="resetMajor">
+            <el-select size="small" v-model="major" placeholder="专业" clearable filterable @change="resetMajor">
               <el-option v-for="x in majorNames" :key="x" :label="x" :value="x" />
             </el-select>
-            <el-select v-model="selectedMajor" class="plan-select" placeholder="培养方案" filterable @change="onPlanChanged">
+            <el-select size="small" v-model="selectedMajor" class="plan-select" placeholder="培养方案" filterable @change="onPlanChanged">
               <el-option v-for="x in availablePlans" :key="x.planId" :label="x.planName" :value="x.planId" />
             </el-select>
-            <div class="plan-filter-actions">
-              <el-button type="primary" @click="queryProgress">查询</el-button>
-              <el-button @click="resetProgressFilters">重置</el-button>
+            <div class="plan-filter-actions sa-button-row">
+              <el-button size="small" type="primary" @click="queryProgress">查询</el-button>
+              <el-button size="small" @click="resetProgressFilters">重置</el-button>
             </div>
           </div>
         </div>

@@ -13,7 +13,7 @@
         </el-tag>
         <el-tag v-if="briefing.cache_hit" size="small" type="success" effect="plain">快照复用</el-tag>
       </div>
-      <div class="meta-row muted">生成于 {{ formatTime(briefing.generated_at) }}</div>
+      <div class="meta-row muted">生成于 {{ formatDateTime(briefing.generated_at, { precision: 'minute' }) }}</div>
       <div class="meta-row muted">数据学期 {{ briefing.semester }} · 指纹 {{ shortFp }}</div>
       <div class="meta-row muted" v-if="freshnessText">口径：{{ freshnessText }}</div>
     </div>
@@ -21,6 +21,7 @@
 </template>
 
 <script setup lang="ts">
+import { formatDateTime } from '@/utils/dateTime'
 import { computed } from 'vue'
 import type { DecisionBriefing, TagType } from '@/types/decision'
 
@@ -36,10 +37,6 @@ const freshnessText = computed(() => {
   return parts.length ? `部分Skill为快照数据（${parts.join('，')}）` : ''
 })
 
-function formatTime(value: string): string {
-  if (!value) return '—'
-  return value.replace('T', ' ').slice(0, 16)
-}
 </script>
 
 <style scoped lang="scss">

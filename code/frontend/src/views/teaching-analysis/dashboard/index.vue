@@ -112,8 +112,12 @@
 
       <div v-if="data.scope?.restricted && canCompareColleges" class="sa-card dashboard-card">
         <div class="sa-card-title">跨学院聚合参照 <span class="extra">他院只提供聚合比较，不能进入学生明细</span></div>
-        <el-alert type="info" :closable="false" show-icon :title="comparison.definition.boundary" style="margin-bottom:10px" />
-        <AppTable :columns="comparisonCols" :data="comparison.items"
+        <el-alert v-if="comparisonError" type="error" :closable="false" show-icon
+          title="跨学院聚合参照加载失败" :description="comparisonError" style="margin-bottom:10px">
+          <el-button size="small" @click="loadComparison(dashboardRequestSeq)">重试</el-button>
+        </el-alert>
+        <el-alert v-else-if="comparison.definition.boundary" type="info" :closable="false" show-icon :title="comparison.definition.boundary" style="margin-bottom:10px" />
+        <AppTable v-if="!comparisonError" :columns="comparisonCols" :data="comparison.items" :loading="comparisonLoading"
           storage-key="dashboard:college-aggregate-compare" :max-business-columns="5"
           :config-version="1" stripe  @row-click="goComparisonCollege" :show-density="true" :show-column-settings="true" :pagination="false">
           <template #col-collegeName="{row}"><span :class="row.canDrillDown ? 'college-link' : ''">{{ row.collegeName }}</span><el-tag v-if="row.canDrillDown" size="small" effect="plain" style="margin-left:6px">本院</el-tag></template>
@@ -179,7 +183,7 @@
 <script setup lang="ts">
 import * as dashboardApi from '@/api/teachingAnalysis/dashboard'
 
-import { reactive, onMounted, ref, computed } from 'vue'
+import { reactive, onMounted, onBeforeUnmount, ref, computed } from 'vue'
 ;
 import { useRoute, useRouter } from 'vue-router'
 import KpiLabel from '@/components/KpiLabel.vue';
@@ -197,9 +201,11 @@ const router = useRouter();
 const route = useRoute();
 const data = reactive<any>({ kpi:[], colleges:[], gpaDist:[], gpaDistByCollege:{}, scope:{ restricted:false,label:'全校' }, evidence:{} });
 const comparison = reactive<any>({ items:[], definition:{} });
+const comparisonLoading = ref(false);
+const comparisonError = ref('');
 const canCompareColleges = computed(() => !!authStore.user?.permissionContext?.comparisonScope?.allowOtherOrganizations);
 
-// 学院横向对比表列定义（M6 DataTable）
+// 学院横向对比表列定义（AppTable）
 const collegeCols: AppTableColumn[] = [
   { key: 'name', label: '学院', minWidth: 170, fixed: 'left', region: 'identity', required: true },
   { key: 'students', label: '在籍学生', minWidth: 84, align: 'center', defaultVisible: false },
@@ -292,28 +298,41 @@ const hasCoursePassData = computed(() => {
 // GPA 5 档色：不及格→优秀（玫红/琥珀/靛/靛蓝/青绿）
 const GPA_COLORS = ['#E11D48', '#D97706', '#6366F1', '#4F46E5', '#0D9488'];
 
-// 使用当前已应用条件读取数据，保留原请求顺序与结果赋值。
+// 跨学院参照独立加载，失败或响应较慢不阻塞总览主数据。
+async function loadComparison(requestId: number) {
+  comparison.items = [];
+  comparison.definition = {};
+  comparisonError.value = '';
+  const detailType = authStore.user?.permissionContext?.detailScope?.type;
+  if (detailType !== 'college' || !canCompareColleges.value) {
+    comparisonLoading.value = false;
+    return;
+  }
+  comparisonLoading.value = true;
+  const qs = fSemester.value ? `?semester=${fSemester.value}` : '';
+  try {
+    const result = await dashboardApi.getCollegeComparison(qs);
+    if (requestId !== dashboardRequestSeq) return;
+    Object.assign(comparison, result);
+  } catch (error:any) {
+    if (requestId !== dashboardRequestSeq) return;
+    comparisonError.value = error?.message || '请稍后重试';
+  } finally {
+    if (requestId === dashboardRequestSeq) comparisonLoading.value = false;
+  }
+}
+
+// 主数据返回后立即展示；请求序号防止快速切换学期时旧结果覆盖新结果。
 async function loadData() {
   const requestId = ++dashboardRequestSeq;
   pageLoading.value = true;
   loadError.value = '';
   const qs = fSemester.value ? `?semester=${fSemester.value}` : '';
+  void loadComparison(requestId);
   try {
-    const detailType = authStore.user?.permissionContext?.detailScope?.type;
-    const comparePromise = detailType === 'college' && canCompareColleges.value
-      ? dashboardApi.getCollegeComparison(qs).catch(() => null)
-      : Promise.resolve(null);
-    const [d, compare] = await Promise.all([
-      dashboardApi.getDashboard(qs),
-      comparePromise,
-    ]);
+    const d = await dashboardApi.getDashboard(qs);
     if (requestId !== dashboardRequestSeq || !d) return;
     Object.assign(data, d);
-    if (compare) {
-      Object.assign(comparison, compare || {});
-    } else {
-      comparison.items = [];
-    }
     failCourses.value = d.failCourses || [];
     if (gpaCollege.value !== 'all' && !data.gpaDistByCollege?.[gpaCollege.value]) gpaCollege.value = 'all';
     loadGpa();
@@ -325,6 +344,8 @@ async function loadData() {
     if (requestId === dashboardRequestSeq) pageLoading.value = false;
   }
 }
+
+onBeforeUnmount(() => { dashboardRequestSeq++; });
 
 // 进入页面时执行原初始化流程，恢复路由条件与可用选项。
 onMounted(async () => {

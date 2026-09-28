@@ -1,5 +1,5 @@
 """预警组：预警总览/列表 + 学生明细。数据来自 fact_alert + fact_grade + dim_*。
-形状对齐 vite.config.ts mock（/api/admin/alerts、/api/admin/student/{sid}）。
+提供 /api/admin/alerts 和 /api/admin/student/{sid} 接口。
 """
 import sqlite3
 from datetime import datetime, timezone

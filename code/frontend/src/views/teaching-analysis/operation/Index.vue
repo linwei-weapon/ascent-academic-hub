@@ -7,7 +7,7 @@
       </div>
       <div v-if="activeTab !== 'course-quality'" class="period-control">
         <span>统计学期</span>
-        <el-select v-model="sharedSemester" style="width:190px" placeholder="选择统计学期">
+        <el-select size="small" v-model="sharedSemester" style="width:190px" placeholder="选择统计学期">
           <el-option v-for="item in semesters" :key="item.value" :label="item.label" :value="item.value" />
         </el-select>
       </div>
