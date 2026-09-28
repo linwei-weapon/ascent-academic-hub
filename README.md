@@ -12,6 +12,12 @@ Architecture renovation starts with [project architecture and documentation conv
 
 ## Quick Start
 
+Shared startup skill: [highedu-start](.agents/skills/highedu-start/SKILL.md). Use `$highedu-start local` for the local frontend, FastAPI backend and SQLite databases, or `$highedu-start test` for a local frontend connected to the test server.
+
+Both modes share `frontendConfig` in `code/frontend/vite.config.ts`; no frontend `.env` file is needed.
+
+To connect manually, run `npm ci` once and `npm run dev:test` from `code/frontend`, then open `http://127.0.0.1:3007` and sign in with your test account. See the [development setup](文档/5-部署方案/新增-5.1-开发环境部署方案.md).
+
 ```bash
 # 1. Install backend dependencies
 cd code/backend

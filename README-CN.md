@@ -51,6 +51,12 @@
 
 ## 三、五分钟跑起来
 
+团队启动 Skill：[highedu-start](.agents/skills/highedu-start/SKILL.md)。在项目中使用 `$highedu-start local` 启动本地前后端和 SQLite，使用 `$highedu-start test` 启动本地前端并连接测试服务器。
+
+两种模式的公共配置统一维护在 `code/frontend/vite.config.ts` 的 `frontendConfig` 中，无需准备 `.env` 文件。
+
+手动连接测试环境：在 `code/frontend` 执行 `npm ci`（首次安装），然后 `npm run dev:test`，访问 `http://127.0.0.1:3007`，使用测试环境账号登录。详细配置见[开发环境部署方案](文档/5-部署方案/新增-5.1-开发环境部署方案.md)。
+
 详细步骤见 `文档/5-部署方案/03-部署手册.md`。最短路径：
 
 ```bash

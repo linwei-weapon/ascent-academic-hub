@@ -20,6 +20,7 @@ credentials/
 
 # Build output
 dist/
+/work/runtime/highedu-start/
 *.egg-info/
 
 # Data files (proprietary)

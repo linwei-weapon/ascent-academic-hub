@@ -83,19 +83,9 @@ K004 挂科率，支持学院/专业/年级维度与学期筛选。缺少可靠�
 所有候选特征必须由通用规则引擎可执行；未知特征按失败关闭处理。采纳建议只创建禁用规则占位和
 规则变更草稿，之后必须完成影响试算、独立复核、发布配置和受控激活。
 
-## 前后端联调（切换 mock → 真实后端）
+## 前后端联调
 
-编辑 `平台管理端-0618/vite.config.ts`：
-
-1. 注释 `plugins` 中的 `mockPlugin()`。
-2. `server` 增加代理：
-
-```ts
-server: {
-  port: Number(VITE_PORT), host: true,
-  proxy: { '/api': { target: 'http://localhost:8000', changeOrigin: true } },
-}
-```
+前端 Mock 已停用。在 `code/frontend` 执行 `npm run dev` 连接本地后端，执行 `npm run dev:test` 连接测试后端。地址与端口统一维护在 `code/frontend/vite.config.ts` 的 `frontendConfig` 中，无需准备前端 `.env` 文件。
 
 先起后端（8000）再起前端（3006）。CORS 默认只允许本地 3006/3007 来源，可通过逗号分隔的
 `BI_CORS_ORIGINS` 配置部署白名单。生产环境设置 `BI_APP_ENV=production` 时必须同时配置独立
