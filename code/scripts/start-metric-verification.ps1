@@ -1,4 +1,4 @@
-param([int]$Port = 8010)
+﻿param([int]$Port = 8010)
 $ErrorActionPreference = 'Stop'
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $codeRoot = Join-Path $repoRoot 'code'

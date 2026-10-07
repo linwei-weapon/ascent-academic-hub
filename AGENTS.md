@@ -69,6 +69,8 @@
 
 启动项目时使用仓库级 [highedu-start](.agents/skills/highedu-start/SKILL.md)：`local` 启动本地前后端及 SQLite，`test` 启动本地前端并连接测试服务器。先按上下文选择模式；未指定时询问，不默认连接共享数据。
 
+向共享测试服务器发布代码或更新业务库时使用 [highedu_deploy](.agents/skills/highedu_deploy/SKILL.md)，支持前端、Java 后端、状态检查、代码回滚，以及独立的 `database preview/apply/status`。代码发布使用 `edu_developer` 及服务器已有发布工具；数据库使用 `highedu_user`，只更新业务库，源库只读。本仓库 Python 后端及 SQLite 迁移不能直接替换服务器 Java/MySQL 实现。
+
 不要先通读全部仓库。按任务选择以下最小上下文：
 
 | 任务 | 必读文件 |
