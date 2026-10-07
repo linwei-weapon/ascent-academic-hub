@@ -16,7 +16,7 @@
       <el-form :inline="true" label-position="top" class="report-filter">
         <el-form-item v-if="!isRpt01" label="学年学期" :required="isRequired('semesterId')">
           <el-select size="small" v-model="draft.semesterId" clearable filterable placeholder="请选择学年学期" class="semester-control">
-            <el-option v-for="item in options.semesters" :key="item" :label="item" :value="item" />
+            <el-option v-for="item in semesterOptions" :key="item.value" :label="item.label" :value="item.value" />
           </el-select>
         </el-form-item>
         <el-form-item :label="usesGradeLabel ? '年级' : '入学年级'" :required="isRequired('entryGrade')">
@@ -160,6 +160,10 @@ const focusRule = computed(() => result.value?.focusRule || null)
 const loading = ref(false)
 const exporting = ref(false)
 
+// 测试后端返回值/名称对象，本地后端返回字符串；展示名称，查询与导出保留实际学期值。
+const semesterOptions = computed(() => (options.semesters as Array<string | { value: string | number; label: string }>).map(item =>
+  typeof item === 'string' ? { value: item, label: item } : { value: String(item.value), label: item.label }))
+
 // 将服务端学院元组转换为原下拉选项。
 const organizationOptions = computed(() => options.organizations.map((item: any[]) => ({ value: item[0], label: item[1] })))
 // 区分名单快照缺失与一般数据源缺失，保持原提示。
@@ -194,7 +198,7 @@ function isRequired(key: BasicReportFilter) { return definition.value.requiredFi
 
 // 恢复原默认查询条件并清除结果，不自动重新查询。
 function clearPage() {
-  Object.assign(draft, { semesterId: isRpt01.value ? (options.semesters[0] || '') : '', entryGrade: null, organizationId: '', majorCode: '', classCode: '' })
+  Object.assign(draft, { semesterId: isRpt01.value ? (semesterOptions.value[0]?.value || '') : '', entryGrade: null, organizationId: '', majorCode: '', classCode: '' })
   Object.assign(applied, draft)
   result.value = null
 }
@@ -214,7 +218,7 @@ async function loadOptions() {
   const data = await basicReportsApi.getBasicReportOptions<any>()
   Object.assign(options, data)
   if (isRpt01.value) {
-    draft.semesterId = options.semesters[0] || ''
+    draft.semesterId = semesterOptions.value[0]?.value || ''
     applied.semesterId = draft.semesterId
   }
 }
