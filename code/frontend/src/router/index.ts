@@ -67,6 +67,8 @@ function isAllowed(path: string): boolean {
   if (path.startsWith('/admin/verify/')) return has('/admin/reports/decision')
   // 专家问策：与 AI管理决策同一准入（服务端仍按当前身份与数据范围二次鉴权）
   if (path.startsWith('/admin/reports/advice')) return has('/admin/reports/decision')
+  if (path.startsWith('/admin/reports/expert-team/')) return has('/admin/reports/expert-team')
+  if (path.startsWith('/admin/system/expert-test/')) return has('/admin/system/expert-management')
   return has(menuKeyOfPath(path))
 }
 

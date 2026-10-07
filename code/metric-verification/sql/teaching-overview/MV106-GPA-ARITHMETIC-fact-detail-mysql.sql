@@ -1,0 +1,46 @@
+WITH input_rows AS (
+SELECT g.attempt_id AS attempt_id,
+       g.student_id AS student_id,
+       g.course_id AS course_id,
+       g.semester_id AS semester_id,
+       g.score AS score,
+       g.gpa AS gpa,
+       g.is_published AS is_published,
+       g.is_pass AS is_pass,
+       g.grade_status AS grade_status,
+       g.is_retake AS is_retake,
+       g.published_date_time AS published_date_time,
+       g.input_date_time AS input_date_time,
+       s.organization_id AS organization_id,
+       s.major_id AS major_id,
+       s.entry_grade AS entry_grade,
+       g.source_row_no AS source_row_no,
+       g.batch_id AS batch_id,
+       g.id AS fact_row_id,
+       g.is_void AS is_void,
+       g.attempt_type AS attempt_type,
+       g.credits AS attempt_credits,
+       g.publish_status AS publish_status,
+       g.exam_status AS exam_status,
+       cm.course_code, cm.course_name, cm.course_metadata_rows, sm.semester_name, sm.semester_start_date, sm.semester_metadata_rows
+FROM ACT_GRADE_ATTEMPT g
+JOIN ACT_STUDENT s ON s.student_id = g.student_id
+LEFT JOIN (SELECT dc.course_id AS course_key, CASE WHEN COUNT(DISTINCT dc.code) = 1 THEN MIN(dc.code) END AS course_code, CASE WHEN COUNT(DISTINCT dc.name_zh) = 1 THEN MIN(dc.name_zh) END AS course_name, COUNT(*) AS course_metadata_rows FROM ACT_COURSE dc
+WHERE dc.batch_id = :course_batch_id
+  AND dc.source = 'real' GROUP BY dc.course_id) cm ON cm.course_key = g.course_id
+LEFT JOIN (SELECT tm.semester_id AS semester_key, CASE WHEN COUNT(DISTINCT tm.name_zh) = 1 THEN MIN(tm.name_zh) END AS semester_name, CASE WHEN COUNT(DISTINCT tm.start_date) = 1 THEN MIN(tm.start_date) END AS semester_start_date, COUNT(*) AS semester_metadata_rows FROM ACT_SEMESTER tm
+WHERE tm.source = 'real' GROUP BY tm.semester_id) sm ON sm.semester_key = g.semester_id
+WHERE (:organization_id IS NULL OR s.organization_id = :organization_id)
+  AND (:major_id IS NULL OR s.major_id = :major_id)
+  AND (:grade IS NULL OR s.entry_grade = :grade)
+  AND (:student_id IS NULL OR s.student_id = :student_id)
+  AND s.batch_id = :student_batch_id
+  AND s.source = 'real'
+  AND 1 = 1
+  AND g.student_id = :student_id
+  AND g.batch_id = :grade_batch_id
+  AND g.source = 'real'
+)
+SELECT * FROM input_rows
+ORDER BY CASE WHEN semester_start_date IS NULL THEN 1 ELSE 0 END, semester_start_date DESC, CASE WHEN score IS NULL THEN 1 ELSE 0 END, score ASC, semester_id DESC, attempt_id, fact_row_id
+LIMIT 100

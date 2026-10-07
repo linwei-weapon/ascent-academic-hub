@@ -1,0 +1,133 @@
+{
+  "schemaVersion": "3.1.0",
+  "template": true,
+  "projectId": "highedu",
+  "module": {
+    "id": "teaching-overview",
+    "name": "教学数据总览"
+  },
+  "mode": "initial",
+  "baseRevisionId": null,
+  "scope": {
+    "metricIds": [
+      "O-10"
+    ],
+    "includeSupportingEvidence": true,
+    "excluded": [
+      "其他页面及原型内容",
+      "页面布局、导航、控件与交互验收",
+      "身份权限功能验收",
+      "生产代码过程分析"
+    ],
+    "exclusionReason": "只为106教学数据总览的应用业务指标建立可验证闭环",
+    "businessCategories": [
+      "学业表现"
+    ]
+  },
+  "sources": [
+    {
+      "id": "SRC-REQ-106",
+      "kind": "document",
+      "role": "requirement",
+      "title": "106-教学数据总览功能指标详细需求说明",
+      "location": "文档/4-需求文档/4.1-教学数据总览/106-教学数据总览功能指标详细需求说明.md",
+      "version": null,
+      "contentHash": null,
+      "sections": [
+        "3.5",
+        "12"
+      ],
+      "authority": "requirement"
+    },
+    {
+      "id": "SRC-ORACLE-V6",
+      "kind": "document",
+      "role": "source_schema",
+      "title": "Oracle源表字段完整清单V6.0(2)",
+      "location": null,
+      "version": "6.0",
+      "contentHash": null,
+      "sections": [
+        "GRADE",
+        "STUDENT"
+      ],
+      "authority": "design_evidence"
+    },
+    {
+      "id": "SRC-DESIGN-V6",
+      "kind": "document",
+      "role": "analytics_design",
+      "title": "中国矿业大学学业分析平台数据库设计文档V6.0(3)",
+      "location": null,
+      "version": "6.0",
+      "contentHash": null,
+      "sections": [
+        "4.3.1 ACT_GRADE_ATTEMPT",
+        "ACT_STUDENT"
+      ],
+      "authority": "design_evidence"
+    },
+    {
+      "id": "SRC-OBS-O10",
+      "kind": "live_ui",
+      "role": "metric_evidence",
+      "title": "目标业务指标的可选观察（待取得）",
+      "location": "http://127.0.0.1:3007/#/admin/dashboard",
+      "version": null,
+      "contentHash": null,
+      "authority": "observation_only",
+      "use": "identify_metric_or_observe_actual",
+      "optional": true,
+      "metricObservation": {
+        "metricId": "O-10",
+        "metricLabel": "当前挂科学生率",
+        "locator": null,
+        "filterContext": null,
+        "identityContext": null,
+        "unit": "%",
+        "observedAt": null,
+        "dataAsOf": null,
+        "dataNature": "unknown",
+        "snapshotRef": null
+      }
+    }
+  ],
+  "environment": {
+    "id": "test-114",
+    "sourceDialect": "mysql",
+    "analyticsDialect": "mysql",
+    "sourceConnectionProfileRef": null,
+    "analyticsConnectionProfileRef": null,
+    "schemaSnapshotRefs": null,
+    "historicalBatchAccess": "unreliable"
+  },
+  "checks": {
+    "mode": "documents",
+    "sampleScope": null,
+    "maxRows": 50,
+    "timeoutSeconds": 10,
+    "businessDataWriteAllowed": false,
+    "evidenceCapture": {
+      "requiredForCalculationValidation": true,
+      "storage": "verification_execution",
+      "method": "single_connection_consistent_read",
+      "requireCompleteInputs": true,
+      "maxBytes": 1048576,
+      "onLimitExceeded": "reduce_valid_business_scope_or_keep_inconclusive"
+    }
+  },
+  "interaction": {
+    "channel": "current_conversation",
+    "productOwnerRef": null,
+    "existingDecisionRefs": null,
+    "questionBatchLimit": 3,
+    "onUnanswered": "keep_open_and_continue_unaffected_work",
+    "resumePolicy": "explicit_skill_invocation"
+  },
+  "delivery": {
+    "mode": "analyze_only",
+    "serviceProfileRef": null,
+    "authorizationRef": null
+  },
+  "analysisId": "REPLACE_WITH_ANALYSIS_ID"
+}

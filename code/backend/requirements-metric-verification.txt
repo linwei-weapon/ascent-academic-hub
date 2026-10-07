@@ -1,0 +1,6 @@
+fastapi==0.141.1
+uvicorn==0.54.0
+pydantic==2.13.5
+PyMySQL==1.2.3
+httpx==0.28.1
+# Oracle原库模式另安装 oracledb；MySQL贴源镜像不需要。

@@ -1,0 +1,2 @@
+-r requirements-metric-verification.txt
+jsonschema>=4.23,<5

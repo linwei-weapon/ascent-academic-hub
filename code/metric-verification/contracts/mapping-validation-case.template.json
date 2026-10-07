@@ -1,0 +1,176 @@
+{
+  "schemaVersion": "3.1.0",
+  "template": true,
+  "validationCase": {
+    "id": "CASE-O10-BOUNDED-REAL",
+    "metricId": "O-10",
+    "target": "requirement_to_sql",
+    "title": "限定真实原始记录的独立核算（待执行）",
+    "method": "capture_inputs_and_result_then_independent_expectation_before_disclosure",
+    "evidenceRefs": [
+      "E-REQ-O10"
+    ],
+    "samplePlan": {
+      "inputDatasets": [
+        {
+          "queryId": "QRY-O10-FACT-INPUT",
+          "countQueryId": "QRY-O10-FACT-INPUT-COUNT",
+          "role": "raw_input",
+          "coverageNote": "需覆盖筛选前原始记录和关联/去重所需字段；不足时增加登记输入查询，不能把缺失关系视为已验证"
+        }
+      ],
+      "parameters": null,
+      "businessKeys": null,
+      "scopeReason": null,
+      "evidenceRef": null,
+      "recordCount": null,
+      "completeness": "unknown",
+      "capture": {
+        "status": "not_captured",
+        "method": "single_connection_consistent_read",
+        "consistency": "not_checked",
+        "readbackVerified": false
+      },
+      "requirement": "原始输入与被测输出在同一次核实的一致性读取中取得并留存；原始输入count与完整明细匹配。样本须能由同一登记SQL限定，截断或缺必要字段时不能判通过。"
+    },
+    "expected": {
+      "status": "not_prepared",
+      "method": "independent_calculation_from_retained_inputs_before_result_disclosure",
+      "basisRef": null,
+      "derivation": null,
+      "rows": null,
+      "determinedAt": null,
+      "determinedByRef": null,
+      "inputEvidenceRef": null,
+      "inputContentHash": null,
+      "resultKnownBeforeCalculation": null,
+      "submittedBeforeResultDisclosure": null
+    },
+    "execution": {
+      "queryId": "QRY-O10-FACT-EXPECTED",
+      "status": "not_run",
+      "environmentId": null,
+      "parameters": null,
+      "queryChecksum": null,
+      "executionId": null,
+      "actualRows": null,
+      "executedAt": null,
+      "mappingRevisionId": null,
+      "executionUse": "definition_validation",
+      "evidenceRef": null,
+      "resultDisclosure": "not_captured"
+    },
+    "comparison": {
+      "status": "not_run",
+      "differences": null,
+      "coverage": null,
+      "reviewerRef": null,
+      "reviewedAt": null,
+      "evidenceReadback": "not_run"
+    },
+    "ruleIllustration": {
+      "purpose": "explanation_only",
+      "dataNature": "synthetic",
+      "countsForSqlValidation": false,
+      "rows": [
+        {
+          "attempt_key": "A1",
+          "student_key": "S1",
+          "valid_attempt": true,
+          "is_pass": 0
+        },
+        {
+          "attempt_key": "A2",
+          "student_key": "S1",
+          "valid_attempt": true,
+          "is_pass": 1
+        },
+        {
+          "attempt_key": "A3",
+          "student_key": "S2",
+          "valid_attempt": true,
+          "is_pass": 1
+        },
+        {
+          "attempt_key": "A4",
+          "student_key": "S3",
+          "valid_attempt": false,
+          "is_pass": 0
+        }
+      ],
+      "derivation": [
+        "有效成绩学生集合为S1、S2",
+        "未通过学生集合为S1",
+        "1 / 2 × 100 = 50%"
+      ],
+      "illustratedResult": {
+        "metric_value": "50",
+        "numerator": 1,
+        "denominator": 2,
+        "unit": "%"
+      },
+      "limitation": "valid_attempt是解释前提，不是真实表字段；本算例没有执行或验证登记SQL。"
+    }
+  },
+  "retainedEvidenceTemplate": {
+    "schemaVersion": "3.1.0",
+    "template": true,
+    "storageTarget": "sys_metric_verification_execution.evidence_json",
+    "id": null,
+    "executionId": null,
+    "mappingRevisionId": null,
+    "metricId": "O-10",
+    "caseId": "CASE-O10-BOUNDED-REAL",
+    "environmentId": null,
+    "capture": {
+      "connectionRef": null,
+      "method": "single_connection_consistent_read",
+      "startedAt": null,
+      "endedAt": null,
+      "consistency": "not_checked",
+      "consistencyBasis": null
+    },
+    "scope": {
+      "parameters": null,
+      "businessKeys": null,
+      "coverage": "bounded_sample",
+      "description": null
+    },
+    "datasets": [
+      {
+        "queryId": "QRY-O10-FACT-INPUT",
+        "countQueryId": "QRY-O10-FACT-INPUT-COUNT",
+        "role": "raw_input",
+        "sql": null,
+        "sqlChecksum": null,
+        "countSql": null,
+        "countSqlChecksum": null,
+        "parameters": null,
+        "columns": null,
+        "rows": null,
+        "matchedRecordCount": null,
+        "returnedRecordCount": null,
+        "complete": null,
+        "truncated": null
+      }
+    ],
+    "testedResult": {
+      "queryId": "QRY-O10-FACT-EXPECTED",
+      "sql": null,
+      "sqlChecksum": null,
+      "parameters": null,
+      "columns": null,
+      "rows": null,
+      "returnedRecordCount": null,
+      "complete": null,
+      "truncated": null
+    },
+    "integrity": {
+      "contentHash": null,
+      "byteCount": null,
+      "persistedAt": null,
+      "readbackVerified": false
+    },
+    "boundary": "仅定义服务侧留存结构；真实证据不进入映射包、聊天报告或Git。独立预期另存independent_expectation_json；留存内容支持原样本复核，不提供历史数据库重放。"
+  }
+}

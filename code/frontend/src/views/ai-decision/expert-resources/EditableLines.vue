@@ -1,0 +1,3 @@
+<template><section class="lines"><label>{{ title }}<small>每行一项</small><el-input :model-value="modelValue.join('\n')" type="textarea" :rows="Math.min(Math.max(modelValue.length,3),7)" @update:model-value="$emit('update:modelValue',String($event).split('\n'))" /></label></section></template>
+<script setup lang="ts">defineProps<{title:string;modelValue:string[]}>();defineEmits<{'update:modelValue':[value:string[]]}>()</script>
+<style scoped>.lines{margin:20px 0}.lines label{display:block;font-size:14px;color:#334155}.lines small{font-size:12px;color:#64748b;margin-left:10px}.lines .el-textarea{margin-top:9px}</style>

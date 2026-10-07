@@ -1,0 +1,77 @@
+{
+  "schemaVersion": "3.1.0",
+  "template": true,
+  "analysisId": null,
+  "scope": {
+    "projectId": "highedu",
+    "moduleId": "teaching-overview",
+    "environmentId": "test-114",
+    "metricIds": null,
+    "businessCategories": null
+  },
+  "sources": {
+    "capturedRefs": null,
+    "unavailableRefs": null
+  },
+  "mapping": {
+    "status": "not_analyzed",
+    "pendingQuestionIds": null,
+    "candidateMetricIds": null,
+    "organizedMetricIds": null,
+    "completeMetricIds": null,
+    "partialMetricIds": null
+  },
+  "storage": {
+    "status": "not_persisted",
+    "revisionId": null,
+    "packageHash": null,
+    "currentRevisionId": null,
+    "readbackVerified": false,
+    "persistedAt": null
+  },
+  "checks": {
+    "contract": "not_run",
+    "compatibility": "not_run",
+    "independentCases": "not_run",
+    "runtimeSql": "not_run",
+    "consumerReadback": "not_run",
+    "businessDependencies": "not_run",
+    "evidenceReadback": "not_run"
+  },
+  "businessVerification": {
+    "status": "not_run",
+    "recordIds": null,
+    "coverage": null,
+    "resultCompleteness": null,
+    "remainingConditions": null
+  },
+  "changes": {
+    "added": null,
+    "changed": null,
+    "retired": null,
+    "affectedEvidenceIds": null,
+    "impactReview": {
+      "changedRuleIds": null,
+      "reviewedMetricIds": null,
+      "affectedMetricIds": null,
+      "unaffectedMetricIds": null,
+      "unresolvedMetricIds": null,
+      "basis": null
+    }
+  },
+  "entry": "系统管理→指标核验→教学数据总览→业务指标",
+  "nextAction": "模板仅说明业务指标闭环的交付回执；未入库、未留存真实样本、未运行SQL、未取得业务核验结论。历史批次不可稳定重取，不交付其他页面原型。",
+  "answerSync": {
+    "status": "not_run",
+    "pendingSubmissionIds": null,
+    "confirmedAnswerIds": null
+  },
+  "evidenceRetention": {
+    "status": "not_captured",
+    "evidenceRefs": null,
+    "readbackVerified": false,
+    "coverage": null,
+    "consistency": null,
+    "remainingConditions": null
+  }
+}

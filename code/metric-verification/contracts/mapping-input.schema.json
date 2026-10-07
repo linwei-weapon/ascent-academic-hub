@@ -1,0 +1,134 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "mapping-input.schema.json",
+  "title": "mapping-input",
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "const": "3.1.0"
+    },
+    "template": {
+      "type": "boolean"
+    },
+    "analysisId": {
+      "type": "string"
+    },
+    "projectId": {
+      "type": "string"
+    },
+    "module": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ],
+      "additionalProperties": true
+    },
+    "mode": {
+      "enum": [
+        "initial",
+        "update"
+      ]
+    },
+    "baseRevisionId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "scope": {
+      "type": "object"
+    },
+    "sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "document",
+              "schema_snapshot",
+              "user_decision",
+              "prototype",
+              "live_ui",
+              "screenshot"
+            ]
+          },
+          "role": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "location": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "version": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "contentHash": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "role",
+          "title",
+          "location",
+          "version",
+          "contentHash"
+        ],
+        "additionalProperties": true
+      }
+    },
+    "environment": {
+      "type": "object"
+    },
+    "checks": {
+      "type": "object"
+    },
+    "interaction": {
+      "type": "object"
+    },
+    "delivery": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "template",
+    "analysisId",
+    "projectId",
+    "module",
+    "mode",
+    "baseRevisionId",
+    "scope",
+    "sources",
+    "environment",
+    "checks",
+    "interaction",
+    "delivery"
+  ],
+  "additionalProperties": false
+}

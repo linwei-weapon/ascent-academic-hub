@@ -1,0 +1,322 @@
+{
+  "type": "object",
+  "properties": {
+    "taskId": {
+      "type": "string",
+      "enum": [
+        "R-CHECK",
+        "R-SCENARIO"
+      ]
+    },
+    "rankingRef": {
+      "type": "object",
+      "properties": {
+        "resultId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "objectRefs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "uniqueItems": true
+        },
+        "conditionIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "uniqueItems": true
+        },
+        "evidenceIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "resultId"
+      ],
+      "additionalProperties": false,
+      "title": "已保存排名结果",
+      "description": "引用同年度、完整群体且合法的精确排名结果。"
+    },
+    "year": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "title": "适用年度",
+      "description": "明确本轮规则年度；不根据当前日期或年级猜测。"
+    },
+    "ruleRef": {
+      "type": "object",
+      "properties": {
+        "ruleId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      },
+      "required": [
+        "ruleId",
+        "version"
+      ],
+      "additionalProperties": false,
+      "title": "已发布规则版本",
+      "description": "引用唯一适用且已确认发布的规则，不由客户端提供规则事实。"
+    },
+    "baselineRef": {
+      "type": "object",
+      "properties": {
+        "resultId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "objectRefs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "uniqueItems": true
+        },
+        "conditionIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "uniqueItems": true
+        },
+        "evidenceIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "resultId"
+      ],
+      "additionalProperties": false,
+      "title": "已保存基线结果",
+      "description": "引用可鉴权、范围和口径可核对的基线结果。"
+    },
+    "thresholds": {
+      "type": "object",
+      "additionalProperties": {
+        "type": [
+          "number",
+          "string"
+        ]
+      },
+      "title": "明示条件阈值",
+      "description": "只允许正式规则明确可讨论的条件参数。"
+    }
+  },
+  "required": [
+    "taskId"
+  ],
+  "additionalProperties": false,
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "rankingRef": {
+          "type": "object",
+          "properties": {
+            "resultId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "objectRefs": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "uniqueItems": true
+            },
+            "conditionIds": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "uniqueItems": true
+            },
+            "evidenceIds": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "resultId"
+          ],
+          "additionalProperties": false,
+          "title": "已保存排名结果",
+          "description": "引用同年度、完整群体且合法的精确排名结果。"
+        },
+        "year": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "title": "适用年度",
+          "description": "明确本轮规则年度；不根据当前日期或年级猜测。"
+        },
+        "ruleRef": {
+          "type": "object",
+          "properties": {
+            "ruleId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          "required": [
+            "ruleId",
+            "version"
+          ],
+          "additionalProperties": false,
+          "title": "已发布规则版本",
+          "description": "引用唯一适用且已确认发布的规则，不由客户端提供规则事实。"
+        },
+        "taskId": {
+          "const": "R-CHECK"
+        }
+      },
+      "required": [
+        "rankingRef",
+        "year",
+        "ruleRef",
+        "taskId"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "baselineRef": {
+          "type": "object",
+          "properties": {
+            "resultId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "objectRefs": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "uniqueItems": true
+            },
+            "conditionIds": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "uniqueItems": true
+            },
+            "evidenceIds": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "resultId"
+          ],
+          "additionalProperties": false,
+          "title": "已保存基线结果",
+          "description": "引用可鉴权、范围和口径可核对的基线结果。"
+        },
+        "ruleRef": {
+          "type": "object",
+          "properties": {
+            "ruleId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          "required": [
+            "ruleId",
+            "version"
+          ],
+          "additionalProperties": false,
+          "title": "已发布规则版本",
+          "description": "引用唯一适用且已确认发布的规则，不由客户端提供规则事实。"
+        },
+        "thresholds": {
+          "type": "object",
+          "additionalProperties": {
+            "type": [
+              "number",
+              "string"
+            ]
+          },
+          "title": "明示条件阈值",
+          "description": "只允许正式规则明确可讨论的条件参数。"
+        },
+        "taskId": {
+          "const": "R-SCENARIO"
+        }
+      },
+      "required": [
+        "baselineRef",
+        "ruleRef",
+        "thresholds",
+        "taskId"
+      ],
+      "additionalProperties": false
+    }
+  ]
+}

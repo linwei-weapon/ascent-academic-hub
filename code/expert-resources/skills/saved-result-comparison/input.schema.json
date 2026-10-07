@@ -1,0 +1,304 @@
+{
+  "type": "object",
+  "properties": {
+    "taskId": {
+      "type": "string",
+      "enum": [
+        "C-CHANGE",
+        "G-CHANGE"
+      ]
+    },
+    "baselineRef": {
+      "type": "object",
+      "properties": {
+        "resultId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "objectRefs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "uniqueItems": true
+        },
+        "conditionIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "uniqueItems": true
+        },
+        "evidenceIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "resultId"
+      ],
+      "additionalProperties": false,
+      "title": "已保存基线结果",
+      "description": "引用可鉴权、范围和口径可核对的基线结果。"
+    },
+    "currentRef": {
+      "type": "object",
+      "properties": {
+        "resultId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "objectRefs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "uniqueItems": true
+        },
+        "conditionIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "uniqueItems": true
+        },
+        "evidenceIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "resultId"
+      ],
+      "additionalProperties": false,
+      "title": "已保存对照结果",
+      "description": "引用另一份实际保存结果，不补造未保存的历史。"
+    }
+  },
+  "required": [
+    "taskId"
+  ],
+  "additionalProperties": false,
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "baselineRef": {
+          "type": "object",
+          "properties": {
+            "resultId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "objectRefs": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "uniqueItems": true
+            },
+            "conditionIds": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "uniqueItems": true
+            },
+            "evidenceIds": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "resultId"
+          ],
+          "additionalProperties": false,
+          "title": "已保存基线结果",
+          "description": "引用可鉴权、范围和口径可核对的基线结果。"
+        },
+        "currentRef": {
+          "type": "object",
+          "properties": {
+            "resultId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "objectRefs": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "uniqueItems": true
+            },
+            "conditionIds": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "uniqueItems": true
+            },
+            "evidenceIds": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "resultId"
+          ],
+          "additionalProperties": false,
+          "title": "已保存对照结果",
+          "description": "引用另一份实际保存结果，不补造未保存的历史。"
+        },
+        "taskId": {
+          "const": "C-CHANGE"
+        }
+      },
+      "required": [
+        "baselineRef",
+        "currentRef",
+        "taskId"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "baselineRef": {
+          "type": "object",
+          "properties": {
+            "resultId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "objectRefs": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "uniqueItems": true
+            },
+            "conditionIds": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "uniqueItems": true
+            },
+            "evidenceIds": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "resultId"
+          ],
+          "additionalProperties": false,
+          "title": "已保存基线结果",
+          "description": "引用可鉴权、范围和口径可核对的基线结果。"
+        },
+        "currentRef": {
+          "type": "object",
+          "properties": {
+            "resultId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "objectRefs": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "uniqueItems": true
+            },
+            "conditionIds": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "uniqueItems": true
+            },
+            "evidenceIds": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "resultId"
+          ],
+          "additionalProperties": false,
+          "title": "已保存对照结果",
+          "description": "引用另一份实际保存结果，不补造未保存的历史。"
+        },
+        "taskId": {
+          "const": "G-CHANGE"
+        }
+      },
+      "required": [
+        "baselineRef",
+        "currentRef",
+        "taskId"
+      ],
+      "additionalProperties": false
+    }
+  ]
+}

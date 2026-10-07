@@ -1,0 +1,28 @@
+{
+  "type": "object",
+  "properties": {
+    "plan_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "description": "从当前身份可用选项选择的培养方案ID；不是专业名称。"
+    },
+    "target_plan_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "description": "明确选定的另一份培养方案ID；转专业场景中为目标方案。"
+    },
+    "college_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "description": "当前身份授权范围内的学院ID；不传不代表获得全校权限。"
+    }
+  },
+  "required": [
+    "plan_id",
+    "target_plan_id"
+  ],
+  "additionalProperties": false
+}

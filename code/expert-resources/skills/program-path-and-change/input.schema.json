@@ -1,0 +1,234 @@
+{
+  "type": "object",
+  "properties": {
+    "taskId": {
+      "type": "string",
+      "enum": [
+        "P-PATH",
+        "P-CHANGE"
+      ]
+    },
+    "plan_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "title": "基线培养方案",
+      "description": "从当前授权选项选择本轮基线培养方案。"
+    },
+    "ruleRef": {
+      "type": "object",
+      "properties": {
+        "ruleId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      },
+      "required": [
+        "ruleId",
+        "version"
+      ],
+      "additionalProperties": false,
+      "title": "已发布规则版本",
+      "description": "引用唯一适用且已确认发布的规则，不由客户端提供规则事实。"
+    },
+    "changes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "enum": [
+              "add",
+              "remove",
+              "update"
+            ]
+          },
+          "courseId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "values": {
+            "type": "object",
+            "properties": {
+              "semester": {
+                "type": [
+                  "number",
+                  "string"
+                ]
+              },
+              "credits": {
+                "type": [
+                  "number",
+                  "string"
+                ]
+              },
+              "category": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "action",
+          "courseId"
+        ],
+        "additionalProperties": false
+      },
+      "title": "明示调整参数",
+      "description": "只提供拟讨论的变更；不覆盖正式规则或来源事实。"
+    }
+  },
+  "required": [
+    "taskId"
+  ],
+  "additionalProperties": false,
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "plan_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "title": "基线培养方案",
+          "description": "从当前授权选项选择本轮基线培养方案。"
+        },
+        "ruleRef": {
+          "type": "object",
+          "properties": {
+            "ruleId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          "required": [
+            "ruleId",
+            "version"
+          ],
+          "additionalProperties": false,
+          "title": "已发布规则版本",
+          "description": "引用唯一适用且已确认发布的规则，不由客户端提供规则事实。"
+        },
+        "taskId": {
+          "const": "P-PATH"
+        }
+      },
+      "required": [
+        "plan_id",
+        "ruleRef",
+        "taskId"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "plan_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "title": "基线培养方案",
+          "description": "从当前授权选项选择本轮基线培养方案。"
+        },
+        "ruleRef": {
+          "type": "object",
+          "properties": {
+            "ruleId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          "required": [
+            "ruleId",
+            "version"
+          ],
+          "additionalProperties": false,
+          "title": "已发布规则版本",
+          "description": "引用唯一适用且已确认发布的规则，不由客户端提供规则事实。"
+        },
+        "changes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "action": {
+                "enum": [
+                  "add",
+                  "remove",
+                  "update"
+                ]
+              },
+              "courseId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "values": {
+                "type": "object",
+                "properties": {
+                  "semester": {
+                    "type": [
+                      "number",
+                      "string"
+                    ]
+                  },
+                  "credits": {
+                    "type": [
+                      "number",
+                      "string"
+                    ]
+                  },
+                  "category": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "action",
+              "courseId"
+            ],
+            "additionalProperties": false
+          },
+          "title": "明示调整参数",
+          "description": "只提供拟讨论的变更；不覆盖正式规则或来源事实。"
+        },
+        "taskId": {
+          "const": "P-CHANGE"
+        }
+      },
+      "required": [
+        "plan_id",
+        "ruleRef",
+        "changes",
+        "taskId"
+      ],
+      "additionalProperties": false
+    }
+  ]
+}

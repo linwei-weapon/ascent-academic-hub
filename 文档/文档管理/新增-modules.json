@@ -58,6 +58,29 @@
         "code/backend/api/security_governance.py"
       ],
       "notes": "账号、权限、规则、方案、审计、会话受控持久化。"
+    },
+    {
+      "id": "metric-verification-source",
+      "name": "指标核验测试贴源库",
+      "runtimeLocation": "MV_SOURCE_*；当前数据库edu_source；支持MySQL镜像或Oracle原库",
+      "evidenceFiles": [
+        "code/backend/.env.metric-verification.example",
+        "code/backend/metric_verification/config.py",
+        "code/backend/metric_verification/database.py"
+      ],
+      "notes": "仅SELECT；配置存在、TCP成功不代表数据库认证或真实查询通过。"
+    },
+    {
+      "id": "metric-verification-analytics",
+      "name": "指标核验测试分析库",
+      "runtimeLocation": "MV_ANALYTICS_*；当前数据库edu_analytics_v3",
+      "evidenceFiles": [
+        "code/backend/.env.metric-verification.example",
+        "code/backend/metric_verification/config.py",
+        "code/backend/metric_verification/database.py",
+        "code/backend/metric_verification/migrate.py"
+      ],
+      "notes": "读取ACT/应用层实际数据；受控写入sys_metric_mapping_revision/head/question及sys_metric_verification_execution/record。迁移显式运行；证据限当前用户、当前身份及服务授权，不回写源表或业务事实表。"
     }
   ],
   "sharedCapabilities": [
@@ -1106,7 +1129,7 @@
     {
       "id": "system",
       "name": "系统管理",
-      "purpose": "账号、角色、数据权限、菜单、指标、学校方案、审计和参数；预警规则归预警模块。",
+      "purpose": "账号、角色、数据权限、菜单、指标与口径、指标核验、学校方案、审计和参数；预警规则归预警模块。",
       "current": {
         "routes": [
           {
@@ -1153,6 +1176,11 @@
             "path": "/admin/settings",
             "kind": "page",
             "page": "code/frontend/src/views/admin/system/Parameters.vue"
+          },
+          {
+            "path": "/admin/system/metric-verification",
+            "kind": "page",
+            "page": "code/frontend/src/views/admin/system/metric-verification/Index.vue"
           }
         ],
         "viewFiles": [
@@ -1164,12 +1192,25 @@
           "code/frontend/src/views/admin/system/Parameters.vue",
           "code/frontend/src/views/admin/system/Permissions.vue",
           "code/frontend/src/views/admin/system/Roles.vue",
-          "code/frontend/src/views/admin/system/Schemes.vue"
+          "code/frontend/src/views/admin/system/Schemes.vue",
+          "code/frontend/src/views/admin/system/metric-verification/Index.vue",
+          "code/frontend/src/views/admin/system/metric-verification/RequirementWorkspace.vue",
+          "code/frontend/src/views/admin/system/metric-verification/MetricQueryPanel.vue",
+          "code/frontend/src/views/admin/system/metric-verification/VerificationRecords.vue",
+          "code/frontend/src/views/admin/system/metric-verification/MappingContext.vue",
+          "code/frontend/src/views/admin/system/metric-verification/EvidenceReview.vue",
+          "code/frontend/src/views/admin/system/metric-verification/EvidenceDetails.vue",
+          "code/frontend/src/views/admin/system/metric-verification/ComparisonEditor.vue",
+          "code/frontend/src/views/admin/system/metric-verification/ComparisonDetails.vue"
         ],
         "requestHelpers": [
-          "code/frontend/src/utils/decision.ts"
+          "code/frontend/src/utils/decision.ts",
+          "code/frontend/src/api/admin/metricVerification.ts",
+          "code/frontend/src/api/admin/metricVerificationAccess.ts"
         ],
-        "typeFiles": [],
+        "typeFiles": [
+          "code/frontend/src/types/metricVerification.ts"
+        ],
         "backendFiles": [
           "code/backend/api/routers/admin_rbac.py",
           "code/backend/api/routers/system_management.py",
@@ -1177,7 +1218,23 @@
           "code/backend/api/routers/ai_decision.py",
           "code/backend/skills/config_store.py",
           "code/backend/metric_catalog.py",
-          "code/backend/permission_catalog.py"
+          "code/backend/permission_catalog.py",
+          "code/backend/metric_verification/app.py",
+          "code/backend/metric_verification/auth.py",
+          "code/backend/metric_verification/config.py",
+          "code/backend/metric_verification/database.py",
+          "code/backend/metric_verification/registry.py",
+          "code/backend/metric_verification/store.py",
+          "code/backend/metric_verification/comparison.py",
+          "code/backend/metric_verification/evidence_import.py",
+          "code/backend/metric_verification/migrate.py",
+          "code/backend/metric_verification/mapping_contract.py",
+          "code/backend/metric_verification/mapping_store.py",
+          "code/backend/metric_verification/mapping_router.py",
+          "code/backend/metric_verification/mapping_adapter.py",
+          "code/backend/metric_verification/mapping_legacy.py",
+          "code/backend/metric_verification/evidence.py",
+          "code/backend/metric_verification/options.py"
         ],
         "apiGroups": [
           {
@@ -1195,28 +1252,212 @@
           {
             "file": "code/backend/api/routers/system_management.py",
             "prefix": "/api/admin/system"
+          },
+          {
+            "file": "code/backend/metric_verification/app.py",
+            "prefix": "/api/admin/metric-verification"
+          },
+          {
+            "file": "code/backend/metric_verification/mapping_router.py",
+            "prefix": "/api/admin/metric-verification/mapping"
           }
         ],
         "dataSources": [
-          "platform"
+          "platform",
+          "metric-verification-source",
+          "metric-verification-analytics"
         ],
         "documents": [
           "文档/4-需求文档/4.10-登录角色与权限/100-账号管理UE深度走查与优化方案.md",
           "文档/4-需求文档/4.9-系统管理/101-指标与口径管理UE深度走查与优化方案.md",
           "文档/4-需求文档/4.9-系统管理/103-分析方案管理UE深度走查与优化方案.md",
           "文档/4-需求文档/4.9-系统管理/89-P5系统管理收口验收记录.md",
-          "文档/4-需求文档/4.10-登录角色与权限/86-P2数据权限契约与验收记录.md"
+          "文档/4-需求文档/4.10-登录角色与权限/86-P2数据权限契约与验收记录.md",
+          "文档/4-需求文档/4.9-系统管理/指标核验模块说明.md"
         ],
         "relevantTests": [
           "code/backend/tests/test_account_governance.py",
           "code/backend/tests/test_decision_config.py",
-          "code/backend/tests/test_system_management.py"
+          "code/backend/tests/test_system_management.py",
+          "code/scripts/metric_verification_check_queries.py",
+          "code/backend/tests/test_metric_verification.py",
+          "code/backend/tests/test_metric_verification_comparison.py",
+          "code/backend/tests/test_metric_verification_import.py",
+          "code/scripts/metric_verification_live_check.py",
+          "code/backend/tests/test_metric_mapping_contract.py",
+          "code/backend/tests/test_metric_mapping_store.py",
+          "code/backend/tests/test_metric_mapping_cli.py",
+          "code/backend/tests/test_metric_evidence.py"
         ],
         "notes": [
           "文件归属不等于每个Vue文件都有独立菜单；未路由文件可能是子组件或兼容实现。",
           "空typeFiles表示未登记独立类型文件，不表示没有局部类型。",
-          "相关测试只登记位置，本次未运行。"
-        ]
+          "相关测试登记验证入口；每次执行结果以当前模块说明记录为准。",
+          "指标核验原型的当前入口、专用服务及未完成条件见metricVerification字段和统一模块说明；其登记覆盖不表示数据验收通过。"
+        ],
+        "metricVerification": {
+          "generator": "code/scripts/metric_mapping.py",
+          "entry": "系统管理 → 指标核验 → 教学数据总览 → 业务指标 → 三层SQL与真实结果对照",
+          "runtime": "前端test端口3007沿用114登录；仅/api/admin/metric-verification代理至本地8010；核验服务直连配置的测试数据库。",
+          "maintenanceSkill": ".agents/skills/metric-verification-maintain/SKILL.md",
+          "legacyAssets": [
+            "code/metric-verification/catalog/teaching-overview.json",
+            "code/metric-verification/queries/teaching-overview.json",
+            "code/metric-verification/sql/teaching-overview"
+          ],
+          "assets": [
+            "code/metric-verification/mappings/teaching-overview/input.json",
+            "code/metric-verification/mappings/teaching-overview/package.json",
+            "code/metric-verification/contracts/mapping-input.template.json",
+            "code/metric-verification/contracts/mapping-output.template.json",
+            "code/metric-verification/contracts/mapping-question.template.json",
+            "code/metric-verification/contracts/mapping-validation-case.template.json",
+            "code/metric-verification/contracts/mapping-receipt.template.json"
+          ],
+          "historicalValidation": {
+            "checkedAt": "2026-09-29",
+            "status": "prototype_implemented_business_findings_recorded",
+            "coverage": {
+              "requirements": 115,
+              "metrics": 55,
+              "acceptanceCriteria": 324,
+              "sqlQueries": 548,
+              "countAndDetailQueries": 412,
+              "calculationQueries": 136,
+              "documentedCalculationQueries": 40,
+              "blockedCalculationQueries": 96,
+              "mysqlQueriesExecuted": 418,
+              "oracleQueriesOfflineOnly": 130,
+              "applicationPhysicalLayers": 25,
+              "applicationReferenceLayers": 30,
+              "sourceNotApplicableLayers": 7
+            },
+            "limitations": [
+              "418条MySQL已完成实库技术执行；130条Oracle仅离线验证。业务验收需核对同范围、同时间和同口径。",
+              "96条复算因业务条件不足仍受控；25项应用物理对象与30项事实参考入口均保留页面绑定未证明的边界。",
+              "核验记录仅当前用户当前工作身份可读写与引用，不是团队共享验收流。"
+            ],
+            "note": "保留2026-09-29旧资产验证记录，不作为当前映射版本或业务验收结果。"
+          },
+          "status": "consumer_implemented_versioned_mapping_supported",
+          "limitations": [
+            "当前环境生效版本从mapping/head读取；缺连接、映射表或版本时按MV_MAPPING_MODE明确处理。",
+            "定义核算样本与业务验收证据分开；历史摘要没有原始输入时不可重算。",
+            "核验记录仅当前用户当前工作身份可读写与引用。"
+          ]
+        },
+        "metricMappingSkill": {
+          "status": "implemented_validated_with_business_gaps",
+          "checkedAt": "2026-09-30",
+          "name": "metric-mapping-build",
+          "skill": ".agents/skills/metric-mapping-build/SKILL.md",
+          "agentMetadata": ".agents/skills/metric-mapping-build/agents/openai.yaml",
+          "specification": "文档/4-需求文档/4.9-系统管理/指标核验模块说明.md#13-指标映射skill与数据库接入规格",
+          "documentationVersion": "1.4.0",
+          "contractVersion": "3.1.0",
+          "contracts": [
+            "code/metric-verification/contracts/mapping-input.template.json",
+            "code/metric-verification/contracts/mapping-output.template.json",
+            "code/metric-verification/contracts/mapping-question.template.json",
+            "code/metric-verification/contracts/mapping-validation-case.template.json",
+            "code/metric-verification/contracts/mapping-receipt.template.json"
+          ],
+          "schemas": [
+            "code/metric-verification/contracts/mapping-input.schema.json",
+            "code/metric-verification/contracts/mapping-output.schema.json",
+            "code/metric-verification/contracts/mapping-question.schema.json",
+            "code/metric-verification/contracts/mapping-validation-case.schema.json",
+            "code/metric-verification/contracts/mapping-receipt.schema.json"
+          ],
+          "cli": "code/scripts/metric_mapping.py",
+          "commands": [
+            "prepare",
+            "validate",
+            "publish",
+            "resume"
+          ],
+          "initialModuleAssets": [
+            "code/metric-verification/mappings/teaching-overview/input.json",
+            "code/metric-verification/mappings/teaching-overview/package.json",
+            "code/metric-verification/mappings/teaching-overview/receipt.json"
+          ],
+          "sourceOfTruth": "生效后的配置分析库SYS版本包；JSON用于交换、导出和首次迁移。",
+          "implementedDatabaseMappingStorage": true,
+          "storageTables": [
+            "sys_metric_mapping_revision",
+            "sys_metric_mapping_head",
+            "sys_metric_mapping_question"
+          ],
+          "migration": "code/backend/metric_verification/migrate.py",
+          "activationStatus": "read_from_mapping_head_per_environment",
+          "runtimeValidation": {
+            "environment": "test-114",
+            "checkedRevisionId": "521e749e-e38f-4cb2-b477-5e41ab920554",
+            "metricDefinitions": 75,
+            "queryTemplates": 744,
+            "boundedIndependentCasesMatched": 3,
+            "realApplicationObservations": 13,
+            "comparisonDifferences": 3,
+            "comparisonInsufficientConditions": 10,
+            "relatedTestsPassed": 128,
+            "frontendBuild": "passed",
+            "businessAcceptance": "previous_results_retained_current_mapping_requires_recheck",
+            "remainingConditions": "应用业务时点、统计学生集合、在籍及修读分类等仍需确认；未将限定样本或SQL成功视为全部指标通过。",
+            "lineageEnrichment": {
+              "additionalDirectSourceFields": 50,
+              "additionalDirectSourceSteps": 13,
+              "changes": 282,
+              "dictionarySteps": 2,
+              "homeSceneCount": 18,
+              "joins": 278,
+              "layerSteps": 214,
+              "metricsCovered": 75,
+              "physicalJoinKeys": 254,
+              "priorityMetricCount": 24,
+              "priorityMetricsCovered": 24,
+              "selectMappings": 365,
+              "sourceNodesAdded": 15,
+              "sourceRowNoMappings": 106,
+              "sourceRowNoSteps": 53
+            },
+            "nodeGrainCorrections": 758
+          },
+          "execution": "Skill分析业务指标与必要依赖，CLI组包和离线校验；已有授权身份通过核验服务保存草稿、同步答复、回读和生效。",
+          "purpose": "为应用层业务指标建立需求、三层映射、SQL、独立核算、应用实值和核验证据的闭环。",
+          "excludedScope": [
+            "其他页面原型、布局、导航和交互设计",
+            "生产代码处理过程分析"
+          ],
+          "evidenceStorage": {
+            "table": "sys_metric_verification_execution",
+            "fields": [
+              "mapping_revision_id",
+              "evidence_json",
+              "independent_expectation_json"
+            ],
+            "capture": "同指标、同MySQL连接的InnoDB基础表只读一致性取证；输入count与完整明细一致后留存，提交独立预期后揭示结果。",
+            "maxRowsPerDataset": 50,
+            "maxBytes": 1048576,
+            "historicalBatchAccess": "unreliable",
+            "definitionSampleBoundary": "executionUse=definition_validation只验证限定样本SQL，不能自动带入业务验收或作为符合引用；业务核验另行以verification执行。"
+          },
+          "apiPrefix": "/api/admin/metric-verification",
+          "capabilities": [
+            "映射版本及SQL快照",
+            "按指标显示共用规则与加工依据",
+            "问题答复、幂等同步和采用状态",
+            "原始输入与结果留存及授权回看",
+            "实际结果人工对照和单值复算带入",
+            "业务依赖影响及旧证据有效性检查"
+          ],
+          "limitations": [
+            "代码实现不代表特定环境已经迁移、生效或完成业务验收，真实执行结果另按模块说明登记。",
+            "Oracle不进入首版同次留存核算；普通技术查询仍按配置、权限与已登记条件开放。",
+            "演示原型值只作标明数据性质的关联检查，不能替代真实应用实值。",
+            "映射定义与本人当前身份的原始核算证据权限分开；不新增团队共享验收流。"
+          ],
+          "frontendLineageComponent": "code/frontend/src/views/admin/system/metric-verification/LayerMappingDetails.vue"
+        }
       },
       "target": {
         "status": "not-implemented",

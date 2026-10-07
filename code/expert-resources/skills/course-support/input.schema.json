@@ -1,0 +1,92 @@
+{
+  "type": "object",
+  "properties": {
+    "course_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "title": "指定课程编号（可选）",
+      "description": "只查看指定课程的聚合表现；留空时使用当前完整筛选范围。"
+    },
+    "documentRefs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "documentId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "version": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "documentId",
+          "version"
+        ],
+        "additionalProperties": false
+      },
+      "title": "固定文档版本",
+      "description": "引用所需已确认文档的固定版本。"
+    },
+    "resultRef": {
+      "type": "object",
+      "properties": {
+        "resultId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "objectRefs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "uniqueItems": true
+        },
+        "conditionIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "uniqueItems": true
+        },
+        "evidenceIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "resultId"
+      ],
+      "additionalProperties": false,
+      "title": "已保存分析结果",
+      "description": "引用已保存且可鉴权的实际分析结果。"
+    },
+    "problem": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "title": "需了解的问题",
+      "description": "明确课程问题背景，与来源事实和教学成因分别表达。"
+    }
+  },
+  "required": [
+    "course_id",
+    "documentRefs"
+  ],
+  "additionalProperties": false
+}

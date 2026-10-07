@@ -1,0 +1,26 @@
+{
+  "type": "object",
+  "properties": {
+    "college_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "description": "当前身份授权范围内的学院ID；不传不代表获得全校权限。"
+    },
+    "semester_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "description": "从当前数据选项选择的学期ID；未指定时由返回结果明确实际范围。"
+    },
+    "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 200,
+      "default": 50,
+      "description": "最多展示的课程或汇总记录条数；不改变分母，截断必须披露。"
+    }
+  },
+  "required": [],
+  "additionalProperties": false
+}

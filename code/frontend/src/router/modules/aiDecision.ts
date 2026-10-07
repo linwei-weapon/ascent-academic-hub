@@ -6,16 +6,18 @@ export const aiDecisionRoutes: RouteRecordRaw[] = [
   // AI 分组默认入口
   { path: 'reports', redirect: '/admin/reports/decision' },
   // 决策简报
-  { path: 'reports/decision', component: () => import('@/views/ai-decision/decision/index.vue') },
+  { path: 'reports/decision', component: () => import('@/views/ai-decision/briefing/index.vue') },
+  { path: 'reports/decision/legacy', component: () => import('@/views/ai-decision/decision/index.vue') },
   // 专家分析工作区
   { path: 'reports/decision/skills/:skillId', component: () => import('@/views/ai-decision/decision/workspaces/SkillWorkspace.vue') },
   // 专家问策（R4）：专家库 + 三栏纯对话页
   // 专家库
-  { path: 'reports/advice', component: () => import('@/views/ai-decision/advice/index.vue') },
+  { path: 'reports/advice', component: () => import('@/views/ai-decision/conversation/index.vue') },
   // 专家对话
   { path: 'reports/advice/:skillId', component: () => import('@/views/ai-decision/advice/Chat.vue') },
   // 专家团研究工作区：保留既有菜单 URL，由服务端校验身份与范围。
-  { path: 'reports/expert-team', component: () => import('@/views/ai-decision/expert-team/index.vue') },
+  { path: 'reports/expert-team', redirect: to => ({path:'/admin/reports/advice',query:to.query}) },
+  { path: 'reports/expert-team/legacy', component: () => import('@/views/ai-decision/expert-team/index.vue') },
   // 旧「管理要情」「决策研判」已废弃，统一收口到 Skill 链路决策简报
   // 旧管理要情入口
   { path: 'reports/management-briefing', redirect: '/admin/reports/decision' },

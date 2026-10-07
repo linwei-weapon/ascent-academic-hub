@@ -7,12 +7,14 @@ import Components from 'unplugin-vue-components/vite'
 import AutoImport from 'unplugin-auto-import/vite'
 import tailwindcss from '@tailwindcss/vite'
 
-// 前端公共配置统一维护在此处；npm run dev 使用 local，dev:test 使用 test。
+// 原型默认使用测试服务器；dev:local 才显式使用本地开发后端。
 const frontendConfig = {
   version: '3.0.2',
   base: '/',
   local: { port: 3006, apiTarget: 'http://127.0.0.1:8000' },
   test: { port: 3007, apiTarget: 'http://114.215.189.215' },
+  metricVerification: { apiTarget: 'http://127.0.0.1:8010' },
+  expertResources: { apiTarget: 'http://127.0.0.1:8011' },
 }
 
 export default ({ mode }: { mode: string }) => {
@@ -33,6 +35,16 @@ export default ({ mode }: { mode: string }) => {
       // 使用显式 IPv4 回环地址，避免 Windows 上 localhost 优先解析为 ::1，
       // 而后端仅监听 127.0.0.1 时代理请求失败。
       proxy: {
+        ...(remoteTest ? {
+          '/api/admin/expert-resources': {
+            target: frontendConfig.expertResources.apiTarget,
+            changeOrigin: true,
+          },
+          '/api/admin/metric-verification': {
+            target: frontendConfig.metricVerification.apiTarget,
+            changeOrigin: true,
+          },
+        } : {}),
         '/api': {
           target: apiTarget,
           changeOrigin: true,

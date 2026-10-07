@@ -1,0 +1,39 @@
+{
+  "type": "object",
+  "properties": {
+    "plan_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "title": "基线培养方案",
+      "description": "从当前授权选项选择本轮基线培养方案。"
+    },
+    "documentRef": {
+      "type": "object",
+      "properties": {
+        "documentId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      },
+      "required": [
+        "documentId",
+        "version"
+      ],
+      "additionalProperties": false,
+      "title": "固定文档版本",
+      "description": "引用已确认文档的固定版本与来源定位。"
+    }
+  },
+  "required": [
+    "plan_id",
+    "documentRef"
+  ],
+  "additionalProperties": false
+}

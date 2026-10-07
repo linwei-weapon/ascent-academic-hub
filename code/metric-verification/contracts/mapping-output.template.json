@@ -1,0 +1,1646 @@
+{
+  "schemaVersion": "3.1.0",
+  "template": true,
+  "packageId": "REPLACE_WITH_UNIQUE_PACKAGE_ID",
+  "analysisId": "REPLACE_WITH_ANALYSIS_ID",
+  "projectId": "highedu",
+  "moduleId": "teaching-overview",
+  "moduleName": "教学数据总览",
+  "environmentId": "test-114",
+  "baseRevisionId": null,
+  "inputManifest": {
+    "schemaVersion": "3.1.0",
+    "template": true,
+    "projectId": "highedu",
+    "module": {
+      "id": "teaching-overview",
+      "name": "教学数据总览"
+    },
+    "mode": "initial",
+    "baseRevisionId": null,
+    "scope": {
+      "metricIds": [
+        "O-10"
+      ],
+      "includeSupportingEvidence": true,
+      "excluded": [
+        "其他页面及原型内容",
+        "页面布局、导航、控件与交互验收",
+        "身份权限功能验收",
+        "生产代码过程分析"
+      ],
+      "exclusionReason": "只为106教学数据总览的应用业务指标建立可验证闭环",
+      "businessCategories": [
+        "学业表现"
+      ]
+    },
+    "sources": [
+      {
+        "id": "SRC-REQ-106",
+        "kind": "document",
+        "role": "requirement",
+        "title": "106-教学数据总览功能指标详细需求说明",
+        "location": "文档/4-需求文档/4.1-教学数据总览/106-教学数据总览功能指标详细需求说明.md",
+        "version": null,
+        "contentHash": null,
+        "sections": [
+          "3.5",
+          "12"
+        ],
+        "authority": "requirement"
+      },
+      {
+        "id": "SRC-ORACLE-V6",
+        "kind": "document",
+        "role": "source_schema",
+        "title": "Oracle源表字段完整清单V6.0(2)",
+        "location": null,
+        "version": "6.0",
+        "contentHash": null,
+        "sections": [
+          "GRADE",
+          "STUDENT"
+        ],
+        "authority": "design_evidence"
+      },
+      {
+        "id": "SRC-DESIGN-V6",
+        "kind": "document",
+        "role": "analytics_design",
+        "title": "中国矿业大学学业分析平台数据库设计文档V6.0(3)",
+        "location": null,
+        "version": "6.0",
+        "contentHash": null,
+        "sections": [
+          "4.3.1 ACT_GRADE_ATTEMPT",
+          "ACT_STUDENT"
+        ],
+        "authority": "design_evidence"
+      },
+      {
+        "id": "SRC-OBS-O10",
+        "kind": "live_ui",
+        "role": "metric_evidence",
+        "title": "目标业务指标的可选观察（待取得）",
+        "location": "http://127.0.0.1:3007/#/admin/dashboard",
+        "version": null,
+        "contentHash": null,
+        "authority": "observation_only",
+        "use": "identify_metric_or_observe_actual",
+        "optional": true,
+        "metricObservation": {
+          "metricId": "O-10",
+          "metricLabel": "当前挂科学生率",
+          "locator": null,
+          "filterContext": null,
+          "identityContext": null,
+          "unit": "%",
+          "observedAt": null,
+          "dataAsOf": null,
+          "dataNature": "unknown",
+          "snapshotRef": null
+        }
+      }
+    ],
+    "environment": {
+      "id": "test-114",
+      "sourceDialect": "mysql",
+      "analyticsDialect": "mysql",
+      "sourceConnectionProfileRef": null,
+      "analyticsConnectionProfileRef": null,
+      "schemaSnapshotRefs": null,
+      "historicalBatchAccess": "unreliable"
+    },
+    "checks": {
+      "mode": "documents",
+      "sampleScope": null,
+      "maxRows": 50,
+      "timeoutSeconds": 10,
+      "businessDataWriteAllowed": false,
+      "evidenceCapture": {
+        "requiredForCalculationValidation": true,
+        "storage": "verification_execution",
+        "method": "single_connection_consistent_read",
+        "requireCompleteInputs": true,
+        "maxBytes": 1048576,
+        "onLimitExceeded": "reduce_valid_business_scope_or_keep_inconclusive"
+      }
+    },
+    "interaction": {
+      "channel": "current_conversation",
+      "productOwnerRef": null,
+      "existingDecisionRefs": null,
+      "questionBatchLimit": 3,
+      "onUnanswered": "keep_open_and_continue_unaffected_work",
+      "resumePolicy": "explicit_skill_invocation"
+    },
+    "delivery": {
+      "mode": "analyze_only",
+      "serviceProfileRef": null,
+      "authorizationRef": null
+    },
+    "analysisId": "REPLACE_WITH_ANALYSIS_ID"
+  },
+  "sourceManifest": [
+    {
+      "id": "SRC-REQ-106",
+      "kind": "document",
+      "role": "requirement",
+      "location": "文档/4-需求文档/4.1-教学数据总览/106-教学数据总览功能指标详细需求说明.md",
+      "version": null,
+      "contentHash": null,
+      "evidence": [
+        {
+          "id": "E-REQ-O10",
+          "locator": {
+            "section": "3.5",
+            "lineStart": null,
+            "lineEnd": null
+          },
+          "excerpt": null,
+          "status": "not_captured"
+        }
+      ],
+      "title": "106-教学数据总览功能指标详细需求说明"
+    },
+    {
+      "id": "SRC-DESIGN-V6",
+      "kind": "document",
+      "role": "analytics_design",
+      "location": null,
+      "version": "6.0",
+      "contentHash": null,
+      "evidence": [
+        {
+          "id": "E-DESIGN-GRADE",
+          "locator": {
+            "section": "4.3.1 ACT_GRADE_ATTEMPT"
+          },
+          "excerpt": null,
+          "status": "not_captured"
+        },
+        {
+          "id": "E-DESIGN-STUDENT",
+          "locator": {
+            "section": "ACT_STUDENT"
+          },
+          "excerpt": null,
+          "status": "not_captured"
+        },
+        {
+          "id": "E-DESIGN-SEMESTER",
+          "locator": {
+            "section": "ACT_SEMESTER"
+          },
+          "excerpt": null,
+          "status": "not_captured"
+        },
+        {
+          "id": "E-DESIGN-ORG",
+          "locator": {
+            "section": "ACT_ORGANIZATION"
+          },
+          "excerpt": null,
+          "status": "not_captured"
+        }
+      ],
+      "title": "中国矿业大学学业分析平台数据库设计文档V6.0(3)"
+    },
+    {
+      "id": "SRC-ORACLE-V6",
+      "kind": "document",
+      "role": "source_schema",
+      "location": null,
+      "version": "6.0",
+      "contentHash": null,
+      "evidence": [
+        {
+          "id": "E-SOURCE-GRADE",
+          "locator": {
+            "section": "GRADE"
+          },
+          "excerpt": null,
+          "status": "not_captured"
+        }
+      ],
+      "title": "Oracle源表字段完整清单V6.0(2)"
+    },
+    {
+      "id": "SRC-OBS-O10",
+      "kind": "live_ui",
+      "role": "metric_evidence",
+      "location": "http://127.0.0.1:3007/#/admin/dashboard",
+      "version": null,
+      "contentHash": null,
+      "evidence": [
+        {
+          "id": "E-OBS-O10",
+          "status": "not_observed",
+          "excerpt": null,
+          "metricObservation": {
+            "metricId": "O-10",
+            "metricLabel": "当前挂科学生率",
+            "locator": null,
+            "filterContext": null,
+            "identityContext": null,
+            "unit": "%",
+            "observedAt": null,
+            "dataAsOf": null,
+            "dataNature": "unknown",
+            "snapshotRef": null
+          }
+        }
+      ],
+      "title": "目标业务指标的可选观察（待取得）",
+      "use": "identify_metric_or_observe_actual"
+    }
+  ],
+  "coverage": [
+    {
+      "id": "C-O10",
+      "sourceRef": "SRC-REQ-106",
+      "locator": "3.5",
+      "disposition": "included",
+      "metricIds": [
+        "O-10"
+      ],
+      "reason": "示例：业务结果作为主指标，分子分母作为内部组成"
+    }
+  ],
+  "metrics": [
+    {
+      "id": "O-10",
+      "name": "当前挂科学生率",
+      "type": "ratio",
+      "version": null,
+      "definition": {
+        "meaning": "当前学期有有效成绩的学生中，出现未通过成绩的学生占比",
+        "formula": "numerator / denominator * 100",
+        "unit": "%",
+        "grain": {
+          "result": "组织范围×学期",
+          "observationEntity": "成绩修读尝试",
+          "deduplicationEntity": "学生",
+          "dimensions": [
+            "semester_id",
+            "organization_scope"
+          ]
+        },
+        "components": [
+          {
+            "key": "numerator",
+            "name": "未通过学生数",
+            "unit": "人",
+            "expression": "有效成绩集合中is_pass=0的student_id去重计数"
+          },
+          {
+            "key": "denominator",
+            "name": "有效成绩学生数",
+            "unit": "人",
+            "expression": "同一有效成绩集合的student_id去重计数"
+          }
+        ],
+        "validityRules": [],
+        "deduplication": {
+          "keys": [
+            "student_id"
+          ],
+          "appliesTo": "分子和分母分别计数",
+          "finalAttemptSelection": "本指标不按最后一次课程结果去重"
+        },
+        "timeScope": {
+          "kind": "semester",
+          "parameter": "semester_id",
+          "asOfRule": null
+        },
+        "nullPolicy": {
+          "zeroDenominator": null,
+          "meaning": null
+        },
+        "evidenceRefs": [
+          "E-REQ-O10"
+        ],
+        "questionIds": [
+          "Q-TEMPLATE-COMPLETENESS"
+        ],
+        "scope": {
+          "organizationRule": null,
+          "populationRule": "当前学期有效成绩学生集合"
+        },
+        "businessPurpose": "判断约定统计范围内出现未通过成绩的学生占比，为学业风险研判提供结果。",
+        "precision": {
+          "calculation": null,
+          "comparison": null,
+          "roundingRule": null
+        },
+        "ruleRefs": [
+          "RULE-VALID-GRADE"
+        ],
+        "metricRefs": []
+      },
+      "lineage": {
+        "nodes": [
+          {
+            "id": "N-SOURCE-GRADE",
+            "layer": "source",
+            "role": "business_input",
+            "objectType": "table",
+            "logicalName": "GRADE",
+            "physicalBindings": null,
+            "fields": [
+              "STUDENT_ID",
+              "SEMESTER_ID",
+              "PASSED",
+              "PUBLISHED",
+              "STATE",
+              "GRADE_STATUS"
+            ],
+            "grain": "学生×课程×修读尝试",
+            "evidenceRefs": [
+              "E-SOURCE-GRADE"
+            ],
+            "questionIds": [
+              "Q-SOURCE-VALIDITY"
+            ]
+          },
+          {
+            "id": "N-SOURCE-STUDENT",
+            "layer": "source",
+            "role": "dimension",
+            "objectType": "table",
+            "logicalName": "STUDENT",
+            "physicalBindings": null,
+            "fields": [
+              "ID",
+              "DEPARTMENT_ID"
+            ],
+            "grain": "学生",
+            "evidenceRefs": null,
+            "questionIds": [
+              "Q-TEMPLATE-COMPLETENESS"
+            ]
+          },
+          {
+            "id": "N-FACT-GRADE",
+            "layer": "fact",
+            "role": "business_input",
+            "objectType": "table",
+            "logicalName": "ACT_GRADE_ATTEMPT",
+            "physicalBindings": [
+              {
+                "id": "B-FACT-GRADE",
+                "environmentId": "test-114",
+                "connectionRef": "analytics",
+                "dialect": "mysql",
+                "schema": "edu_analytics_v3",
+                "objectName": "ACT_GRADE_ATTEMPT",
+                "fieldMap": {
+                  "student_id": "student_id",
+                  "semester_id": "semester_id",
+                  "is_pass": "is_pass",
+                  "is_published": "is_published",
+                  "is_void": "is_void",
+                  "source": "source",
+                  "batch_id": "batch_id"
+                },
+                "status": "design_only",
+                "evidenceRefs": [
+                  "E-DESIGN-GRADE"
+                ],
+                "note": "绑定结构示意；未读取或验证当前物理表，不能据此开放查询。"
+              }
+            ],
+            "fields": [
+              "student_id",
+              "semester_id",
+              "is_pass",
+              "is_published",
+              "is_void",
+              "source",
+              "batch_id"
+            ],
+            "grain": "成绩修读尝试",
+            "evidenceRefs": [
+              "E-DESIGN-GRADE"
+            ],
+            "questionIds": [
+              "Q-TEMPLATE-COMPLETENESS"
+            ]
+          },
+          {
+            "id": "N-FACT-STUDENT",
+            "layer": "fact",
+            "role": "dimension",
+            "objectType": "table",
+            "logicalName": "ACT_STUDENT",
+            "physicalBindings": [
+              {
+                "id": "B-FACT-STUDENT",
+                "environmentId": "test-114",
+                "connectionRef": "analytics",
+                "dialect": "mysql",
+                "schema": "edu_analytics_v3",
+                "objectName": "ACT_STUDENT",
+                "fieldMap": {
+                  "student_id": "student_id",
+                  "organization_id": "organization_id",
+                  "source": "source",
+                  "batch_id": "batch_id"
+                },
+                "status": "design_only",
+                "evidenceRefs": [
+                  "E-DESIGN-STUDENT"
+                ],
+                "note": "绑定结构示意；未读取或验证当前物理表，不能据此开放查询。"
+              }
+            ],
+            "fields": [
+              "student_id",
+              "organization_id",
+              "source",
+              "batch_id"
+            ],
+            "grain": "学生×快照批次",
+            "evidenceRefs": [
+              "E-DESIGN-STUDENT"
+            ],
+            "questionIds": [
+              "Q-TEMPLATE-COMPLETENESS"
+            ]
+          },
+          {
+            "id": "N-EXPECTED-O10",
+            "layer": "application",
+            "role": "expected_result",
+            "objectType": "virtual_result",
+            "logicalName": "需求要求的当前挂科学生率",
+            "physicalBindings": [],
+            "fields": [
+              "metric_value",
+              "numerator",
+              "denominator"
+            ],
+            "grain": "范围×学期",
+            "evidenceRefs": [
+              "E-REQ-O10"
+            ],
+            "questionIds": [
+              "Q-TEMPLATE-COMPLETENESS"
+            ]
+          },
+          {
+            "id": "N-VALID-ATTEMPTS",
+            "layer": "fact",
+            "role": "intermediate",
+            "objectType": "virtual_result",
+            "logicalName": "有效成绩集合",
+            "physicalBindings": [],
+            "fields": [
+              "student_id",
+              "is_pass"
+            ],
+            "grain": "有效成绩尝试",
+            "evidenceRefs": [
+              "E-REQ-O10"
+            ],
+            "questionIds": [
+              "Q-TEMPLATE-COMPLETENESS"
+            ]
+          },
+          {
+            "id": "N-STUDENT-COUNTS",
+            "layer": "application",
+            "role": "intermediate",
+            "objectType": "virtual_result",
+            "logicalName": "分子和分母",
+            "physicalBindings": [],
+            "fields": [
+              "numerator",
+              "denominator"
+            ],
+            "grain": "范围×学期",
+            "evidenceRefs": [
+              "E-REQ-O10"
+            ],
+            "questionIds": [
+              "Q-TEMPLATE-COMPLETENESS"
+            ]
+          },
+          {
+            "id": "N-SEMESTER",
+            "layer": "fact",
+            "role": "parameter_dimension",
+            "objectType": "table",
+            "logicalName": "ACT_SEMESTER",
+            "physicalBindings": [
+              {
+                "id": "B-SEMESTER",
+                "environmentId": "test-114",
+                "connectionRef": "analytics",
+                "dialect": "mysql",
+                "schema": "edu_analytics_v3",
+                "objectName": "ACT_SEMESTER",
+                "fieldMap": {
+                  "semester_id": "semester_id",
+                  "name_zh": "name_zh"
+                },
+                "status": "design_only",
+                "evidenceRefs": [
+                  "E-DESIGN-SEMESTER"
+                ],
+                "note": "绑定结构示意；未读取或验证当前物理表，不能据此开放查询。"
+              }
+            ],
+            "fields": [
+              "semester_id",
+              "name_zh"
+            ],
+            "grain": "维度业务键；唯一性待核对",
+            "evidenceRefs": [
+              "E-DESIGN-SEMESTER"
+            ],
+            "questionIds": [
+              "Q-TEMPLATE-COMPLETENESS"
+            ]
+          },
+          {
+            "id": "N-ORGANIZATION",
+            "layer": "fact",
+            "role": "parameter_dimension",
+            "objectType": "table",
+            "logicalName": "ACT_ORGANIZATION",
+            "physicalBindings": [
+              {
+                "id": "B-ORGANIZATION",
+                "environmentId": "test-114",
+                "connectionRef": "analytics",
+                "dialect": "mysql",
+                "schema": "edu_analytics_v3",
+                "objectName": "ACT_ORGANIZATION",
+                "fieldMap": {
+                  "organization_id": "organization_id",
+                  "name": "name"
+                },
+                "status": "design_only",
+                "evidenceRefs": [
+                  "E-DESIGN-ORG"
+                ],
+                "note": "绑定结构示意；未读取或验证当前物理表，不能据此开放查询。"
+              }
+            ],
+            "fields": [
+              "organization_id",
+              "name"
+            ],
+            "grain": "维度业务键；唯一性待核对",
+            "evidenceRefs": [
+              "E-DESIGN-ORG"
+            ],
+            "questionIds": [
+              "Q-TEMPLATE-COMPLETENESS"
+            ]
+          }
+        ]
+      },
+      "processing": {
+        "steps": [
+          {
+            "id": "STEP-SOURCE-GRADE",
+            "kind": "map",
+            "inputNodeIds": [
+              "N-SOURCE-GRADE"
+            ],
+            "outputNodeId": "N-FACT-GRADE",
+            "dependsOn": [],
+            "definitionFields": [],
+            "fieldMappings": [
+              {
+                "from": "GRADE.STUDENT_ID",
+                "to": "ACT_GRADE_ATTEMPT.student_id",
+                "expression": "保留学生业务标识；类型转换需按目标结构核对"
+              },
+              {
+                "from": "GRADE.PASSED",
+                "to": "ACT_GRADE_ATTEMPT.is_pass",
+                "expression": "1=通过，0=未通过，NULL=无结论；来源枚举待实库校验"
+              }
+            ],
+            "join": null,
+            "physicalPredicate": null,
+            "cardinality": {
+              "expected": null,
+              "observed": null,
+              "checkRef": null
+            },
+            "evidenceRefs": [
+              "E-DESIGN-GRADE"
+            ],
+            "questionIds": [
+              "Q-SOURCE-VALIDITY",
+              "Q-TEMPLATE-COMPLETENESS"
+            ]
+          },
+          {
+            "id": "STEP-SOURCE-STUDENT",
+            "kind": "map",
+            "inputNodeIds": [
+              "N-SOURCE-STUDENT"
+            ],
+            "outputNodeId": "N-FACT-STUDENT",
+            "dependsOn": [],
+            "definitionFields": [],
+            "fieldMappings": null,
+            "join": null,
+            "physicalPredicate": null,
+            "cardinality": {
+              "expected": null,
+              "observed": null,
+              "checkRef": null
+            },
+            "evidenceRefs": null,
+            "questionIds": [
+              "Q-TEMPLATE-COMPLETENESS"
+            ]
+          },
+          {
+            "id": "STEP-INPUT",
+            "kind": "join",
+            "inputNodeIds": [
+              "N-FACT-GRADE",
+              "N-FACT-STUDENT"
+            ],
+            "outputNodeId": "N-VALID-ATTEMPTS",
+            "dependsOn": [
+              "STEP-SOURCE-GRADE",
+              "STEP-SOURCE-STUDENT"
+            ],
+            "definitionFields": [
+              "validityRules",
+              "timeScope",
+              "scope",
+              "ruleRefs"
+            ],
+            "fieldMappings": null,
+            "join": {
+              "type": "inner",
+              "keys": [
+                {
+                  "left": "N-FACT-GRADE.student_id",
+                  "right": "N-FACT-STUDENT.student_id"
+                }
+              ],
+              "snapshotCondition": "需核实当前成绩与学生维度的业务分区/时点及一对一关系；本次一致性读取不证明ETL对齐，已存在的批次号也不作为历史重取承诺"
+            },
+            "physicalPredicate": null,
+            "cardinality": {
+              "expected": "在已核实的学生维度业务范围内，每条成绩至多对应一个学生对象",
+              "observed": null,
+              "checkRef": null
+            },
+            "evidenceRefs": [
+              "E-REQ-O10"
+            ],
+            "questionIds": [
+              "Q-TEMPLATE-COMPLETENESS"
+            ]
+          },
+          {
+            "id": "STEP-COUNTS",
+            "kind": "aggregate",
+            "inputNodeIds": [
+              "N-VALID-ATTEMPTS"
+            ],
+            "outputNodeId": "N-STUDENT-COUNTS",
+            "dependsOn": [
+              "STEP-INPUT"
+            ],
+            "definitionFields": [
+              "components",
+              "deduplication"
+            ],
+            "fieldMappings": null,
+            "join": null,
+            "physicalPredicate": null,
+            "evidenceRefs": [
+              "E-REQ-O10"
+            ],
+            "questionIds": [
+              "Q-TEMPLATE-COMPLETENESS"
+            ]
+          },
+          {
+            "id": "STEP-RATIO",
+            "kind": "calculate",
+            "inputNodeIds": [
+              "N-STUDENT-COUNTS"
+            ],
+            "outputNodeId": "N-EXPECTED-O10",
+            "dependsOn": [
+              "STEP-COUNTS"
+            ],
+            "definitionFields": [
+              "formula",
+              "nullPolicy"
+            ],
+            "fieldMappings": null,
+            "join": null,
+            "physicalPredicate": null,
+            "evidenceRefs": [
+              "E-REQ-O10"
+            ],
+            "questionIds": [
+              "Q-TEMPLATE-COMPLETENESS"
+            ]
+          }
+        ]
+      },
+      "expectedResult": {
+        "nodeId": "N-EXPECTED-O10",
+        "queryId": "QRY-O10-FACT-EXPECTED",
+        "shape": "scalar"
+      },
+      "actualBinding": {
+        "status": "unmapped",
+        "kind": null,
+        "nodeId": null,
+        "queryId": null,
+        "valueField": null,
+        "evidenceRefs": null,
+        "questionIds": [
+          "Q-APP-BINDING"
+        ],
+        "reason": "模板未提供独立应用实值绑定；不从事实复算或SYS定义行生成实际值"
+      },
+      "status": {
+        "definitionStatus": "pending",
+        "mappingStatus": "partial",
+        "schemaStatus": "not_checked",
+        "queryStatus": "not_generated",
+        "actualBindingStatus": "unmapped"
+      },
+      "businessCategory": "学业表现",
+      "verificationPlan": {
+        "queriesByLayer": [
+          {
+            "layer": "source",
+            "queryIds": [],
+            "gap": "模板未确认源端有效性枚举及物理绑定，源端查询尚未建立。"
+          },
+          {
+            "layer": "fact",
+            "queryIds": [
+              "QRY-O10-FACT-EXPECTED",
+              "QRY-O10-FACT-COUNT",
+              "QRY-O10-FACT-INPUT",
+              "QRY-O10-FACT-INPUT-COUNT"
+            ],
+            "gap": "所有SQL仍为空；需确认原始输入和关联字段完整、原始count对应、限定范围可用及一致性读取能力，不依赖历史批次重取。"
+          },
+          {
+            "layer": "application",
+            "queryIds": [],
+            "gap": "尚未取得独立应用实际结果，不用事实复算冒充。"
+          }
+        ],
+        "caseIds": [
+          "CASE-O10-BOUNDED-REAL"
+        ],
+        "comparison": {
+          "shape": "scalar",
+          "dimensions": [
+            "organization_scope",
+            "semester_id"
+          ],
+          "requiredConditions": [
+            "同一业务对象范围",
+            "同一观察学期",
+            "可核实的业务数据时点对应；采集时间接近不等于可比",
+            "相同口径版本",
+            "相同单位与精度"
+          ],
+          "actualValueMode": "unresolved",
+          "judgmentOwner": "authorized_human"
+        },
+        "closureStatus": "not_verified"
+      }
+    }
+  ],
+  "queries": [
+    {
+      "id": "QRY-O10-FACT-EXPECTED",
+      "metricId": "O-10",
+      "layer": "fact",
+      "kind": "calculate",
+      "purpose": "expected_value",
+      "dialect": "mysql",
+      "version": null,
+      "sql": null,
+      "sqlChecksum": null,
+      "parameters": [
+        {
+          "name": "semester_id",
+          "label": "学期",
+          "type": "string",
+          "required": true,
+          "default": null,
+          "optionSource": {
+            "bindingId": "B-FACT-GRADE",
+            "valueColumn": "semester_id",
+            "labelSource": {
+              "bindingId": "B-SEMESTER",
+              "keyColumn": "semester_id",
+              "labelColumn": "name_zh"
+            }
+          },
+          "defaultPolicy": "explicit_selection"
+        },
+        {
+          "name": "organization_id",
+          "label": "学院",
+          "type": "string",
+          "required": false,
+          "default": null,
+          "optionSource": {
+            "bindingId": "B-FACT-STUDENT",
+            "valueColumn": "organization_id",
+            "labelSource": {
+              "bindingId": "B-ORGANIZATION",
+              "keyColumn": "organization_id",
+              "labelColumn": "name"
+            }
+          },
+          "defaultPolicy": "explicit_selection"
+        },
+        {
+          "name": "grade_batch_id",
+          "label": "当前成绩业务批次（按实库核实）",
+          "type": "string",
+          "required": true,
+          "default": null,
+          "optionSource": {
+            "bindingId": "B-FACT-GRADE",
+            "valueColumn": "batch_id",
+            "labelSource": null
+          },
+          "defaultPolicy": "explicit_selection"
+        },
+        {
+          "name": "student_batch_id",
+          "label": "当前学生维度业务批次（按实库核实）",
+          "type": "string",
+          "required": true,
+          "default": null,
+          "optionSource": {
+            "bindingId": "B-FACT-STUDENT",
+            "valueColumn": "batch_id",
+            "labelSource": null
+          },
+          "defaultPolicy": "explicit_selection"
+        }
+      ],
+      "dependencies": [
+        {
+          "bindingId": "B-FACT-GRADE",
+          "columns": [
+            "student_id",
+            "semester_id",
+            "is_pass",
+            "is_published",
+            "is_void",
+            "source",
+            "batch_id"
+          ]
+        },
+        {
+          "bindingId": "B-FACT-STUDENT",
+          "columns": [
+            "student_id",
+            "organization_id",
+            "source",
+            "batch_id"
+          ]
+        }
+      ],
+      "resultContract": {
+        "shape": "scalar",
+        "rowKey": [],
+        "ordering": [],
+        "rowCountMeaning": "一个指定范围的复算结果，不是输入记录总数",
+        "columns": [
+          {
+            "key": "metric_value",
+            "label": "当前挂科学生率",
+            "dataType": "decimal",
+            "unit": "%",
+            "semanticRole": "metric_value",
+            "nullMeaning": "待确认；未确认时禁止正式指标复算，不将无分母与查询失败合并"
+          },
+          {
+            "key": "numerator",
+            "label": "未通过学生数",
+            "dataType": "integer",
+            "unit": "人",
+            "semanticRole": "numerator",
+            "nullMeaning": "未取得"
+          },
+          {
+            "key": "denominator",
+            "label": "有效成绩学生数",
+            "dataType": "integer",
+            "unit": "人",
+            "semanticRole": "denominator",
+            "nullMeaning": "未取得"
+          }
+        ],
+        "completeness": {
+          "expected": "complete",
+          "truncationPolicy": "block_auto_import",
+          "totalCountQueryId": null
+        }
+      },
+      "prerequisiteQuestionIds": [
+        "Q-TEMPLATE-COMPLETENESS"
+      ],
+      "technicalChecks": null,
+      "blockedReason": "此文件仅为输出结构模板，未填写可执行SQL，不能导入为可运行查询",
+      "stepIds": [
+        "STEP-INPUT",
+        "STEP-COUNTS",
+        "STEP-RATIO"
+      ],
+      "connectionRef": "analytics",
+      "title": "需求复算：当前挂科学生率"
+    },
+    {
+      "id": "QRY-O10-FACT-COUNT",
+      "metricId": "O-10",
+      "layer": "fact",
+      "kind": "count",
+      "purpose": "input_count",
+      "dialect": "mysql",
+      "version": null,
+      "sql": null,
+      "sqlChecksum": null,
+      "parameters": [
+        {
+          "name": "semester_id",
+          "label": "学期",
+          "type": "string",
+          "required": true,
+          "default": null,
+          "optionSource": {
+            "bindingId": "B-FACT-GRADE",
+            "valueColumn": "semester_id",
+            "labelSource": {
+              "bindingId": "B-SEMESTER",
+              "keyColumn": "semester_id",
+              "labelColumn": "name_zh"
+            }
+          },
+          "defaultPolicy": "explicit_selection"
+        },
+        {
+          "name": "organization_id",
+          "label": "学院",
+          "type": "string",
+          "required": false,
+          "default": null,
+          "optionSource": {
+            "bindingId": "B-FACT-STUDENT",
+            "valueColumn": "organization_id",
+            "labelSource": {
+              "bindingId": "B-ORGANIZATION",
+              "keyColumn": "organization_id",
+              "labelColumn": "name"
+            }
+          },
+          "defaultPolicy": "explicit_selection"
+        },
+        {
+          "name": "grade_batch_id",
+          "label": "当前成绩业务批次（按实库核实）",
+          "type": "string",
+          "required": true,
+          "default": null,
+          "optionSource": {
+            "bindingId": "B-FACT-GRADE",
+            "valueColumn": "batch_id",
+            "labelSource": null
+          },
+          "defaultPolicy": "explicit_selection"
+        },
+        {
+          "name": "student_batch_id",
+          "label": "当前学生维度业务批次（按实库核实）",
+          "type": "string",
+          "required": true,
+          "default": null,
+          "optionSource": {
+            "bindingId": "B-FACT-STUDENT",
+            "valueColumn": "batch_id",
+            "labelSource": null
+          },
+          "defaultPolicy": "explicit_selection"
+        }
+      ],
+      "dependencies": [
+        {
+          "bindingId": "B-FACT-GRADE",
+          "columns": [
+            "student_id",
+            "semester_id",
+            "is_pass",
+            "is_published",
+            "is_void",
+            "source",
+            "batch_id"
+          ]
+        },
+        {
+          "bindingId": "B-FACT-STUDENT",
+          "columns": [
+            "student_id",
+            "organization_id",
+            "source",
+            "batch_id"
+          ]
+        }
+      ],
+      "resultContract": {
+        "shape": "scalar",
+        "rowKey": [],
+        "ordering": [],
+        "rowCountMeaning": "指定范围及批次下的有效成绩尝试数，不是学生去重人数；与复算使用相同有效性口径。",
+        "columns": [
+          {
+            "key": "matched_records",
+            "label": "有效成绩记录数",
+            "dataType": "integer",
+            "unit": "人次",
+            "semanticRole": "matched_records",
+            "nullMeaning": "执行失败或未取得；不能当作0"
+          }
+        ],
+        "completeness": {
+          "expected": "complete",
+          "truncationPolicy": "block_auto_import",
+          "totalCountQueryId": null
+        }
+      },
+      "prerequisiteQuestionIds": [
+        "Q-TEMPLATE-COMPLETENESS"
+      ],
+      "technicalChecks": null,
+      "blockedReason": "此文件仅为输出结构模板，未填写可执行SQL，不能导入为可运行查询",
+      "stepIds": [
+        "STEP-INPUT"
+      ],
+      "connectionRef": "analytics",
+      "title": "参与计算的有效成绩记录数"
+    },
+    {
+      "id": "QRY-O10-FACT-INPUT",
+      "metricId": "O-10",
+      "layer": "fact",
+      "kind": "detail",
+      "purpose": "input_detail",
+      "dialect": "mysql",
+      "version": null,
+      "sql": null,
+      "sqlChecksum": null,
+      "parameters": [
+        {
+          "name": "semester_id",
+          "label": "学期",
+          "type": "string",
+          "required": true,
+          "default": null,
+          "optionSource": {
+            "bindingId": "B-FACT-GRADE",
+            "valueColumn": "semester_id",
+            "labelSource": {
+              "bindingId": "B-SEMESTER",
+              "keyColumn": "semester_id",
+              "labelColumn": "name_zh"
+            }
+          },
+          "defaultPolicy": "explicit_selection"
+        },
+        {
+          "name": "organization_id",
+          "label": "学院",
+          "type": "string",
+          "required": false,
+          "default": null,
+          "optionSource": {
+            "bindingId": "B-FACT-STUDENT",
+            "valueColumn": "organization_id",
+            "labelSource": {
+              "bindingId": "B-ORGANIZATION",
+              "keyColumn": "organization_id",
+              "labelColumn": "name"
+            }
+          },
+          "defaultPolicy": "explicit_selection"
+        },
+        {
+          "name": "grade_batch_id",
+          "label": "当前成绩业务批次（按实库核实）",
+          "type": "string",
+          "required": true,
+          "default": null,
+          "optionSource": {
+            "bindingId": "B-FACT-GRADE",
+            "valueColumn": "batch_id",
+            "labelSource": null
+          },
+          "defaultPolicy": "explicit_selection"
+        },
+        {
+          "name": "student_batch_id",
+          "label": "当前学生维度业务批次（按实库核实）",
+          "type": "string",
+          "required": true,
+          "default": null,
+          "optionSource": {
+            "bindingId": "B-FACT-STUDENT",
+            "valueColumn": "batch_id",
+            "labelSource": null
+          },
+          "defaultPolicy": "explicit_selection"
+        }
+      ],
+      "dependencies": [
+        {
+          "bindingId": "B-FACT-GRADE",
+          "columns": [
+            "student_id",
+            "semester_id",
+            "is_pass",
+            "is_published",
+            "is_void",
+            "source",
+            "batch_id"
+          ]
+        },
+        {
+          "bindingId": "B-FACT-STUDENT",
+          "columns": [
+            "student_id",
+            "organization_id",
+            "source",
+            "batch_id"
+          ]
+        }
+      ],
+      "resultContract": {
+        "shape": "collection",
+        "rowKey": null,
+        "ordering": null,
+        "rowCountMeaning": "限定对象、学期和批次内用于独立判定有效性的原始记录；主键和完整性尚待确认，不等同于有效成绩count。",
+        "columns": [
+          {
+            "key": "student_id",
+            "label": "学生标识",
+            "dataType": "string",
+            "unit": "标识",
+            "semanticRole": "member",
+            "nullMeaning": "依据字段原含义核对，不补默认值"
+          },
+          {
+            "key": "is_pass",
+            "label": "通过状态",
+            "dataType": "integer",
+            "unit": "状态",
+            "semanticRole": "supporting",
+            "nullMeaning": "依据字段原含义核对，不补默认值"
+          },
+          {
+            "key": "is_published",
+            "label": "发布状态",
+            "dataType": "integer",
+            "unit": "状态",
+            "semanticRole": "supporting",
+            "nullMeaning": "依据字段原含义核对，不补默认值"
+          },
+          {
+            "key": "is_void",
+            "label": "作废状态",
+            "dataType": "integer",
+            "unit": "状态",
+            "semanticRole": "supporting",
+            "nullMeaning": "依据字段原含义核对，不补默认值"
+          }
+        ],
+        "completeness": {
+          "expected": "complete",
+          "truncationPolicy": "block_full_sample_claim",
+          "totalCountQueryId": "QRY-O10-FACT-INPUT-COUNT"
+        }
+      },
+      "prerequisiteQuestionIds": [
+        "Q-TEMPLATE-COMPLETENESS"
+      ],
+      "technicalChecks": null,
+      "blockedReason": "此文件仅为输出结构模板，未填写可执行SQL，不能导入为可运行查询",
+      "stepIds": [],
+      "connectionRef": "analytics",
+      "title": "独立核算所需原始记录（有效性筛选前）"
+    },
+    {
+      "id": "QRY-O10-FACT-INPUT-COUNT",
+      "metricId": "O-10",
+      "layer": "fact",
+      "kind": "count",
+      "purpose": "input_count",
+      "dialect": "mysql",
+      "version": null,
+      "sql": null,
+      "sqlChecksum": null,
+      "parameters": [
+        {
+          "name": "semester_id",
+          "label": "学期",
+          "type": "string",
+          "required": true,
+          "default": null,
+          "optionSource": {
+            "bindingId": "B-FACT-GRADE",
+            "valueColumn": "semester_id",
+            "labelSource": {
+              "bindingId": "B-SEMESTER",
+              "keyColumn": "semester_id",
+              "labelColumn": "name_zh"
+            }
+          },
+          "defaultPolicy": "explicit_selection"
+        },
+        {
+          "name": "organization_id",
+          "label": "学院",
+          "type": "string",
+          "required": false,
+          "default": null,
+          "optionSource": {
+            "bindingId": "B-FACT-STUDENT",
+            "valueColumn": "organization_id",
+            "labelSource": {
+              "bindingId": "B-ORGANIZATION",
+              "keyColumn": "organization_id",
+              "labelColumn": "name"
+            }
+          },
+          "defaultPolicy": "explicit_selection"
+        },
+        {
+          "name": "grade_batch_id",
+          "label": "当前成绩业务批次（按实库核实）",
+          "type": "string",
+          "required": true,
+          "default": null,
+          "optionSource": {
+            "bindingId": "B-FACT-GRADE",
+            "valueColumn": "batch_id",
+            "labelSource": null
+          },
+          "defaultPolicy": "explicit_selection"
+        },
+        {
+          "name": "student_batch_id",
+          "label": "当前学生维度业务批次（按实库核实）",
+          "type": "string",
+          "required": true,
+          "default": null,
+          "optionSource": {
+            "bindingId": "B-FACT-STUDENT",
+            "valueColumn": "batch_id",
+            "labelSource": null
+          },
+          "defaultPolicy": "explicit_selection"
+        }
+      ],
+      "dependencies": [
+        {
+          "bindingId": "B-FACT-GRADE",
+          "columns": [
+            "student_id",
+            "semester_id",
+            "is_pass",
+            "is_published",
+            "is_void",
+            "source",
+            "batch_id"
+          ]
+        },
+        {
+          "bindingId": "B-FACT-STUDENT",
+          "columns": [
+            "student_id",
+            "organization_id",
+            "source",
+            "batch_id"
+          ]
+        }
+      ],
+      "resultContract": {
+        "shape": "scalar",
+        "rowKey": [],
+        "ordering": [],
+        "rowCountMeaning": "与QRY-O10-FACT-INPUT完全相同的小范围原始输入行数，包含判定有效性所需的未通过筛选记录；不等于有效成绩数或学生去重人数。",
+        "columns": [
+          {
+            "key": "matched_records",
+            "label": "原始输入记录数",
+            "dataType": "integer",
+            "unit": "条",
+            "semanticRole": "matched_records",
+            "nullMeaning": "未取得，不能当作0"
+          }
+        ],
+        "completeness": {
+          "expected": "complete",
+          "truncationPolicy": "block_full_sample_claim",
+          "totalCountQueryId": null
+        }
+      },
+      "prerequisiteQuestionIds": [
+        "Q-TEMPLATE-COMPLETENESS"
+      ],
+      "technicalChecks": null,
+      "blockedReason": "此文件仅为输出结构模板，未填写可执行SQL，不能导入为可运行查询",
+      "stepIds": [],
+      "connectionRef": "analytics",
+      "title": "独立核算原始输入记录数（有效性筛选前）"
+    }
+  ],
+  "questions": [
+    {
+      "id": "Q-SOURCE-VALIDITY",
+      "semanticKey": "O-10.source.validity",
+      "contextHash": null,
+      "ownerRole": "data_owner",
+      "status": "open",
+      "title": "源端哪些状态表示作废或无结论？",
+      "problem": "需要来源系统状态枚举说明，不由产品经理猜字段值",
+      "affectedMetricIds": [
+        "O-10"
+      ],
+      "evidenceRefs": [
+        "E-SOURCE-GRADE"
+      ],
+      "options": null,
+      "recommendation": null,
+      "blockedActions": [
+        "源端有效成绩复算"
+      ],
+      "unaffectedActions": [
+        "原始记录查询",
+        "独立分析已知事实字段"
+      ],
+      "analysisId": "REPLACE_WITH_ANALYSIS_ID",
+      "affectedDefinitionFields": [],
+      "appliedRevisionId": null,
+      "customAnswerAllowed": true,
+      "type": "technical_gap"
+    },
+    {
+      "id": "Q-APP-BINDING",
+      "semanticKey": "O-10.application.actual-binding",
+      "contextHash": null,
+      "ownerRole": "developer",
+      "status": "open",
+      "title": "应用实际值从哪个明确对象取得？",
+      "problem": "需明确应用业务结果表、视图、独立结果查询或同范围真实观察；无需分析其他页面原型或生产源码。",
+      "affectedMetricIds": [
+        "O-10"
+      ],
+      "evidenceRefs": null,
+      "options": null,
+      "recommendation": null,
+      "blockedActions": [
+        "自动读取应用实值"
+      ],
+      "unaffectedActions": [
+        "需求复算",
+        "有真实观察证据的人工核对"
+      ],
+      "analysisId": "REPLACE_WITH_ANALYSIS_ID",
+      "affectedDefinitionFields": [],
+      "appliedRevisionId": null,
+      "customAnswerAllowed": true,
+      "type": "technical_gap"
+    },
+    {
+      "id": "Q-TEMPLATE-COMPLETENESS",
+      "semanticKey": "template.not-an-analysis-result",
+      "contextHash": null,
+      "ownerRole": "skill",
+      "status": "open",
+      "title": "模板仍有待填写的证据、规则、粒度校验和SQL",
+      "problem": "本文件说明输出结构，不能冒充已分析或已验证结果；实际任务须消除本模板问题并将真实缺口具体化",
+      "affectedMetricIds": [
+        "O-10"
+      ],
+      "evidenceRefs": null,
+      "options": null,
+      "recommendation": null,
+      "blockedActions": [
+        "模板入库",
+        "正式SQL执行",
+        "生效声明"
+      ],
+      "unaffectedActions": [
+        "阅读和填写模板"
+      ],
+      "analysisId": "REPLACE_WITH_ANALYSIS_ID",
+      "affectedDefinitionFields": [],
+      "appliedRevisionId": null,
+      "customAnswerAllowed": true,
+      "type": "technical_gap"
+    }
+  ],
+  "pendingAnswers": [],
+  "decisions": [],
+  "validationCases": [
+    {
+      "id": "CASE-O10-BOUNDED-REAL",
+      "metricId": "O-10",
+      "target": "requirement_to_sql",
+      "title": "限定真实原始记录的独立核算（待执行）",
+      "method": "capture_inputs_and_result_then_independent_expectation_before_disclosure",
+      "evidenceRefs": [
+        "E-REQ-O10"
+      ],
+      "samplePlan": {
+        "inputDatasets": [
+          {
+            "queryId": "QRY-O10-FACT-INPUT",
+            "countQueryId": "QRY-O10-FACT-INPUT-COUNT",
+            "role": "raw_input",
+            "coverageNote": "需覆盖筛选前原始记录和关联/去重所需字段；不足时增加登记输入查询，不能把缺失关系视为已验证"
+          }
+        ],
+        "parameters": null,
+        "businessKeys": null,
+        "scopeReason": null,
+        "evidenceRef": null,
+        "recordCount": null,
+        "completeness": "unknown",
+        "capture": {
+          "status": "not_captured",
+          "method": "single_connection_consistent_read",
+          "consistency": "not_checked",
+          "readbackVerified": false
+        },
+        "requirement": "原始输入与被测输出在同一次核实的一致性读取中取得并留存；原始输入count与完整明细匹配。样本须能由同一登记SQL限定，截断或缺必要字段时不能判通过。"
+      },
+      "expected": {
+        "status": "not_prepared",
+        "method": "independent_calculation_from_retained_inputs_before_result_disclosure",
+        "basisRef": null,
+        "derivation": null,
+        "rows": null,
+        "determinedAt": null,
+        "determinedByRef": null,
+        "inputEvidenceRef": null,
+        "inputContentHash": null,
+        "resultKnownBeforeCalculation": null,
+        "submittedBeforeResultDisclosure": null
+      },
+      "execution": {
+        "queryId": "QRY-O10-FACT-EXPECTED",
+        "status": "not_run",
+        "environmentId": null,
+        "parameters": null,
+        "queryChecksum": null,
+        "executionId": null,
+        "actualRows": null,
+        "executedAt": null,
+        "mappingRevisionId": null,
+        "executionUse": "definition_validation",
+        "evidenceRef": null,
+        "resultDisclosure": "not_captured"
+      },
+      "comparison": {
+        "status": "not_run",
+        "differences": null,
+        "coverage": null,
+        "reviewerRef": null,
+        "reviewedAt": null,
+        "evidenceReadback": "not_run"
+      },
+      "ruleIllustration": {
+        "purpose": "explanation_only",
+        "dataNature": "synthetic",
+        "countsForSqlValidation": false,
+        "rows": [
+          {
+            "attempt_key": "A1",
+            "student_key": "S1",
+            "valid_attempt": true,
+            "is_pass": 0
+          },
+          {
+            "attempt_key": "A2",
+            "student_key": "S1",
+            "valid_attempt": true,
+            "is_pass": 1
+          },
+          {
+            "attempt_key": "A3",
+            "student_key": "S2",
+            "valid_attempt": true,
+            "is_pass": 1
+          },
+          {
+            "attempt_key": "A4",
+            "student_key": "S3",
+            "valid_attempt": false,
+            "is_pass": 0
+          }
+        ],
+        "derivation": [
+          "有效成绩学生集合为S1、S2",
+          "未通过学生集合为S1",
+          "1 / 2 × 100 = 50%"
+        ],
+        "illustratedResult": {
+          "metric_value": "50",
+          "numerator": 1,
+          "denominator": 2,
+          "unit": "%"
+        },
+        "limitation": "valid_attempt是解释前提，不是真实表字段；本算例没有执行或验证登记SQL。"
+      }
+    }
+  ],
+  "analysisSummary": [
+    {
+      "step": "template_only",
+      "status": "not_run",
+      "inputRefs": [
+        "SRC-REQ-106"
+      ],
+      "outputRefs": [
+        "O-10"
+      ],
+      "evidenceSummary": "仅定义格式；无本轮分析、运行或产品经理确认",
+      "openQuestionIds": [
+        "Q-TEMPLATE-COMPLETENESS"
+      ],
+      "completedAt": null
+    }
+  ],
+  "checkpoint": {
+    "lastCompletedStage": null,
+    "affectedMetricIds": [
+      "O-10"
+    ],
+    "unappliedAnswerIds": null,
+    "reason": "模板尚未开展分析，不可作为已完成阶段恢复。"
+  },
+  "validations": [
+    {
+      "id": "CHECK-TEMPLATE",
+      "kind": "not_a_runtime_result",
+      "status": "not_run",
+      "scope": "本结构模板",
+      "evidenceRef": null,
+      "checkedAt": null
+    }
+  ],
+  "changeSet": {
+    "added": null,
+    "changed": null,
+    "retired": null,
+    "invalidateEvidenceFor": null,
+    "summary": "业务指标结构示例，非完整模块快照；AI仅改受影响指标，脚本从基线组装完整包。服务生成兼容关联，不从本包生成其他页面原型。",
+    "impactReview": {
+      "changedRuleIds": null,
+      "reviewedMetricIds": null,
+      "affectedMetricIds": null,
+      "unaffectedMetricIds": null,
+      "unresolvedMetricIds": null,
+      "basis": null
+    }
+  },
+  "sharedRules": [
+    {
+      "id": "RULE-VALID-GRADE",
+      "name": "有效成绩口径（结构示例，待核实）",
+      "definition": {
+        "validityRules": [
+          {
+            "text": "同一学期、同一授权学生范围，成绩已发布、未作废且通过状态明确"
+          }
+        ]
+      },
+      "evidenceRefs": [
+        "E-REQ-O10"
+      ],
+      "questionIds": [
+        "Q-SOURCE-VALIDITY"
+      ]
+    }
+  ]
+}

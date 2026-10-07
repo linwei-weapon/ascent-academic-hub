@@ -1,0 +1,10 @@
+WITH input_rows AS (
+SELECT a.course_id, a.semester_id, a.fail_rate, a.source
+FROM AGG_COURSE_TERM a
+WHERE a.course_id = :course_id
+  AND a.source = 'real'
+  AND a.semester_id = :semester_id
+)
+SELECT * FROM input_rows
+ORDER BY course_id, semester_id
+LIMIT 100

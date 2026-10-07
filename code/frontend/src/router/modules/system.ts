@@ -19,6 +19,14 @@ export const systemRoutes: RouteRecordRaw[] = [
       { path: 'audit', component: () => import('@/views/admin/audit/Audit.vue') },
       // 指标与口径管理
       { path: 'kpis', component: () => import('@/views/admin/kpis/Kpis.vue') },
+      // 按需求逐项核对指标来源、三层数据、SQL与人工验收记录。
+      { path: 'metric-verification', component: () => import('@/views/admin/system/metric-verification/Index.vue') },
+      { path: 'expert-resources', redirect: '/admin/system/expert-management' },
+      { path: 'expert-management', component: () => import('@/views/ai-decision/expert-resources/index.vue'), meta: { resourceKind: 'experts' } },
+      { path: 'expert-test/:id', component: () => import('@/views/ai-decision/expert-resources/ExpertTest.vue') },
+      { path: 'skill-management', component: () => import('@/views/ai-decision/expert-resources/index.vue'), meta: { resourceKind: 'skills' } },
+      { path: 'mcp-management', component: () => import('@/views/ai-decision/expert-resources/index.vue'), meta: { resourceKind: 'mcps' } },
+      { path: 'background-processing', component: () => import('@/views/ai-decision/processing/index.vue') },
       // 指标查询（只读）及独立详情页
       { path: 'metric-query', component: () => import('@/views/admin/metric-query/Index.vue') },
       { path: 'metric-query/:id', component: () => import('@/views/admin/metric-query/Detail.vue') },

@@ -1,0 +1,42 @@
+{
+  "type": "object",
+  "properties": {
+    "plan_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "title": "基线培养方案",
+      "description": "从当前授权选项选择本轮基线培养方案。"
+    },
+    "target_plan_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "title": "对照培养方案",
+      "description": "选择与基线不同的授权对照方案；转入任务表示目标方案。"
+    },
+    "comparisonMode": {
+      "type": "string",
+      "enum": [
+        "all_course_ids"
+      ],
+      "title": "比较口径",
+      "description": "当前按全部模块的已识别课程编号比较；未确认分类不能排除公共课。",
+      "default": "all_course_ids"
+    },
+    "previewLimit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 200,
+      "default": 50,
+      "title": "预览记录数",
+      "description": "只改变表格展示条数，完整证据和统计分母保持一致。"
+    }
+  },
+  "required": [
+    "plan_id",
+    "target_plan_id",
+    "comparisonMode"
+  ],
+  "additionalProperties": false
+}

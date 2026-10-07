@@ -47,7 +47,7 @@ python -X utf8 -m uvicorn backend.api.main:app --host 127.0.0.1 --port 8000
 前端工作目录为 `code/frontend/`：
 
 ```text
-npm run dev -- --host 127.0.0.1 --port 3006 --strictPort
+npm run dev:local -- --host 127.0.0.1 --port 3006 --strictPort
 ```
 
 用持久进程工具或隐藏后台方式启动，不要调用会弹出两个命令窗口的旧 `start.bat`。

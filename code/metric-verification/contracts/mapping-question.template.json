@@ -1,0 +1,107 @@
+{
+  "schemaVersion": "3.1.0",
+  "template": true,
+  "question": {
+    "id": "Q-O23-MISSING-GP",
+    "semanticKey": "O-23.final-result.missing-gp",
+    "contextHash": null,
+    "status": "open",
+    "ownerRole": "product_manager",
+    "title": "最后一次有效成绩没有绩点时，是否使用之前的绩点？",
+    "type": "business_rule_ambiguity",
+    "problem": "先确定最后成绩再排除缺GP，与先排除缺GP再选最后成绩，会产生不同的统计学生集合。模板未记录任何新确认意见。",
+    "affectedMetricIds": [
+      "O-23"
+    ],
+    "evidenceRefs": null,
+    "sourceLocators": [
+      {
+        "document": "106-教学数据总览功能指标详细需求说明",
+        "section": "7.3",
+        "excerpt": null
+      }
+    ],
+    "illustration": {
+      "dataNature": "hypothetical",
+      "description": "假设一名学生较早有效成绩GP为3.0，最后一次有效成绩GP为空；这不是实际学生记录。"
+    },
+    "options": [
+      {
+        "id": "latest_then_exclude",
+        "label": "先取最新，再排除缺GP",
+        "effect": "示例学生不进入O-23的均值或分母",
+        "rule": "先按已确认的最终成绩选择规则选出记录，再排除GP为空的结果"
+      },
+      {
+        "id": "exclude_then_latest",
+        "label": "先筛有GP，再取最后一条",
+        "effect": "示例学生进入分母，以较早的3.0参与均值",
+        "rule": "先排除GP为空的有效记录，再按已确认的排序选最后一条"
+      },
+      {
+        "id": "defer",
+        "label": "暂不能确定",
+        "effect": "保留原始记录查询，O-23正式复算继续等待口径",
+        "rule": null
+      }
+    ],
+    "recommendation": null,
+    "blockedActions": [
+      "O-23的正式指标复算与相应符合判断"
+    ],
+    "unaffectedActions": [
+      "查看原始成绩及记录数",
+      "分析其他独立指标"
+    ],
+    "customAnswerAllowed": true,
+    "analysisId": "REPLACE_WITH_ANALYSIS_ID",
+    "affectedDefinitionFields": [
+      "deduplication",
+      "nullPolicy"
+    ],
+    "appliedRevisionId": null
+  },
+  "answerSubmissionTemplate": {
+    "questionId": "Q-O23-MISSING-GP",
+    "questionContextHash": null,
+    "choiceId": null,
+    "customAnswer": null,
+    "scope": null,
+    "effectiveFrom": null,
+    "opinionSourceRef": null,
+    "submissionId": "REPLACE_WITH_ANSWER_SUBMISSION_ID",
+    "rawAnswer": null
+  },
+  "serverReceiptTemplate": {
+    "recordedBy": null,
+    "recordedAt": null,
+    "questionStatus": null,
+    "affectedMetricIds": null,
+    "nextAction": "先保存含问题草稿，再提交原答复取得answerId；最终包使用新的packageId，采用该答复且生效后才resolved。",
+    "answerId": null,
+    "appliedRevisionId": null
+  },
+  "scope": {
+    "projectId": "highedu",
+    "moduleId": "teaching-overview",
+    "environmentId": "test-114"
+  },
+  "pendingAnswerTemplate": {
+    "questionId": "Q-O23-MISSING-GP",
+    "questionContextHash": null,
+    "choiceId": null,
+    "customAnswer": null,
+    "scope": null,
+    "effectiveFrom": null,
+    "opinionSourceRef": null,
+    "submissionId": "REPLACE_WITH_ANSWER_SUBMISSION_ID",
+    "rawAnswer": null,
+    "persistenceStatus": "not_persisted"
+  },
+  "syncSequence": [
+    "保存含问题与pendingAnswers的草稿",
+    "按submissionId提交答复并取得真实answerId",
+    "将答复关联decisions，校验受影响规则和SQL",
+    "以新packageId保存最终包并在授权范围内生效"
+  ]
+}

@@ -1,0 +1,280 @@
+{
+  "type": "object",
+  "properties": {
+    "taskId": {
+      "type": "string",
+      "enum": [
+        "T-POLICY",
+        "T-POLICY-SCENARIO"
+      ]
+    },
+    "populationRef": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "title": "授权对象群体",
+      "description": "引用服务端可验证的对象集合；不能上传成绩或通过状态充当事实。"
+    },
+    "year": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "title": "适用年度",
+      "description": "明确本轮规则年度；不根据当前日期或年级猜测。"
+    },
+    "ruleRef": {
+      "type": "object",
+      "properties": {
+        "ruleId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      },
+      "required": [
+        "ruleId",
+        "version"
+      ],
+      "additionalProperties": false,
+      "title": "已发布规则版本",
+      "description": "引用唯一适用且已确认发布的规则，不由客户端提供规则事实。"
+    },
+    "baselineRef": {
+      "type": "object",
+      "properties": {
+        "resultId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "objectRefs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "uniqueItems": true
+        },
+        "conditionIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "uniqueItems": true
+        },
+        "evidenceIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "resultId"
+      ],
+      "additionalProperties": false,
+      "title": "已保存基线结果",
+      "description": "引用可鉴权、范围和口径可核对的基线结果。"
+    },
+    "changes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "conditionId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "proposedValue": {
+            "type": [
+              "number",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "conditionId",
+          "proposedValue"
+        ],
+        "additionalProperties": false
+      },
+      "title": "明示调整参数",
+      "description": "只提供拟讨论的变更；不覆盖正式规则或来源事实。"
+    }
+  },
+  "required": [
+    "taskId"
+  ],
+  "additionalProperties": false,
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "populationRef": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "title": "授权对象群体",
+          "description": "引用服务端可验证的对象集合；不能上传成绩或通过状态充当事实。"
+        },
+        "year": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "title": "适用年度",
+          "description": "明确本轮规则年度；不根据当前日期或年级猜测。"
+        },
+        "ruleRef": {
+          "type": "object",
+          "properties": {
+            "ruleId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          "required": [
+            "ruleId",
+            "version"
+          ],
+          "additionalProperties": false,
+          "title": "已发布规则版本",
+          "description": "引用唯一适用且已确认发布的规则，不由客户端提供规则事实。"
+        },
+        "taskId": {
+          "const": "T-POLICY"
+        }
+      },
+      "required": [
+        "populationRef",
+        "year",
+        "ruleRef",
+        "taskId"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "baselineRef": {
+          "type": "object",
+          "properties": {
+            "resultId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "objectRefs": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "uniqueItems": true
+            },
+            "conditionIds": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "uniqueItems": true
+            },
+            "evidenceIds": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "resultId"
+          ],
+          "additionalProperties": false,
+          "title": "已保存基线结果",
+          "description": "引用可鉴权、范围和口径可核对的基线结果。"
+        },
+        "ruleRef": {
+          "type": "object",
+          "properties": {
+            "ruleId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          "required": [
+            "ruleId",
+            "version"
+          ],
+          "additionalProperties": false,
+          "title": "已发布规则版本",
+          "description": "引用唯一适用且已确认发布的规则，不由客户端提供规则事实。"
+        },
+        "changes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "conditionId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "proposedValue": {
+                "type": [
+                  "number",
+                  "string"
+                ]
+              }
+            },
+            "required": [
+              "conditionId",
+              "proposedValue"
+            ],
+            "additionalProperties": false
+          },
+          "title": "明示调整参数",
+          "description": "只提供拟讨论的变更；不覆盖正式规则或来源事实。"
+        },
+        "taskId": {
+          "const": "T-POLICY-SCENARIO"
+        }
+      },
+      "required": [
+        "baselineRef",
+        "ruleRef",
+        "changes",
+        "taskId"
+      ],
+      "additionalProperties": false
+    }
+  ]
+}

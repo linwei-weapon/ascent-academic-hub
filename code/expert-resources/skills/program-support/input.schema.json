@@ -1,0 +1,49 @@
+{
+  "type": "object",
+  "properties": {
+    "plan_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "title": "基线培养方案",
+      "description": "从当前授权选项选择本轮基线培养方案。"
+    },
+    "target_plan_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "title": "对照培养方案",
+      "description": "选择与基线不同的授权对照方案；转入任务表示目标方案。"
+    },
+    "documentRefs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "documentId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "version": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "documentId",
+          "version"
+        ],
+        "additionalProperties": false
+      },
+      "title": "固定文档版本",
+      "description": "引用所需已确认文档的固定版本。"
+    }
+  },
+  "required": [
+    "plan_id",
+    "documentRefs"
+  ],
+  "additionalProperties": false
+}

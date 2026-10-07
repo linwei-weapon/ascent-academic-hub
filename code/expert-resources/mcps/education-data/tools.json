@@ -1,0 +1,1111 @@
+[
+  {
+    "name": "list_analysis_options",
+    "title": "可用分析对象",
+    "description": "读取当前身份允许的方案、学院、学期选项；不包含用户或学生个人信息。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "description": "当前授权范围的选项及记录覆盖；用于选择真实ID，不能据选项存在推定详情可执行。",
+      "required": [
+        "status",
+        "summary",
+        "scope",
+        "data",
+        "sources",
+        "limitations",
+        "missingEvidence"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "completed",
+            "limited",
+            "blocked"
+          ],
+          "description": "计算完成、限定结果或缺证据无法执行；不代表人工业务验收通过。"
+        },
+        "summary": {
+          "type": "string",
+          "description": "基于本轮实际返回事实的简短判断，不编造未返回的指标。"
+        },
+        "scope": {
+          "type": "object",
+          "description": "服务端实际授权与过滤后的学院、方案、学期、观察时间等范围；保留空值和未指定情况。",
+          "additionalProperties": true
+        },
+        "data": {
+          "type": "object",
+          "description": "当前授权范围的选项及记录覆盖；用于选择真实ID，不能据选项存在推定详情可执行。",
+          "properties": {},
+          "additionalProperties": true
+        },
+        "tables": {
+          "type": "array",
+          "description": "实际返回的结构化证据表，汇总值与展示行截断分别说明。",
+          "items": {
+            "type": "object",
+            "required": [
+              "title",
+              "columns",
+              "rows",
+              "note"
+            ],
+            "properties": {
+              "title": {
+                "type": "string"
+              },
+              "columns": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "key",
+                    "label"
+                  ],
+                  "properties": {
+                    "key": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "rows": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "sources": {
+          "type": "array",
+          "description": "本轮真实使用的库表、查询名称、数据时点与记录范围；不得填写假来源。",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "limitations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "实际受限项，包括范围、缺字段、映射、截断和时间不可比。"
+        },
+        "missingEvidence": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "需要补充或确认的具体资料；空记录不等于缺证据已补齐。"
+        }
+      },
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "read_program_structure",
+    "title": "读取培养方案结构",
+    "description": "读取一份已授权方案的课程结构、记录数，分列课程目录学分与方案字段原值及差异。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "plan_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "description": "从当前身份可用选项选择的培养方案ID；不是专业名称。"
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 200,
+          "default": 50,
+          "description": "最多展示的课程或汇总记录条数；不改变分母，截断必须披露。"
+        }
+      },
+      "required": [
+        "plan_id"
+      ],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "description": "方案身份、课程结构、课程目录学分合计、明细与字段核对；目录学分不代表正式方案学分要求。",
+      "required": [
+        "status",
+        "summary",
+        "scope",
+        "data",
+        "sources",
+        "limitations",
+        "missingEvidence"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "completed",
+            "limited",
+            "blocked"
+          ],
+          "description": "计算完成、限定结果或缺证据无法执行；不代表人工业务验收通过。"
+        },
+        "summary": {
+          "type": "string",
+          "description": "基于本轮实际返回事实的简短判断，不编造未返回的指标。"
+        },
+        "scope": {
+          "type": "object",
+          "description": "服务端实际授权与过滤后的学院、方案、学期、观察时间等范围；保留空值和未指定情况。",
+          "additionalProperties": true
+        },
+        "data": {
+          "type": "object",
+          "description": "方案身份、课程结构、课程目录学分合计、明细与字段核对；目录学分不代表正式方案学分要求。",
+          "properties": {},
+          "additionalProperties": true
+        },
+        "tables": {
+          "type": "array",
+          "description": "实际返回的结构化证据表，汇总值与展示行截断分别说明。",
+          "items": {
+            "type": "object",
+            "required": [
+              "title",
+              "columns",
+              "rows",
+              "note"
+            ],
+            "properties": {
+              "title": {
+                "type": "string"
+              },
+              "columns": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "key",
+                    "label"
+                  ],
+                  "properties": {
+                    "key": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "rows": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "sources": {
+          "type": "array",
+          "description": "本轮真实使用的库表、查询名称、数据时点与记录范围；不得填写假来源。",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "limitations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "实际受限项，包括范围、缺字段、映射、截断和时间不可比。"
+        },
+        "missingEvidence": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "需要补充或确认的具体资料；空记录不等于缺证据已补齐。"
+        }
+      },
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "compare_programs",
+    "title": "比较两份培养方案",
+    "description": "按全部模块的course_id去重比较两份获准方案；不自动排除公共课，不输出必修覆盖；学分差异另列。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "plan_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "description": "从当前身份可用选项选择的培养方案ID；不是专业名称。"
+        },
+        "target_plan_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "description": "明确选定的另一份培养方案ID；转专业场景中为目标方案。"
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 200,
+          "default": 50,
+          "description": "最多展示的课程或汇总记录条数；不改变分母，截断必须披露。"
+        }
+      },
+      "required": [
+        "plan_id",
+        "target_plan_id"
+      ],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "description": "课程集合交并集、目标覆盖和目标侧明细；目录学分/方案字段原值及差异分列，比例不采用学分加权。",
+      "required": [
+        "status",
+        "summary",
+        "scope",
+        "data",
+        "sources",
+        "limitations",
+        "missingEvidence"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "completed",
+            "limited",
+            "blocked"
+          ],
+          "description": "计算完成、限定结果或缺证据无法执行；不代表人工业务验收通过。"
+        },
+        "summary": {
+          "type": "string",
+          "description": "基于本轮实际返回事实的简短判断，不编造未返回的指标。"
+        },
+        "scope": {
+          "type": "object",
+          "description": "服务端实际授权与过滤后的学院、方案、学期、观察时间等范围；保留空值和未指定情况。",
+          "additionalProperties": true
+        },
+        "data": {
+          "type": "object",
+          "description": "课程集合交并集、目标覆盖和目标侧明细；目录学分/方案字段原值及差异分列，比例不采用学分加权。",
+          "properties": {},
+          "additionalProperties": true
+        },
+        "tables": {
+          "type": "array",
+          "description": "实际返回的结构化证据表，汇总值与展示行截断分别说明。",
+          "items": {
+            "type": "object",
+            "required": [
+              "title",
+              "columns",
+              "rows",
+              "note"
+            ],
+            "properties": {
+              "title": {
+                "type": "string"
+              },
+              "columns": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "key",
+                    "label"
+                  ],
+                  "properties": {
+                    "key": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "rows": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "sources": {
+          "type": "array",
+          "description": "本轮真实使用的库表、查询名称、数据时点与记录范围；不得填写假来源。",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "limitations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "实际受限项，包括范围、缺字段、映射、截断和时间不可比。"
+        },
+        "missingEvidence": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "需要补充或确认的具体资料；空记录不等于缺证据已补齐。"
+        }
+      },
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "read_course_performance",
+    "title": "读取课程表现",
+    "description": "读取当前可用的课程聚合指标及记录数，不输出个人成绩。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "semester_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "从当前数据选项选择的学期ID；未指定时由返回结果明确实际范围。"
+        },
+        "college_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "description": "当前身份授权范围内的学院ID；不传不代表获得全校权限。"
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 200,
+          "default": 50,
+          "description": "最多展示的课程或汇总记录条数；不改变分母，截断必须披露。"
+        }
+      },
+      "required": [
+        "semester_id"
+      ],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "description": "授权开课院系/学期的课程聚合行、实际采用口径和来源。",
+      "required": [
+        "status",
+        "summary",
+        "scope",
+        "data",
+        "sources",
+        "limitations",
+        "missingEvidence"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "completed",
+            "limited",
+            "blocked"
+          ],
+          "description": "计算完成、限定结果或缺证据无法执行；不代表人工业务验收通过。"
+        },
+        "summary": {
+          "type": "string",
+          "description": "基于本轮实际返回事实的简短判断，不编造未返回的指标。"
+        },
+        "scope": {
+          "type": "object",
+          "description": "服务端实际授权与过滤后的学院、方案、学期、观察时间等范围；保留空值和未指定情况。",
+          "additionalProperties": true
+        },
+        "data": {
+          "type": "object",
+          "description": "授权开课院系/学期的课程聚合行、实际采用口径和来源。",
+          "properties": {},
+          "additionalProperties": true
+        },
+        "tables": {
+          "type": "array",
+          "description": "实际返回的结构化证据表，汇总值与展示行截断分别说明。",
+          "items": {
+            "type": "object",
+            "required": [
+              "title",
+              "columns",
+              "rows",
+              "note"
+            ],
+            "properties": {
+              "title": {
+                "type": "string"
+              },
+              "columns": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "key",
+                    "label"
+                  ],
+                  "properties": {
+                    "key": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "rows": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "sources": {
+          "type": "array",
+          "description": "本轮真实使用的库表、查询名称、数据时点与记录范围；不得填写假来源。",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "limitations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "实际受限项，包括范围、缺字段、映射、截断和时间不可比。"
+        },
+        "missingEvidence": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "需要补充或确认的具体资料；空记录不等于缺证据已补齐。"
+        }
+      },
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "read_transfer_history",
+    "title": "读取转专业异动路径与状态",
+    "description": "从edu_source.std_alteration解析学院/专业路径，保留STATUS，以生效日期归属学期；仅授权汇总，无个人标识。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "college_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "description": "当前身份授权范围内的学院ID；不传不代表获得全校权限。"
+        },
+        "semester_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "从当前数据选项选择的学期ID；未指定时由返回结果明确实际范围。"
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 200,
+          "default": 50,
+          "description": "最多展示的课程或汇总记录条数；不改变分母，截断必须披露。"
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "description": "贴源异动路径与原状态分组、记录数、组内去重人数、最近生效日期及实际来源；不把所有状态当完成。",
+      "required": [
+        "status",
+        "summary",
+        "scope",
+        "data",
+        "sources",
+        "limitations",
+        "missingEvidence"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "completed",
+            "limited",
+            "blocked"
+          ],
+          "description": "计算完成、限定结果或缺证据无法执行；不代表人工业务验收通过。"
+        },
+        "summary": {
+          "type": "string",
+          "description": "基于本轮实际返回事实的简短判断，不编造未返回的指标。"
+        },
+        "scope": {
+          "type": "object",
+          "description": "服务端实际授权与过滤后的学院、方案、学期、观察时间等范围；保留空值和未指定情况。",
+          "additionalProperties": true
+        },
+        "data": {
+          "type": "object",
+          "description": "贴源异动路径与原状态分组、记录数、组内去重人数、最近生效日期及实际来源；不把所有状态当完成。",
+          "properties": {},
+          "additionalProperties": true
+        },
+        "tables": {
+          "type": "array",
+          "description": "实际返回的结构化证据表，汇总值与展示行截断分别说明。",
+          "items": {
+            "type": "object",
+            "required": [
+              "title",
+              "columns",
+              "rows",
+              "note"
+            ],
+            "properties": {
+              "title": {
+                "type": "string"
+              },
+              "columns": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "key",
+                    "label"
+                  ],
+                  "properties": {
+                    "key": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "rows": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "sources": {
+          "type": "array",
+          "description": "本轮真实使用的库表、查询名称、数据时点与记录范围；不得填写假来源。",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "limitations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "实际受限项，包括范围、缺字段、映射、截断和时间不可比。"
+        },
+        "missingEvidence": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "需要补充或确认的具体资料；空记录不等于缺证据已补齐。"
+        }
+      },
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "read_graduation_progress",
+    "title": "读取毕业准备进度",
+    "description": "读取指定方案的培养进度聚合，保留已知、未知和缺记录状态。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "plan_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "description": "从当前身份可用选项选择的培养方案ID；不是专业名称。"
+        }
+      },
+      "required": [
+        "plan_id"
+      ],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "description": "进度与缺口汇总、对象范围、规则/数据时间和限制。",
+      "required": [
+        "status",
+        "summary",
+        "scope",
+        "data",
+        "sources",
+        "limitations",
+        "missingEvidence"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "completed",
+            "limited",
+            "blocked"
+          ],
+          "description": "计算完成、限定结果或缺证据无法执行；不代表人工业务验收通过。"
+        },
+        "summary": {
+          "type": "string",
+          "description": "基于本轮实际返回事实的简短判断，不编造未返回的指标。"
+        },
+        "scope": {
+          "type": "object",
+          "description": "服务端实际授权与过滤后的学院、方案、学期、观察时间等范围；保留空值和未指定情况。",
+          "additionalProperties": true
+        },
+        "data": {
+          "type": "object",
+          "description": "进度与缺口汇总、对象范围、规则/数据时间和限制。",
+          "properties": {},
+          "additionalProperties": true
+        },
+        "tables": {
+          "type": "array",
+          "description": "实际返回的结构化证据表，汇总值与展示行截断分别说明。",
+          "items": {
+            "type": "object",
+            "required": [
+              "title",
+              "columns",
+              "rows",
+              "note"
+            ],
+            "properties": {
+              "title": {
+                "type": "string"
+              },
+              "columns": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "key",
+                    "label"
+                  ],
+                  "properties": {
+                    "key": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "rows": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "sources": {
+          "type": "array",
+          "description": "本轮真实使用的库表、查询名称、数据时点与记录范围；不得填写假来源。",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "limitations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "实际受限项，包括范围、缺字段、映射、截断和时间不可比。"
+        },
+        "missingEvidence": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "需要补充或确认的具体资料；空记录不等于缺证据已补齐。"
+        }
+      },
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "read_graduation_audit",
+    "title": "读取既有毕业审核记录",
+    "description": "读取已有审核记录的状态汇总及问题，既不重新审批也不修改结果。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "college_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "description": "当前身份授权范围内的学院ID；不传不代表获得全校权限。"
+        },
+        "semester_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "从当前数据选项选择的学期ID；未指定时由返回结果明确实际范围。"
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 200,
+          "default": 50,
+          "description": "最多展示的课程或汇总记录条数；不改变分母，截断必须披露。"
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "description": "已有审核状态和资料问题汇总，保留状态原义与记录范围。",
+      "required": [
+        "status",
+        "summary",
+        "scope",
+        "data",
+        "sources",
+        "limitations",
+        "missingEvidence"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "completed",
+            "limited",
+            "blocked"
+          ],
+          "description": "计算完成、限定结果或缺证据无法执行；不代表人工业务验收通过。"
+        },
+        "summary": {
+          "type": "string",
+          "description": "基于本轮实际返回事实的简短判断，不编造未返回的指标。"
+        },
+        "scope": {
+          "type": "object",
+          "description": "服务端实际授权与过滤后的学院、方案、学期、观察时间等范围；保留空值和未指定情况。",
+          "additionalProperties": true
+        },
+        "data": {
+          "type": "object",
+          "description": "已有审核状态和资料问题汇总，保留状态原义与记录范围。",
+          "properties": {},
+          "additionalProperties": true
+        },
+        "tables": {
+          "type": "array",
+          "description": "实际返回的结构化证据表，汇总值与展示行截断分别说明。",
+          "items": {
+            "type": "object",
+            "required": [
+              "title",
+              "columns",
+              "rows",
+              "note"
+            ],
+            "properties": {
+              "title": {
+                "type": "string"
+              },
+              "columns": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "key",
+                    "label"
+                  ],
+                  "properties": {
+                    "key": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "rows": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "sources": {
+          "type": "array",
+          "description": "本轮真实使用的库表、查询名称、数据时点与记录范围；不得填写假来源。",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "limitations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "实际受限项，包括范围、缺字段、映射、截断和时间不可比。"
+        },
+        "missingEvidence": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "需要补充或确认的具体资料；空记录不等于缺证据已补齐。"
+        }
+      },
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "read_learning_results",
+    "title": "读取真实学习成果关联证据",
+    "description": "校验正式主方案分配与学籍专业归属后读取真实有效成果及尝试关联；不以推导进度替代正式分配，全部成果覆盖仍未知。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "plan_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "title": "基线培养方案",
+          "description": "从当前授权选项选择本轮基线培养方案。"
+        },
+        "populationRef": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "title": "授权对象群体",
+          "description": "引用服务端可验证的对象集合；不能上传成绩或通过状态充当事实。"
+        },
+        "college_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "title": "学院范围",
+          "description": "只允许当前身份授权的学院，按本任务的实际组织口径筛选。"
+        }
+      },
+      "required": [
+        "plan_id",
+        "populationRef"
+      ],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "required": [
+        "status",
+        "summary",
+        "objects",
+        "coverage",
+        "scope",
+        "sources",
+        "limitations"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "limited"
+          ]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "objects": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "objectRef",
+              "achievements",
+              "coverage"
+            ],
+            "properties": {
+              "objectRef": {
+                "type": "string"
+              },
+              "achievements": {
+                "type": "array",
+                "items": {
+                  "type": "object"
+                }
+              },
+              "coverage": {
+                "type": "object"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "coverage": {
+          "type": "object"
+        },
+        "scope": {
+          "type": "object"
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "limitations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "description": "固定授权学籍群体、真实有效结果及实际尝试关联；无姓名学号，业务来源完整性与学校成果/学分确认分别标明。"
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  }
+]

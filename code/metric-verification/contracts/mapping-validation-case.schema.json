@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "mapping-validation-case.schema.json",
+  "title": "mapping-validation-case",
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "const": "3.1.0"
+    },
+    "template": {
+      "type": "boolean"
+    },
+    "validationCase": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "metricId": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        },
+        "method": {
+          "type": "string"
+        },
+        "samplePlan": {
+          "type": "object"
+        },
+        "expected": {
+          "type": "object"
+        },
+        "execution": {
+          "type": "object"
+        },
+        "comparison": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "id",
+        "metricId",
+        "target",
+        "method",
+        "samplePlan",
+        "expected",
+        "execution",
+        "comparison"
+      ],
+      "additionalProperties": true
+    },
+    "retainedEvidenceTemplate": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "template",
+    "validationCase",
+    "retainedEvidenceTemplate"
+  ],
+  "additionalProperties": false
+}

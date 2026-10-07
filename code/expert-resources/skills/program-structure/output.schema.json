@@ -1,0 +1,110 @@
+{
+  "type": "object",
+  "description": "方案身份、实际课程总量、返回明细及结构统计；标明课程池、未知类别、截断和未接原文。 课程明细区分课程目录学分 credits、方案字段原值 recorded_plan_credits 和 credit_check；不得将结构展示值解释成正式方案学分。",
+  "required": [
+    "status",
+    "summary",
+    "scope",
+    "data",
+    "sources",
+    "limitations",
+    "missingEvidence"
+  ],
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": [
+        "completed",
+        "limited",
+        "blocked"
+      ],
+      "description": "计算完成、限定结果或缺证据无法执行；不代表人工业务验收通过。"
+    },
+    "summary": {
+      "type": "string",
+      "description": "基于本轮实际返回事实的简短判断，不编造未返回的指标。"
+    },
+    "scope": {
+      "type": "object",
+      "description": "服务端实际授权与过滤后的学院、方案、学期、观察时间等范围；保留空值和未指定情况。",
+      "additionalProperties": true
+    },
+    "data": {
+      "type": "object",
+      "description": "方案身份、实际课程总量、返回明细及结构统计；标明课程池、未知类别、截断和未接原文。 课程明细区分课程目录学分 credits、方案字段原值 recorded_plan_credits 和 credit_check；不得将结构展示值解释成正式方案学分。",
+      "properties": {},
+      "additionalProperties": true
+    },
+    "tables": {
+      "type": "array",
+      "description": "实际返回的结构化证据表，汇总值与展示行截断分别说明。",
+      "items": {
+        "type": "object",
+        "required": [
+          "title",
+          "columns",
+          "rows",
+          "note"
+        ],
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "columns": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "key",
+                "label"
+              ],
+              "properties": {
+                "key": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "note": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "sources": {
+      "type": "array",
+      "description": "本轮真实使用的库表、查询名称、数据时点与记录范围；不得填写假来源。",
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    "limitations": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "实际受限项，包括范围、缺字段、映射、截断和时间不可比。"
+    },
+    "missingEvidence": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "需要补充或确认的具体资料；空记录不等于缺证据已补齐。"
+    }
+  },
+  "additionalProperties": false
+}

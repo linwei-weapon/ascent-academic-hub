@@ -1,0 +1,859 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "mapping-output.schema.json",
+  "title": "mapping-output",
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "const": "3.1.0"
+    },
+    "template": {
+      "type": "boolean"
+    },
+    "packageId": {
+      "type": "string"
+    },
+    "analysisId": {
+      "type": "string"
+    },
+    "projectId": {
+      "type": "string"
+    },
+    "moduleId": {
+      "type": "string"
+    },
+    "moduleName": {
+      "type": "string"
+    },
+    "environmentId": {
+      "type": "string"
+    },
+    "baseRevisionId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "inputManifest": {
+      "$ref": "mapping-input.schema.json"
+    },
+    "sourceManifest": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "document",
+              "schema_snapshot",
+              "user_decision",
+              "prototype",
+              "live_ui",
+              "screenshot"
+            ]
+          },
+          "role": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "location": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "version": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "contentHash": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "role",
+          "title",
+          "location",
+          "version",
+          "contentHash"
+        ],
+        "additionalProperties": true
+      }
+    },
+    "coverage": {
+      "type": "array"
+    },
+    "metrics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "businessCategory": {
+            "type": "string"
+          },
+          "version": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "definition": {
+            "type": "object",
+            "properties": {
+              "meaning": {},
+              "formula": {},
+              "unit": {},
+              "grain": {},
+              "scope": {},
+              "timeScope": {},
+              "components": {},
+              "validityRules": {},
+              "deduplication": {},
+              "nullPolicy": {},
+              "precision": {},
+              "ruleRefs": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "metricRefs": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "metricId": {
+                      "type": "string"
+                    },
+                    "appliesTo": {
+                      "type": "string"
+                    },
+                    "parameterBindings": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "targetParameter": {
+                            "type": "string"
+                          },
+                          "sourceParameter": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "literalValue": {}
+                        },
+                        "required": [
+                          "targetParameter"
+                        ],
+                        "additionalProperties": true
+                      }
+                    }
+                  },
+                  "required": [
+                    "metricId",
+                    "appliesTo",
+                    "parameterBindings"
+                  ],
+                  "additionalProperties": true
+                }
+              },
+              "evidenceRefs": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "questionIds": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "meaning",
+              "formula",
+              "unit",
+              "grain",
+              "scope",
+              "timeScope",
+              "components",
+              "validityRules",
+              "deduplication",
+              "nullPolicy",
+              "precision",
+              "ruleRefs",
+              "metricRefs",
+              "evidenceRefs",
+              "questionIds"
+            ],
+            "additionalProperties": true
+          },
+          "lineage": {
+            "type": "object",
+            "properties": {
+              "nodes": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "layer": {
+                      "enum": [
+                        "source",
+                        "fact",
+                        "application"
+                      ]
+                    },
+                    "role": {
+                      "type": "string"
+                    },
+                    "objectType": {
+                      "type": "string"
+                    },
+                    "logicalName": {
+                      "type": "string"
+                    },
+                    "physicalBindings": {
+                      "type": [
+                        "array",
+                        "null"
+                      ],
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "environmentId": {
+                            "type": "string"
+                          },
+                          "connectionRef": {
+                            "enum": [
+                              "source",
+                              "analytics"
+                            ]
+                          },
+                          "dialect": {
+                            "enum": [
+                              "mysql",
+                              "oracle"
+                            ]
+                          },
+                          "schema": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "objectName": {
+                            "type": "string"
+                          },
+                          "fieldMap": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "type": "string"
+                            }
+                          },
+                          "status": {
+                            "enum": [
+                              "design_only",
+                              "observed",
+                              "drifted"
+                            ]
+                          },
+                          "evidenceRefs": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "environmentId",
+                          "connectionRef",
+                          "dialect",
+                          "schema",
+                          "objectName",
+                          "fieldMap",
+                          "status",
+                          "evidenceRefs"
+                        ],
+                        "additionalProperties": true
+                      }
+                    },
+                    "fields": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "grain": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "layer",
+                    "objectType",
+                    "logicalName",
+                    "physicalBindings",
+                    "fields",
+                    "grain"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            },
+            "required": [
+              "nodes"
+            ],
+            "additionalProperties": true
+          },
+          "processing": {
+            "type": "object",
+            "properties": {
+              "steps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "enum": [
+                        "filter",
+                        "join",
+                        "map",
+                        "deduplicate",
+                        "aggregate",
+                        "calculate",
+                        "rank",
+                        "bucket",
+                        "select_result"
+                      ]
+                    },
+                    "inputNodeIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "outputNodeId": {
+                      "type": "string"
+                    },
+                    "dependsOn": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "kind",
+                    "inputNodeIds",
+                    "outputNodeId",
+                    "dependsOn"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            },
+            "required": [
+              "steps"
+            ],
+            "additionalProperties": true
+          },
+          "expectedResult": {
+            "type": "object"
+          },
+          "actualBinding": {
+            "type": "object"
+          },
+          "status": {
+            "type": "object"
+          },
+          "verificationPlan": {
+            "type": "object",
+            "properties": {
+              "queriesByLayer": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "layer": {
+                      "enum": [
+                        "source",
+                        "fact",
+                        "application"
+                      ]
+                    },
+                    "queryIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "gap": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "layer",
+                    "queryIds",
+                    "gap"
+                  ],
+                  "additionalProperties": true
+                }
+              },
+              "caseIds": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "comparison": {
+                "type": "object"
+              },
+              "closureStatus": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "queriesByLayer",
+              "caseIds",
+              "comparison",
+              "closureStatus"
+            ],
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "type",
+          "businessCategory",
+          "version",
+          "definition",
+          "lineage",
+          "processing",
+          "expectedResult",
+          "actualBinding",
+          "status",
+          "verificationPlan"
+        ],
+        "additionalProperties": true
+      }
+    },
+    "queries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "metricId": {
+            "type": "string"
+          },
+          "layer": {
+            "enum": [
+              "source",
+              "fact",
+              "application"
+            ]
+          },
+          "connectionRef": {
+            "enum": [
+              "source",
+              "analytics"
+            ]
+          },
+          "dialect": {
+            "enum": [
+              "mysql",
+              "oracle"
+            ]
+          },
+          "kind": {
+            "enum": [
+              "count",
+              "detail",
+              "calculate"
+            ]
+          },
+          "purpose": {
+            "enum": [
+              "input_count",
+              "input_detail",
+              "expected_value",
+              "application_actual",
+              "reference"
+            ]
+          },
+          "version": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sql": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sqlChecksum": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "parameters": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "type": {
+                  "enum": [
+                    "string",
+                    "integer",
+                    "number",
+                    "date",
+                    "boolean"
+                  ]
+                },
+                "required": {
+                  "type": "boolean"
+                },
+                "optionSource": {
+                  "type": [
+                    "object",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "name",
+                "type",
+                "required"
+              ],
+              "additionalProperties": true
+            }
+          },
+          "dependencies": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "bindingId": {
+                  "type": "string"
+                },
+                "columns": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "bindingId",
+                "columns"
+              ],
+              "additionalProperties": true
+            }
+          },
+          "stepIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "resultContract": {
+            "type": "object",
+            "properties": {
+              "shape": {
+                "type": "string"
+              },
+              "columns": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "key": {
+                      "type": "string"
+                    },
+                    "semanticRole": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "key",
+                    "semanticRole"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            },
+            "required": [
+              "shape",
+              "columns"
+            ],
+            "additionalProperties": true
+          },
+          "prerequisiteQuestionIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "metricId",
+          "layer",
+          "connectionRef",
+          "dialect",
+          "kind",
+          "purpose",
+          "version",
+          "sql",
+          "sqlChecksum",
+          "parameters",
+          "dependencies",
+          "stepIds",
+          "resultContract",
+          "prerequisiteQuestionIds"
+        ],
+        "additionalProperties": true
+      }
+    },
+    "questions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "semanticKey": {
+            "type": "string"
+          },
+          "contextHash": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "title": {
+            "type": "string"
+          },
+          "problem": {
+            "type": "string"
+          },
+          "affectedMetricIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "evidenceRefs": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "enum": [
+              "open",
+              "answered",
+              "deferred",
+              "resolved",
+              "superseded"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "semanticKey",
+          "title",
+          "problem",
+          "affectedMetricIds",
+          "evidenceRefs",
+          "status"
+        ],
+        "additionalProperties": true
+      }
+    },
+    "pendingAnswers": {
+      "type": "array"
+    },
+    "decisions": {
+      "type": "array"
+    },
+    "validationCases": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "metricId": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          },
+          "method": {
+            "type": "string"
+          },
+          "samplePlan": {
+            "type": "object"
+          },
+          "expected": {
+            "type": "object"
+          },
+          "execution": {
+            "type": "object"
+          },
+          "comparison": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "id",
+          "metricId",
+          "target",
+          "method",
+          "samplePlan",
+          "expected",
+          "execution",
+          "comparison"
+        ],
+        "additionalProperties": true
+      }
+    },
+    "validations": {
+      "type": "array"
+    },
+    "analysisSummary": {
+      "type": [
+        "array",
+        "object"
+      ]
+    },
+    "checkpoint": {
+      "type": "object"
+    },
+    "changeSet": {
+      "type": "object"
+    },
+    "sharedRules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "definition": {
+            "type": "object"
+          },
+          "evidenceRefs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "questionIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "definition",
+          "evidenceRefs",
+          "questionIds"
+        ],
+        "additionalProperties": true
+      }
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "template",
+    "packageId",
+    "analysisId",
+    "projectId",
+    "moduleId",
+    "moduleName",
+    "environmentId",
+    "baseRevisionId",
+    "inputManifest",
+    "sourceManifest",
+    "coverage",
+    "metrics",
+    "queries",
+    "questions",
+    "pendingAnswers",
+    "decisions",
+    "validationCases",
+    "validations",
+    "analysisSummary",
+    "checkpoint",
+    "changeSet",
+    "sharedRules"
+  ],
+  "additionalProperties": false
+}

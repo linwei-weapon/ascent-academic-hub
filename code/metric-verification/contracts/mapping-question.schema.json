@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "mapping-question.schema.json",
+  "title": "mapping-question",
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "const": "3.1.0"
+    },
+    "template": {
+      "type": "boolean"
+    },
+    "question": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "semanticKey": {
+          "type": "string"
+        },
+        "contextHash": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "title": {
+          "type": "string"
+        },
+        "problem": {
+          "type": "string"
+        },
+        "affectedMetricIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "evidenceRefs": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "status": {
+          "enum": [
+            "open",
+            "answered",
+            "deferred",
+            "resolved",
+            "superseded"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "semanticKey",
+        "title",
+        "problem",
+        "affectedMetricIds",
+        "evidenceRefs",
+        "status"
+      ],
+      "additionalProperties": true
+    },
+    "answerSubmissionTemplate": {
+      "type": "object"
+    },
+    "serverReceiptTemplate": {
+      "type": "object"
+    },
+    "scope": {
+      "type": "object"
+    },
+    "pendingAnswerTemplate": {
+      "type": "object"
+    },
+    "syncSequence": {
+      "type": "array"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "template",
+    "question",
+    "answerSubmissionTemplate",
+    "serverReceiptTemplate",
+    "scope",
+    "pendingAnswerTemplate",
+    "syncSequence"
+  ],
+  "additionalProperties": false
+}

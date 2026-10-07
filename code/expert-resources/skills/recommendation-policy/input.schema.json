@@ -1,0 +1,13 @@
+{
+  "type": "object",
+  "properties": {
+    "college_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "description": "当前身份授权范围内的学院ID；不传不代表获得全校权限。"
+    }
+  },
+  "required": [],
+  "additionalProperties": false
+}

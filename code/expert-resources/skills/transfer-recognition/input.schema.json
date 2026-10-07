@@ -1,0 +1,47 @@
+{
+  "type": "object",
+  "properties": {
+    "populationRef": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "title": "授权对象群体",
+      "description": "引用服务端可验证的对象集合；不能上传成绩或通过状态充当事实。"
+    },
+    "target_plan_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "title": "对照培养方案",
+      "description": "选择与基线不同的授权对照方案；转入任务表示目标方案。"
+    },
+    "ruleRef": {
+      "type": "object",
+      "properties": {
+        "ruleId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      },
+      "required": [
+        "ruleId",
+        "version"
+      ],
+      "additionalProperties": false,
+      "title": "已发布规则版本",
+      "description": "引用唯一适用且已确认发布的规则，不由客户端提供规则事实。"
+    }
+  },
+  "required": [
+    "populationRef",
+    "target_plan_id",
+    "ruleRef"
+  ],
+  "additionalProperties": false
+}

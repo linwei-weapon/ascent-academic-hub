@@ -77,7 +77,7 @@ echo [1/2] 启动后端 API  http://localhost:8000 ...
 start "学业平台-后端:8000" cmd /k "cd /d %ROOT% && set PYTHONIOENCODING=utf-8 && python -X utf8 -m uvicorn backend.api.main:app --port 8000"
 
 echo [2/2] 启动前端 Vite http://localhost:3006 ...
-start "学业平台-前端:3006" cmd /k "cd /d %ROOT%\frontend && pnpm dev"
+start "学业平台-前端:3006" cmd /k "cd /d %ROOT%\frontend && pnpm dev:local"
 
 echo.
 echo 已在两个新窗口分别启动后端与前端。

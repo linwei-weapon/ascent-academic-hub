@@ -1,0 +1,256 @@
+{
+  "analysisId": "ANALYSIS-106-LINEAGE-ENRICH-20260930",
+  "baseRevisionId": "cf1b07e5-c639-4e51-8ab2-35024f71fce2",
+  "checks": {
+    "businessDataWriteAllowed": false,
+    "evidenceCapture": {
+      "maxBytes": 1048576,
+      "method": "single_connection_consistent_read",
+      "onLimitExceeded": "reduce_valid_business_scope_or_keep_inconclusive",
+      "requireCompleteInputs": true,
+      "requiredForCalculationValidation": true,
+      "storage": "verification_execution"
+    },
+    "maxRows": 50,
+    "mode": "documents",
+    "sampleScope": null,
+    "timeoutSeconds": 10
+  },
+  "delivery": {
+    "authorizationRef": "current_conversation:继续完善原型，调用skill将指标、三层关系、SQL补充到原型",
+    "mode": "activate",
+    "serviceProfileRef": "existing_metric_verification_service"
+  },
+  "environment": {
+    "analyticsConnectionProfileRef": "metric-verification:analytics",
+    "analyticsDialect": "mysql",
+    "historicalBatchAccess": "unreliable",
+    "id": "test-114",
+    "schemaSnapshotRefs": [
+      "SRC-LIVE-SCHEMA-SOURCE",
+      "SRC-LIVE-SCHEMA-ANALYTICS"
+    ],
+    "sourceConnectionProfileRef": "metric-verification:source",
+    "sourceDialect": "mysql"
+  },
+  "interaction": {
+    "channel": "current_conversation",
+    "existingDecisionRefs": null,
+    "onUnanswered": "keep_open_and_continue_unaffected_work",
+    "productOwnerRef": null,
+    "questionBatchLimit": 3,
+    "resumePolicy": "explicit_skill_invocation"
+  },
+  "mode": "update",
+  "module": {
+    "id": "teaching-overview",
+    "name": "教学数据总览"
+  },
+  "projectId": "highedu",
+  "schemaVersion": "3.1.0",
+  "scope": {
+    "businessCategories": [
+      "个人学业结果",
+      "分布与比较",
+      "培养方案进度",
+      "教学规模",
+      "整体学业表现",
+      "课程修读结果",
+      "预警与核查结果"
+    ],
+    "excluded": [
+      "其他页面及原型内容",
+      "页面布局、导航、控件与交互验收",
+      "身份权限功能验收",
+      "生产代码过程分析"
+    ],
+    "exclusionReason": "只为106教学数据总览的应用业务指标建立可验证闭环",
+    "includeSupportingEvidence": true,
+    "metricIds": [
+      "O-01",
+      "O-02",
+      "O-03",
+      "O-05",
+      "O-06",
+      "O-08",
+      "O-09",
+      "O-10",
+      "O-11",
+      "O-13",
+      "O-14",
+      "O-16",
+      "O-17",
+      "O-18",
+      "O-19",
+      "O-20",
+      "O-21",
+      "O-22",
+      "O-23",
+      "MV106-TERM-COURSE-COUNT",
+      "MV106-TEACHER-COUNT",
+      "MV106-FIRST-PASS-RATE",
+      "MV106-MAKEUP-PASS-RATE",
+      "MV106-RETAKE-PASS-RATE",
+      "MV106-PUBLIC-FIRST-PASS-RATE",
+      "MV106-GPA-DISTRIBUTION",
+      "MV106-GPA-RANK",
+      "MV106-PRIORITY-MAJOR-COUNT",
+      "MV106-CREDIT-PASS-RATIO",
+      "MV106-VALID-ATTEMPT-COUNT",
+      "MV106-COURSE-MEAN-SCORE",
+      "MV106-COURSE-EXCELLENT-RATE",
+      "MV106-SCORE-DISTRIBUTION",
+      "MV106-GRADE-COURSE-COUNT",
+      "MV106-STUDENT-TERM-GPA",
+      "MV106-UNRESOLVED-COURSE-COUNT",
+      "MV106-REPEAT-UNRESOLVED-COUNT",
+      "MV106-ACTIVE-RULE-COUNT",
+      "MV106-EARNED-CREDITS",
+      "MV106-PASSED-COURSE-COUNT",
+      "MV106-STUDY-HOURS",
+      "MV106-PLAN-MODULE-COMPLETION",
+      "MV106-PLAN-RULE-COVERAGE",
+      "MV106-PLAN-GAP-MODULES",
+      "MV106-PLAN-CANDIDATE-MODULES",
+      "MV106-ALERT-HISTORY-COUNT",
+      "MV106-FOLLOWUP-COUNT",
+      "MV106-ALERT-TRAJECTORY",
+      "MV106-GROWTH-EVENT-COUNT",
+      "MV106-GPA-ARITHMETIC",
+      "MV106-RETAKE-ATTEMPT-COUNT",
+      "MV106-STATUS-EVENT-COUNT",
+      "MV106-REQUIRED-FAILURE-COUNT",
+      "MV106-REPEAT-FAILURE-ATTEMPTS",
+      "MV106-PLAN-CANDIDATE-COURSES",
+      "MV106-COLLEGE-EXCESS-IMPACT",
+      "MV106-COURSE-TOP10-MEAN-SCORE",
+      "MV106-COURSE-TOP6-MEAN-SCORE",
+      "MV106-COURSE-EXCELLENT-COUNT",
+      "MV106-FILTERED-STUDENT-COUNT",
+      "MV106-STUDENT-PERIOD-GPA",
+      "MV106-STUDENT-COURSE-RESULT",
+      "MV106-TERM-FAILED-COURSE-COUNT",
+      "MV106-TERM-EARNED-CREDITS",
+      "MV106-CURRENT-PASSED-COURSE-COUNT",
+      "MV106-CURRENT-FAILED-COURSE-COUNT",
+      "MV106-CURRENT-EARNED-CREDITS",
+      "MV106-EVIDENCE-RULE-COUNT",
+      "MV106-CURRENT-ALERT-RECORD-COUNT",
+      "MV106-HIGHEST-ALERT-LEVEL",
+      "MV106-MANAGEMENT-ATTENTION",
+      "MV106-ALERT-CHANGE",
+      "MV106-HISTORICAL-FAILED-COURSES",
+      "MV106-DIFFICULTY-EVIDENCE",
+      "MV106-R2-UNRESOLVED-COURSES"
+    ]
+  },
+  "sources": [
+    {
+      "authority": "requirement",
+      "contentHash": "65423a13bcf76a4a941b5b737940a2bdd3feb2da4042634727bd46c28940c0f4",
+      "id": "SRC-REQ-106",
+      "kind": "document",
+      "location": "文档/4-需求文档/4.1-教学数据总览/106-教学数据总览功能指标详细需求说明.md",
+      "role": "requirement",
+      "sections": [
+        "2.4",
+        "3—10",
+        "12",
+        "13.2"
+      ],
+      "title": "106-教学数据总览功能指标详细需求说明",
+      "version": null
+    },
+    {
+      "authority": "design_evidence",
+      "contentHash": "232f3759123df98633f65972832ffae771a7c8dd82ae4227bcef07cdd3740319",
+      "id": "SRC-ORACLE-V6",
+      "kind": "document",
+      "location": "D:/AI教育/AI学业助手/10-管理端原型/20260626智能学业分析平台-交接/HighEdu/文档/3-技术文档/Oracle源表字段完整清单V6.0(2).md",
+      "role": "source_schema",
+      "sections": [
+        "GRADE",
+        "STUDENT"
+      ],
+      "title": "Oracle源表字段完整清单V6.0(2)",
+      "version": "6.0"
+    },
+    {
+      "authority": "design_evidence",
+      "contentHash": "82d69abd22d360acd9a8cc2812dcb18293ca6602bb1592df0d14891f9e169045",
+      "id": "SRC-DESIGN-V6",
+      "kind": "document",
+      "location": "D:/AI教育/AI学业助手/10-管理端原型/20260626智能学业分析平台-交接/HighEdu/文档/3-技术文档/中国矿业大学学业分析平台数据库设计文档V6.0(3).md",
+      "role": "analytics_design",
+      "sections": [
+        "4.3.1 ACT_GRADE_ATTEMPT",
+        "ACT_STUDENT"
+      ],
+      "title": "中国矿业大学学业分析平台数据库设计文档V6.0(3)",
+      "version": "6.0"
+    },
+    {
+      "authority": "observed_schema",
+      "checkedAt": "2026-09-29T17:56:41+00:00",
+      "contentHash": "564e37c2dc88b6eef55a1b6fec4bf18d53fdede8d37f502dd61e35e99de5f378",
+      "id": "SRC-LIVE-SCHEMA-SOURCE",
+      "kind": "schema_snapshot",
+      "location": "work/runtime/metric-mapping-live/schema-source.json",
+      "role": "source_schema",
+      "title": "114当次真实数据库结构：source",
+      "version": null
+    },
+    {
+      "authority": "observed_schema",
+      "checkedAt": "2026-09-29T17:56:43+00:00",
+      "contentHash": "55e6173cc4221573c7bcc688c5514f198db112c5a01834a08cf042fb056fff46",
+      "id": "SRC-LIVE-SCHEMA-ANALYTICS",
+      "kind": "schema_snapshot",
+      "location": "work/runtime/metric-mapping-live/schema-fact.json",
+      "role": "analytics_schema",
+      "title": "114当次真实数据库结构：analytics",
+      "version": null
+    },
+    {
+      "authority": "observation_only",
+      "contentHash": "1e4c2cb29169df8cf73de373a45543ca09390932333ee1ecf1c3ed83a22d17e9",
+      "id": "SRC-TEST-APPLICATION",
+      "kind": "live_ui",
+      "location": "http://114.215.189.215/#/admin",
+      "metricObservation": {
+        "businessVerification": "not_run",
+        "dataAsOf": null,
+        "dataNature": "real",
+        "identityContext": {
+          "activeIdentity": "系统管理员",
+          "scope": "全校",
+          "semesterId": null,
+          "semesterLabel": "2025-2026-2",
+          "user": "admin"
+        },
+        "metricIds": [
+          "O-10",
+          "O-05",
+          "O-19",
+          "O-01",
+          "MV106-TERM-COURSE-COUNT",
+          "MV106-TEACHER-COUNT",
+          "O-13",
+          "O-14",
+          "MV106-FIRST-PASS-RATE",
+          "MV106-MAKEUP-PASS-RATE",
+          "MV106-RETAKE-PASS-RATE",
+          "MV106-PUBLIC-FIRST-PASS-RATE",
+          "MV106-GPA-DISTRIBUTION"
+        ],
+        "observedAt": "2026-09-30T01:54:00+08:00",
+        "observedAtPrecision": "approximately_minute"
+      },
+      "role": "metric_evidence",
+      "title": "114测试系统教学数据总览的实际指标",
+      "use": "identify_metric_or_observe_actual",
+      "version": null
+    }
+  ],
+  "template": false
+}

@@ -1,0 +1,236 @@
+{
+  "type": "object",
+  "description": "双方方案、全部模块按course_id去重的规模、共同/目标独有数量、交集/并集、交集/目标规模与目标侧课程对照；仅解释工具实际返回的字段。 课程明细区分课程目录学分 credits、方案字段原值 recorded_plan_credits 和 credit_check；不得将结构展示值解释成正式方案学分。",
+  "required": [
+    "status",
+    "summary",
+    "scope",
+    "data",
+    "sources",
+    "limitations",
+    "missingEvidence",
+    "schemaVersion",
+    "taskId",
+    "resultKind",
+    "facts",
+    "coverage",
+    "evidence",
+    "conditions",
+    "issues"
+  ],
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": [
+        "completed",
+        "limited",
+        "blocked"
+      ],
+      "description": "计算完成、限定结果或缺证据无法执行；不代表人工业务验收通过。"
+    },
+    "summary": {
+      "type": "string",
+      "description": "基于本轮实际返回事实的简短判断，不编造未返回的指标。"
+    },
+    "scope": {
+      "type": "object",
+      "description": "服务端实际授权与过滤后的学院、方案、学期、观察时间等范围；保留空值和未指定情况。",
+      "additionalProperties": true
+    },
+    "data": {
+      "type": "object",
+      "description": "双方方案、全部模块按course_id去重的规模、共同/目标独有数量、交集/并集、交集/目标规模与目标侧课程对照；仅解释工具实际返回的字段。 课程明细区分课程目录学分 credits、方案字段原值 recorded_plan_credits 和 credit_check；不得将结构展示值解释成正式方案学分。",
+      "properties": {},
+      "additionalProperties": true
+    },
+    "tables": {
+      "type": "array",
+      "description": "实际返回的结构化证据表，汇总值与展示行截断分别说明。",
+      "items": {
+        "type": "object",
+        "required": [
+          "title",
+          "columns",
+          "rows",
+          "note"
+        ],
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "columns": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "key",
+                "label"
+              ],
+              "properties": {
+                "key": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "note": {
+            "type": "string"
+          },
+          "totalRows": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "returnedRows": {
+            "type": "integer"
+          },
+          "truncated": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "evidenceId": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "sources": {
+      "type": "array",
+      "description": "本轮真实使用的库表、查询名称、数据时点与记录范围；不得填写假来源。",
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    "limitations": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "实际受限项，包括范围、缺字段、映射、截断和时间不可比。"
+    },
+    "missingEvidence": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "需要补充或确认的具体资料；空记录不等于缺证据已补齐。"
+    },
+    "schemaVersion": {
+      "const": "2.0"
+    },
+    "taskId": {
+      "type": "string"
+    },
+    "resultKind": {
+      "enum": [
+        "facts",
+        "rule_check",
+        "scenario"
+      ]
+    },
+    "facts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "factId",
+          "name",
+          "value",
+          "sourceRefs"
+        ],
+        "properties": {
+          "factId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "value": {},
+          "sourceRefs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "required": [
+        "definedPopulation",
+        "observedPopulation",
+        "evaluablePopulation",
+        "unknownCount",
+        "exclusions",
+        "inputCompleteness"
+      ],
+      "additionalProperties": true
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "evidenceId",
+          "sourceRef",
+          "grain",
+          "sourceRowCount",
+          "retainedRowCount",
+          "fields",
+          "retentionComplete",
+          "records"
+        ],
+        "properties": {
+          "evidenceId": {
+            "type": "string"
+          },
+          "records": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "retentionComplete": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "conditions": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "issues": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "comparisonCapability": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": false
+}

@@ -23,7 +23,7 @@
     </el-alert>
 
     <el-alert v-if="data.evidence?.limitation" type="warning" :closable="false" show-icon style="margin-bottom:12px"
-      title="证据说明：部分专业学分要求包含模拟数据"
+      title="数据依据说明"
       :description="data.evidence.limitation" />
 
     <!-- 关系身份异常返回无个性化视图时，明确披露范围状态。 -->

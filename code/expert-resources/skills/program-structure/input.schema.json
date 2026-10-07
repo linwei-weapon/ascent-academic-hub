@@ -1,0 +1,22 @@
+{
+  "type": "object",
+  "properties": {
+    "plan_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "description": "从当前身份可用选项选择的培养方案ID；不是专业名称。"
+    },
+    "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 200,
+      "default": 50,
+      "description": "最多展示的课程或汇总记录条数；不改变分母，截断必须披露。"
+    }
+  },
+  "required": [
+    "plan_id"
+  ],
+  "additionalProperties": false
+}

@@ -20,7 +20,11 @@ credentials/
 
 # Build output
 dist/
+/work/runtime/
 /work/runtime/highedu-start/
+/work/runtime/expert-control-backups/
+/work/runtime/expert-v33/
+*.service.lock
 *.egg-info/
 
 # Data files (proprietary)
@@ -40,10 +44,15 @@ Thumbs.db
 
 # Screenshots
 演示截图/
+work/runtime/metric-mapping-*/
 
 # Business docs (internal)
 需求分析/
 试用账户.md
 *.log
 *.txt
+!code/backend/requirements-metric-verification.txt
+!code/backend/requirements-expert-resources.txt
+*.sqlite-wal
+*.sqlite-shm
 *.docx

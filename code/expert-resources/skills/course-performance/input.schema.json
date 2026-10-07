@@ -1,0 +1,38 @@
+{
+  "type": "object",
+  "properties": {
+    "semester_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "title": "分析学期",
+      "description": "选择本轮实际观察的学期，不继承隐藏的旧学期筛选。"
+    },
+    "college_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "title": "开课院系筛选",
+      "description": "课程表现按授权开课院系筛选，不等同学生归属学院。"
+    },
+    "course_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "title": "指定课程编号（可选）",
+      "description": "只查看指定课程的聚合表现；留空时使用当前完整筛选范围。"
+    },
+    "previewLimit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 200,
+      "default": 50,
+      "title": "预览记录数",
+      "description": "只改变表格展示条数，完整证据和统计分母保持一致。"
+    }
+  },
+  "required": [
+    "semester_id"
+  ],
+  "additionalProperties": false
+}

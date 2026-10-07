@@ -1,0 +1,73 @@
+{
+  "type": "object",
+  "properties": {
+    "populationRef": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "title": "授权对象群体",
+      "description": "引用服务端可验证的对象集合；不能上传成绩或通过状态充当事实。"
+    },
+    "plan_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "title": "基线培养方案",
+      "description": "从当前授权选项选择本轮基线培养方案。"
+    },
+    "ruleRef": {
+      "type": "object",
+      "properties": {
+        "ruleId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      },
+      "required": [
+        "ruleId",
+        "version"
+      ],
+      "additionalProperties": false,
+      "title": "已发布规则版本",
+      "description": "引用唯一适用且已确认发布的规则，不由客户端提供规则事实。"
+    },
+    "year": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "title": "适用年度",
+      "description": "明确本轮规则年度；不根据当前日期或年级猜测。"
+    },
+    "college_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "title": "学院范围",
+      "description": "只允许当前身份授权的学院，按本任务的实际组织口径筛选。"
+    },
+    "conditionIds": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+      },
+      "uniqueItems": true,
+      "title": "核验条件",
+      "description": "选择固定规则中的条件子范围；其他条件保持未核或未知。"
+    }
+  },
+  "required": [
+    "populationRef",
+    "plan_id",
+    "ruleRef",
+    "year"
+  ],
+  "additionalProperties": false
+}

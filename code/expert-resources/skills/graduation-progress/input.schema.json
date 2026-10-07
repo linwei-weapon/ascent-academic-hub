@@ -1,0 +1,15 @@
+{
+  "type": "object",
+  "properties": {
+    "plan_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "description": "从当前身份可用选项选择的培养方案ID；不是专业名称。"
+    }
+  },
+  "required": [
+    "plan_id"
+  ],
+  "additionalProperties": false
+}
